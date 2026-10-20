@@ -64,8 +64,12 @@ function namesByKey(
 	return out;
 }
 
+/** Names pair case-insensitively, as Excel matches them; a new spelling is still a change. */
 const sameDefinition = (a: DefinedName, b: DefinedName): boolean =>
-	a.formula === b.formula && !a.hidden === !b.hidden && (a.comment ?? '') === (b.comment ?? '');
+	a.name === b.name &&
+	a.formula === b.formula &&
+	!a.hidden === !b.hidden &&
+	(a.comment ?? '') === (b.comment ?? '');
 
 /**
  * Defined names added, removed or changed, sorted by name. A sheet-scoped name is matched through

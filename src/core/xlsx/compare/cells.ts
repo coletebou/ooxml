@@ -5,10 +5,11 @@
 import { MAX_COL, formatRange } from '../address';
 import { dataTableAt, dataTableFormula } from '../edit/data-table';
 import { effectiveStyleId } from '../layout/cell-view';
+import { needsArrayEvaluation } from '../formula/array-context';
 import { isSpilledCell } from '../formula/spill';
 import { isCellError, type Cell, type CellValue, type Workbook, type Worksheet } from '../model';
 import { styleAt } from '../styles';
-import { FormatIndex } from './format-key';
+import { FormatIndex, paintedStyle } from './format-key';
 import { richTextChanged } from './rich-text';
 import type { CellDifference, CellSide, CompareCategory, FormatAttribute } from './types';
 
@@ -122,6 +123,22 @@ function sortedKeys(
 const sameValue = (a: CellValue, b: CellValue): boolean =>
 	a === b || (isCellError(a) && isCellError(b) && a.error === b.error);
 
+const isLegacy = (cell: Cell | undefined) => !!cell?.legacyFormula && !cell.arrayRange;
+
+/**
+ * The same formula switched between dynamic-array and legacy (implicit intersection) semantics
+ * where that changes its result: only a formula that needs array evaluation, the test the writer
+ * uses to store a formula as a dynamic array (a loaded `A1+1` is legacy and means the same).
+ */
+function legacyChanged(b: Cell | undefined, a: Cell | undefined): boolean {
+	return (
+		isLegacy(b) !== isLegacy(a) &&
+		b?.formula !== undefined &&
+		b.formula === a?.formula &&
+		needsArrayEvaluation(b.formula)
+	);
+}
+
 /** A check of the before (`b`) and after (`a`) cells at one address. */
 type AtAddress<T> = (b: Cell | undefined, a: Cell | undefined, row: number, col: number) => T;
 
@@ -143,7 +160,7 @@ export function compareSheetCells(
 	/** How the values of the cells at one address differ; undefined when they agree. */
 	const valueKind: AtAddress<CellDifference['kind'] | undefined> = (b, a, row, col) => {
 		const formula = before.formulaKey(b, row, col);
-		if (formula !== after.formulaKey(a, row, col)) return 'formula';
+		if (formula !== after.formulaKey(a, row, col) || legacyChanged(b, a)) return 'formula';
 		if (sameValue(b?.value ?? null, a?.value ?? null)) return undefined;
 		if (formula === undefined && (before.isTyped(b, row, col) || after.isTyped(a, row, col)))
 			return 'enteredValue';
@@ -153,12 +170,10 @@ export function compareSheetCells(
 	const valueDifference: AtAddress<CellDifference | undefined> = (b, a, row, col) => {
 		const kind = valueKind(b, a, row, col);
 		if (!kind || !has(kind)) return undefined;
-		return {
-			kind,
-			address: { row, col },
-			before: before.cellSide(b, row, col),
-			after: after.cellSide(a, row, col),
-		};
+		const sides = { before: before.cellSide(b, row, col), after: after.cellSide(a, row, col) };
+		if (kind === 'formula' && legacyChanged(b, a))
+			(isLegacy(b) ? sides.before : sides.after).legacyFormula = true;
+		return { kind, address: { row, col }, ...sides };
 	};
 
 	const formatDifference: AtAddress<CellDifference | undefined> = (b, a, row, col) => {
@@ -170,7 +185,12 @@ export function compareSheetCells(
 		);
 		const bFormat = styleAt(beforeBook, bStyle);
 		const aFormat = styleAt(afterBook, aStyle);
-		const runs = richTextChanged(b, a, bFormat.font, aFormat.font);
+		const runs = richTextChanged(
+			b,
+			a,
+			paintedStyle(beforeBook, bStyle).font,
+			paintedStyle(afterBook, aStyle).font,
+		);
 		const attributes: FormatAttribute[] = runs ? [...changed, 'richText'] : changed;
 		if (!attributes.length) return undefined;
 		return {

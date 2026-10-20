@@ -285,6 +285,48 @@ describe('compareWorkbooks cells', () => {
 		expect(cleared.map((d) => d.kind)).toEqual(['enteredValue']);
 	});
 
+	it('reports a formula switched to or from implicit intersection where that matters', () => {
+		const build = (legacy: boolean) => {
+			const book = createWorkbook();
+			put(book, 'B1', { value: 1, formula: 'A2:A3', ...(legacy ? { legacyFormula: true } : {}) });
+			put(book, 'C1', { value: 2, formula: 'A1+1', ...(legacy ? { legacyFormula: true } : {}) });
+			return book;
+		};
+		const [range, ...rest] = compareWorkbooks(build(false), build(true)).sheets[0]!.cells;
+		expect(rest).toEqual([]);
+		expect(range).toMatchObject({
+			kind: 'formula',
+			address: { row: 0, col: 1 },
+			before: { formula: 'A2:A3' },
+			after: { formula: 'A2:A3', legacyFormula: true },
+		});
+	});
+
+	it('resolves a missing font name or size from the default format, as the grid does', () => {
+		const build = (size: number) => {
+			const book = createWorkbook();
+			book.styles[0]!.font.size = size;
+			book.styles.push({ ...defaultCellStyle(), font: { bold: true } });
+			put(book, 'A1', { value: 1, styleId: 1 });
+			return book;
+		};
+		expect(cells(build(11), build(11))).toEqual([]);
+		expect(compareWorkbooks(build(11), build(24)).sheets[0]!.cells[0]).toMatchObject({
+			kind: 'format',
+			attributes: ['font'],
+		});
+	});
+
+	it('treats a border edge without a line as no edge', () => {
+		const build = (border: object) => {
+			const book = createWorkbook();
+			book.styles.push({ ...defaultCellStyle(), border: border as CellStyle['border'] });
+			put(book, 'A1', { value: 1, styleId: 1 });
+			return book;
+		};
+		expect(compareWorkbooks(build({}), build({ left: { style: 'none' } })).count).toBe(0);
+	});
+
 	it('compares only the chosen categories and says what it left out', () => {
 		const before = createWorkbook();
 		put(before, 'A1', { value: 1 });

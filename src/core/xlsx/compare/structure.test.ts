@@ -121,11 +121,14 @@ describe('compareWorkbooks structure', () => {
 			{ name: 'Same', formula: 'Data!$A$1', localSheet: 1 },
 			{ name: 'New', formula: '2', localSheet: 1 },
 		];
+		before.definedNames.push({ name: 'Spelled', formula: '3' });
+		after.definedNames.push({ name: 'SPELLED', formula: '3' });
 		const names = compareWorkbooks(before, after, { categories: ['name'] }).workbook;
 		expect(names.map((d) => ('name' in d ? [d.kind, d.name, d.scope] : [d.kind]))).toEqual([
 			['nameAdded', 'New', 'Data'],
 			['nameRemoved', 'Old', undefined],
 			['nameChanged', 'RATE', undefined],
+			['nameChanged', 'SPELLED', undefined],
 			['nameChanged', 'Total', 'Calc'],
 		]);
 	});
@@ -289,6 +292,33 @@ describe('compareWorkbooks structure', () => {
 			kind: 'conditionalFormatReordered',
 			after: { ranges: [R('C1:C9')] },
 		});
+	});
+
+	it('keeps the anchor of a rule with relative formulas, not of one without', () => {
+		const format = (
+			refs: string[],
+			rule: ConditionalFormat['rules'][number],
+		): ConditionalFormat => ({
+			ranges: refs.map(R),
+			rules: [rule],
+		});
+		const style = { font: { bold: true } };
+		const expression = { type: 'expression' as const, formula: 'A1=1', style, priority: 1 };
+		const blanks = { type: 'containsBlanks' as const, style, priority: 2 };
+		const before = createWorkbook();
+		before.sheets[0]!.conditionalFormats = [
+			format(['A1', 'B1'], expression),
+			format(['D1', 'E1'], blanks),
+		];
+		const after = createWorkbook();
+		after.sheets[0]!.conditionalFormats = [
+			format(['B1', 'A1'], expression),
+			format(['E1', 'D1'], blanks),
+		];
+		expect(compareWorkbooks(before, after).sheets[0]!.structure.map((d) => d.kind)).toEqual([
+			'conditionalFormatRemoved',
+			'conditionalFormatAdded',
+		]);
 	});
 
 	it('ignores data validation defaults spelled out', () => {

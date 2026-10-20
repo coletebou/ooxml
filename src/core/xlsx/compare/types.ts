@@ -95,6 +95,8 @@ export interface CellSide {
 	/** Without the leading `=`. */
 	formula?: string;
 	arrayRange?: CellRange;
+	/** The formula is evaluated with implicit intersection (legacy semantics), where that matters. */
+	legacyFormula?: true;
 	/** The effective format, for `format` differences. */
 	style?: CellStyle;
 }

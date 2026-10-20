@@ -3,7 +3,7 @@
 // each. So each rule is compared on its own, with the ranges of its format, matched by content
 // (priority aside); neither renumbered priorities nor the order a file stores rules in is a change.
 // The order rules are evaluated in is compared on its own.
-import { formatRange } from '../address';
+import { formatAddress, formatRange } from '../address';
 import type { CfvoThreshold, ConditionalFormat, ConditionalRule } from '../model';
 import { stableKey } from '../stable-key';
 import { withCanonicalColors } from './format-key';
@@ -52,10 +52,28 @@ function ruleKey(rule: ConditionalRule): string {
 	return stableKey(withCanonicalColors(out));
 }
 
+/** The rule evaluates formulas, whose relative references the evaluator anchors at a range. */
+const hasFormulas = (rule: ConditionalRule) =>
+	rule.type === 'expression' ||
+	rule.type === 'cellIs' ||
+	('thresholds' in rule && rule.thresholds.some((t) => t.type === 'formula')) ||
+	(rule.type === 'dataBar' && (rule.min.type === 'formula' || rule.max.type === 'formula'));
+
+/**
+ * Units keyed by sorted ranges and rule content. A rule with formulas also keeps the top-left cell
+ * of its format's first range, where relative references are anchored (`cf-evaluator`), since
+ * reordering the ranges then changes which cells the rule matches.
+ */
 const unitsOf = (formats: readonly ConditionalFormat[]): Unit[] =>
 	formats.flatMap((format) => {
 		const ranges = format.ranges.map(formatRange).sort();
-		return format.rules.map((rule) => ({ format, rule, key: stableKey([ranges, ruleKey(rule)]) }));
+		const start = format.ranges[0]?.start;
+		const anchor = start ? formatAddress(start) : '';
+		return format.rules.map((rule) => ({
+			format,
+			rule,
+			key: stableKey([ranges, hasFormulas(rule) ? anchor : '', ruleKey(rule)]),
+		}));
 	});
 
 /** Pairs equal rules, each occurrence once and equal occurrences in priority order. */

@@ -14,6 +14,7 @@ import type {
 	Workbook,
 } from '../model';
 import { stableKey } from '../stable-key';
+import { cellFont } from '../layout/style-view';
 import { styleAt } from '../styles';
 import type { FormatAttribute } from './types';
 
@@ -77,8 +78,9 @@ function fill(value: Fill): Fill {
 	return out;
 }
 
+/** An edge with no line draws nothing, as the reader treats `style="none"`. */
 function edge(value: BorderEdge | undefined): BorderEdge | undefined {
-	if (!value) return undefined;
+	if (!value || (value.style as string) === 'none') return undefined;
 	const c = color(value.color);
 	return c ? { style: value.style, color: c } : { style: value.style };
 }
@@ -145,6 +147,15 @@ export function withCanonicalColors<T>(value: T): T {
 	return out as T;
 }
 
+/**
+ * The format at `styleId` with the font it paints with: a font without a name or size takes the
+ * default style's (`cellFont`, as the grid does), so changing style 0 shows in the cells using it.
+ */
+export function paintedStyle(workbook: Workbook, styleId: number | undefined): CellStyle {
+	const style = styleAt(workbook, styleId);
+	return { ...style, font: cellFont(style.font, workbook.styles[0]?.font ?? {}) };
+}
+
 /** Interns the formats of the workbooks being compared into shared canonical ids. */
 export class FormatIndex {
 	private readonly ids = new Map<string, number>();
@@ -160,7 +171,7 @@ export class FormatIndex {
 			this.styleIds.set(workbook, ids);
 		}
 		const index = styleId ?? 0;
-		return (ids[index] ??= this.intern(formatAttributeKeys(styleAt(workbook, index))));
+		return (ids[index] ??= this.intern(formatAttributeKeys(paintedStyle(workbook, index))));
 	}
 
 	/** The canonical id of a format with these attribute keys, added when it is new. */
