@@ -9,6 +9,7 @@ import {
 	type DefinedName,
 } from '../model';
 import { stableKey } from '../stable-key';
+import { OFF_BY_DEFAULT } from './conditional';
 import type {
 	CellDifference,
 	CellDifferenceRange,
@@ -113,6 +114,12 @@ function workbookLine(d: WorkbookDifference): string {
 
 const rangesText = (list: readonly CellRange[]) => list.map(formatRange).join(' ');
 
+/**
+ * Flags that are off unless set, so `false` says nothing; any other `false` (a hidden drop-down,
+ * a data bar without its value) is a setting and is shown.
+ */
+const UNSET = new Set([...OFF_BY_DEFAULT, 'allowBlank', 'showErrorMessage', 'showInputMessage']);
+
 /** Settings shown first, in this order; the rest follow by name. */
 const LEADING = ['type', 'operator', 'formula', 'formulas', 'formula1', 'formula2', 'text'];
 
@@ -122,11 +129,14 @@ const LEADING = ['type', 'operator', 'formula', 'formulas', 'formula1', 'formula
  */
 function settingsText(item: object, skip: readonly string[]): string {
 	const rank = (key: string) => (LEADING.includes(key) ? LEADING.indexOf(key) : LEADING.length);
+	const shown = (key: string, v: unknown) =>
+		!skip.includes(key) && v !== undefined && v !== '' && !(v === false && UNSET.has(key));
 	return Object.entries(item)
-		.filter(([key, v]) => !skip.includes(key) && v !== undefined && v !== false && v !== '')
+		.filter(([key, v]) => shown(key, v))
 		.sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))
 		.map(([key, v]) => {
 			if (v === true) return key;
+			if (v === false) return `${key} false`;
 			if (typeof v !== 'string')
 				return `${key} ${typeof v === 'object' ? stableKey(v) : String(v)}`;
 			return `${key} ${/^[A-Za-z][\w.-]*$/.test(v) ? v : quote(v)}`;

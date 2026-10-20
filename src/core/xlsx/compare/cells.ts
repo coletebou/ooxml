@@ -8,7 +8,6 @@ import { effectiveStyleId } from '../layout/cell-view';
 import { needsArrayEvaluation } from '../formula/array-context';
 import { isSpilledCell } from '../formula/spill';
 import { isCellError, type Cell, type CellValue, type Workbook, type Worksheet } from '../model';
-import { styleAt } from '../styles';
 import { FormatIndex, paintedStyle } from './format-key';
 import { richTextChanged } from './rich-text';
 import type { CellDifference, CellSide, CompareCategory, FormatAttribute } from './types';
@@ -183,14 +182,10 @@ export function compareSheetCells(
 			ctx.formats.idOf(beforeBook, bStyle),
 			ctx.formats.idOf(afterBook, aStyle),
 		);
-		const bFormat = styleAt(beforeBook, bStyle);
-		const aFormat = styleAt(afterBook, aStyle);
-		const runs = richTextChanged(
-			b,
-			a,
-			paintedStyle(beforeBook, bStyle).font,
-			paintedStyle(afterBook, aStyle).font,
-		);
+		// The formats as compared (and painted): a font missing a name or size has style 0's.
+		const bFormat = paintedStyle(beforeBook, bStyle);
+		const aFormat = paintedStyle(afterBook, aStyle);
+		const runs = richTextChanged(b, a, bFormat.font, aFormat.font);
 		const attributes: FormatAttribute[] = runs ? [...changed, 'richText'] : changed;
 		if (!attributes.length) return undefined;
 		return {

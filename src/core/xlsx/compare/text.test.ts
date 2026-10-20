@@ -110,6 +110,42 @@ describe('comparisonText', () => {
 		]);
 	});
 
+	it('shows a setting turned off, not only the ones turned on', () => {
+		const before = createWorkbook();
+		const after = createWorkbook();
+		const list = { ranges: [R('A1')], type: 'list' as const, formula1: '"a,b"' };
+		before.sheets[0]!.dataValidations = [list];
+		after.sheets[0]!.dataValidations = [{ ...list, showDropDown: false }];
+		const bar = (showValue: boolean) => ({
+			ranges: [R('B1:B9')],
+			rules: [
+				{
+					type: 'dataBar' as const,
+					min: { type: 'min' as const },
+					max: { type: 'max' as const },
+					color: { rgb: 'FF638EC6' },
+					priority: 1,
+					showValue,
+				},
+			],
+		});
+		before.sheets[0]!.conditionalFormats = [bar(true)];
+		after.sheets[0]!.conditionalFormats = [bar(false)];
+		const lines = comparisonText(compareWorkbooks(before, after)).split('\n').slice(1, 5);
+		expect(lines).toEqual([
+			'  Data validation removed A1 (type list, formula1 "\\"a,b\\"")',
+			'  Data validation added A1 (type list, formula1 "\\"a,b\\"", showDropDown false)',
+			expect.stringMatching(
+				/^ {2}Conditional format rule removed B1:B9 \(type dataBar, color .*\)$/,
+			),
+			expect.stringMatching(/^ {2}Conditional format rule added B1:B9 \(.*showValue false.*\)$/),
+		]);
+		expect([lines[2]?.endsWith(', showValue)'), lines[3]?.endsWith(', showValue false)')]).toEqual([
+			true,
+			true,
+		]);
+	});
+
 	it('says when there is nothing to report and when the report stopped early', () => {
 		const book = createWorkbook();
 		expect(comparisonText(compareWorkbooks(book, structuredClone(book)))).toMatch(

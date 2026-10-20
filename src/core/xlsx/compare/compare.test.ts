@@ -311,10 +311,12 @@ describe('compareWorkbooks cells', () => {
 			return book;
 		};
 		expect(cells(build(11), build(11))).toEqual([]);
-		expect(compareWorkbooks(build(11), build(24)).sheets[0]!.cells[0]).toMatchObject({
-			kind: 'format',
-			attributes: ['font'],
-		});
+		const [difference] = compareWorkbooks(build(11), build(24)).sheets[0]!.cells;
+		expect(difference).toMatchObject({ kind: 'format', attributes: ['font'] });
+		// The formats reported are the ones compared, with the inherited size filled in.
+		expect([difference?.before.style?.font.size, difference?.after.style?.font.size]).toEqual([
+			11, 24,
+		]);
 	});
 
 	it('treats a border edge without a line as no edge', () => {

@@ -18,7 +18,14 @@ interface Unit {
 }
 
 /** Rule settings that are off unless a file turns them on. */
-const OFF_BY_DEFAULT = ['stopIfTrue', 'bottom', 'percent', 'below', 'equalAverage', 'reverse'];
+export const OFF_BY_DEFAULT = [
+	'stopIfTrue',
+	'bottom',
+	'percent',
+	'below',
+	'equalAverage',
+	'reverse',
+];
 
 /** A threshold without `gte: true`, which is the default (a value equal to it reaches it). */
 function threshold(t: CfvoThreshold): CfvoThreshold {
