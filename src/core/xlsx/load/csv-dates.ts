@@ -117,12 +117,17 @@ export function parseOrderedDate(
 	text: string,
 	order: CsvDateOrder,
 	date1904: boolean,
+	decimal = '.',
 ): OrderedDate | undefined {
 	if (text.length > MAX_DATE_TEXT) return undefined;
 	const split = splitTime(text);
 	if (!split) return undefined;
-	const tail = split[1] === undefined ? undefined : TIME_RE.exec(split[1]);
-	if (split[1] !== undefined && !tail) return undefined;
+	// Fractions of a second use the import's decimal separator (`10:20:30,5`), and only it.
+	let clock = split[1];
+	if (clock !== undefined && decimal !== '.')
+		clock = clock.includes('.') ? '' : clock.replace(decimal, '.');
+	const tail = clock === undefined ? undefined : TIME_RE.exec(clock);
+	if (clock !== undefined && !tail) return undefined;
 	const parts = dayParts(split[0], order);
 	const date = parts && inOrder(parts, order);
 	if (!date) return undefined;

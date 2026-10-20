@@ -209,14 +209,18 @@ describe('csvToWorkbook column formats', () => {
 	});
 
 	it('reports date-column values that General read as dates in another order', () => {
-		const csv = load('When,Note\n04/03/2024,x\n04/13/2024,y\n2024-03-05,z\nn/a,w\n', {
-			columns: { 0: 'DMY' },
-		});
+		const csv = load(
+			'When,Note\n04/03/2024,x\n04/13/2024,y\n2024-03-05,z\nn/a,w\n10:30,v\nMar 5,u\n4/13,t\n',
+			{ columns: { 0: 'DMY' } },
+		);
 		// The wizard's General fallback keeps its value; the column now mixes two orders.
 		expect(csv.value('A3')).toBe(day(2024, 4, 13));
+		// Only month-first numeric reads are reported: not ISO dates, times or month names.
 		expect(csv.warnings).toEqual([
 			'Column A: 2 values could not be read as dates in DMY order and were read as General (first: A3).',
 		]);
+		// In a month-first column the General reading agrees, so there is nothing to report.
+		expect(load('2024/13/04\n', { columns: { 0: 'YMD' } }).warnings).toEqual([]);
 		expect(load('04/13/2024\n', { columns: { 0: 'DMY' } }).warnings).toEqual([
 			'Column A: 1 value could not be read as a date in DMY order and was read as General (first: A1).',
 		]);
@@ -266,6 +270,16 @@ describe('csvToWorkbook separators and trailing minus', () => {
 		expect(csv.value('F1')).toBe('04.03.2024');
 		expect(csv.value('G1')).toBe('Smith, J.');
 		// A time with a comma fraction reads once localized; a plain date keeps its own reading.
+		const stamp = load('04/03/2024 10:20:30,5\n', {
+			delimiter: ';',
+			decimalSeparator: ',',
+			columns: { 0: 'DMY' },
+		});
+		expect(stamp.value('A1')).toBeCloseTo(
+			day(2024, 3, 4) + (10 * 3600 + 20 * 60 + 30.5) / 86_400,
+			10,
+		);
+		expect(stamp.warnings).toEqual([]);
 		const times = load('10:30:15,5;Mar 5, 2024\n', { delimiter: ';', decimalSeparator: ',' });
 		expect(times.value('A1')).toBeCloseTo((10 * 3600 + 30 * 60 + 15.5) / 86_400, 10);
 		expect(times.value('B1')).toBe(day(2024, 3, 5));

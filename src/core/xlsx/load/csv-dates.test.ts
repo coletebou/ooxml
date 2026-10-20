@@ -124,6 +124,14 @@ describe('parseOrderedDate', () => {
 		);
 	});
 
+	it('reads fractions of a second with the configured decimal separator', () => {
+		const comma = parseOrderedDate('04/03/2024 10:20:30,5', 'DMY', false, ',');
+		expect(comma?.value).toBeCloseTo(at(2024, 3, 4, 10, 20, 30) + 0.5 / 86_400, 10);
+		expect(comma?.numFmt).toBe('yyyy-mm-dd h:mm:ss.0');
+		// With a comma decimal, a period is not a fraction separator.
+		expect(parseOrderedDate('04/03/2024 10:20:30.5', 'DMY', false, ',')).toBeUndefined();
+	});
+
 	it('honours the 1904 date system', () => {
 		expect(parseOrderedDate('2024-03-04', 'YMD', true)?.value).toBe(at(2024, 3, 4) - 1462);
 	});

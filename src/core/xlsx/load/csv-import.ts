@@ -102,6 +102,10 @@ const KINDS = [
 	},
 ] as const;
 const FORMATS = new Set(['general', 'text', 'skip', 'MDY', 'DMY', 'YMD', 'MYD', 'DYM', 'YDM']);
+/** Date orders with the day before the month, which General's month-first reading contradicts. */
+const DAY_FIRST = new Set(['DMY', 'DYM', 'YDM']);
+/** A numeric date as General reads it month first (`04/13/2024`, `4/13`), not year first. */
+const MONTH_FIRST_RE = /^\d{1,2}[-/]\d{1,2}(?:[-/]\d{1,4})?(?:$|[\sT])/;
 
 /** The formats typing gives a mixed fraction (`1 1/2`), whose space is not a thousands separator. */
 const FRACTION_FORMATS = new Set(['# ?/?', '# ??/??']);
@@ -242,11 +246,12 @@ export function createFieldReader(
 			if (format === undefined || format === 'general') return general(field, row, col);
 			if (format === 'text') return { value: field, numFmt: '@' };
 			if (format === 'skip') return { value: null };
-			const date = parseOrderedDate(field.trim(), format, date1904);
+			const date = parseOrderedDate(field.trim(), format, date1904, separators.decimal);
 			if (!date) {
 				// The wizard's fallback; a date read this way mixes another order into the column.
 				const parsed = general(field, row, col);
-				if (typeof parsed.value === 'number' && isDate(parsed.numFmt))
+				const dated = typeof parsed.value === 'number' && isDate(parsed.numFmt);
+				if (dated && DAY_FIRST.has(format) && MONTH_FIRST_RE.test(field.trim()))
 					report(DATE_FALLBACK, row, col);
 				return parsed;
 			}
