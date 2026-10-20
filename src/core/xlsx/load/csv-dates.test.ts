@@ -60,7 +60,14 @@ describe('parseOrderedDate', () => {
 		expect(parseOrderedDate('2024-03-04 10:20', 'YMD', false)?.numFmt).toBe('yyyy-mm-dd h:mm');
 		const fraction = parseOrderedDate('2024-03-04T10:20:30.250', 'YMD', false);
 		expect(fraction?.value).toBeCloseTo(at(2024, 3, 4, 10, 20, 30) + 0.25 / 86_400, 10);
-		expect(fraction?.numFmt).toBe('yyyy-mm-dd h:mm:ss');
+		// The display keeps the fraction (up to milliseconds), so stamps within a second differ.
+		expect(fraction?.numFmt).toBe('yyyy-mm-dd h:mm:ss.000');
+		expect(parseOrderedDate('2024-03-04T10:20:30.5', 'YMD', false)?.numFmt).toBe(
+			'yyyy-mm-dd h:mm:ss.0',
+		);
+		expect(parseOrderedDate('2024-03-04T10:20:30.123456', 'YMD', false)?.numFmt).toBe(
+			'yyyy-mm-dd h:mm:ss.000',
+		);
 		expect(parseOrderedDate('04/03/2024 2:15 PM', 'DMY', false)).toEqual({
 			value: at(2024, 3, 4, 14, 15),
 			numFmt: 'yyyy-mm-dd h:mm AM/PM',

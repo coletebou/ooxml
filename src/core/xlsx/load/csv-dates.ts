@@ -20,6 +20,8 @@ const DAY_RE = /^(\d{1,4})([-/. ])(\d{1,4})\2(\d{1,4})$/;
 const COMPACT_RE = /^\d{8}$/;
 /** A day and a month in the current year (`04/03`), as typing reads `m/d`. */
 const PAIR_RE = /^(\d{1,2})\/(\d{1,2})$/;
+/** The fraction of a second in a time (`10:20:30.250`). */
+const FRACTION_RE = /\.(\d+)/;
 /** A time after a space or `T` (seconds, fractions and AM/PM optional), then `Z` or `+hh[:mm]`. */
 const TIME_RE =
 	/(?:\s+|T)(\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?(?:\s*[ap]m?)?)\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
@@ -106,6 +108,8 @@ export function parseOrderedDate(
 	if (offset === undefined) return undefined;
 	const value = serial + time.fraction - offset / 1440;
 	if (value < (date1904 ? 0 : 1)) return undefined;
-	const format = time.format === 'mm:ss.0' ? 'h:mm:ss' : time.format;
+	// Show as many fraction digits as the field has, up to milliseconds (Excel's `ss.000`).
+	const digits = Math.min(3, FRACTION_RE.exec(tail[1] ?? '')?.[1]?.length ?? 0);
+	const format = digits ? `h:mm:ss.${'0'.repeat(digits)}` : time.format;
 	return { value, numFmt: `yyyy-mm-dd ${format}`, zoned: zone !== undefined };
 }
