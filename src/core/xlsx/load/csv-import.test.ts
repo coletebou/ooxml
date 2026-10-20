@@ -251,6 +251,11 @@ describe('csvToWorkbook separators and trailing minus', () => {
 		});
 		expect(['A1', 'B1', 'C1'].map(fraction.value)).toEqual([1.5, 12_345, 2.75]);
 		expect(fraction.format('A1')).toBe('# ?/?');
+		// Nor is it a grouped zero: `0 1/2` has no leading zero to lose, `00 1/2` has.
+		const half = { delimiter: ';', thousandsSeparator: ' ' } as const;
+		expect(load('0 1/2\n', half).warnings).toEqual([]);
+		const kept = load('0 1/2;00 1/2\n', { ...half, conversions: { leadingZeros: false } });
+		expect(['A1', 'B1'].map(kept.value)).toEqual([0.5, '00 1/2']);
 	});
 
 	it('reads a trailing minus as a negative number only when asked', () => {

@@ -93,6 +93,9 @@ const TIME_ZONE = 16;
 
 const FORMATS = new Set(['general', 'text', 'skip', 'MDY', 'DMY', 'YMD', 'MYD', 'DYM', 'YDM']);
 
+/** The formats typing gives a mixed fraction (`1 1/2`), whose space is not a thousands separator. */
+const FRACTION_FORMATS = new Set(['# ?/?', '# ??/??']);
+
 /** The separators the default typing reads, so a number they produced is not localized. */
 const EN_US_SEPARATORS_RE = /[.,]/;
 
@@ -243,9 +246,11 @@ export function createFieldReader(
 		if (!formulas && field.startsWith('=')) return { value: field };
 		const parsed = (trailingMinus ? negative(field) : undefined) ?? type(field);
 		if (typeof parsed.value !== 'number' || parsed.formula !== undefined) return parsed;
+		// No thousands separator inside a mixed fraction (-1 matches no character).
+		const grouping = FRACTION_FORMATS.has(parsed.numFmt ?? '') ? -1 : thousands;
 		const traits = isDate(parsed.numFmt)
 			? dateTraits(field)
-			: numberTraits(field, decimal, thousands);
+			: numberTraits(field, decimal, grouping);
 		if (traits === 0) return parsed;
 		if (traits & keepText) return { value: field };
 		report(traits, row, col);
