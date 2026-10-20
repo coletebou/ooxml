@@ -114,6 +114,16 @@ describe('parseOrderedDate', () => {
 		expect(parseOrderedDate('2024-03-04T10:20+25:00', 'YMD', false)).toBeUndefined();
 	});
 
+	it('reads at most 64 characters, so padding in a crafted file cannot make it slow', () => {
+		// A valid shape, but longer than any date and time needs: refused before any pattern runs.
+		expect(parseOrderedDate(`2024-03-04${' '.repeat(60)}10:30`, 'YMD', false)).toBeUndefined();
+		expect(parseOrderedDate(`2024-03-04${' '.repeat(30_000)}x`, 'YMD', false)).toBeUndefined();
+		expect(parseOrderedDate('2024-03-04    10:30', 'YMD', false)?.value).toBeCloseTo(
+			at(2024, 3, 4, 10, 30),
+			10,
+		);
+	});
+
 	it('honours the 1904 date system', () => {
 		expect(parseOrderedDate('2024-03-04', 'YMD', true)?.value).toBe(at(2024, 3, 4) - 1462);
 	});

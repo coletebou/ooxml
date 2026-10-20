@@ -22,9 +22,34 @@ const COMPACT_RE = /^\d{8}$/;
 const PAIR_RE = /^(\d{1,2})\/(\d{1,2})$/;
 /** The fraction of a second in a time (`10:20:30.250`). */
 const FRACTION_RE = /\.(\d+)/;
-/** A time after a space or `T` (seconds, fractions and AM/PM optional), then `Z` or `+hh[:mm]`. */
+/** A time (seconds, fractions and AM/PM optional), then `Z` or `+hh[:mm]`; anchored at both ends. */
 const TIME_RE =
-	/(?:\s+|T)(\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?(?:\s*[ap]m?)?)\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+	/^(\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?(?:\s*[ap]m?)?)\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+const SPACE_RE = /\s/;
+/**
+ * The longest field read as a date. No date and time needs more, and it caps the work of the
+ * patterns, whatever padding a file holds.
+ */
+export const MAX_DATE_TEXT = 64;
+
+/**
+ * The date and the time of `text`, found in one pass: the time starts at the one or two hour
+ * digits before the first `:` and follows a space or `T`. `undefined` when a `:` has no such time.
+ */
+function splitTime(text: string): [day: string, time: string | undefined] | undefined {
+	const colon = text.indexOf(':');
+	if (colon < 0) return [text, undefined];
+	let start = colon;
+	while (start > 0 && colon - start < 2) {
+		const code = text.charCodeAt(start - 1);
+		if (code < 48 || code > 57) break;
+		start--;
+	}
+	const before = text[start - 1] ?? '';
+	if (start === colon || !before) return undefined;
+	if (before === 'T' || before === 't') return [text.slice(0, start - 1), text.slice(start)];
+	return SPACE_RE.test(before) ? [text.slice(0, start).trimEnd(), text.slice(start)] : undefined;
+}
 
 /** Splits eight digits by `order`: four for the year, two for the day and the month. */
 function compactParts(text: string, order: CsvDateOrder): string[] {
@@ -93,8 +118,12 @@ export function parseOrderedDate(
 	order: CsvDateOrder,
 	date1904: boolean,
 ): OrderedDate | undefined {
-	const tail = TIME_RE.exec(text);
-	const parts = dayParts(tail ? text.slice(0, tail.index) : text, order);
+	if (text.length > MAX_DATE_TEXT) return undefined;
+	const split = splitTime(text);
+	if (!split) return undefined;
+	const tail = split[1] === undefined ? undefined : TIME_RE.exec(split[1]);
+	if (split[1] !== undefined && !tail) return undefined;
+	const parts = dayParts(split[0], order);
 	const date = parts && inOrder(parts, order);
 	if (!date) return undefined;
 	const serial = serialOf(date[0], date[1], date[2], date1904);
