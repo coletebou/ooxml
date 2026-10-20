@@ -42,19 +42,23 @@ const ATTRIBUTE_TEXT: Record<FormatAttribute, string> = {
 	richText: 'rich text',
 };
 
-const quote = (text: string) => JSON.stringify(text);
+/** A quoted string, kept on one line (JSON leaves the line and paragraph separators literal). */
+const quote = (text: string) => oneLine(JSON.stringify(text));
 
 const ESCAPES: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
 
 /**
- * Text kept on one line: line breaks and other control characters escaped, so a formula or a
- * name cannot start report lines of its own (Excel allows line breaks in formulas).
+ * Text kept on one line: line breaks, separators and other control characters escaped, so a
+ * formula, a name or a value cannot start report lines of its own (Excel allows line breaks in
+ * formulas).
  */
 function oneLine(text: string): string {
 	let out = '';
 	for (const ch of text) {
 		const code = ch.charCodeAt(0);
-		const control = code < 32 || code === 127;
+		// C0 and C1 controls (U+0085 is a line break to some readers) and the line and paragraph
+		// separators U+2028 and U+2029.
+		const control = code < 32 || (code >= 127 && code <= 159) || code === 0x2028 || code === 0x2029;
 		out += control ? (ESCAPES[ch] ?? `\\u${code.toString(16).padStart(4, '0')}`) : ch;
 	}
 	return out;

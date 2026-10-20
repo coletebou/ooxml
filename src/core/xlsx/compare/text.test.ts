@@ -110,6 +110,19 @@ describe('comparisonText', () => {
 		]);
 	});
 
+	it('escapes line and paragraph separators in values and formulas', () => {
+		const before = createWorkbook();
+		const after = createWorkbook();
+		put(before, 'A1', { value: 'one' });
+		put(after, 'A1', { value: 'one\u2028Sheet "Fake"\u0085two' });
+		put(before, 'B1', { value: 1, formula: '1' });
+		put(after, 'B1', { value: 2, formula: '1+1\u2029' });
+		const text = comparisonText(compareWorkbooks(before, after));
+		expect(text).not.toMatch(/[\u0085\u2028\u2029]/u);
+		expect(text).toContain('A1 entered value: "one" -> "one\\u2028Sheet \\"Fake\\"\\u0085two"');
+		expect(text).toContain('B1 formula: =1 -> =1+1\\u2029');
+	});
+
 	it('shows a setting turned off, not only the ones turned on', () => {
 		const before = createWorkbook();
 		const after = createWorkbook();
