@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { parseAddress } from '../address';
 import { getCell } from '../cells';
 import { dateToSerial } from '../numfmt/date';
-import { styleAt } from '../styles';
-import { csvToWorkbook, type CsvWorkbookOptions } from './csv';
+import { internStyle, styleAt } from '../styles';
+import { csvToWorkbook, sheetToCsv, type CsvWorkbookOptions } from './csv';
 
 /** Loads `text` (comma-delimited unless told otherwise) and reads cells by A1 reference. */
 function load(text: string, options: CsvWorkbookOptions = {}) {
@@ -46,7 +46,6 @@ describe('csvToWorkbook default conversions', () => {
 		expect(csv.warnings).toEqual([
 			'Column A: 2 values lost their leading zeros when converted to numbers (first: A2).',
 			'Column B: 1 value with more than 15 digits lost digits when converted to a number (first: B3).',
-			'Column C: 2 values with the letter E were converted to numbers in scientific notation (first: C2).',
 			'Column D: 2 values of letters and digits such as JAN1 were converted to dates (first: D2).',
 		]);
 	});
@@ -150,6 +149,22 @@ describe('csvToWorkbook conversion switches', () => {
 		expect(off.value('A1')).toBe('0.30000000000000004');
 	});
 
+	it('reports scientific notation only when the number does not keep what the text says', () => {
+		// Our own export writes 1.00E+05; reading it back changes nothing.
+		const workbook = csvToWorkbook('x\n', { delimiter: ',' });
+		const sheet = workbook.sheets[0]!;
+		const scientific = internStyle(workbook, { ...styleAt(workbook, 0), numFmt: '0.00E+00' });
+		sheet.rows.set(0, new Map([[0, { value: 100_000, styleId: scientific }]]));
+		const back = load(sheetToCsv(workbook, 0));
+		expect(back.value('A1')).toBe(100_000);
+		expect(back.warnings).toEqual([]);
+		expect(load('123E5,1.5e-10\n').warnings).toEqual([]);
+		// An exponent below what a number holds turns the value into 0.
+		expect(load('1.5e-400\n').warnings).toEqual([
+			'Column A: 1 value with the letter E lost digits when converted to a number (first: A1).',
+		]);
+	});
+
 	it('keeps a field as text when any conversion it needs is off', () => {
 		const csv = load('00012345678901234567\n', { conversions: { longNumbers: false } });
 		expect(csv.value('A1')).toBe('00012345678901234567');
@@ -165,9 +180,8 @@ describe('csvToWorkbook column formats', () => {
 		expect(['A1', 'B1', 'C1'].map(csv.value)).toEqual(['00123', '=1+2', 'TRUE']);
 		expect(csv.format('A1')).toBe('@');
 		expect(csv.value('D1')).toBe(100_000);
-		expect(csv.warnings).toEqual([
-			'Column D: 1 value with the letter E was converted to a number in scientific notation (first: D1).',
-		]);
+		// 1E5 is exactly the number its text says, so nothing is reported.
+		expect(csv.warnings).toEqual([]);
 	});
 
 	it('skips columns and moves the following ones left', () => {
@@ -350,7 +364,6 @@ describe('csvToWorkbook with an export from another system', () => {
 		expect(csv.warnings).toEqual([
 			'Column A: 20000 values lost their leading zeros when converted to numbers (first: A2).',
 			'Column B: 20000 values with more than 15 digits lost digits when converted to numbers (first: B2).',
-			'Column C: 20000 values with the letter E were converted to numbers in scientific notation (first: C2).',
 		]);
 		expect(csv.value('A20001')).toBe(20_000);
 		const kept = load(rows.join('\n'), { columns: { 0: 'text', 1: 'text', 2: 'text' } });

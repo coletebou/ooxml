@@ -12,6 +12,7 @@ import {
 	keepsDigits,
 	LONG_NUMBER,
 	numberTraits,
+	SCIENTIFIC,
 	TIME_ZONE,
 } from './csv-traits';
 
@@ -59,10 +60,10 @@ export interface CsvImportOptions {
 	trailingMinus?: boolean;
 	/**
 	 * Add one workbook warning per column and kind of conversion that changed data (leading zeros
-	 * dropped, digits a number could not keep, letters to dates, time zones made UTC, a date-column
-	 * value read as a General date in another order) or may have
-	 * (digits around `E`, since `123E5` the identifier and `1.5E5` the number look alike), with a
-	 * count and the first cell. On by default.
+	 * dropped, digits a number could not keep, with or without an `E`, letters to dates, time
+	 * zones made UTC, a date-column value read as a General date in another order), with a count
+	 * and the first cell. A number that keeps what its text says (`1.00E+05`, `123E5`) is not
+	 * reported, even where a switch would keep it as text. On by default.
 	 */
 	reportConversions?: boolean;
 }
@@ -81,8 +82,8 @@ const KINDS = [
 	},
 	{
 		conversion: 'scientific',
-		one: 'value with the letter E was converted to a number in scientific notation',
-		many: 'values with the letter E were converted to numbers in scientific notation',
+		one: 'value with the letter E lost digits when converted to a number',
+		many: 'values with the letter E lost digits when converted to numbers',
 	},
 	{
 		conversion: 'letterDates',
@@ -224,9 +225,12 @@ export function createFieldReader(
 			: numberTraits(field, decimal, grouping);
 		if (traits === 0) return parsed;
 		if (traits & keepText) return { value: field };
-		// Excel's rule decides what the switch keeps; a warning says only what was really lost.
-		const kept = traits & LONG_NUMBER && keepsDigits(field, parsed.value);
-		const lost = kept ? traits ^ LONG_NUMBER : traits;
+		// Excel's rules decide what the switches keep; a warning says only what was really lost.
+		let lost = traits;
+		if (traits & (LONG_NUMBER | SCIENTIFIC)) {
+			if (keepsDigits(field, parsed.value)) lost &= ~(LONG_NUMBER | SCIENTIFIC);
+			else if (traits & LONG_NUMBER) lost &= ~SCIENTIFIC;
+		}
 		if (lost) report(lost, row, col);
 		return parsed;
 	};
