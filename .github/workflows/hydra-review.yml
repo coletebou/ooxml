@@ -1,0 +1,295 @@
+name: Hydra review
+
+# Six independent reviews of every pull request, one seat per model. Each seat is one run of the
+# autoreview helper (github.com/coletebou/agent-skills, skills/autoreview/scripts/autoreview) with
+# the hydra panel's exact flags, over one pinned scope: branch mode from the merge base of the pull
+# request head and its base, findings at P2 and above. Every seat uploads its report as the
+# hydra-<seat> artifact, and the summary job keeps one comment on the pull request up to date with a
+# table of the seats (requested model, the model that ran, status, findings) and each report.
+#
+# Security:
+# - Triggered by `pull_request` only, never `pull_request_target`. Every job also requires a pull
+#   request from a branch of this repository opened by its owner, a member or a collaborator, so a
+#   pull request from anyone else's fork never runs with the Bedrock key.
+# - Only the step that runs the reviewer gets the key (the AWS_BEARER_TOKEN_BEDROCK secret). The
+#   summary job, the only job that can write to the pull request, never sees it.
+# - The Codex profiles and the summary scripts are read from the base commit, never the head.
+# - Exact tool versions, TruffleHog checked against its release SHA-256, the helper pinned to a
+#   commit, every action pinned to a commit.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: hydra-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Codex 0.162.1 and Claude Code 2.1.304 come from .github/hydra/tools/package-lock.json.
+  TRUFFLEHOG_VERSION: 3.97.9
+  TRUFFLEHOG_SHA256: 40377e6572495412fb9ba0bc21c9401f73b72f1d2afd11b9931bc4a5ed622866
+  # github.com/coletebou/agent-skills main on 2026-10-20 (upstream merge 1444c91). Bump it on
+  # purpose, after a review.
+  AGENT_SKILLS_SHA: 47543daac03e279c63f3e2cce64a593add9e561a
+
+jobs:
+  seat:
+    name: ${{ matrix.seat }} (${{ matrix.model }})
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read # check out the pull request
+    strategy:
+      fail-fast: false
+      matrix:
+        # The panel: each seat's flags exactly as hydra-autoreview.sh --print gives them. A model id
+        # never contains a space, so the flags split on spaces.
+        include:
+          - seat: gpt61sol
+            engine: codex
+            model: openai.gpt-6.1-sol
+            flags: >-
+              --engine codex --codex-auth default --codex-profile autoreview-bedrock
+              --model openai.gpt-6.1-sol --thinking max --codex-speed ultrafast
+              --codex-fallback-profile autoreview-bedrock-runtime
+              --codex-fallback-auth-model global.openai.gpt-6.1-sol
+          - seat: gpt6sol
+            engine: codex
+            model: openai.gpt-6-sol
+            flags: >-
+              --engine codex --codex-auth default --codex-profile autoreview-bedrock
+              --model openai.gpt-6-sol --thinking max --codex-speed default
+              --codex-fallback-profile autoreview-bedrock-runtime
+              --codex-fallback-auth-model global.openai.gpt-6-sol
+          - seat: astra6
+            engine: codex
+            model: openai.gpt-6-astra
+            flags: >-
+              --engine codex --codex-auth default --codex-profile autoreview-bedrock-astra
+              --model openai.gpt-6-astra --thinking max --codex-speed default
+              --codex-fallback-profile autoreview-bedrock-runtime
+              --codex-fallback-auth-model global.openai.gpt-6-astra
+          - seat: opus55
+            engine: claude
+            model: anthropic.claude-opus-5-5[1m]
+            flags: >-
+              --engine claude --claude-auth mantle --model anthropic.claude-opus-5-5[1m]
+              --thinking high --claude-bedrock-region us-east-1
+              --claude-fallback-auth bedrock --claude-fallback-auth-model us.anthropic.claude-opus-5-5[1m]
+          - seat: fable51
+            engine: claude
+            model: global.anthropic.claude-fable-5-1[1m]
+            flags: >-
+              --engine claude --claude-auth bedrock --model global.anthropic.claude-fable-5-1[1m]
+              --thinking high --claude-bedrock-region us-east-1
+          - seat: sonnet55
+            engine: claude
+            model: us.anthropic.claude-sonnet-5-5
+            flags: >-
+              --engine claude --claude-auth bedrock --model us.anthropic.claude-sonnet-5-5
+              --thinking high --claude-bedrock-region us-east-1
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      SEAT: ${{ matrix.seat }}
+      SEAT_ENGINE: ${{ matrix.engine }}
+      SEAT_MODEL: ${{ matrix.model }}
+    steps:
+      - name: Check out the pull request head with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Stage the Codex profiles, tool lockfile and seat summarizer from the base commit
+        run: |
+          HYDRA_DIR="$RUNNER_TEMP/hydra"
+          # A base rewritten since the event (a resync with upstream) is fetched by its id.
+          git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet --no-tags origin "$BASE_SHA"
+          install -d -m 700 "$HYDRA_DIR/codex-home"
+          for file in autoreview-bedrock.config.toml autoreview-bedrock-astra.config.toml \
+            autoreview-bedrock-runtime.config.toml autoreview-bedrock.models.json; do
+            git show "$BASE_SHA:.github/hydra/codex/$file" > "$HYDRA_DIR/codex-home/$file"
+            chmod 600 "$HYDRA_DIR/codex-home/$file"
+          done
+          mkdir -p "$HYDRA_DIR/tools"
+          for file in package.json package-lock.json; do
+            git show "$BASE_SHA:.github/hydra/tools/$file" > "$HYDRA_DIR/tools/$file"
+          done
+          git show "$BASE_SHA:.github/hydra/seat-summary.py" > "$HYDRA_DIR/seat-summary.py"
+
+      - name: Install Codex, Claude Code and TruffleHog
+        run: |
+          HYDRA_DIR="$RUNNER_TEMP/hydra"
+          # Exact versions with registry integrity hashes, from the staged lockfile. Its package.json
+          # approves the one install script needed (Claude Code links its native binary in postinstall).
+          npm ci --prefix "$HYDRA_DIR/tools" --no-fund --no-audit
+          echo "$HYDRA_DIR/tools/node_modules/.bin" >> "$GITHUB_PATH"
+          mkdir -p "$HYDRA_DIR/bin"
+          tarball="$HYDRA_DIR/trufflehog.tar.gz"
+          curl -fsSL --retry 3 -o "$tarball" \
+            "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"
+          echo "$TRUFFLEHOG_SHA256  $tarball" | sha256sum --check --strict
+          tar -xzf "$tarball" -C "$HYDRA_DIR/bin" trufflehog
+          echo "$HYDRA_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch the autoreview helper at the pinned commit
+        run: |
+          helper="$RUNNER_TEMP/hydra/agent-skills"
+          git init --quiet "$helper"
+          git -C "$helper" fetch --quiet --depth 1 https://github.com/coletebou/agent-skills.git "$AGENT_SKILLS_SHA"
+          git -C "$helper" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$helper" rev-parse HEAD)" = "$AGENT_SKILLS_SHA"
+
+      - name: Show the tool versions
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print("python", sys.version.split()[0])'
+          for tool in git codex claude trufflehog; do printf '%s: %s\n' "$tool" "$(command -v "$tool")"; done
+          git --version
+          codex --version
+          claude --version
+          trufflehog --version
+
+      - name: Review with ${{ matrix.model }}
+        # Bounded below the job timeout so the report is always summarized and uploaded.
+        timeout-minutes: 55
+        env:
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          AWS_REGION: us-east-1
+          SEAT_FLAGS: ${{ matrix.flags }}
+          CODEX_HOME: ${{ runner.temp }}/hydra/codex-home
+          AUTOREVIEW_RUN_LOG_DIR: ${{ runner.temp }}/hydra/history
+          # As hydra does: blank every inherited fallback, Codex config and speed override, so only
+          # the flags above choose a seat's model, tier and fallback.
+          AUTOREVIEW_CODEX_FALLBACK_AUTH: ''
+          AUTOREVIEW_CODEX_FALLBACK_PROFILE: ''
+          AUTOREVIEW_CODEX_FALLBACK_AUTH_MODEL: ''
+          AUTOREVIEW_CLAUDE_FALLBACK_AUTH: ''
+          AUTOREVIEW_CLAUDE_FALLBACK_AUTH_MODEL: ''
+          AUTOREVIEW_FALLBACK_MODEL: ''
+          AUTOREVIEW_CLAUDE_FALLBACK_MODEL: ''
+          AUTOREVIEW_CODEX_FALLBACK_MODEL: ''
+          AUTOREVIEW_CODEX_CONFIG: ''
+          AUTOREVIEW_CODEX_SPEED: ''
+        run: |
+          HYDRA_DIR="$RUNNER_TEMP/hydra"
+          if [ -z "$AWS_BEARER_TOKEN_BEDROCK" ]; then
+            echo "::error::The AWS_BEARER_TOKEN_BEDROCK secret is not set"
+            exit 1
+          fi
+          read -r -a flags <<< "$SEAT_FLAGS"
+          out="$HYDRA_DIR/out"
+          mkdir -p "$out"
+          merge_base=$(git merge-base HEAD "$BASE_SHA")
+          printf '%s\n' "$merge_base" > "$out/merge-base"
+          echo "Reviewing $merge_base..$HEAD_SHA as seat $SEAT"
+          set +e
+          timeout --kill-after=60s 50m env -u TMP -u TEMP \
+            "$HYDRA_DIR/agent-skills/skills/autoreview/scripts/autoreview" \
+            --mode branch --base "$merge_base" --max-priority P2 "${flags[@]}" \
+            --output "$out/report.md" --json-output "$out/report.json" --status-output "$out/status.json" \
+            2>&1 | tee "$out/console.raw.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$rc" > "$out/exit"
+          echo "autoreview exit code: $rc"
+          # Artifacts are not masked like the log is: drop the key, or anything shaped like an AWS
+          # key, from every text file the seat uploads.
+          python3 -I - "$out" <<'PY'
+          import os, pathlib, re, sys
+          out = pathlib.Path(sys.argv[1])
+          secret = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
+          shapes = re.compile(r"ABSK[A-Za-z0-9+/=]{20,}|bedrock-api-key-[A-Za-z0-9+/=]{20,}|AKIA[0-9A-Z]{16}")
+          def clean(text):
+              return shapes.sub("***", text.replace(secret, "***") if secret else text)
+          raw = out / "console.raw.log"
+          if raw.exists():
+              (out / "console.log").write_text(clean(raw.read_text(errors="replace")))
+              raw.unlink()
+          for name in ("report.md", "report.json"):
+              path = out / name
+              if path.exists():
+                  text = path.read_text(errors="replace")
+                  if clean(text) != text:
+                      path.write_text(clean(text))
+          PY
+
+      - name: Summarize the seat
+        if: always()
+        env:
+          HYDRA_DIR: ${{ runner.temp }}/hydra
+        run: python3 -I "$HYDRA_DIR/seat-summary.py"
+
+      - name: Upload the seat report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hydra-${{ matrix.seat }}
+          path: ${{ runner.temp }}/hydra/artifact/
+          if-no-files-found: warn
+          retention-days: 30
+          overwrite: true
+
+      - name: Fail when the seat produced no report
+        run: |
+          python3 -I - "$RUNNER_TEMP/hydra/artifact/seat.json" <<'PY'
+          import json, sys
+          seat = json.load(open(sys.argv[1]))
+          if not seat.get("report_produced"):
+              print(f"::error::{seat['seat']} produced no report: status={seat.get('status')} reason={seat.get('reason')} exit={seat.get('helper_exit_code')}")
+              sys.exit(1)
+          PY
+
+  summary:
+    name: summary
+    needs: seat
+    if: >-
+      !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read # list this run's jobs, to link and name every seat
+      contents: read # check out the comment script from the base commit
+      pull-requests: write # create or update the summary comment
+    steps:
+      - name: Check out the comment script from the base commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/hydra
+          persist-credentials: false
+
+      - name: Download the seat reports
+        # A seat that failed before uploading is still listed, from the run's job list.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: hydra-*
+          path: ${{ runner.temp }}/seats
+
+      - name: Post or update the summary comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SEATS_DIR: ${{ runner.temp }}/seats
+        with:
+          script: |
+            const run = require('./.github/hydra/comment.cjs');
+            await run({ github, context, core });

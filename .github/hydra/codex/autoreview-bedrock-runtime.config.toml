@@ -1,0 +1,18 @@
+# Codex profile for the route fallback of the Codex seats of hydra-review.yml: the same model on
+# the Bedrock Runtime endpoint (the built-in amazon-bedrock-runtime provider, OpenAI Responses API)
+# in us-east-1. Runtime has no in-Region ID for these models, so they use the global cross-Region
+# inference profile. Each seat names its own fallback model on the command line
+# (--codex-fallback-auth-model); the model below is only the profile default. The workflow copies
+# this file from the base commit into a private CODEX_HOME, and the autoreview helper stages only
+# model, model_provider, model_reasoning_effort, service_tier and the AWS region from it.
+#
+# No credential lives here. The provider authenticates with the Bedrock API key in the
+# AWS_BEARER_TOKEN_BEDROCK environment variable, which the workflow sets from the repository secret
+# of the same name.
+model = "global.openai.gpt-6.1-sol"
+model_provider = "amazon-bedrock-runtime"
+model_reasoning_effort = "max"
+service_tier = "default"
+
+[model_providers.amazon-bedrock-runtime.aws]
+region = "us-east-1"
