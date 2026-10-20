@@ -181,7 +181,10 @@ export function createFieldReader(
 		const parsed = parseCellInput(normalized);
 		if (normalized === text || isNumber(parsed)) return parsed;
 		const plain = parseCellInput(text);
-		return isNumber(plain) && EN_US_SEPARATORS_RE.test(text) ? { value: text } : plain;
+		if (isNumber(plain) && EN_US_SEPARATORS_RE.test(text)) return { value: text };
+		// A date or time that only reads localized (`10:30:15,5`) beats plain text.
+		const dated = typeof parsed.value === 'number' && parsed.formula === undefined;
+		return dated && typeof plain.value === 'string' ? parsed : plain;
 	};
 	const type = normalize
 		? (text: string): ParsedInput => localized(text, normalize(text))

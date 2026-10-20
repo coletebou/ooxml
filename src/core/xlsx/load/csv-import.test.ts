@@ -237,6 +237,10 @@ describe('csvToWorkbook separators and trailing minus', () => {
 		expect(csv.value('E1')).toBe(3140);
 		expect(csv.value('F1')).toBe('04.03.2024');
 		expect(csv.value('G1')).toBe('Smith, J.');
+		// A time with a comma fraction reads once localized; a plain date keeps its own reading.
+		const times = load('10:30:15,5;Mar 5, 2024\n', { delimiter: ';', decimalSeparator: ',' });
+		expect(times.value('A1')).toBeCloseTo((10 * 3600 + 30 * 60 + 15.5) / 86_400, 10);
+		expect(times.value('B1')).toBe(day(2024, 3, 5));
 	});
 
 	it('reads a space as the thousands separator and keeps formulas and times intact', () => {
