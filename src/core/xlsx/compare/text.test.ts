@@ -86,6 +86,30 @@ describe('comparisonText', () => {
 		]);
 	});
 
+	it('keeps every difference on one line and shows what a rule or name changed', () => {
+		const before = createWorkbook();
+		const after = createWorkbook();
+		put(before, 'A1', { value: 1, formula: 'IF(B1,\n1,2)' });
+		put(after, 'A1', { value: 1, formula: 'IF(B1,\r\n2,2)' });
+		before.definedNames = [{ name: 'Total', formula: '1' }];
+		after.definedNames = [{ name: 'TOTAL', formula: '1' }];
+		before.sheets[0]!.dataValidations = [
+			{ ranges: [R('C2')], type: 'whole', operator: 'between', formula1: '1', formula2: '9' },
+		];
+		after.sheets[0]!.dataValidations = [
+			{ ranges: [R('C2')], type: 'whole', operator: 'between', formula1: '1', formula2: '10' },
+		];
+		const lines = comparisonText(compareWorkbooks(before, after)).split('\n');
+		expect(lines.slice(0, 6)).toEqual([
+			'Workbook',
+			'  Name Total renamed to TOTAL',
+			'Sheet "Sheet1"',
+			'  Data validation removed C2 (type whole, operator between, formula1 "1", formula2 "9")',
+			'  Data validation added C2 (type whole, operator between, formula1 "1", formula2 "10")',
+			'  A1 formula: =IF(B1,\\n1,2) -> =IF(B1,\\r\\n2,2)',
+		]);
+	});
+
 	it('says when there is nothing to report and when the report stopped early', () => {
 		const book = createWorkbook();
 		expect(comparisonText(compareWorkbooks(book, structuredClone(book)))).toMatch(

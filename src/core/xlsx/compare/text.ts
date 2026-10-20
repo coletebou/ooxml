@@ -1,7 +1,14 @@
 // A plain-text report of a workbook comparison, for a terminal or a code review: one line per
 // difference, in the result's stable order, with A1 addresses and old -> new values.
 import { formatAddress, formatRange, type CellRange } from '../address';
-import { isCellError, type CellValue, type ConditionalFormat, type DefinedName } from '../model';
+import {
+	isCellError,
+	type CellValue,
+	type ConditionalFormat,
+	type DataValidation,
+	type DefinedName,
+} from '../model';
+import { stableKey } from '../stable-key';
 import type {
 	CellDifference,
 	CellDifferenceRange,
@@ -36,6 +43,22 @@ const ATTRIBUTE_TEXT: Record<FormatAttribute, string> = {
 
 const quote = (text: string) => JSON.stringify(text);
 
+const ESCAPES: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+
+/**
+ * Text kept on one line: line breaks and other control characters escaped, so a formula or a
+ * name cannot start report lines of its own (Excel allows line breaks in formulas).
+ */
+function oneLine(text: string): string {
+	let out = '';
+	for (const ch of text) {
+		const code = ch.charCodeAt(0);
+		const control = code < 32 || code === 127;
+		out += control ? (ESCAPES[ch] ?? `\\u${code.toString(16).padStart(4, '0')}`) : ch;
+	}
+	return out;
+}
+
 /** A value as a report shows it: strings quoted, so `"1"` and `1` differ visibly. */
 function valueText(value: CellValue): string {
 	if (value === null) return '(empty)';
@@ -49,13 +72,23 @@ function valueText(value: CellValue): string {
 function cellText(side: CellSide): string {
 	if (side.formula === undefined) return valueText(side.value);
 	const array = side.arrayRange ? ` (array ${formatRange(side.arrayRange)})` : '';
-	return `=${side.formula}${array}`;
+	const legacy = side.legacyFormula ? ' (implicit intersection)' : '';
+	return `=${oneLine(side.formula)}${array}${legacy}`;
 }
 
 const position = (index: number) => `position ${index + 1}`;
-const nameText = (d: { name: string; scope?: string }) =>
-	d.scope === undefined ? d.name : `${d.name} (${quote(d.scope)})`;
-const definition = (name: DefinedName) => `=${name.formula}${name.hidden ? ' (hidden)' : ''}`;
+const nameText = (name: string, scope: string | undefined) =>
+	scope === undefined ? oneLine(name) : `${oneLine(name)} (${quote(scope)})`;
+const definition = (name: DefinedName) =>
+	`=${oneLine(name.formula)}${name.hidden ? ' (hidden)' : ''}${name.comment ? ` (comment ${quote(name.comment)})` : ''}`;
+
+function nameChange(d: Extract<WorkbookDifference, { kind: 'nameChanged' }>): string {
+	const from = definition(d.before);
+	const to = definition(d.after);
+	const renamed = d.before.name === d.after.name ? '' : ` renamed to ${oneLine(d.after.name)}`;
+	const changed = from === to ? '' : `${renamed ? ' and' : ''} changed: ${from} -> ${to}`;
+	return `Name ${nameText(d.before.name, d.scope)}${renamed}${changed}`;
+}
 
 function workbookLine(d: WorkbookDifference): string {
 	switch (d.kind) {
@@ -70,17 +103,45 @@ function workbookLine(d: WorkbookDifference): string {
 		case 'sheetState':
 			return `Sheet ${quote(d.sheet)} ${d.from} -> ${d.to}`;
 		case 'nameAdded':
-			return `Name ${nameText(d)} added: ${definition(d.after)}`;
+			return `Name ${nameText(d.name, d.scope)} added: ${definition(d.after)}`;
 		case 'nameRemoved':
-			return `Name ${nameText(d)} removed: ${definition(d.before)}`;
+			return `Name ${nameText(d.name, d.scope)} removed: ${definition(d.before)}`;
 		case 'nameChanged':
-			return `Name ${nameText(d)} changed: ${definition(d.before)} -> ${definition(d.after)}`;
+			return nameChange(d);
 	}
 }
 
 const rangesText = (list: readonly CellRange[]) => list.map(formatRange).join(' ');
+
+/** Settings shown first, in this order; the rest follow by name. */
+const LEADING = ['type', 'operator', 'formula', 'formulas', 'formula1', 'formula2', 'text'];
+
+/**
+ * The settings of a rule or validation that are set, so two report lines that differ only in a
+ * formula, a flag or a style say so: words bare, other strings quoted, structures as JSON.
+ */
+function settingsText(item: object, skip: readonly string[]): string {
+	const rank = (key: string) => (LEADING.includes(key) ? LEADING.indexOf(key) : LEADING.length);
+	return Object.entries(item)
+		.filter(([key, v]) => !skip.includes(key) && v !== undefined && v !== false && v !== '')
+		.sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))
+		.map(([key, v]) => {
+			if (v === true) return key;
+			if (typeof v !== 'string')
+				return `${key} ${typeof v === 'object' ? stableKey(v) : String(v)}`;
+			return `${key} ${/^[A-Za-z][\w.-]*$/.test(v) ? v : quote(v)}`;
+		})
+		.join(', ');
+}
+
+const validationText = (v: DataValidation) =>
+	`${rangesText(v.ranges)} (${settingsText(v, ['ranges'])})`;
+
 const ruleText = (format: ConditionalFormat) =>
-	`${rangesText(format.ranges)} (${format.rules.map((rule) => rule.type).join(', ')})`;
+	`${rangesText(format.ranges)} (${format.rules.map((rule) => settingsText(rule, ['priority', 'extensionId', 'extensionXml'])).join('; ')})`;
+
+const priorities = (format: ConditionalFormat) =>
+	format.rules.map((rule) => rule.priority).join(', ');
 
 function sheetLine(d: SheetDifference): string {
 	switch (d.kind) {
@@ -89,26 +150,26 @@ function sheetLine(d: SheetDifference): string {
 		case 'mergeRemoved':
 			return `Merge removed ${formatRange(d.range)}`;
 		case 'tableAdded':
-			return `Table ${d.table} added at ${formatRange(d.after.range)}`;
+			return `Table ${oneLine(d.table)} added at ${formatRange(d.after.range)}`;
 		case 'tableRemoved':
-			return `Table ${d.table} removed from ${formatRange(d.before.range)}`;
+			return `Table ${oneLine(d.table)} removed from ${formatRange(d.before.range)}`;
 		case 'tableChanged': {
 			const where =
 				formatRange(d.before.range) === formatRange(d.after.range)
 					? formatRange(d.after.range)
 					: `${formatRange(d.before.range)} -> ${formatRange(d.after.range)}`;
-			return `Table ${d.table} changed (${d.fields.join(', ')}): ${where}`;
+			return `Table ${oneLine(d.table)} changed (${d.fields.join(', ')}): ${where}`;
 		}
 		case 'dataValidationAdded':
-			return `Data validation added ${rangesText(d.after.ranges)} (${d.after.type})`;
+			return `Data validation added ${validationText(d.after)}`;
 		case 'dataValidationRemoved':
-			return `Data validation removed ${rangesText(d.before.ranges)} (${d.before.type})`;
+			return `Data validation removed ${validationText(d.before)}`;
 		case 'conditionalFormatAdded':
 			return `Conditional format rule added ${ruleText(d.after)}`;
 		case 'conditionalFormatRemoved':
 			return `Conditional format rule removed ${ruleText(d.before)}`;
 		case 'conditionalFormatReordered':
-			return `Conditional format rule reordered ${ruleText(d.after)}`;
+			return `Conditional format rule reordered ${ruleText(d.after)}: priority ${priorities(d.before)} -> ${priorities(d.after)}`;
 	}
 }
 
@@ -120,7 +181,7 @@ function cellLine(d: CellDifference): string {
 	const at = `${formatAddress(d.address)} ${KIND_TEXT[d.kind]}`;
 	if (d.kind === 'formula') return `${at}: ${cellText(d.before)} -> ${cellText(d.after)}`;
 	if (d.kind !== 'format') {
-		const formula = d.after.formula === undefined ? '' : ` (=${d.after.formula})`;
+		const formula = d.after.formula === undefined ? '' : ` (=${oneLine(d.after.formula)})`;
 		return `${at}: ${valueText(d.before.value)} -> ${valueText(d.after.value)}${formula}`;
 	}
 	const line = `${at} (${attributesText(d.attributes)})`;
