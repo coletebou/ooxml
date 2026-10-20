@@ -6,7 +6,14 @@ import { columnLabel, MAX_COL } from '../address';
 import { isDateFormat, parseCellInput, type ParsedInput } from '../numfmt/index';
 import { parseOrderedDate, type CsvDateOrder } from './csv-dates';
 import { separatorNormalizer, separatorsOf } from './csv-separators';
-import { dateTraits, keepsDigits, LONG_NUMBER, numberTraits, TIME_ZONE } from './csv-traits';
+import {
+	DATE_FALLBACK,
+	dateTraits,
+	keepsDigits,
+	LONG_NUMBER,
+	numberTraits,
+	TIME_ZONE,
+} from './csv-traits';
 
 /**
  * Excel's automatic data conversions. Each is on by default, as in Excel and as typing into a
@@ -52,7 +59,8 @@ export interface CsvImportOptions {
 	trailingMinus?: boolean;
 	/**
 	 * Add one workbook warning per column and kind of conversion that changed data (leading zeros
-	 * dropped, digits a number could not keep, letters to dates, time zones made UTC) or may have
+	 * dropped, digits a number could not keep, letters to dates, time zones made UTC, a date-column
+	 * value read as a General date in another order) or may have
 	 * (digits around `E`, since `123E5` the identifier and `1.5E5` the number look alike), with a
 	 * count and the first cell. On by default.
 	 */
@@ -85,6 +93,11 @@ const KINDS = [
 		conversion: undefined,
 		one: 'date-time with a time zone was converted to UTC',
 		many: 'date-times with a time zone were converted to UTC',
+	},
+	{
+		conversion: undefined,
+		one: 'value could not be read as a date in {order} order and was read as General',
+		many: 'values could not be read as dates in {order} order and were read as General',
 	},
 ] as const;
 const FORMATS = new Set(['general', 'text', 'skip', 'MDY', 'DMY', 'YMD', 'MYD', 'DYM', 'YDM']);
@@ -226,7 +239,13 @@ export function createFieldReader(
 			if (format === 'text') return { value: field, numFmt: '@' };
 			if (format === 'skip') return { value: null };
 			const date = parseOrderedDate(field.trim(), format, date1904);
-			if (!date) return general(field, row, col);
+			if (!date) {
+				// The wizard's fallback; a date read this way mixes another order into the column.
+				const parsed = general(field, row, col);
+				if (typeof parsed.value === 'number' && isDate(parsed.numFmt))
+					report(DATE_FALLBACK, row, col);
+				return parsed;
+			}
 			if (date.zoned) report(TIME_ZONE, row, col);
 			return { value: date.value, numFmt: date.numFmt };
 		},
@@ -234,8 +253,9 @@ export function createFieldReader(
 			const warnings: string[] = [];
 			counts.forEach((count, key) => {
 				const kind = KINDS[key % KINDS.length];
-				const label = columnLabel(target(Math.floor(key / KINDS.length)));
-				const what = count === 1 ? kind?.one : kind?.many;
+				const col = Math.floor(key / KINDS.length);
+				const label = columnLabel(target(col));
+				const what = (count === 1 ? kind?.one : kind?.many)?.replace('{order}', formats[col] ?? '');
 				const row = (firstRows[key] ?? 0) + 1;
 				warnings.push(`Column ${label}: ${count} ${what} (first: ${label}${row}).`);
 			});

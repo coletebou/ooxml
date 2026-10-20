@@ -194,6 +194,20 @@ describe('csvToWorkbook column formats', () => {
 		expect(csv.value('B3')).toBe('not a date');
 	});
 
+	it('reports date-column values that General read as dates in another order', () => {
+		const csv = load('When,Note\n04/03/2024,x\n04/13/2024,y\n2024-03-05,z\nn/a,w\n', {
+			columns: { 0: 'DMY' },
+		});
+		// The wizard's General fallback keeps its value; the column now mixes two orders.
+		expect(csv.value('A3')).toBe(day(2024, 4, 13));
+		expect(csv.warnings).toEqual([
+			'Column A: 2 values could not be read as dates in DMY order and were read as General (first: A3).',
+		]);
+		expect(load('04/13/2024\n', { columns: { 0: 'DMY' } }).warnings).toEqual([
+			'Column A: 1 value could not be read as a date in DMY order and was read as General (first: A1).',
+		]);
+	});
+
 	it('converts zoned date-times to UTC and reports them once per column', () => {
 		const csv = load(
 			'id,stamp\n1,2024-03-04T10:20:30Z\n2,2024-03-04T12:00:00+02:00\n3,2024-03-04\n',

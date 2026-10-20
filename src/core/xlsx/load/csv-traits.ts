@@ -7,6 +7,8 @@ export const LONG_NUMBER = 2;
 export const SCIENTIFIC = 4;
 export const LETTER_DATE = 8;
 export const TIME_ZONE = 16;
+/** Not a trait of the text: a date-column value that the General fallback read as a date. */
+export const DATE_FALLBACK = 32;
 
 const isDigit = (code: number): boolean => code >= 48 && code <= 57;
 const isLetter = (code: number): boolean => (code | 32) >= 97 && (code | 32) <= 122;
