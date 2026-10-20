@@ -93,6 +93,9 @@ const TIME_ZONE = 16;
 
 const FORMATS = new Set(['general', 'text', 'skip', 'MDY', 'DMY', 'YMD', 'MYD', 'DYM', 'YDM']);
 
+/** The separators the default typing reads, so a number they produced is not localized. */
+const EN_US_SEPARATORS_RE = /[.,]/;
+
 /** A sign or parenthesis before the digits (after any currency symbol): no trailing minus then. */
 const SIGNED_RE = /^\s*(?:[$€£]\s*)?[-+(]/;
 
@@ -126,8 +129,12 @@ function numberTraits(text: string, decimal: number, thousands: number): number 
 	return digits > 15 ? traits | LONG_NUMBER : traits;
 }
 
-/** A date typed from letters followed directly by digits (`JAN1`, `SEPT2`). */
-function dateTraits(text: string): number {
+/**
+ * A date typed from letters followed directly by digits (`JAN1`, `SEPT2`), checked on the
+ * trimmed text as `parseCellInput` reads it (` JAN1` is one too).
+ */
+function dateTraits(field: string): number {
+	const text = field.trimStart();
 	let i = 0;
 	while (isLetter(text.charCodeAt(i))) i++;
 	return i > 0 && isDigit(text.charCodeAt(i)) ? LETTER_DATE : 0;
@@ -208,12 +215,15 @@ export function createFieldReader(
 	const isNumber = (parsed: ParsedInput): parsed is ParsedInput & { value: number } =>
 		typeof parsed.value === 'number' && parsed.formula === undefined && !isDate(parsed.numFmt);
 
-	/** Typing with the configured separators: a number that needs `.` or `,` reads as text. */
+	/**
+	 * Typing with the configured separators: a number only the default `.` and `,` make (`3.14`
+	 * with a comma decimal) reads as text; one that needs no separator (`1 1/2`) stays a number.
+	 */
 	const localized = (text: string, normalized: string): ParsedInput => {
 		const parsed = parseCellInput(normalized);
 		if (normalized === text || isNumber(parsed)) return parsed;
 		const plain = parseCellInput(text);
-		return isNumber(plain) ? { value: text } : plain;
+		return isNumber(plain) && EN_US_SEPARATORS_RE.test(text) ? { value: text } : plain;
 	};
 	const type = normalize
 		? (text: string): ParsedInput => localized(text, normalize(text))

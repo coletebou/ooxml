@@ -122,10 +122,15 @@ describe('csvToWorkbook conversion switches', () => {
 	});
 
 	it('keeps continuous letters and digits as text when letterDates is off', () => {
-		const csv = load('JAN1,MARCH1,sept2,Jan 1,Jan-1,10:30am\n', {
+		const csv = load('JAN1,MARCH1,sept2,Jan 1,Jan-1,10:30am, JAN1\n', {
 			conversions: { letterDates: false },
 		});
 		expect(['A1', 'B1', 'C1'].map(csv.value)).toEqual(['JAN1', 'MARCH1', 'sept2']);
+		// Padding is trimmed before typing, so it does not hide the letters from the switch.
+		expect(csv.value('G1')).toBe(' JAN1');
+		expect(load('id, JAN1\n').warnings).toEqual([
+			'Column B: 1 value of letters and digits such as JAN1 was converted to a date (first: B1).',
+		]);
 		// Excel documents that values with a space or another character may still become dates.
 		expect(typeof csv.value('D1')).toBe('number');
 		expect(typeof csv.value('E1')).toBe('number');
@@ -238,6 +243,14 @@ describe('csvToWorkbook separators and trailing minus', () => {
 		});
 		expect(['A1', 'B1', 'C1'].map(euro.value)).toEqual([1234.56, 1234.5, 12_345]);
 		expect(euro.format('A1')).toBe('€#,##0.00');
+		// A fraction's space is not a thousands separator.
+		const fraction = load('1 1/2;12 345;2 3/4\n', {
+			delimiter: ';',
+			decimalSeparator: ',',
+			thousandsSeparator: ' ',
+		});
+		expect(['A1', 'B1', 'C1'].map(fraction.value)).toEqual([1.5, 12_345, 2.75]);
+		expect(fraction.format('A1')).toBe('# ?/?');
 	});
 
 	it('reads a trailing minus as a negative number only when asked', () => {
