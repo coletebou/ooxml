@@ -6,6 +6,7 @@ import { columnLabel, MAX_COL } from '../address';
 import { isDateFormat, parseCellInput, type ParsedInput } from '../numfmt/index';
 import { parseOrderedDate, type CsvDateOrder } from './csv-dates';
 import { separatorNormalizer, separatorsOf } from './csv-separators';
+import { dateTraits, keepsDigits, LONG_NUMBER, numberTraits, TIME_ZONE } from './csv-traits';
 
 /**
  * Excel's automatic data conversions. Each is on by default, as in Excel and as typing into a
@@ -16,7 +17,8 @@ export interface CsvConversions {
 	leadingZeros?: boolean;
 	/**
 	 * "Keep the first 15 digits of long numbers": fields of 16 or more significant digits (counted
-	 * from the first non-zero digit) become numbers, which Excel holds to 15 digits.
+	 * from the first non-zero digit) become numbers. Turned off, they all stay text, as in Excel;
+	 * left on, only those whose number does not keep every digit are reported.
 	 */
 	longNumbers?: boolean;
 	/** "Convert digits surrounding the letter E": `123E5` becomes 12300000. */
@@ -50,7 +52,8 @@ export interface CsvImportOptions {
 	trailingMinus?: boolean;
 	/**
 	 * Add one workbook warning per column and kind of conversion that changed data (leading zeros
-	 * dropped, digits past 15, letters to scientific numbers or dates, time zones made UTC), with a
+	 * dropped, digits a number could not keep, letters to dates, time zones made UTC) or may have
+	 * (digits around `E`, since `123E5` the identifier and `1.5E5` the number look alike), with a
 	 * count and the first cell. On by default.
 	 */
 	reportConversions?: boolean;
@@ -65,8 +68,8 @@ const KINDS = [
 	},
 	{
 		conversion: 'longNumbers',
-		one: 'value with more than 15 digits was converted to a number; Excel keeps only 15 significant digits',
-		many: 'values with more than 15 digits were converted to numbers; Excel keeps only 15 significant digits',
+		one: 'value with more than 15 digits lost digits when converted to a number',
+		many: 'values with more than 15 digits lost digits when converted to numbers',
 	},
 	{
 		conversion: 'scientific',
@@ -84,13 +87,6 @@ const KINDS = [
 		many: 'date-times with a time zone were converted to UTC',
 	},
 ] as const;
-// Bit `1 << i` of a traits mask is KINDS[i].
-const LEADING_ZEROS = 1;
-const LONG_NUMBER = 2;
-const SCIENTIFIC = 4;
-const LETTER_DATE = 8;
-const TIME_ZONE = 16;
-
 const FORMATS = new Set(['general', 'text', 'skip', 'MDY', 'DMY', 'YMD', 'MYD', 'DYM', 'YDM']);
 
 /** The formats typing gives a mixed fraction (`1 1/2`), whose space is not a thousands separator. */
@@ -101,47 +97,6 @@ const EN_US_SEPARATORS_RE = /[.,]/;
 
 /** A sign or parenthesis before the digits (after any currency symbol): no trailing minus then. */
 const SIGNED_RE = /^\s*(?:[$€£]\s*)?[-+(]/;
-
-const isDigit = (code: number): boolean => code >= 48 && code <= 57;
-const isLetter = (code: number): boolean => (code | 32) >= 97 && (code | 32) <= 122;
-
-/**
- * Leading zeros (in the integer part only: `0,123` has one, `.05` none), 16+ significant digits
- * and an exponent, from a field typed as a number with these separators (char codes).
- */
-function numberTraits(text: string, decimal: number, thousands: number): number {
-	let traits = 0;
-	let digits = 0;
-	let first = true;
-	for (let i = 0; i < text.length; i++) {
-		const code = text.charCodeAt(i);
-		if (isDigit(code)) {
-			if (first && code === 48) {
-				const next = text.charCodeAt(i + 1);
-				if (isDigit(next) || (next === thousands && isDigit(text.charCodeAt(i + 2))))
-					traits |= LEADING_ZEROS;
-			}
-			first = false;
-			if (digits > 0 || code !== 48) digits++;
-		} else if (code === decimal) first = false;
-		else if (code === 69 || code === 101) {
-			traits |= SCIENTIFIC;
-			break;
-		}
-	}
-	return digits > 15 ? traits | LONG_NUMBER : traits;
-}
-
-/**
- * A date typed from letters followed directly by digits (`JAN1`, `SEPT2`), checked on the
- * trimmed text as `parseCellInput` reads it (` JAN1` is one too).
- */
-function dateTraits(field: string): number {
-	const text = field.trimStart();
-	let i = 0;
-	while (isLetter(text.charCodeAt(i))) i++;
-	return i > 0 && isDigit(text.charCodeAt(i)) ? LETTER_DATE : 0;
-}
 
 function columnFormats(columns: CsvImportOptions['columns']): (CsvColumnFormat | undefined)[] {
 	const formats: (CsvColumnFormat | undefined)[] = [];
@@ -253,7 +208,10 @@ export function createFieldReader(
 			: numberTraits(field, decimal, grouping);
 		if (traits === 0) return parsed;
 		if (traits & keepText) return { value: field };
-		report(traits, row, col);
+		// Excel's rule decides what the switch keeps; a warning says only what was really lost.
+		const kept = traits & LONG_NUMBER && keepsDigits(field, parsed.value);
+		const lost = kept ? traits ^ LONG_NUMBER : traits;
+		if (lost) report(lost, row, col);
 		return parsed;
 	};
 

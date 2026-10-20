@@ -45,7 +45,7 @@ describe('csvToWorkbook default conversions', () => {
 		);
 		expect(csv.warnings).toEqual([
 			'Column A: 2 values lost their leading zeros when converted to numbers (first: A2).',
-			'Column B: 2 values with more than 15 digits were converted to numbers; Excel keeps only 15 significant digits (first: B2).',
+			'Column B: 1 value with more than 15 digits lost digits when converted to a number (first: B3).',
 			'Column C: 2 values with the letter E were converted to numbers in scientific notation (first: C2).',
 			'Column D: 2 values of letters and digits such as JAN1 were converted to dates (first: D2).',
 		]);
@@ -135,6 +135,19 @@ describe('csvToWorkbook conversion switches', () => {
 		expect(typeof csv.value('D1')).toBe('number');
 		expect(typeof csv.value('E1')).toBe('number');
 		expect(csv.value('F1')).toBeCloseTo(10.5 / 24);
+	});
+
+	it('reports long numbers only when the stored number does not keep their digits', () => {
+		const csv = load(
+			'a,b,c,d\n0.30000000000000004,1234567890123456,1.0000000000000000,12345678901234567890\n',
+		);
+		expect(csv.value('A2')).toBe(0.30000000000000004);
+		expect(csv.warnings).toEqual([
+			'Column D: 1 value with more than 15 digits lost digits when converted to a number (first: D2).',
+		]);
+		// The switch still follows Excel's rule: 16 or more digits stay text when it is off.
+		const off = load('0.30000000000000004\n', { conversions: { longNumbers: false } });
+		expect(off.value('A1')).toBe('0.30000000000000004');
 	});
 
 	it('keeps a field as text when any conversion it needs is off', () => {
@@ -314,11 +327,11 @@ describe('csvToWorkbook with an export from another system', () => {
 	it('counts conversions across a large file without one warning per cell', () => {
 		const rows = ['id,acct,code,name'];
 		for (let i = 0; i < 20_000; i++)
-			rows.push(`${String(i + 1).padStart(6, '0')},${9_000_000_000_000_000 + i},${i % 9}E2,n${i}`);
+			rows.push(`${String(i + 1).padStart(6, '0')},${i + 1}77777777777777777,${i % 9}E2,n${i}`);
 		const csv = load(rows.join('\n'));
 		expect(csv.warnings).toEqual([
 			'Column A: 20000 values lost their leading zeros when converted to numbers (first: A2).',
-			'Column B: 20000 values with more than 15 digits were converted to numbers; Excel keeps only 15 significant digits (first: B2).',
+			'Column B: 20000 values with more than 15 digits lost digits when converted to numbers (first: B2).',
 			'Column C: 20000 values with the letter E were converted to numbers in scientific notation (first: C2).',
 		]);
 		expect(csv.value('A20001')).toBe(20_000);
