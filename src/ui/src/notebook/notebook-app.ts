@@ -513,6 +513,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			@nb-undo=${() => this.#client?.undo()}
 			@nb-redo=${() => this.#client?.redo()}
 			@nb-link-request=${() => runCommand(this, 'link')}
+			@nb-notice=${(e: CustomEvent<{ code: 'file-too-large' }>) => this.notify(this.t(`notice.${e.detail.code}`))}
 		>
 			${this.#ribbon()}
 			<div class="body">

@@ -1,12 +1,18 @@
 // Files dropped, pasted or inserted on a page become containers: pictures at their natural size
 // (scaled down to fit), Office files as live embeds, anything else as a card. Several files cascade
 // from the drop point so none hides another.
-import { type BinaryItemInput, isImageMime } from 'ooxml-core/notebook';
+import { type BinaryItemInput, MAX_FILE_BYTES, isImageMime } from 'ooxml-core/notebook';
 import { detectOfficeKind } from 'ooxml-core/opc';
 
 export interface PlacedFile {
 	kind: 'image' | 'file';
 	input: BinaryItemInput;
+}
+
+export interface PlacedFiles {
+	placed: PlacedFile[];
+	/** Files refused for being over `MAX_FILE_BYTES`; none of them was read. */
+	tooLarge: number;
 }
 
 const MAX_PICTURE_WIDTH = 480;
@@ -53,13 +59,19 @@ export function belowContent(containers: readonly { y: number; height: number }[
 export async function placeFiles(
 	files: readonly File[],
 	at: { x: number; y: number },
-): Promise<PlacedFile[]> {
+): Promise<PlacedFiles> {
 	const out: PlacedFile[] = [];
-	for (const [i, file] of files.entries()) {
+	let tooLarge = 0;
+	for (const file of files) {
+		if (file.size > MAX_FILE_BYTES) {
+			tooLarge++;
+			continue;
+		}
 		const mime = mimeOf(file);
 		const bytes = new Uint8Array(await file.arrayBuffer());
-		const x = Math.round(at.x + i * CASCADE);
-		const y = Math.round(at.y + i * CASCADE);
+		// Cascade by what is placed, so a refused file leaves no gap.
+		const x = Math.round(at.x + out.length * CASCADE);
+		const y = Math.round(at.y + out.length * CASCADE);
 		if (isImageMime(mime)) {
 			const natural = await pictureSize(file);
 			const scale = Math.min(1, MAX_PICTURE_WIDTH / natural.width);
@@ -91,5 +103,5 @@ export async function placeFiles(
 			});
 		}
 	}
-	return out;
+	return { placed: out, tooLarge };
 }

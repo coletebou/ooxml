@@ -177,7 +177,9 @@ export class NotebookPage extends NotebookElement {
 	async #addFiles(files: readonly File[], at: { x: number; y: number }): Promise<void> {
 		const client = this.client;
 		if (!client || !files.length) return;
-		for (const placed of await placeFiles(files, at)) {
+		const { placed: items, tooLarge } = await placeFiles(files, at);
+		if (tooLarge) this.fire('nb-notice', { code: 'file-too-large' });
+		for (const placed of items) {
 			const id =
 				placed.kind === 'image' ? client.addImage(placed.input) : client.addFile(placed.input);
 			if (id) this.selectedId = id;
