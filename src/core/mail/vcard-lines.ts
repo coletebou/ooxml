@@ -2,7 +2,7 @@
 // line, structured-value splitting and text unescaping, and the 2.1 quoted-printable values. Used
 // by `vcard.ts`. The line split and the RFC 6868 decoding are the iCalendar reader's, which shares
 // the line format; the rest stays vCard's own (group prefixes, bare 2.1 types, quoted-printable
-// soft breaks, only the escapes RFC 6350 defines). New code.
+// soft breaks, 2.1 base64 lines without indent, only the escapes RFC 6350 defines). New code.
 import { caretDecode, splitContentLine } from '../calendar/ics-lines';
 import { decodeCharset } from './mime/charset';
 
@@ -22,6 +22,13 @@ export const isQuotedPrintable = (property: Property): boolean =>
 const FOLD_ANYWHERE = new Set(['3.0', '4.0']);
 /** A line that begins or ends a card, which no value runs on into. */
 const CARD_EDGE = /^(?:BEGIN|END):VCARD\s*$/i;
+/** A line of base64 alone, without indent: never a property's, which has a colon. */
+const BASE64_LINE = /^[A-Za-z0-9+/=][A-Za-z0-9+/=\s]*$/;
+
+/** Whether a property's value is base64: `ENCODING=BASE64` or `B`, or a bare 2.1 `BASE64`. */
+const isBase64 = (property: Property): boolean =>
+	/^(?:BASE64|B)$/i.test(property.params.ENCODING?.[0] ?? '') ||
+	(property.params.TYPE ?? []).some((type) => type.toUpperCase() === 'BASE64');
 
 /**
  * Join folded lines (CRLF or LF followed by a space or tab, which goes) and quoted-printable soft
@@ -29,7 +36,9 @@ const CARD_EDGE = /^(?:BEGIN|END):VCARD\s*$/i;
  * 5): the `=` goes and the next line follows as it is, leading white space included, as vCard 2.1
  * writes it. A card that says it is 3.0 or 4.0 folds with a space after any character, so there a
  * next line that starts with one is a fold. Whether a value is quoted-printable is read from its
- * parameters, once per property, never from its text.
+ * parameters, once per property, never from its text. A 2.1 base64 value (a photo) goes on in the
+ * lines of base64 alone that follow it, indented or not, up to a blank line or a line of any other
+ * kind, as 2.1 writers break it.
  */
 export function unfold(text: string): string[] {
 	// A byte order mark (files saved by some editors) would otherwise hide the first BEGIN line.
@@ -49,18 +58,22 @@ export function unfold(text: string): string[] {
 	let version = '';
 	let quoted = false;
 	let soft = false;
+	/** The line being joined is a 2.1 base64 value, which lines of base64 alone go on. */
+	let base64 = false;
 	for (const line of lines) {
 		const folded = line.startsWith(' ') || line.startsWith('\t');
 		if (soft && (!folded || !FOLD_ANYWHERE.has(version)) && !CARD_EDGE.test(line)) {
 			pieces[pieces.length - 1] = pieces.at(-1)!.slice(0, -1);
 			pieces.push(line);
 		} else if (folded && pieces.length) pieces.push(line.slice(1));
+		else if (base64 && BASE64_LINE.test(line)) pieces.push(line);
 		else {
 			end();
 			const property = parseLine(line);
 			if (property?.name === 'VERSION') version = property.value.trim();
 			else if (property?.name === 'BEGIN') version = '';
 			quoted = property !== null && isQuotedPrintable(property);
+			base64 = property !== null && !FOLD_ANYWHERE.has(version) && isBase64(property);
 			pieces.push(line);
 		}
 		soft = quoted && line.endsWith('=');

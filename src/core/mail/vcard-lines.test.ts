@@ -1,4 +1,5 @@
-import { parseVCards } from './vcard';
+import { decodeBase64, encodeBase64 } from '../digest/base64';
+import { parseVCards, serializeVCards } from './vcard';
 import { decodeValue, parseLine, unfold } from './vcard-lines';
 
 describe('decodeValue', () => {
@@ -74,6 +75,43 @@ describe('unfold', () => {
 		// Each break used to copy the whole value joined so far; generous, so a loaded runner does
 		// not flake.
 		expect(elapsed).toBeLessThan(2000);
+	});
+
+	it('reads a 2.1 base64 value that goes on in lines without indent, to a blank line', () => {
+		// vCard 2.1 writers break a long base64 value into lines of their own, which end with a blank
+		// line; some indent them, some do not.
+		const bytes = Uint8Array.from({ length: 120 }, (_, i) => (i * 37) % 256);
+		const lines = encodeBase64(bytes).match(/.{1,40}/g)!;
+		const card = (photo: string, starts: boolean, ...after: string[]): string =>
+			[
+				'BEGIN:VCARD',
+				'VERSION:2.1',
+				'UID:photo',
+				'N:Lovelace;Ada',
+				...(starts ? [`${photo}${lines[0]}`, ...lines.slice(1)] : [photo, ...lines]),
+				...after,
+				'TEL;WORK:+44 20 7946 0000',
+				'END:VCARD',
+			].join('\r\n');
+		const texts = [
+			card('PHOTO;ENCODING=BASE64;TYPE=JPEG:', true, ''),
+			card('PHOTO;TYPE=JPEG;ENCODING=B:', false, ''),
+			card('PHOTO;JPEG;BASE64:', false, ''),
+			// The next property right after the value, without the blank line, starts a line of its own.
+			card('PHOTO;ENCODING=BASE64;TYPE=JPEG:', true),
+		];
+		for (const text of texts) {
+			const { contacts, skipped } = parseVCards(text);
+			expect([skipped, contacts.length]).toEqual([0, 1]);
+			expect(contacts[0]).toMatchObject({
+				familyName: 'Lovelace',
+				phones: [{ type: 'work', number: '+44 20 7946 0000' }],
+			});
+			// Written as 4.0, the photo is every byte it was.
+			const written = serializeVCards(contacts).replace(/\r\n /g, '');
+			const data = /\r\nPHOTO:data:image\/jpeg;base64,([^\r]*)\r\n/.exec(written)?.[1];
+			expect(decodeBase64(data ?? '')).toEqual(bytes);
+		}
 	});
 
 	it('still drops only the `=` of a soft break and keeps a folded line as it is', () => {
