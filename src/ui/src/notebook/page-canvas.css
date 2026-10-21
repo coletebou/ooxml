@@ -72,7 +72,16 @@
 	pointer-events: none;
 }
 
+/* The frames stack among themselves; the ink layer above draws over all of them. */
+.frames {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+}
+
 .frame {
+	pointer-events: auto;
 	position: absolute;
 	box-sizing: border-box;
 	border: var(--office-border-width) solid transparent;

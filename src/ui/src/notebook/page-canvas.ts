@@ -22,7 +22,7 @@ import { NotebookElement } from './base';
 import { defineNotebookFile } from './file-embed';
 import { formatCreated } from './i18n/translator';
 import { defineNotebookInk, type StrokeDetail } from './ink-layer';
-import { placeFiles } from './page-files';
+import { belowContent, placeFiles } from './page-files';
 import { type NotebookText, defineNotebookText } from './text-container';
 import css from './page-canvas.css?raw';
 
@@ -69,7 +69,8 @@ export class NotebookPage extends NotebookElement {
 	#bindings = new Map<string, TextBinding>();
 	#assets = new Map<string, { bytes: Uint8Array; url?: string }>();
 	#title: string | null = null;
-	#lastPoint = { x: 40, y: 40 };
+	/** Where the person last clicked on this page: pasted items go there, else below the content. */
+	#lastPoint: { x: number; y: number } | null = null;
 	#page = '';
 
 	constructor() {
@@ -92,9 +93,9 @@ export class NotebookPage extends NotebookElement {
 			.map((el) => el.containerId);
 	}
 
-	/** Add picked files near the last place the person clicked. */
+	/** Add picked files below what is on the page (a drop lands where it was dropped). */
 	insertFiles(files: readonly File[]): Promise<void> {
-		return this.#addFiles(files, this.#lastPoint);
+		return this.#addFiles(files, belowContent(this.state?.containers ?? []));
 	}
 
 	focusTitle(): void {
@@ -113,6 +114,7 @@ export class NotebookPage extends NotebookElement {
 		if (pageId !== this.#page) {
 			this.#page = pageId;
 			this.#title = null;
+			this.#lastPoint = null;
 			this.selectedId = '';
 		}
 		// Forget what left the page (revoke picture URLs), keep what stays.
@@ -190,14 +192,18 @@ export class NotebookPage extends NotebookElement {
 		const files = [...(event.clipboardData?.files ?? [])];
 		if (files.length) {
 			event.preventDefault();
-			void this.#addFiles(files, this.#lastPoint);
+			void this.#addFiles(files, this.#pastePoint());
 			return;
 		}
 		const text = event.clipboardData?.getData('text/plain') ?? '';
 		if (!text.trim() || !this.client) return;
 		event.preventDefault();
-		const id = this.client.addText(this.#lastPoint, richTextFromPlain(text));
+		const id = this.client.addText(this.#pastePoint(), richTextFromPlain(text));
 		if (id) this.focusId = id;
+	}
+
+	#pastePoint(): { x: number; y: number } {
+		return this.#lastPoint ?? belowContent(this.state?.containers ?? []);
 	}
 
 	#drop(event: DragEvent): void {
@@ -422,11 +428,13 @@ export class NotebookPage extends NotebookElement {
 						}}
 						@drop=${(e: DragEvent) => this.#drop(e)}
 					>
-						${repeat(
-							state.containers,
-							(c) => c.id,
-							(c, i) => this.#frame(c, i, state.peers),
-						)}
+						<div class="frames">
+							${repeat(
+								state.containers,
+								(c) => c.id,
+								(c, i) => this.#frame(c, i, state.peers),
+							)}
+						</div>
 						<notebook-ink
 							.strokes=${state.strokes}
 							.tool=${inkTool}

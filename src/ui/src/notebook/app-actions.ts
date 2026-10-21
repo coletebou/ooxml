@@ -18,6 +18,7 @@ import type { ExportedFile } from 'ooxml-core/notebook';
 import { isOpenableHyperlinkHref } from 'ooxml-core/opc';
 import type { AppHost } from './app-host';
 import { addPage, addSection } from './app-nav';
+import { belowContent } from './page-files';
 import { formatCreated, notebookI18n } from './i18n/translator';
 import { downloadBytes, rasterize } from './raster';
 import { strokeWidthOf } from './ribbon';
@@ -28,14 +29,6 @@ function onText(app: AppHost, command: Command): void {
 	if (!view || !view.dom.isConnected) return;
 	command(view.state, view.dispatch, view);
 	view.focus();
-}
-
-/** Where a new text box goes: below what is already on the page. */
-function nextSpot(app: AppHost): { x: number; y: number } {
-	const containers = app.state?.containers ?? [];
-	if (!containers.length) return { x: 48, y: 24 };
-	const bottom = Math.max(...containers.map((c) => c.y + (c.height || 96)));
-	return { x: 48, y: Math.round(bottom + 24) };
 }
 
 const ZOOMS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
@@ -71,7 +64,7 @@ export function runCommand(app: AppHost, command: string): void {
 		case 'todo':
 			return onText(app, toggleTodo);
 		case 'text': {
-			const id = client?.addText(nextSpot(app));
+			const id = client?.addText(belowContent(app.state?.containers ?? []));
 			if (id) app.focusId = id;
 			return;
 		}
