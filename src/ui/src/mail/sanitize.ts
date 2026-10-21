@@ -2,13 +2,16 @@
 // `javascript:` links; remote resources (images, backgrounds, every URL in CSS, `@import`) are
 // blocked until the person allows them, and counted so the reading pane can say so; `cid:` images
 // point at the message's own attachments; every link (an image map's areas too) opens in a new tab
-// without an opener. The result is then shown in a sandboxed frame without scripts and with a
-// Content-Security-Policy (`emailDocument`), so a sanitiser miss still cannot run code or fetch
-// anything there. Compose puts the same HTML into the page itself, where no such policy applies, so
-// the sanitiser must not miss.
+// without an opener; what styles the body itself is cleaned the same way. The result is then shown
+// in a sandboxed frame without scripts and with a Content-Security-Policy (email-document.ts), so a
+// sanitiser miss still cannot run code or fetch anything there. Compose puts the same HTML into the
+// page itself, where no such policy applies, so the sanitiser must not miss.
 // A body sent in several parts is cleaned part by part (`sanitizeMessageHtml`). New code.
 import DOMPurify from 'dompurify';
+import { BODY_ATTRIBUTES, type BodyAttribute, type BodyAttributes } from './email-document';
 import { rewriteCss } from './sanitize-css';
+
+export { emailDocument, type FrameStyle } from './email-document';
 
 export interface SanitizeOptions {
 	/** Load remote images and styles (the person chose "show images"). */
@@ -27,6 +30,12 @@ export interface SanitizedHtml {
 	sheets: readonly string[];
 	/** The body markup, cleaned. */
 	body: string;
+	/**
+	 * The attributes that style the message's own `<body>` (`BODY_ATTRIBUTES`), cleaned as those of
+	 * every element are. The frame's body takes them (`emailDocument`), so the message is shown on
+	 * its own background, which fills the frame.
+	 */
+	bodyAttributes: BodyAttributes;
 	/** Remote resources that were blocked. */
 	blocked: number;
 	/**
@@ -67,6 +76,19 @@ const FORBID_TAGS = [
 	'style',
 ];
 const FORBID_ATTR = ['srcset', 'formaction', 'action', 'ping', 'autofocus', 'srcdoc', 'poster'];
+/** How DOMPurify cleans a message's markup, and the attributes of its body. */
+const PURIFY = {
+	USE_PROFILES: { html: true },
+	FORBID_TAGS,
+	FORBID_ATTR,
+	ALLOW_DATA_ATTR: false,
+	ADD_ATTR: ['target'],
+	ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
+};
+/** The colours only a `<body>` has, which DOMPurify does not know: allowed on the body alone. */
+const BODY_ONLY = ['text', 'link', 'vlink', 'alink'];
+/** The colours of a body, each read by a browser with the legacy colour rules. */
+const BODY_COLOURS: ReadonlySet<string> = new Set(['bgcolor', ...BODY_ONLY]);
 const REMOTE = /^\s*(?:https?:)?\/\//i;
 const CID = /^\s*cid:(.+)$/i;
 
@@ -154,26 +176,56 @@ function instance(): ReturnType<typeof DOMPurify> {
 	return purifier;
 }
 
-/** The message's `<style>` blocks (head and body) and its body, each cleaned. */
+/**
+ * The attributes that style the message's own `<body>`, cleaned as those of every element are: the
+ * body, without its content, goes through the same DOMPurify pass, so its style goes through
+ * `cleanCss`, its picture through `resourceUrl` (blocked and counted as anywhere else) and what is
+ * unsafe goes as it does anywhere. A colour the legacy colour rules find none in (empty or
+ * `transparent`) goes too, so that the frame's own stays (`emailDocument`). One named in `taken`
+ * (given by an earlier part of the message) is left out, and this body's own are added to it.
+ */
+function cleanBodyAttributes(body: HTMLElement, taken: Set<string>): BodyAttributes {
+	const stand = body.ownerDocument.createElement('body');
+	for (const name of BODY_ATTRIBUTES) {
+		const value = body.getAttribute(name);
+		if (value === null || taken.has(name)) continue;
+		taken.add(name);
+		stand.setAttribute(name, value);
+	}
+	if (!stand.hasAttributes()) return {};
+	const clean = instance().sanitize(stand, {
+		...PURIFY,
+		ADD_ATTR: [...PURIFY.ADD_ATTR, ...BODY_ONLY],
+		RETURN_DOM: true,
+	}) as Element;
+	const kept: Partial<Record<BodyAttribute, string>> = {};
+	for (const name of BODY_ATTRIBUTES) {
+		const value = clean.getAttribute(name);
+		if (value !== null && !(BODY_COLOURS.has(name) && /^(?:transparent)?$/i.test(value)))
+			kept[name] = value;
+	}
+	return kept;
+}
+
+/** The message's `<style>` blocks (head and body), its body and what styles the body, cleaned. */
 export function sanitizeEmailHtml(html: string, options: SanitizeOptions): SanitizedHtml {
+	return cleanText(html, options, new Set());
+}
+
+/** `sanitizeEmailHtml` without the body attributes named in `taken` (`cleanBodyAttributes`). */
+function cleanText(html: string, options: SanitizeOptions, taken: Set<string>): SanitizedHtml {
 	const purify = instance();
 	if (typeof purify.sanitize !== 'function' || typeof DOMParser === 'undefined')
-		return { sheets: [], body: '', blocked: 0, cids: [] };
+		return { sheets: [], body: '', bodyAttributes: {}, blocked: 0, cids: [] };
 	pass = { options, blocked: 0, cids: new Set() };
 	try {
 		const parsed = new DOMParser().parseFromString(html, 'text/html');
 		const sheets = [...parsed.querySelectorAll('style')].map((style) =>
 			cleanCss(style.textContent ?? ''),
 		);
-		const body = purify.sanitize(parsed.body.innerHTML, {
-			USE_PROFILES: { html: true },
-			FORBID_TAGS,
-			FORBID_ATTR,
-			ALLOW_DATA_ATTR: false,
-			ADD_ATTR: ['target'],
-			ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
-		});
-		return { sheets, body, blocked: pass.blocked, cids: [...pass.cids] };
+		const bodyAttributes = cleanBodyAttributes(parsed.body, taken);
+		const body = purify.sanitize(parsed.body.innerHTML, PURIFY);
+		return { sheets, body, bodyAttributes, blocked: pass.blocked, cids: [...pass.cids] };
 	} finally {
 		pass = null;
 	}
@@ -190,64 +242,29 @@ export interface MessageHtml {
  * A message's HTML body cleaned as `sanitizeEmailHtml` cleans one text, part by part when it was
  * sent in several, as RFC 8621 asks: read as one text, a part that ends in an open comment or tag
  * would take in the parts after it. The bodies are joined in order and the style sheets kept in
- * order, each apart; what each part blocked is added up and the `cid`s they load are merged.
+ * order, each apart; what each part blocked is added up and the `cid`s they load are merged. The
+ * body is styled as the parts read as one document would style it: a parser gives a body the
+ * attributes of a later `<body>` tag only where it has none of its own, so the first part whose
+ * body has an attribute gives it, and one a later part cannot give is neither cleaned nor counted.
  */
 export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptions): SanitizedHtml {
 	const parts = message.htmlParts?.length ? message.htmlParts : [message.html ?? ''];
 	const sheets: string[] = [];
+	const bodyAttributes: Partial<Record<BodyAttribute, string>> = {};
+	const taken = new Set<string>();
 	const cids = new Set<string>();
 	let body = '';
 	let blocked = 0;
 	for (const part of parts) {
-		const clean = sanitizeEmailHtml(part, options);
+		const clean = cleanText(part, options, taken);
 		// One at a time: a message may hold more style elements than a call takes arguments.
 		for (const sheet of clean.sheets) sheets.push(sheet);
 		body += clean.body;
+		Object.assign(bodyAttributes, clean.bodyAttributes);
 		blocked += clean.blocked;
 		for (const cid of clean.cids) cids.add(cid);
 	}
-	return { sheets, body, blocked, cids: [...cids] };
-}
-
-/** Colours and type of the frame, read from the host's tokens (the frame cannot see them). */
-export interface FrameStyle {
-	font: string;
-	fontSize: string;
-	color: string;
-	background: string;
-	link: string;
-	quote: string;
-}
-
-/**
- * The frame's whole document: a CSP that allows inline styles and, only when `allowRemote`, remote
- * images and fonts; links open in a new tab. Message HTML is written for a light page, so it is
- * shown on paper colours in every theme. Each of the message's style sheets is written in a
- * `<style>` of its own, as the message had them, so a browser reads each on its own. A sheet cannot
- * end its element early: an end tag starts `</s`, and each one there becomes `<\/s`, the same `/`
- * to CSS. Nothing else is touched, so a comment opened right after a `<` stays a comment.
- */
-export function emailDocument(
-	content: Pick<SanitizedHtml, 'sheets' | 'body'>,
-	allowRemote: boolean,
-	style: FrameStyle,
-): string {
-	const remote = allowRemote ? ' https: http:' : '';
-	const csp = [
-		"default-src 'none'",
-		`img-src data: blob:${remote}`,
-		"style-src 'unsafe-inline'",
-		`font-src data:${remote}`,
-		"media-src 'none'",
-		"frame-src 'none'",
-		"form-action 'none'",
-		"base-uri 'none'",
-	].join('; ');
-	const base = `html{color-scheme:light}body{margin:0;padding:.75em;font-family:${style.font};font-size:${style.fontSize};color:${style.color};background:${style.background};overflow-wrap:anywhere}a{color:${style.link}}img{max-width:100%;height:auto}blockquote{margin:0 0 0 .5em;padding-left:.75em;border-left:.2em solid ${style.quote}}pre{white-space:pre-wrap}`;
-	const sheets = content.sheets.map(
-		(sheet) => `<style>${sheet.replace(/<\/(?=s)/gi, '<\\/')}</style>`,
-	);
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${base}</style>${sheets.join('')}</head><body>${content.body}</body></html>`;
+	return { sheets, body, bodyAttributes, blocked, cids: [...cids] };
 }
 
 export interface TextSegment {

@@ -21,7 +21,8 @@ OpenMail is an early implementation. This page lists what it does not do, so not
 - **Threads are per folder**: a reply you sent shows in Sent, not inside the Inbox conversation.
 - **Rich text** uses the browser's editing commands; it is tested in Chromium. Quoted, pasted and
   dropped HTML, and a saved draft opened again, lose remote images (so composing never loads a
-  tracker) and style sheets (inline styles stay): what is sent is what the editor shows.
+  tracker), style sheets (inline styles stay) and the styling of the message's own body, such as
+  its background: what is sent is what the editor shows.
 - **A send the server did not confirm** (it failed part way, said nothing of the submission, or
   sent no answer at all) is reported as possibly sent. Sent again unchanged from the same open app,
   the message is first checked with the server and goes out only if it did not the first time;

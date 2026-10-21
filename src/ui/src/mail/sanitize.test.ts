@@ -19,6 +19,33 @@ const STYLE = {
 const clean = (html: string, allowRemote = false, cidUrls?: Map<string, string>) =>
 	sanitizeEmailHtml(html, { allowRemote, ...(cidUrls ? { cidUrls } : {}) });
 
+/** The frame's document for a message, cleaned, and the attributes its body has there. */
+function frame(html: string, allowRemote = false, cidUrls?: Map<string, string>) {
+	const content = clean(html, allowRemote, cidUrls);
+	const doc = new DOMParser().parseFromString(
+		emailDocument(content, allowRemote, STYLE),
+		'text/html',
+	);
+	const attributes = Object.fromEntries(
+		[...doc.body.attributes].map(({ name, value }) => [name, value]),
+	);
+	return { content, doc, attributes };
+}
+
+/**
+ * The colours the frame's own style rules (its first style element) give `element` of `doc`, read
+ * with the rules' own selectors.
+ */
+function frameColours(doc: Document, element: Element): string[] {
+	const sheet = new CSSStyleSheet();
+	sheet.replaceSync(doc.querySelector('style')?.textContent ?? '');
+	return [...sheet.cssRules]
+		.filter((rule): rule is CSSStyleRule => 'selectorText' in rule)
+		.filter((rule) => element.matches(rule.selectorText))
+		.flatMap((rule) => [...rule.style])
+		.filter((name) => /color/.test(name));
+}
+
 describe('sanitizeEmailHtml', () => {
 	it('removes scripts, event handlers and javascript: links', () => {
 		const { body } = clean(
@@ -193,6 +220,82 @@ describe('sanitizeEmailHtml', () => {
 		const allowed = sanitizeEmailHtml(html, { allowRemote: true, cidUrls });
 		expect(allowed.sheets[0]).toContain('c{background:image-set("https://t.example/c.png" 1x)}');
 		expect(allowed.blocked).toBe(0);
+	});
+
+	it('keeps the style of the body itself, cleaned as the style of every element is', () => {
+		// Without its own background, the light text would be shown on the light paper.
+		const message = frame('<body style="background:#000"><p style="color:#fff">Message</p></body>');
+		expect(message.attributes).toEqual({ style: 'background:#000' });
+		expect(message.doc.body.innerHTML).toBe('<p style="color:#fff">Message</p>');
+		// What the body keeps of a style is what a paragraph keeps of the same one.
+		const css = 'color:#fff;background:url(https://t.example/a.png);width:expression(alert(1))';
+		const both = frame(`<body style="${css}"><p style="${css}">x</p></body>`);
+		expect(both.attributes.style).toBe(both.doc.querySelector('p')!.getAttribute('style'));
+		expect(both.attributes.style).toBe('color:#fff;background:none;width:x-blocked(alert(1))');
+		expect(both.content.blocked).toBe(2);
+	});
+
+	it('keeps the colours the attributes of the body give it, and the frame gives way to them', () => {
+		const message = frame(
+			'<body bgcolor="000000" text="#ffffff" link="#ffcc00" vlink="#cc99ff" alink="red" leftmargin="0"><p>x <a href="https://example.com/">a link</a></p></body>',
+		);
+		// Not its margin: the frame keeps its own spacing round a message.
+		expect(message.attributes).toEqual({
+			bgcolor: '000000',
+			text: '#ffffff',
+			link: '#ffcc00',
+			vlink: '#cc99ff',
+			alink: 'red',
+		});
+		// A browser reads them as presentational hints, which every style rule wins over: the frame's
+		// own colours stand back where the body gives its own.
+		expect(frameColours(message.doc, message.doc.body)).toEqual([]);
+		expect(frameColours(message.doc, message.doc.querySelector('a')!)).toEqual([]);
+		// A body without colours of its own is shown in the paper's.
+		const plain = frame('<p>x <a href="https://example.com/">a link</a></p>');
+		expect(frameColours(plain.doc, plain.doc.body)).toEqual(['color', 'background-color']);
+		expect(frameColours(plain.doc, plain.doc.querySelector('a')!)).toEqual(['color']);
+		// So is one whose colours a browser does not read as any: they go, and the paper's stay.
+		const refused = frame('<body bgcolor=" Transparent " text=""><p>x</p></body>');
+		expect(refused.attributes).toEqual({});
+		expect(frameColours(refused.doc, refused.doc.body)).toEqual(['color', 'background-color']);
+	});
+
+	it('blocks and counts a remote picture of the body until remote content is allowed', () => {
+		const html =
+			'<body background="https://t.example/bg.png" style="background-image:url(https://t.example/b.png)"><p>x</p></body>';
+		const blocked = frame(html);
+		expect(blocked.content.blocked).toBe(2);
+		expect(blocked.attributes).toEqual({ style: 'background-image:none' });
+		const allowed = frame(html, true);
+		expect(allowed.content.blocked).toBe(0);
+		expect(allowed.attributes).toEqual({
+			style: 'background-image:url("https://t.example/b.png")',
+			background: 'https://t.example/bg.png',
+		});
+		// A picture of the message's own shows from the part it names.
+		const cidUrls = new Map([['back@x', 'blob:http://localhost/1']]);
+		const own = frame('<body background="cid:Back@X"><p>x</p></body>', false, cidUrls);
+		expect(own.attributes).toEqual({ background: 'blob:http://localhost/1' });
+		expect(own.content.cids).toEqual(['back@x']);
+	});
+
+	it('lets nothing run or load from the body, nor leave the attribute it is in', () => {
+		const message = frame(
+			`<body onload="steal()" onclick="steal()" background="javascript:steal()" link="javascript:steal()" id="cookie" bgcolor='#000" onload="steal()' class='a" onload="steal()' style='color:#fff;background:url("javascript:steal()")'><p>x</p></body>`,
+		);
+		// Only what styles a body is taken from it; what is unsafe in that goes as it goes anywhere
+		// else, and what stays stays in its own attribute.
+		expect(message.attributes).toEqual({
+			style: 'color:#fff;background:none',
+			class: 'a" onload="steal()',
+			bgcolor: '#000" onload="steal()',
+		});
+		expect(message.doc.querySelectorAll('script, [onload], [onclick]')).toHaveLength(0);
+		// A value that would end the attribute's element goes, as it does on every element.
+		const ending = frame('<body style="color:red</style><b>x</b>" class="--></b>"><p>x</p></body>');
+		expect(ending.attributes).toEqual({});
+		expect(ending.doc.body.innerHTML).toBe('<p>x</p>');
 	});
 
 	it('stays fast on hostile CSS and long words', () => {
@@ -384,6 +487,32 @@ describe('sanitizeMessageHtml', () => {
 		expect(result.body).toContain('blob:http://localhost/1');
 	});
 
+	it('styles the body as one document of its parts would, cleaning only what it takes', () => {
+		// A parser gives a body the attributes of a later `<body>` tag only where it has none of its
+		// own: the first part whose body has an attribute gives it, and the parts after it only add.
+		const htmlParts = [
+			'<body bgcolor="#000000" style="color:#fff" background="https://t.example/a.png"><p>a</p>',
+			'<body bgcolor="#ffffff" text="#eeeeee" style="color:red" background="https://t.example/b.png"><p>b</p>',
+			'<p>c</p><body link="#ffcc00" text="#000000">',
+		];
+		const message = { html: htmlParts.join(''), htmlParts };
+		const blocked = sanitizeMessageHtml(message, options);
+		expect(blocked.bodyAttributes).toEqual({
+			style: 'color:#fff',
+			bgcolor: '#000000',
+			text: '#eeeeee',
+			link: '#ffcc00',
+		});
+		// The first part's picture is the body's, so it is the only one counted, and loaded once
+		// allowed.
+		expect(blocked.blocked).toBe(1);
+		const allowed = sanitizeMessageHtml(message, { allowRemote: true });
+		expect(allowed.bodyAttributes).toEqual({
+			...blocked.bodyAttributes,
+			background: 'https://t.example/a.png',
+		});
+	});
+
 	it('cleans a body in one part as sanitizeEmailHtml does', () => {
 		const html =
 			'<style>p{background:url(https://t.example/p.png)}</style><p>Hi<img src="cid:logo@x"><img src="https://t.example/i.png"></p>';
@@ -424,6 +553,23 @@ describe('emailDocument', () => {
 			'le><b>y</b>',
 		]);
 		expect(doc.querySelectorAll('b')).toHaveLength(0);
+		expect(doc.body.innerHTML).toBe('<p>x</p>');
+	});
+
+	it('gives its body the attributes that style the message body, and no other', () => {
+		const bodyAttributes = {
+			style: 'font-family:"A&B"',
+			class: '"><b>x</b>',
+			bgcolor: '#000',
+			onload: 'steal()',
+		};
+		const doc = new DOMParser().parseFromString(
+			emailDocument({ sheets: [], body: '<p>x</p>', bodyAttributes }, false, STYLE),
+			'text/html',
+		);
+		expect(
+			Object.fromEntries([...doc.body.attributes].map(({ name, value }) => [name, value])),
+		).toEqual({ style: 'font-family:"A&B"', class: '"><b>x</b>', bgcolor: '#000' });
 		expect(doc.body.innerHTML).toBe('<p>x</p>');
 	});
 });

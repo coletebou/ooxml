@@ -81,6 +81,23 @@ describe('<mail-html-frame>', () => {
 		expect(blocked).toEqual([content.blocked]);
 	});
 
+	it('shows a message on the styling of its own body, and counts its remote picture', async () => {
+		const attributes = (doc: Document) =>
+			Object.fromEntries([...doc.body.attributes].map(({ name, value }) => [name, value]));
+		const { doc, blocked } = await show(
+			'<body bgcolor="#000000" text="#ffffff" style="padding:0" background="https://t.example/bg.png" onload="steal()"><p>Light</p></body>',
+		);
+		expect(attributes(doc)).toEqual({ style: 'padding:0', bgcolor: '#000000', text: '#ffffff' });
+		expect(blocked).toEqual([1]);
+		// Sent in several parts, the body is styled as the parts read as one document would style it.
+		const htmlParts = [
+			'<body bgcolor="#000000"><p>a</p>',
+			'<body bgcolor="#ffffff" text="#eeeeee"><p>b</p>',
+		];
+		const parts = await show(htmlParts.join(''), htmlParts);
+		expect(attributes(parts.doc)).toEqual({ bgcolor: '#000000', text: '#eeeeee' });
+	});
+
 	it('opens compose for a mailto: link or image map area instead of following it', async () => {
 		const { element, doc } = await loaded();
 		doc.body.innerHTML =
