@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { importHtmlMail, openConversation, openDemo } from './helpers';
 
+/** A one-pixel PNG, for the pictures image maps are drawn over. */
+const PIXEL =
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
 test('a conversation opens oldest first with the newest message expanded', async ({ page }) => {
 	await openDemo(page);
 	await openConversation(page, 'Q3 roadmap review');
@@ -56,12 +60,10 @@ test('an image map area opens its page in a new tab without an opener, as a link
 	);
 	await openDemo(page);
 	// One area asks for the opener, the other for the message's own frame.
-	const png =
-		'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 	await importHtmlMail(page, [
 		{
 			subject: 'Image map',
-			html: `<img usemap="#m" width="200" src="data:image/png;base64,${png}" alt="Map"><map name="m"><area shape="rect" coords="0,0,99,9999" href="https://elsewhere.example/a" rel="opener" target="_blank"><area shape="rect" coords="100,0,9999,9999" href="https://elsewhere.example/b" target="_self"></map>`,
+			html: `<img usemap="#m" width="200" src="data:image/png;base64,${PIXEL}" alt="Map"><map name="m"><area shape="rect" coords="0,0,99,9999" href="https://elsewhere.example/a" rel="opener" target="_blank"><area shape="rect" coords="100,0,9999,9999" href="https://elsewhere.example/b" target="_self"></map>`,
 		},
 	]);
 	await openConversation(page, 'Image map');
@@ -78,4 +80,35 @@ test('an image map area opens its page in a new tab without an opener, as a link
 	}
 	// The message is still shown where it was.
 	await expect(frame.locator('img[alt="Map"]')).toBeVisible();
+});
+
+test('a mailto: area of an image map starts a message to its address, as a link does', async ({
+	page,
+	context,
+}) => {
+	await openDemo(page);
+	await importHtmlMail(page, [
+		{
+			subject: 'Mail map',
+			html: `<img usemap="#m" width="200" src="data:image/png;base64,${PIXEL}" alt="Map"><map name="m"><area shape="rect" coords="0,0,9999,9999" href="mailto:bob@example.com?subject=Hello%20Bob"></map>`,
+		},
+	]);
+	await openConversation(page, 'Mail map');
+	const tabs: unknown[] = [];
+	context.on('page', (tab) => tabs.push(tab));
+	await page
+		.frameLocator('mail-html-frame iframe')
+		.locator('img')
+		.click({ position: { x: 50, y: 20 } });
+	await expect(page.locator('mail-compose').getByPlaceholder('Subject')).toHaveValue('Hello Bob');
+	type Compose = { compose: { draft: { to: unknown[] } } | null };
+	const to = await page
+		.locator('mail-app')
+		.evaluate(
+			(app) =>
+				(app as unknown as { client: { getState(): Compose } }).client.getState().compose?.draft.to,
+		);
+	expect(to).toEqual([{ name: '', email: 'bob@example.com' }]);
+	// Compose opened in the app: no tab was opened for the address.
+	expect(tabs).toEqual([]);
 });

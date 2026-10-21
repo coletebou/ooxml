@@ -2,7 +2,7 @@
 // sent in several) and shown in a sandboxed frame: no scripts (`allow-scripts` is never granted),
 // no forms, no top navigation, and a Content-Security-Policy that blocks remote loads until
 // `allowRemote`. The frame is same-origin only so the host can size it to its content and route
-// `mailto:` links to compose. New code.
+// `mailto:` links (an image map's areas too) to compose. New code.
 import { html, type PropertyValues } from 'lit';
 import { OFFICE_TOKENS, type OfficeToken } from '../tokens';
 import { defineOnce, MailElement, mailStyles } from './base';
@@ -84,11 +84,11 @@ export class MailHtmlFrame extends MailElement {
 		const doc = frame?.contentDocument;
 		if (!frame || !doc) return;
 		// The frame is as tall as its message. The content runs no script, so it only changes height
-		// when an image loads or the frame's width changes (the text reflows): the frame element is
-		// observed, not the body inside it, and the height is written on the next frame and only when
-		// it changed, so the observer never sees its own write within one frame (a resize loop). The
-		// height is measured apart from the one the frame has (`contentHeight`), so a write of it
-		// never makes the next measurement taller.
+		// when an image or a web font loads or the frame's width changes (the text reflows): the frame
+		// element is observed, not the body inside it, and the height is written on the next frame and
+		// only when it changed, so the observer never sees its own write within one frame (a resize
+		// loop). The height is measured apart from the one the frame has (`contentHeight`), so a write
+		// of it never makes the next measurement taller.
 		let pending = 0;
 		const fit = (): void => {
 			cancelAnimationFrame(pending);
@@ -99,13 +99,18 @@ export class MailHtmlFrame extends MailElement {
 		};
 		fit();
 		for (const image of doc.images) image.addEventListener('load', fit, { once: true });
+		// A web font the first layout asks for holds the load back, but one the text asks for only
+		// later (a style for another width) arrives after it and sets the text again. A document
+		// another message has replaced by then is not measured (`contentHeight`).
+		doc.fonts?.addEventListener('loadingdone', fit);
 		this.resize?.disconnect();
 		if (typeof ResizeObserver !== 'undefined') {
 			this.resize = new ResizeObserver(fit);
 			this.resize.observe(frame);
 		}
 		doc.addEventListener('click', (event) => {
-			const link = (event.target as Element | null)?.closest?.('a[href]');
+			// A link, or an area of an image map: a click follows the `href` of either.
+			const link = (event.target as Element | null)?.closest?.('a[href], area[href]');
 			const href = link?.getAttribute('href') ?? '';
 			if (!/^mailto:/i.test(href)) return;
 			event.preventDefault();

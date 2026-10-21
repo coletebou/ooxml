@@ -20,6 +20,28 @@ async function show(html: string, htmlParts: readonly string[] | null = null) {
 	return { doc: new DOMParser().parseFromString(srcdoc, 'text/html'), blocked };
 }
 
+/**
+ * A frame once its document has loaded: the element, its iframe and that document, which jsdom
+ * leaves empty (it does not load `srcdoc`). The load is caught on its way to the iframe, so
+ * `prepare` sees the document before the frame's own load handler does.
+ */
+async function loaded(prepare: (doc: Document) => void = () => {}) {
+	const element = document.createElement('mail-html-frame') as MailHtmlFrame;
+	document.body.append(element);
+	const frame = await new Promise<HTMLIFrameElement>((resolve) =>
+		element.shadowRoot!.addEventListener(
+			'load',
+			(event) => {
+				const target = event.target as HTMLIFrameElement;
+				prepare(target.contentDocument!);
+				resolve(target);
+			},
+			{ capture: true, once: true },
+		),
+	);
+	return { element, frame, doc: frame.contentDocument! };
+}
+
 describe('<mail-html-frame>', () => {
 	it('shows each part of a body sent in several on its own', async () => {
 		// Read as one text, the comment the first part leaves open would take in the others.
@@ -57,5 +79,40 @@ describe('<mail-html-frame>', () => {
 			content.sheets,
 		);
 		expect(blocked).toEqual([content.blocked]);
+	});
+
+	it('opens compose for a mailto: link or image map area instead of following it', async () => {
+		const { element, doc } = await loaded();
+		doc.body.innerHTML =
+			'<a href="mailto:ada@example.com">Ada</a><img usemap="#m" alt="Map"><map name="m"><area shape="rect" coords="0,0,10,10" href="MAILTO:bob@example.com?subject=Hi"></map>';
+		const asked: string[] = [];
+		element.addEventListener('mail-mailto', (event) =>
+			asked.push((event as CustomEvent<{ href: string }>).detail.href),
+		);
+		const followed = [...doc.querySelectorAll('a, area')].map((target) => {
+			const click = new doc.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true });
+			target.dispatchEvent(click);
+			return !click.defaultPrevented;
+		});
+		expect(asked).toEqual(['mailto:ada@example.com', 'MAILTO:bob@example.com?subject=Hi']);
+		expect(followed).toEqual([false, false]);
+	});
+
+	it('fits the frame again when a web font arrives after its message has loaded', async () => {
+		// Both are own properties of the frame's document, which goes with the frame: nothing shared.
+		let height = 100;
+		const fonts = new EventTarget();
+		const { frame } = await loaded((doc) => {
+			Object.defineProperty(doc, 'fonts', { configurable: true, value: fonts });
+			Object.defineProperty(doc.documentElement, 'scrollHeight', {
+				configurable: true,
+				get: () => height,
+			});
+		});
+		await vi.waitFor(() => expect(frame.style.height).toBe('100px'));
+		// A font the text asks for only now (a style for another width) sets it on more lines.
+		height = 140;
+		fonts.dispatchEvent(new Event('loadingdone'));
+		await vi.waitFor(() => expect(frame.style.height).toBe('140px'));
 	});
 });
