@@ -16,8 +16,8 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   all. The event form offers the five repeat kinds (none, daily, weekly, monthly, yearly) and keeps
   an existing end or weekday rule. It has no reminders or attendees (an imported event keeps its
   attendees, unedited). Weeks start on Monday in every language.
-- **Forwarding drops inline images**: pictures embedded in a message's HTML (`cid:` parts) are not
-  carried into a forward; regular attachments are.
+- **Replies quote without inline pictures**: the pictures a message's HTML shows in place (`cid:`
+  parts) are left out of a reply's quote. Forwards and reopened drafts keep them.
 - **Threads are per folder**: a reply you sent shows in Sent, not inside the Inbox conversation.
 - **Rich text** uses the browser's editing commands; it is tested in Chromium. Quoted, pasted and
   dropped HTML loses remote images, so composing never loads a tracker.
