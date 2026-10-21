@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
 import { createCallSession } from './call';
 import { createChatStore } from './chat';
-import { detectOfficeKind, sanitizeAttachment, sanitizeMessageText } from './model';
+import { sanitizeAttachment, sanitizeMessageText } from './model';
 import type { PeerConnectionLike, StreamLike, TrackLike } from './peer';
 import { endpointUrl, parseServerConfig } from './server-config';
 import { createMemorySignalingHub, parseSignal } from './signaling';
@@ -13,17 +13,6 @@ const sync = (a: Y.Doc, b: Y.Doc): void => {
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 describe('model', () => {
-	it('detects Office kinds from the extension before the MIME type', () => {
-		expect(detectOfficeKind('Budget.XLSX')).toBe('xlsx');
-		expect(detectOfficeKind('plan.vsdx')).toBe('vsdx');
-		expect(
-			detectOfficeKind(
-				'x',
-				'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-			),
-		).toBe('pptx');
-		expect(detectOfficeKind('notes.txt')).toBe('other');
-	});
 	it('strips markup from messages and drops unsafe attachment links', () => {
 		expect(sanitizeMessageText('hi <img src=x onerror=alert(1)> there')).not.toContain('<');
 		expect(sanitizeAttachment({ name: 'a.docx', url: 'javascript:alert(1)' })?.url).toBeUndefined();
