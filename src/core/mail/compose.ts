@@ -6,6 +6,7 @@
 // cleaning a body part by part takes an HTML parser, which this area has none of. New code.
 import { textToHtml } from './mime/structure';
 import {
+	formatAddress,
 	identityCovers,
 	isWildcardAddress,
 	sameAddress,
@@ -18,6 +19,7 @@ import {
 } from './model';
 import { bodyText, dropScriptsAndStyles } from './search';
 import { forwardSubject, replySubject } from './subject';
+import { messageDate } from './threading';
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
 
@@ -28,6 +30,20 @@ export interface QuoteFormat {
 	/** The header block of a forwarded message, one line each (`From: ...`, `Subject: ...`). */
 	forwardHeader(source: MailMessage): readonly string[];
 }
+
+/** English quote wording, for clients without a localised `quoteFormat`. */
+export const ENGLISH_QUOTE_FORMAT: QuoteFormat = {
+	attribution: (source) =>
+		`On ${new Date(messageDate(source)).toUTCString()}, ${source.from[0] ? formatAddress(source.from[0]) : 'someone'} wrote:`,
+	forwardHeader: (source) => [
+		'---------- Forwarded message ----------',
+		`From: ${source.from.map(formatAddress).join(', ')}`,
+		`Date: ${new Date(messageDate(source)).toUTCString()}`,
+		`Subject: ${source.subject}`,
+		`To: ${source.to.map(formatAddress).join(', ')}`,
+		...(source.cc.length ? [`Cc: ${source.cc.map(formatAddress).join(', ')}`] : []),
+	],
+};
 
 /**
  * A message's HTML body as a draft holds it (a reply's or forward's quote, or a saved draft opened

@@ -5,11 +5,15 @@
 import { createAutosave, patchCompose } from './client-autosave';
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
-import { composeDraft, draftFromMessage, draftRecipients, patchDraft } from './compose';
-import type { QuoteFormat } from './compose';
-import { DRAFT, formatAddress, identityFor } from './model';
+import {
+	composeDraft,
+	draftFromMessage,
+	draftRecipients,
+	ENGLISH_QUOTE_FORMAT,
+	patchDraft,
+} from './compose';
+import { DRAFT, identityFor } from './model';
 import type { Draft, EmailSummary, Identity, MailboxRole, MailMessage } from './model';
-import { messageDate } from './threading';
 import { MailTransportError } from './transport';
 
 type ComposeActions = Pick<
@@ -26,20 +30,6 @@ type ComposeActions = Pick<
 >;
 
 const ADDRESS = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+$/;
-
-/** English quote wording, for clients without a localised `quoteFormat`. */
-export const ENGLISH_QUOTE_FORMAT: QuoteFormat = {
-	attribution: (source) =>
-		`On ${new Date(messageDate(source)).toUTCString()}, ${source.from[0] ? formatAddress(source.from[0]) : 'someone'} wrote:`,
-	forwardHeader: (source) => [
-		'---------- Forwarded message ----------',
-		`From: ${source.from.map(formatAddress).join(', ')}`,
-		`Date: ${new Date(messageDate(source)).toUTCString()}`,
-		`Subject: ${source.subject}`,
-		`To: ${source.to.map(formatAddress).join(', ')}`,
-		...(source.cc.length ? [`Cc: ${source.cc.map(formatAddress).join(', ')}`] : []),
-	],
-};
 
 export function createCompose(core: ClientCore): ComposeActions {
 	/** The send under way, resolving to whether the message went. */

@@ -5,7 +5,6 @@
 export * from './calendar-store';
 export * from './client';
 export type * from './client-types';
-export { ENGLISH_QUOTE_FORMAT } from './client-compose';
 export * from './client-views';
 export * from './compose';
 export * from './contacts';
