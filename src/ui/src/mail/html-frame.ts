@@ -73,16 +73,24 @@ export class MailHtmlFrame extends MailElement {
 		const frame = this.frame;
 		const doc = frame?.contentDocument;
 		if (!frame || !doc) return;
+		// The frame is as tall as its message. The content runs no script, so it only changes height
+		// when an image loads or the frame's width changes (the text reflows): the frame element is
+		// observed, not the body inside it, and the height is written on the next frame and only when
+		// it changed, so the observer never sees its own write within one frame (a resize loop).
+		let pending = 0;
 		const fit = (): void => {
-			const height = doc.documentElement?.scrollHeight ?? 0;
-			if (height) frame.style.height = `${height}px`;
+			cancelAnimationFrame(pending);
+			pending = requestAnimationFrame(() => {
+				const height = `${doc.documentElement?.scrollHeight ?? 0}px`;
+				if (height !== '0px' && frame.style.height !== height) frame.style.height = height;
+			});
 		};
 		fit();
 		for (const image of doc.images) image.addEventListener('load', fit, { once: true });
 		this.resize?.disconnect();
-		if (typeof ResizeObserver !== 'undefined' && doc.body) {
+		if (typeof ResizeObserver !== 'undefined') {
 			this.resize = new ResizeObserver(fit);
-			this.resize.observe(doc.body);
+			this.resize.observe(frame);
 		}
 		doc.addEventListener('click', (event) => {
 			const link = (event.target as Element | null)?.closest?.('a[href]');
