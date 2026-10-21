@@ -3,7 +3,7 @@
 // corner, drop or paste pictures and files, and draw on the ink layer above. A move or resize
 // previews locally and commits once on release (one undo step, one update for collaborators).
 // Containers a collaborator is in carry their colour and name.
-import { html, nothing } from 'lit';
+import { html, nothing, unsafeCSS } from 'lit';
 import { classMap } from 'lit/directives/class-map.js';
 import { repeat } from 'lit/directives/repeat.js';
 import type {
@@ -16,6 +16,7 @@ import type {
 import { richTextFromPlain } from 'ooxml-core/notebook';
 import { controlStyles } from '../base';
 import { trackPointerGesture } from '../pointer-gesture';
+import { OFFICE_TOKENS } from '../tokens';
 import { definer } from '../registry';
 import { NotebookElement } from './base';
 import { defineNotebookFile } from './file-embed';
@@ -35,8 +36,15 @@ interface Drag {
 	height: number;
 }
 
+// The page is paper in every theme, as a Word page is: the token defaults (the light values) apply
+// inside it, so text, ink and highlights look as they print and export, while the app's chrome
+// follows the theme.
+const PAPER = `:host{${Object.entries(OFFICE_TOKENS)
+	.map(([name, value]) => `${name}:${value}`)
+	.join(';')}}`;
+
 export class NotebookPage extends NotebookElement {
-	static override styles = controlStyles(css);
+	static override styles = [unsafeCSS(PAPER), ...controlStyles(css)];
 	static override properties = {
 		client: { attribute: false },
 		state: { attribute: false },
