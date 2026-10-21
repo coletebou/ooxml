@@ -35,6 +35,41 @@ describe('occurrences', () => {
 		expect(week.every((o) => o.end - o.start === 30 * 60_000)).toBe(true);
 	});
 
+	it('ends each occurrence of a length in days on the clock that many days after its start', () => {
+		// 09:00 to 09:00 the next day, then two more hours; 8 March is the spring change.
+		const start = zonedToUtc({ year: 2026, month: 3, day: 6, hour: 9 }, NY);
+		const at = (day: number, hour: number): number =>
+			zonedToUtc({ year: 2026, month: 3, day, hour }, NY);
+		const shift = event({ start, end: at(7, 11), repeat: 'daily', count: 3, nominalDays: 1 });
+		const spans = (e: CalendarEvent): number[] =>
+			occurrencesBetween(e, start, at(10, 0)).map((o) => o.end - o.start);
+		expect(spans(shift)).toEqual([26 * HOUR_MS, 25 * HOUR_MS, 26 * HOUR_MS]);
+		expect(occurrenceEnd(shift, at(7, 9))).toBe(at(8, 11));
+		// A changed occurrence that only moves keeps the length its new start gives it.
+		const moved = {
+			...shift,
+			exceptions: [{ originalStart: at(8, 9), cancelled: false, start: at(7, 12) }],
+		};
+		expect(occurrencesBetween(moved, start, at(10, 0)).find((o) => o.changed)).toMatchObject({
+			start: at(7, 12),
+			end: at(8, 14),
+		});
+		// An end moved to less than those days makes a length like any other, exact.
+		expect(spans({ ...shift, end: start + 2 * HOUR_MS })).toEqual([
+			2 * HOUR_MS,
+			2 * HOUR_MS,
+			2 * HOUR_MS,
+		]);
+		// A whole-day event already counts whole days.
+		const allDay = event({
+			allDay: true,
+			start: midnight(3, 7),
+			end: midnight(3, 8),
+			nominalDays: 3,
+		});
+		expect(occurrenceEnd(allDay, midnight(3, 8))).toBe(midnight(3, 9));
+	});
+
 	it('repeats weekly on the same weekday and never before its first start', () => {
 		const m = event({ repeat: 'weekly' });
 		const month = occurrencesBetween(m, m.start - 30 * DAY_MS, m.start + 28 * DAY_MS);

@@ -1,10 +1,11 @@
 // The VTIMEZONE block of an iCalendar file, derived from the platform's IANA data (`Intl`) so no
-// time-zone database is bundled. The offset changes of the year before the first event are read
-// off the clock; when every later year (ten are checked) repeats the same pair of changes (the
-// "second Sunday of March" kind) the block carries two yearly rules, which any calendar app
-// extends forever. A zone whose rules differ from year to year (or that has one change only) gets
-// each change written out for those years instead. DOM-free. Moved from
-// src/core/teams/ics-timezone.ts.
+// time-zone database is bundled. The offset changes from the year before the first event to the
+// last year asked for (ten years at least) are read off the clock. When the last eleven of those
+// years, or more, repeat the same pair of changes (the "second Sunday of March" kind) the block
+// carries two yearly rules from the first of them, which any calendar app extends forever, and
+// the changes before it one by one. A zone whose rules differ from year to year (or that has one
+// change only) gets each change written out for those years instead. DOM-free. Moved from
+// src/core/teams/ics-timezone.ts; the years after the first one are new.
 import { DAY_MS, MINUTE_MS, offsetMinutes } from './time-zone';
 
 const CHECKED_YEARS = 10;
@@ -104,14 +105,28 @@ const observance = (
 ];
 
 /**
- * The content lines of a VTIMEZONE for an IANA zone, valid from the year before `firstYear`.
- * The result does not depend on the viewer's zone or the current time.
+ * Where the yearly rules start among `years` (the changes of consecutive years): the first of the
+ * years at the end that each repeat the same pair of changes, when there are more than ten of
+ * them; -1 when there are fewer.
  */
-export function vtimezoneLines(zone: string, firstYear: number): string[] {
+function rulesFrom(years: readonly ZoneTransition[][]): number {
+	const keys = years.at(-1)?.map(ruleKey) ?? [];
+	const repeats = (y: readonly ZoneTransition[]): boolean =>
+		keys.length === 2 && y.length === 2 && y.every((t, i) => ruleKey(t) === keys[i]);
+	let from = years.length;
+	while (from > 0 && repeats(years[from - 1] ?? [])) from--;
+	return years.length - from > CHECKED_YEARS ? from : -1;
+}
+
+/**
+ * The content lines of a VTIMEZONE for an IANA zone, valid from the year before `firstYear`
+ * through `lastYear`, and on while the zone keeps the same yearly rules. Every year in between is
+ * read off the clock. The result does not depend on the viewer's zone or the current time.
+ */
+export function vtimezoneLines(zone: string, firstYear: number, lastYear = firstYear): string[] {
 	const anchor = firstYear - 1;
-	const first = zoneTransitions(zone, anchor);
-	const later = Array.from({ length: CHECKED_YEARS }, (_, i) =>
-		zoneTransitions(zone, anchor + 1 + i),
+	const years = Array.from({ length: Math.max(lastYear - anchor, CHECKED_YEARS) + 1 }, (_, i) =>
+		zoneTransitions(zone, anchor + i),
 	);
 	const head = ['BEGIN:VTIMEZONE', `TZID:${zone}`];
 	const tail = ['END:VTIMEZONE'];
@@ -121,27 +136,22 @@ export function vtimezoneLines(zone: string, firstYear: number): string[] {
 		from: offsetMinutes(start, zone),
 		to: offsetMinutes(start, zone),
 	};
-	if (first.length === 0 && later.every((y) => y.length === 0))
+	if (years.every((y) => y.length === 0))
 		return [...head, ...observance(zone, base, '19700101T000000', null), ...tail];
-	const repeats =
-		first.length === 2 &&
-		later.every(
-			(y) =>
-				y.length === 2 && y.every((t, i) => ruleKey(t) === ruleKey(first[i] as ZoneTransition)),
-		);
-	if (repeats) {
-		const lines = first.flatMap((t) => {
-			const o = onset(t);
-			return observance(zone, t, o.text, `FREQ=YEARLY;BYMONTH=${o.month};BYDAY=${nthWeekday(t)}`);
-		});
-		return [...head, ...lines, ...tail];
-	}
-	// Irregular rules: the offset at the start, then every change that is known.
-	const all = [first, ...later].flat();
+	const from = rulesFrom(years);
+	const rules = (years[from] ?? []).flatMap((t) => {
+		const o = onset(t);
+		return observance(zone, t, o.text, `FREQ=YEARLY;BYMONTH=${o.month};BYDAY=${nthWeekday(t)}`);
+	});
+	if (from === 0) return [...head, ...rules, ...tail];
+	// The offset at the start, then every change that is known before the rules (all of them for
+	// irregular rules).
+	const changes = (from < 0 ? years : years.slice(0, from)).flat();
 	return [
 		...head,
 		...observance(zone, base, '19700101T000000', null),
-		...all.flatMap((t) => observance(zone, t, onset(t).text, null)),
+		...changes.flatMap((t) => observance(zone, t, onset(t).text, null)),
+		...rules,
 		...tail,
 	];
 }

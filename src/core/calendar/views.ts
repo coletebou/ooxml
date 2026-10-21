@@ -2,7 +2,7 @@
 // weeks of a month), stepping a view back and forth, and which occurrences fall on each day.
 // DOM-free. `CalendarDay`, `viewDays` and `shiftAnchor` moved from src/core/teams/calendar.ts; the
 // month view, the first day of the week and `eventsByDay` are new.
-import type { DateRange } from './occurrences';
+import { type DateRange, overlapsRange } from './occurrences';
 import { daysInMonth } from './recurrence-calendar';
 import { addDays, dayKey, startOfDay, zonedParts, zonedToUtc } from './time-zone';
 
@@ -143,9 +143,7 @@ export function eventsByDay<O extends DayItem>(
 		const list = occurrences.filter((o) =>
 			o.dates
 				? dateNumber(o.dates.start) <= date && date < dateNumber(o.dates.end)
-				: o.start === o.end
-					? o.start >= day.start && o.start < day.end
-					: o.start < day.end && o.end > day.start,
+				: overlapsRange(o, day.start, day.end),
 		);
 		list.sort(
 			(a, b) =>

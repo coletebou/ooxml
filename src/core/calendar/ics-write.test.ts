@@ -10,8 +10,11 @@ import {
 	icsLocal,
 	icsUtc,
 } from './ics-write';
+import { readComponents } from './ics-lines';
+import { parseIcs } from './ics-read';
+import { fileZoneOffset, readFileZone } from './ics-read-zone';
 import type { CalendarEvent } from './model';
-import { HOUR_MS, zonedToUtc } from './time-zone';
+import { HOUR_MS, offsetMinutes, zonedToUtc } from './time-zone';
 
 const NY = 'America/New_York';
 const at = (month: number, day: number, hour = 9, zone = NY): number =>
@@ -93,12 +96,11 @@ describe('eventsToIcs', () => {
 		const raw = text.split('\r\n');
 		for (const l of raw) expect(new TextEncoder().encode(l).length).toBeLessThanOrEqual(75);
 		const out = lines([event(), event({ id: 'e2', zone: 'UTC' })]);
-		expect(out.slice(0, 5)).toEqual([
+		expect(out.slice(0, 4)).toEqual([
 			'BEGIN:VCALENDAR',
 			'VERSION:2.0',
 			'PRODID:-//Example//Calendar//EN',
 			'CALSCALE:GREGORIAN',
-			'METHOD:PUBLISH',
 		]);
 		expect(out.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(2);
 		expect(out).toContain('UID:e1@example.com');
@@ -107,7 +109,29 @@ describe('eventsToIcs', () => {
 		expect(out).toContain('DTSTART:20261015T130000Z');
 		expect(out.at(-2)).toBe('END:VCALENDAR');
 		expect(lines([event()], { method: 'request' })).toContain('METHOD:REQUEST');
-		expect(lines([event()], { method: 'NOT A METHOD' })).toContain('METHOD:PUBLISH');
+	});
+
+	it('writes no METHOD unless asked: a calendar file is a snapshot, not a scheduling message', () => {
+		// RFC 5545 3.7.2: without METHOD no scheduling is meant. PUBLISH would need an ORGANIZER and
+		// forbid every ATTENDEE (RFC 5546 3.2.1), which an exported calendar does not promise.
+		const out = lines([
+			event({ attendees: [{ name: 'Bob', email: 'bob@example.com' }] }),
+			event({ id: 'e2', organizer: { name: 'Ada', email: 'ada@example.com' } }),
+		]);
+		expect(out.filter((l) => l.startsWith('METHOD'))).toEqual([]);
+		expect(out.slice(0, 5)).toEqual([
+			'BEGIN:VCALENDAR',
+			'VERSION:2.0',
+			'PRODID:-//Example//Calendar//EN',
+			'CALSCALE:GREGORIAN',
+			'BEGIN:VTIMEZONE',
+		]);
+		expect(lines([event()], { method: 'NOT A METHOD' }).some((l) => l.startsWith('METHOD'))).toBe(
+			false,
+		);
+		const cancel = lines([event({ cancelled: true })], { method: 'cancel' });
+		expect(cancel.filter((l) => l.startsWith('METHOD'))).toEqual(['METHOD:CANCEL']);
+		expect(cancel.indexOf('METHOD:CANCEL')).toBeLessThan(cancel.indexOf('BEGIN:VTIMEZONE'));
 	});
 
 	it('writes one VTIMEZONE per zone a timed event uses, none for UTC or dates', () => {
@@ -130,6 +154,53 @@ describe('eventsToIcs', () => {
 		]);
 		expect(out.indexOf('END:VTIMEZONE')).toBeLessThan(out.indexOf('BEGIN:VEVENT'));
 		expect(lines([event({ zone: 'UTC' })])).not.toContain('BEGIN:VTIMEZONE');
+	});
+
+	it('covers every year its events and their repeats need in each VTIMEZONE', () => {
+		// RFC 5545 3.6.5: the block a repeating event refers to holds for all its occurrences.
+		const block = (text: string) =>
+			readFileZone(
+				readComponents(text).components[0]!.components.find((c) => c.name === 'VTIMEZONE')!,
+			)!;
+		const right = (text: string, ...years: number[]): void => {
+			for (const year of years) {
+				const t = Date.UTC(year, 6, 15, 12);
+				expect(fileZoneOffset(block(text), t), String(year)).toBe(offsetMinutes(t, NY));
+			}
+		};
+		// New York changed its rules in 2007; an event of 2005 and one of July 2026.
+		const old = zonedToUtc({ year: 2005, month: 7, day: 4, hour: 9 }, NY);
+		const summer = zonedToUtc({ year: 2026, month: 7, day: 15, hour: 9 }, NY);
+		const both = [
+			event({ start: old, end: old + HOUR_MS }),
+			event({ id: 'e2', start: summer, end: summer + HOUR_MS }),
+		];
+		right(eventsToIcs(both, OPTIONS), 2005, 2026);
+		// Read through that block alone (a zone name no platform knows), each comes back as it was.
+		const renamed = eventsToIcs(both, OPTIONS).replaceAll('America/New_York', 'Eastern Time');
+		expect(parseIcs(renamed).events.map((e) => e.start)).toEqual([old, summer]);
+		// A series that ends: through its last occurrence (July 2034 here). One that does not: through
+		// ten years after the export, then the zone's yearly rules carry on.
+		right(
+			eventsToIcs(
+				[event({ start: old, end: old + HOUR_MS, repeat: 'yearly', count: 30 })],
+				OPTIONS,
+			),
+			2034,
+		);
+		right(
+			eventsToIcs([event({ start: old, end: old + HOUR_MS, repeat: 'weekly' })], OPTIONS),
+			2026,
+			2036,
+			2080,
+		);
+		// Years far from the export add nothing the zone data knows: they never cost the years near it.
+		const ancient = zonedToUtc({ year: 1500, month: 7, day: 1, hour: 9 }, NY);
+		const far = [
+			event({ id: 'e3', start: ancient, end: ancient + HOUR_MS }),
+			event({ id: 'e4', start: summer, end: summer + HOUR_MS, repeat: 'yearly', count: 999 }),
+		];
+		right(eventsToIcs(far, OPTIONS), 2026, 2500);
 	});
 
 	it('writes an all-day event as dates, its end the day after the last', () => {

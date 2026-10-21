@@ -2,7 +2,7 @@ import { layoutDay } from './layout';
 import type { CalendarEvent } from './model';
 import { type Occurrence, occurrencesBetween } from './occurrences';
 import { DAY_MS, minuteOfDay, zonedToUtc } from './time-zone';
-import { viewDays } from './views';
+import { eventsByDay, viewDays } from './views';
 
 const NY = 'America/New_York';
 
@@ -50,6 +50,24 @@ describe('day layout', () => {
 		const [placed] = layoutDay(occurrencesBetween(m, today.start, today.end), today, NY);
 		expect(placed!.startMinute).toBe(minuteOfDay(m.start, NY));
 		expect(placed!.endMinute - placed!.startMinute).toBe(30);
+	});
+
+	it('places an event without length on the day it starts, midnight included', () => {
+		// An imported DTSTART alone is such an event (RFC 5545 3.6.1); the views list it on that day.
+		const midnight = occ('m', 0, 0);
+		const placed = layoutDay([midnight, occ('n', 600, 600)], day, 'UTC');
+		expect(placed.map((p) => [p.occurrence.key, p.startMinute, p.endMinute])).toEqual([
+			['m', 0, 1],
+			['n', 600, 600],
+		]);
+		expect(placed.map((p) => p.occurrence)).toEqual(
+			eventsByDay([midnight, occ('n', 600, 600)], [day], 'UTC').get(day.start),
+		);
+		// One at the next midnight belongs to the next day.
+		expect(layoutDay([occ('next', 1440, 1440)], day, 'UTC')).toEqual([]);
+		expect(layoutDay([occ('next', 1440, 1440)], { start: DAY_MS, end: 2 * DAY_MS }, 'UTC')).toEqual(
+			[expect.objectContaining({ startMinute: 0, endMinute: 1 })],
+		);
 	});
 
 	it('keeps the type of what it places', () => {

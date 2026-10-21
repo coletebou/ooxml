@@ -1,3 +1,5 @@
+import { readComponents } from './ics-lines';
+import { fileZoneOffset, readFileZone } from './ics-read-zone';
 import { icsOffset, vtimezoneLines, zoneTransitions } from './ics-timezone';
 import { HOUR_MS, offsetMinutes } from './time-zone';
 
@@ -75,6 +77,41 @@ describe('VTIMEZONE', () => {
 		expect(lines.some((l) => l.startsWith('RRULE'))).toBe(false);
 		expect(lines).toContain('BEGIN:DAYLIGHT');
 		expect(lines).toContain('TZOFFSETTO:-0300');
+	});
+
+	it('covers the years up to the last one asked for, and the rules a zone keeps from then on', () => {
+		const offsetIn = (lines: string[], instant: number): number => {
+			const zone = readFileZone(readComponents(lines.join('\r\n')).components[0]!);
+			return fileZoneOffset(zone!, instant);
+		};
+		const july2026 = Date.UTC(2026, 6, 15, 12);
+		// New York changed its rules in 2007: from 2005 alone the block lists ten years of changes
+		// and then keeps standard time, so it is asked for the years up to 2026.
+		const alone = vtimezoneLines('America/New_York', 2005);
+		expect(alone.some((l) => l.startsWith('RRULE'))).toBe(false);
+		const lines = vtimezoneLines('America/New_York', 2005, 2026);
+		expect(offsetIn(lines, july2026)).toBe(-240);
+		// The changes before 2007 one by one, then the two yearly rules from their first year.
+		expect(lines).toContain('DTSTART:20060402T020000');
+		expect(lines).toContain('DTSTART:20070311T020000');
+		expect(lines).toContain('RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU');
+		expect(lines).toContain('RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU');
+		expect(lines).not.toContain('DTSTART:20080309T020000');
+		for (const t of [
+			Date.UTC(2004, 6, 1),
+			Date.UTC(2005, 0, 10),
+			Date.UTC(2006, 9, 30),
+			Date.UTC(2007, 2, 12),
+			july2026,
+			Date.UTC(2040, 10, 3),
+		])
+			expect(offsetIn(lines, t), new Date(t).toISOString()).toBe(
+				offsetMinutes(t, 'America/New_York'),
+			);
+		// Where the whole span keeps one pair of rules, the block is what it was for its first year.
+		expect(vtimezoneLines('Europe/Berlin', 2026, 2040)).toEqual(
+			vtimezoneLines('Europe/Berlin', 2026),
+		);
 	});
 
 	it('has balanced BEGIN and END lines', () => {

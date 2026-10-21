@@ -7,9 +7,9 @@
 // and a changed occurrence is an overriding event with the same UID and a RECURRENCE-ID.
 // DOM-free. The value helpers and the RRULE moved from src/core/teams/ics.ts; the dates, durations,
 // people and `eventsToIcs` are new.
-import { vtimezoneLines } from './ics-timezone';
+import { timezoneBlocks } from './ics-write-zone';
 import type { CalendarEvent, EventAttendee, EventPerson, RecurringSeries } from './model';
-import { occurrenceEnd } from './occurrences';
+import { nominalLength, occurrenceEnd } from './occurrences';
 import { ordinalOfDay } from './recurrence-calendar';
 import { MINUTE_MS, isValidZone, zonedParts } from './time-zone';
 
@@ -70,18 +70,21 @@ export function icsDateTime(name: string, ms: number, zone: string): string {
 /** `20261015`: the wall date of an instant in a zone. */
 export const icsDate = (ms: number, zone: string): string => icsLocal(ms, zone).slice(0, 8);
 
+/** `T2H30M`: whole seconds as hours, minutes and seconds; empty for none. */
+function icsTime(total: number): string {
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total - hours * 3600) / 60);
+	const seconds = total - hours * 3600 - minutes * 60;
+	const time = `${hours ? `${hours}H` : ''}${minutes ? `${minutes}M` : ''}${seconds ? `${seconds}S` : ''}`;
+	return time ? `T${time}` : '';
+}
+
 /** A duration such as `PT5M`, `P1DT2H` or `-PT15M`, to the second. */
 export function icsDuration(ms: number): string {
-	let rest = Math.round(Math.abs(ms) / 1000);
+	const rest = Math.round(Math.abs(ms) / 1000);
 	if (rest === 0) return 'PT0S';
 	const days = Math.floor(rest / 86_400);
-	rest -= days * 86_400;
-	const hours = Math.floor(rest / 3600);
-	rest -= hours * 3600;
-	const minutes = Math.floor(rest / 60);
-	const seconds = rest - minutes * 60;
-	const time = `${hours ? `${hours}H` : ''}${minutes ? `${minutes}M` : ''}${seconds ? `${seconds}S` : ''}`;
-	return `${ms < 0 ? '-' : ''}P${days ? `${days}D` : ''}${time ? `T${time}` : ''}`;
+	return `${ms < 0 ? '-' : ''}P${days ? `${days}D` : ''}${icsTime(rest - days * 86_400)}`;
 }
 
 /** A display alarm `minutes` before the start. */
@@ -158,7 +161,12 @@ export interface EventsToIcsOptions {
 	uidDomain: string;
 	/** DTSTAMP; the clock by default. */
 	now?: number;
-	/** `PUBLISH` (the default) for a calendar file; `REQUEST` or `CANCEL` for an invitation. */
+	/**
+	 * The METHOD of a scheduling message (RFC 5546), such as `REQUEST` or `CANCEL`. None by default:
+	 * the file is then a calendar snapshot and no scheduling is meant (RFC 5545 3.7.2). Meeting the
+	 * method's rules is the caller's part (`PUBLISH`, for one, needs an ORGANIZER and no ATTENDEE,
+	 * RFC 5546 3.2.1).
+	 */
 	method?: string;
 	/** Written on events that have no organizer of their own. */
 	organizer?: EventPerson;
@@ -210,7 +218,9 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 	const time = (name: string, ms: number): string =>
 		event.allDay ? `${name};VALUE=DATE:${icsDate(ms, zone)}` : icsDateTime(name, ms, zone);
 	// DTEND must be later than DTSTART (RFC 5545 3.8.2.2). Without it, a timed event ends where it
-	// starts and an all-day one lasts its day (3.6.1), which is what the reader takes it for.
+	// starts and an all-day one lasts its day (3.6.1), which is what the reader takes it for. A
+	// length in days on the clock is a DURATION, which is nominal for each occurrence (3.8.5.3).
+	const length = nominalLength(at);
 	const dtend = (start: number, end: number): string[] =>
 		(event.allDay ? icsDate(end, zone) > icsDate(start, zone) : end > start)
 			? [time('DTEND', end)]
@@ -236,7 +246,9 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 		uid,
 		stamp,
 		time('DTSTART', event.start),
-		...dtend(event.start, event.end),
+		...(length
+			? [`DURATION:P${length.days}D${icsTime(Math.round(length.rest / 1000))}`]
+			: dtend(event.start, event.end)),
 		...body(event.title, event.description),
 		...icsRecurrence(at),
 		status,
@@ -263,33 +275,21 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 
 /** The `.ics` text (CRLF line endings) of the events, with their changed occurrences. */
 export function eventsToIcs(events: readonly CalendarEvent[], options: EventsToIcsOptions): string {
-	const stamp = `DTSTAMP:${icsUtc(options.now ?? Date.now())}`;
-	// One VTIMEZONE per zone a timed event uses, from the earliest year it is needed in.
-	const firstYear = new Map<string, number>();
-	for (const event of events) {
-		if (event.allDay || !isValidZone(event.zone) || UTC_ZONES.has(event.zone)) continue;
-		const changed = event.repeat === 'none' ? [] : (event.exceptions ?? []);
-		for (const t of [
-			event.start,
-			...changed.flatMap((e) => [e.originalStart, e.start ?? e.originalStart]),
-		]) {
-			const year = zonedParts(t, event.zone).year;
-			firstYear.set(event.zone, Math.min(firstYear.get(event.zone) ?? year, year));
-		}
-	}
+	const now = options.now ?? Date.now();
+	const stamp = `DTSTAMP:${icsUtc(now)}`;
+	// One VTIMEZONE per zone a timed event uses, for every year it is needed in.
+	const zoned = events.filter((e) => !e.allDay && isValidZone(e.zone) && !UTC_ZONES.has(e.zone));
 	const method =
 		options.method && /^[A-Za-z-]{1,40}$/u.test(options.method)
-			? options.method.toUpperCase()
-			: 'PUBLISH';
+			? [`METHOD:${options.method.toUpperCase()}`]
+			: [];
 	const lines = [
 		'BEGIN:VCALENDAR',
 		'VERSION:2.0',
 		`PRODID:${icsEscape(options.prodId)}`,
 		'CALSCALE:GREGORIAN',
-		`METHOD:${method}`,
-		...[...firstYear]
-			.sort(([a], [b]) => a.localeCompare(b))
-			.flatMap(([zone, year]) => vtimezoneLines(zone, year)),
+		...method,
+		...timezoneBlocks(zoned, now),
 		...events.flatMap((event) => eventLines(event, options, stamp)),
 		'END:VCALENDAR',
 	];

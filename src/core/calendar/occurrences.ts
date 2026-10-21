@@ -2,9 +2,10 @@
 // cancelled occurrences and applies changed ones (daily and weekly repeats keep the event's
 // wall-clock time, see `recurrence.ts`), and the reminders that are due. An all-day occurrence
 // lasts whole days in the event's zone, so one across a clock change is 23 or 25 hours long, and
-// carries the dates it covers. No clock and no storage: callers pass `now`. DOM-free. Moved from
-// src/core/teams/calendar.ts (`occurrencesBetween`, `occurrenceAt`, `remindersDue`); the all-day
-// and zero-length handling is new.
+// carries the dates it covers; so does the part of a timed length that counts days on the clock
+// (`nominalDays`). No clock and no storage: callers pass `now`. DOM-free. Moved from
+// src/core/teams/calendar.ts (`occurrencesBetween`, `occurrenceAt`, `remindersDue`); the all-day,
+// nominal and zero-length handling is new.
 import type { CalendarEvent, EventException } from './model';
 import { seriesBetween, seriesIndexOf } from './recurrence';
 import { DAY_MS, MINUTE_MS, addDays, dayKey, zonedParts } from './time-zone';
@@ -44,22 +45,47 @@ function wallDays(from: number, to: number, zone: string): number {
 	);
 }
 
+type Length = Pick<CalendarEvent, 'start' | 'end' | 'zone' | 'allDay' | 'nominalDays'>;
+
 /**
- * Where an unchanged occurrence that starts at `start` ends: as long as the first one, or for an
- * all-day event as many whole days in its zone.
+ * The days on the clock a timed event's length counts (`nominalDays`) and the exact rest after
+ * them, or null when its length is exact: it counts none, or it ends before they are over (an end
+ * moved since), which makes it a length like any other.
  */
-export function occurrenceEnd(
-	event: Pick<CalendarEvent, 'start' | 'end' | 'zone' | 'allDay'>,
-	start: number,
-): number {
-	return event.allDay
-		? addDays(start, wallDays(event.start, event.end, event.zone), event.zone)
-		: start + (event.end - event.start);
+export function nominalLength(event: Length): { days: number; rest: number } | null {
+	const days = event.nominalDays;
+	if (event.allDay || days === undefined || !Number.isInteger(days) || days <= 0) return null;
+	const rest = event.end - addDays(event.start, days, event.zone);
+	return rest >= 0 ? { days, rest } : null;
 }
 
-/** Whether an occurrence overlaps `[from, to)`; one without length counts at its start. */
-const overlaps = (o: Pick<Occurrence, 'start' | 'end'>, from: number, to: number): boolean =>
-	o.start < to && (o.end > from || (o.end === o.start && o.start >= from));
+/**
+ * Where an unchanged occurrence ends, from its start: as long as the first one, for an all-day
+ * event as many whole days in its zone, and for a length in days on the clock that many days
+ * after its start and the same rest.
+ */
+function endsOf(event: Length): (start: number) => number {
+	if (event.allDay) {
+		const days = wallDays(event.start, event.end, event.zone);
+		return (start) => addDays(start, days, event.zone);
+	}
+	const length = nominalLength(event);
+	if (length) return (start) => addDays(start, length.days, event.zone) + length.rest;
+	return (start) => start + (event.end - event.start);
+}
+
+/** Where an unchanged occurrence that starts at `start` ends (see `endsOf`). */
+export const occurrenceEnd = (event: Length, start: number): number => endsOf(event)(start);
+
+/**
+ * Whether an occurrence overlaps `[from, to)`; one without length counts at its start, so it is in
+ * the range (a day, say) that it starts in, its first instant included.
+ */
+export const overlapsRange = (
+	o: Pick<Occurrence, 'start' | 'end'>,
+	from: number,
+	to: number,
+): boolean => o.start < to && (o.end > from || (o.end === o.start && o.start >= from));
 
 /**
  * Occurrences that overlap `[from, to)`, in start order. Cancelled events have none; a repeat
@@ -70,10 +96,10 @@ export function occurrencesBetween(event: CalendarEvent, from: number, to: numbe
 	const span = event.end - event.start;
 	const repeats = event.repeat !== 'none';
 	const exceptions = new Map((event.exceptions ?? []).map((e) => [e.originalStart, e]));
-	const days = event.allDay ? wallDays(event.start, event.end, event.zone) : 0;
+	const endOf = endsOf(event);
 	const make = (index: number, original: number, e?: EventException): Occurrence => {
 		const start = e?.start ?? original;
-		const end = e?.end ?? (event.allDay ? addDays(start, days, event.zone) : start + span);
+		const end = e?.end ?? endOf(start);
 		return {
 			key: `${event.id}@${start}`,
 			eventId: event.id,
@@ -89,14 +115,15 @@ export function occurrencesBetween(event: CalendarEvent, from: number, to: numbe
 				: {}),
 		};
 	};
-	// The series is found by its exact span. A whole day is not always 24 hours and an event without
-	// length touches the range only by its start, so those ask a little earlier and check each end.
-	const exact = !event.allDay && span > 0;
+	// The series is found by its exact span. A whole day is not always 24 hours (nor is a length in
+	// days on the clock) and an event without length touches the range only by its start, so those
+	// ask a little earlier and check each end.
+	const exact = !event.allDay && span > 0 && !nominalLength(event);
 	const out: Occurrence[] = [];
 	for (const slot of seriesBetween(event, exact ? from : from - DAY_MS, to, MAX_OCCURRENCES)) {
 		if (exceptions.has(slot.start)) continue;
 		const o = make(slot.index, slot.start);
-		if (exact || overlaps(o, from, to)) out.push(o);
+		if (exact || overlapsRange(o, from, to)) out.push(o);
 	}
 	// Changed occurrences may have moved into the range from outside it (or out of it).
 	for (const e of exceptions.values()) {
@@ -104,7 +131,7 @@ export function occurrencesBetween(event: CalendarEvent, from: number, to: numbe
 		const index = seriesIndexOf(event, e.originalStart);
 		if (index === null) continue;
 		const o = make(index, e.originalStart, e);
-		if (overlaps(o, from, to)) out.push(o);
+		if (overlapsRange(o, from, to)) out.push(o);
 	}
 	return out.sort((a, b) => a.start - b.start || a.index - b.index).slice(0, MAX_OCCURRENCES);
 }

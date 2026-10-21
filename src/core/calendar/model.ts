@@ -84,6 +84,13 @@ export interface CalendarEvent extends RecurringSeries {
 	description: string;
 	location?: string;
 	allDay?: boolean;
+	/**
+	 * A timed event whose length counts this many days on the clock (an iCalendar DURATION in days
+	 * or weeks, RFC 5545 3.3.6): each occurrence ends that many days after its start, at the same
+	 * time of day, plus the rest of the first one's length, so one across a clock change is an hour
+	 * longer or shorter. Without it every occurrence is exactly as long as the first (a DTEND).
+	 */
+	nominalDays?: number;
 	/** Single occurrences that were cancelled or changed. */
 	exceptions?: readonly EventException[];
 	/** The whole event (every occurrence) was cancelled. */

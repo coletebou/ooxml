@@ -6,7 +6,7 @@ import type { CalendarEvent, EventException, Repeat } from './model';
 import { occurrenceEnd } from './occurrences';
 import { seriesStart, withinSeries } from './recurrence';
 import { repeatChoices } from './recurrence-calendar';
-import { isValidZone, zonedParts, zonedToUtc } from './time-zone';
+import { addDays, isValidZone, zonedParts, zonedToUtc } from './time-zone';
 
 const NY = 'America/New_York';
 const ZONES = [NY, 'Europe/Berlin', 'Asia/Tokyo', 'UTC', 'Australia/Sydney', 'Asia/Kolkata'];
@@ -183,6 +183,7 @@ const event = fc
 		minute: fc.integer({ min: 0, max: 59 }),
 		minutes: fc.integer({ min: 0, max: 600 }),
 		days: fc.integer({ min: 1, max: 5 }),
+		nominal: fc.boolean(),
 		repeat: fc.constantFrom<Repeat>('none', 'daily', 'weekly', 'monthly', 'yearly'),
 		byWeekday: fc.boolean(),
 		end: fc.constantFrom('none', 'count', 'until'),
@@ -224,10 +225,12 @@ const event = fc
 			...(r.allDay ? {} : { hour: r.hour, minute: r.minute }),
 		};
 		const start = zonedToUtc(wall, zone);
+		// A length in days on the clock is written as a DURATION, never as a local end time.
+		const nominal = r.nominal && !r.allDay;
 		let end = r.allDay
 			? zonedToUtc({ ...wall, day: r.day + r.days }, zone)
-			: start + r.minutes * 60_000;
-		if (!unambiguous(end, zone)) end = start;
+			: (nominal ? addDays(start, r.days, zone) : start) + r.minutes * 60_000;
+		if (!nominal && !unambiguous(end, zone)) end = start;
 		const series: CalendarEvent = {
 			id: 'e',
 			title: r.title,
@@ -238,6 +241,7 @@ const event = fc
 			repeat: r.repeat,
 		};
 		if (r.allDay) series.allDay = true;
+		if (nominal) series.nominalDays = r.days;
 		if (r.repeat === 'monthly' && r.byWeekday) {
 			series.monthlyBy = 'weekday';
 			series.ordinal = repeatChoices(start, zone).ordinals[0] ?? 1;

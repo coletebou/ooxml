@@ -22,8 +22,11 @@ The area never imports `teams`.
 - `CalendarEvent extends RecurringSeries`: `id`, `title`, `description`, and optional `location`,
   `allDay`, `exceptions`, `cancelled`, `reminder` (minutes before each start), `organizer` and
   `attendees` (`EventPerson`: a name and an address; an `EventAttendee` adds a `response` and
-  `optional`), and `uid` (the iCalendar UID an import read, written back unchanged). A team
-  meeting is assignable to it as it is.
+  `optional`), `uid` (the iCalendar UID an import read, written back unchanged) and
+  `nominalDays` (a timed length that counts days on the clock, an iCalendar DURATION in days: each
+  occurrence ends that many days after its start at the same time of day, plus the rest of the
+  first one's length, so one across a clock change is an hour longer or shorter; RFC 5545
+  3.8.5.3). A team meeting is assignable to it as it is.
 - An all-day event starts at the start of its first day and ends at the start of the day after its
   last one, both in `zone` (iCalendar `VALUE=DATE`, the end exclusive). It may span several days, a
   repeat keeps it on whole days (23 or 25 hours across a clock change), and its occurrences carry
@@ -35,11 +38,11 @@ The area never imports `teams`.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `time-zone.ts`    | `zonedParts`, `zonedToUtc`, `offsetMinutes`, `startOfDay`, `addDays`, `dayKey`, `minuteOfDay`, `isValidZone`, `localZone`, `MINUTE_MS`, `HOUR_MS`, `DAY_MS`              |
 | `recurrence*.ts`  | `seriesStart`, `seriesBetween`, `seriesIndexOf`, `withinSeries`, `calendarSlots`, `slotAt`, `slotStart`, `repeatChoices`, `nthWeekdayOfMonth`, `daysInMonth`, ...        |
-| `occurrences.ts`  | `occurrencesBetween(event, from, to)`, `occurrenceAt(event, start)`, `occurrenceEnd(event, start)`, `dueOccurrences(events, now, lead?)`, `REMINDER_LEAD_MS`             |
+| `occurrences.ts`  | `occurrencesBetween(event, from, to)`, `occurrenceAt`, `occurrenceEnd`, `nominalLength`, `overlapsRange`, `dueOccurrences(events, now, lead?)`, `REMINDER_LEAD_MS`       |
 | `views.ts`        | `viewDays(anchor, mode, zone, weekStartsOn?)`, `shiftAnchor(anchor, mode, direction, zone)`, `addMonths`, `monthGrid(anchor, zone, weekStartsOn?)`, `eventsByDay(...)`   |
-| `layout.ts`       | `layoutDay(occurrences, day, zone)`: minutes after midnight and side-by-side columns for overlapping timed occurrences                                                   |
+| `layout.ts`       | `layoutDay(occurrences, day, zone)`: minutes after midnight and side-by-side columns for overlapping timed occurrences, one without length on its day                    |
 | `ics-write.ts`    | `eventsToIcs(events, { prodId, uidDomain, now?, method?, organizer?, attendees? })`, `icsRecurrence`, `icsUtc`, `icsLocal`, `icsDateTime`, `icsDate`, `icsDuration`, ... |
-| `ics-timezone.ts` | `vtimezoneLines(zone, firstYear)`, `zoneTransitions(zone, year)`                                                                                                         |
+| `ics-timezone.ts` | `vtimezoneLines(zone, firstYear, lastYear?)`, `zoneTransitions(zone, year)`                                                                                              |
 | `ics-read.ts`     | `parseIcs(text, { zone?, uidDomain?, taken?, stored? }): { events, unsupported }`                                                                                        |
 | `ics-lines.ts`    | `unfoldLines`, `parseContentLine`, `unescapeText`, `readComponents`: the content-line reader (vCard uses the same line format)                                           |
 
@@ -57,12 +60,24 @@ with its RRULE, EXDATEs and a RECURRENCE-ID event per changed occurrence (as `me
 for a meeting), LOCATION, ORGANIZER and ATTENDEE (only people with an address), STATUS and a VALARM
 for the reminder. All-day events are written as dates. DTEND is written only when it is after
 DTSTART (RFC 5545): without it a timed event ends where it starts and an all-day one lasts its day.
+A length in days on the clock is written as a DURATION, which is nominal for each occurrence.
+There is no METHOD unless the caller passes one (`REQUEST`, `CANCEL`): a file without it is a
+calendar snapshot, with no scheduling meant (RFC 5545 3.7.2).
+
+A VTIMEZONE holds for every year the file needs it in (RFC 5545 3.6.5 asks it to for all the
+occurrences of a repeat): from the year before the first time written to the last occurrence of
+each series, and for a series that does not end, to ten years after the export. Where the zone's
+changes settle into the same pair every year (eleven years running, at least), they are written as
+two yearly rules from the first of those years, which a calendar program extends forever, and the
+changes before them one by one. Years are read off the clock from two hundred before the export to
+a hundred after it at most: beyond them, zone data keeps the same offset or the same rules.
 
 `parseIcs` never throws. It reads every VEVENT: UID, SUMMARY, DESCRIPTION, LOCATION, DTSTART with
-DTEND or DURATION (UTC times; floating times and all-day dates in the `zone` option, UTC by default;
-a TZID that names an IANA zone; any other TZID through the file's VTIMEZONE, whose TZID is TEXT
-(`Example\, Zone` is the zone `TZID="Example, Zone"` names), its STANDARD and DAYLIGHT rules
-converting the times while a repeat keeps its time in the IANA zone whose clock changes match),
+DTEND or DURATION (whose days stay days on the clock, `nominalDays`; UTC times; floating times and
+all-day dates in the `zone` option, UTC by default; a TZID that names an IANA zone; any other TZID
+through the file's VTIMEZONE, whose TZID is TEXT (`Example\, Zone` is the zone
+`TZID="Example, Zone"` names), its STANDARD and DAYLIGHT rules converting the times while a repeat
+keeps its time in the IANA zone whose clock changes match),
 STATUS:CANCELLED, the RRULE subset a series holds (FREQ=DAILY, WEEKLY, MONTHLY or YEARLY with COUNT
 or UNTIL, BYMONTHDAY, BYDAY with an ordinal or with BYSETPOS for monthly repeats), EXDATE,
 RECURRENCE-ID overrides, the first reminder, ORGANIZER and ATTENDEE with PARTSTAT and ROLE. Of two
@@ -100,5 +115,9 @@ a changed occurrence alters that an exception cannot hold. Nothing is dropped si
   week an hour late when the anchor's day or the week's first day has no midnight (zones that
   change clocks at midnight, such as America/Santiago on 6 September 2026); the month grid does
   not.
+- A zone whose clock changes never settle into a yearly pair (one that follows a lunar calendar,
+  say) is written change by change, for a series that does not end through ten years after the
+  export; after that its block keeps the last offset.
 - No free/busy, tasks, journal entries, attachments or categories; no iTIP scheduling logic
-  (replies, counters). Writing METHOD:REQUEST is up to the caller.
+  (replies, counters). Writing a METHOD such as REQUEST, and meeting its rules, is up to the
+  caller.

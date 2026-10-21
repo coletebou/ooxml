@@ -413,6 +413,53 @@ describe('zones and times', () => {
 		expect(backwards.events[0]?.end).toBe(Date.UTC(2026, 9, 15, 9));
 		expect(backwards.unsupported).toEqual(['An event ends before it starts; its end was left out']);
 	});
+
+	it('keeps a DURATION in days as days on the clock for every occurrence of a repeat', () => {
+		// RFC 5545 3.8.5.3: DURATION is nominal for each occurrence, DTEND exact. New York goes
+		// forward on 8 March 2026, so the day from the 7th at 09:00 is 23 hours long.
+		const read = (duration: string) =>
+			parseIcs(
+				calendar(
+					...vevent(
+						'UID:a',
+						'DTSTART;TZID=America/New_York:20260306T090000',
+						duration,
+						'RRULE:FREQ=DAILY;COUNT=3',
+					),
+				),
+			);
+		const at = (day: number, hour = 9): number =>
+			zonedToUtc({ year: 2026, month: 3, day, hour }, NY);
+		const spans = (e: CalendarEvent): number[][] =>
+			occurrencesBetween(e, at(6, 0), at(10, 0)).map((o) => [o.start, o.end]);
+		const days = read('DURATION:P1D');
+		expect(days.unsupported).toEqual([]);
+		expect(spans(days.events[0]!)).toEqual([
+			[at(6), at(7)],
+			[at(7), at(8)],
+			[at(8), at(9)],
+		]);
+		// The hours after the days stay exact, and a length in hours alone is exact throughout.
+		expect(spans(read('DURATION:P1DT2H').events[0]!).map(([, end]) => end)).toEqual([
+			at(7, 11),
+			at(8, 11),
+			at(9, 11),
+		]);
+		expect(spans(read('DURATION:PT24H').events[0]!)).toEqual([
+			[at(6), at(7)],
+			[at(7), at(8, 10)],
+			[at(8), at(9)],
+		]);
+		// Written back as a DURATION, it reads back the same.
+		const text = eventsToIcs(days.events, {
+			prodId: '-//Example//Test//EN',
+			uidDomain: 'x',
+			now: 0,
+		});
+		expect(text).toContain('\r\nDURATION:P1D\r\n');
+		expect(text).not.toContain('DTEND');
+		expect(parseIcs(text).events).toEqual(days.events);
+	});
 });
 
 describe('repeat rules', () => {

@@ -1,9 +1,9 @@
 // One VEVENT of an imported iCalendar file as a calendar event: UID, SUMMARY, DESCRIPTION,
-// LOCATION, the start and end (DTEND or DURATION; a UTC time, a floating time read in the
-// importing zone, a TZID, or a date for an all-day event), STATUS, the repeat rule, EXDATEs, the
-// first reminder, the organizer and the attendees. A changed occurrence (RECURRENCE-ID) is read the
-// same way and joined to its series by `ics-read.ts`. Whatever the event cannot hold is reported
-// through `note`. DOM-free. New code.
+// LOCATION, the start and end (DTEND, or DURATION, whose days stay days on the clock; a UTC time,
+// a floating time read in the importing zone, a TZID, or a date for an all-day event), STATUS, the
+// repeat rule, EXDATEs, the first reminder, the organizer and the attendees. A changed occurrence
+// (RECURRENCE-ID) is read the same way and joined to its series by `ics-read.ts`. Whatever the
+// event cannot hold is reported through `note`. DOM-free. New code.
 import { type Component, type ContentLine, unescapeText } from './ics-lines';
 import { readRule } from './ics-read-rule';
 import { type Wall, readDateValue, readDuration, wallAsUtc } from './ics-read-time';
@@ -76,12 +76,16 @@ function readTime(p: ContentLine | undefined, ctx: ReadContext, value = p?.value
 	return { ...zone, ms: zone.toUtc(v.wall), wall: v.wall, date: false };
 }
 
-/** The end: DTEND, or the start plus DURATION, or one day (all-day) or no length (timed). */
-function readEnd(c: Component, start: Time, ctx: ReadContext, label: string): number {
+/**
+ * The end: DTEND, or the start plus DURATION, or one day (all-day) or no length (timed); and the
+ * days of a timed DURATION, which are days on the clock for each occurrence (RFC 5545 3.8.5.3).
+ */
+function readEnd(c: Component, start: Time, ctx: ReadContext, label: string): [number, number?] {
 	const fallback = start.date ? addDays(start.ms, 1, start.zone) : start.ms;
 	const dtend = one(c, 'DTEND');
 	const duration = one(c, 'DURATION');
 	let end: number | null = null;
+	let days: number | undefined;
 	if (dtend) {
 		const t = readTime(dtend, ctx);
 		if (t && t.date === start.date) end = t.ms;
@@ -90,12 +94,13 @@ function readEnd(c: Component, start: Time, ctx: ReadContext, label: string): nu
 		const d = readDuration(duration.value);
 		if (d) end = addDays(start.ms, d.sign * d.days, start.zone) + (start.date ? 0 : d.sign * d.ms);
 		else ctx.note(`${label} has a DURATION that cannot be read; it was left out`);
+		if (d && !start.date && d.sign === 1 && d.days > 0) days = d.days;
 	}
 	if (end !== null && (end < start.ms || (start.date && end === start.ms))) {
 		ctx.note(`${label} ends before it starts; its end was left out`);
 		end = null;
 	}
-	return end ?? fallback;
+	return end === null ? [fallback] : days ? [end, days] : [end];
 }
 
 /** UNTIL in the start's zone: a date includes the whole day (an all-day event: its start). */
@@ -259,13 +264,15 @@ export function readEvent(c: Component, ctx: ReadContext): EventDraft | null {
 		return null;
 	}
 	const sequence = Number(one(c, 'SEQUENCE')?.value);
+	const [end, nominalDays] = readEnd(c, start, ctx, label);
 	const event: CalendarEvent = {
 		id: '',
 		title,
 		description: text(one(c, 'DESCRIPTION')) ?? '',
 		zone: start.zone,
 		start: start.ms,
-		end: readEnd(c, start, ctx, label),
+		end,
+		...(nominalDays ? { nominalDays } : {}),
 		...series,
 		...(exdates.length
 			? {
