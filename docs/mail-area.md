@@ -78,7 +78,10 @@ the host owns and gives to the next client (`ooxml-ui/mail`'s `createMail` does 
   logged, persisted, put in a URL or an error message. They and request bodies go over https only
   (plain http to a loopback host), redirects included: where the platform hands redirects back,
   every request checks each hop before following it and refuses one to plain http; a browser,
-  which hides them, blocks that hop itself as mixed content. Every message it sends gets a
+  which hides them, blocks that hop itself as mixed content. The request that shows a browser
+  hides them has reached the server already: it is sent again for the browser to follow only when
+  it only reads, or is an upload; one that changes something fails as not known to be done (a
+  send as `uncertain`), since the server may have acted on it. Every message it sends gets a
   Message-ID of its own (RFC 8621 4.6). After an `uncertain` send it keeps the copy it made, in
   memory, or that Message-ID when the request that creates and submits the message at once got no
   answer at all: the same draft sent again first finds that copy (an `Email/query` for the

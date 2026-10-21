@@ -5,7 +5,10 @@
 // in clear, `Authorization` or not, and a chain through plain http that comes back to https would
 // let whoever answers the http hop choose the server the rest of it reaches. Where the platform
 // hides them (a browser's `opaqueredirect`), fetch follows them itself: a browser blocks the http
-// hop as mixed content. Moved from session discovery, which checked its own redirects. New code.
+// hop as mixed content. Only the answer to a request that reached the server shows that it hides
+// them, so that request goes again only when a second one does no harm: one that changes the server
+// fails instead, as one whose outcome is not known. Moved from session discovery, which checked its
+// own redirects. New code.
 import { MailTransportError } from '../transport';
 import { JmapError } from './errors';
 
@@ -53,6 +56,8 @@ export interface Hop {
 	headers: Readonly<Record<string, string>>;
 	body?: BodyInit;
 	credentials: boolean;
+	/** A POST the server may get twice: it only reads, or a second one does no harm. */
+	repeatable?: boolean;
 }
 
 /** Where an exchange ended: the URL that answered, and whether the credentials went there. */
@@ -114,7 +119,9 @@ function landedAt(response: Response, hop: Hop): Landed {
  * Sends `first` and follows the redirects that answer it. Where the platform hands them back, each
  * one is checked before it is followed and refused unless it points where credentials may go
  * (`isSafeUrl`), `MAX_REDIRECTS` at most; where it hides them, `mode.hidden` is set and fetch
- * follows them from then on, so later requests do not ask twice.
+ * follows them from then on, so later requests do not ask twice. The request that found that out
+ * reached the server, which may have acted on it (a 303 after a POST points at its result): it is
+ * sent again only when it is a GET or `repeatable`, and fails otherwise.
  */
 export async function followRedirects(
 	first: Hop,
@@ -127,7 +134,13 @@ export async function followRedirects(
 		const response = await send(hop, 'manual');
 		if (response.type === 'opaqueredirect') {
 			mode.hidden = true;
-			break;
+			if (hop.method === 'GET' || hop.method === 'HEAD' || hop.repeatable) break;
+			// Neither refused nor known to be done: what a request that got no answer is.
+			throw new JmapError(
+				'network',
+				`${what} was redirected after the server got it, and is not sent again.`,
+				{ level: 'http' },
+			);
 		}
 		const to = redirectTarget(response, hop.url);
 		if (to === null) return { response, landed: landedAt(response, hop) };

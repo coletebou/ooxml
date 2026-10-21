@@ -1,5 +1,5 @@
 import rfc from './__fixtures__/rfc8620-requests.json';
-import { chunk, createJmapClient } from './client';
+import { chunk, createJmapClient, readsOnly } from './client';
 import { createFakeServer, rfcSession } from './test-support/fake-server';
 import { AUTH } from './test-support/setup';
 import type { JmapInvocation } from './types';
@@ -92,5 +92,31 @@ describe('chunk', () => {
 	it('splits a list into runs of at most the given size', () => {
 		expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
 		expect(chunk([], 3)).toEqual([]);
+	});
+});
+
+describe('readsOnly', () => {
+	const request = (...names: string[]) => ({
+		using: [],
+		methodCalls: names.map((name, i): [string, Record<string, unknown>, string] => [
+			name,
+			{},
+			`${i}`,
+		]),
+	});
+
+	it('takes /get, /changes, /query, /queryChanges and Core/echo to change nothing', () => {
+		expect(readsOnly(request('Mailbox/get', 'Email/query', 'Thread/get', 'Core/echo'))).toBe(true);
+		expect(readsOnly(request('Email/changes', 'Email/queryChanges', 'SearchSnippet/get'))).toBe(
+			true,
+		);
+		expect(readsOnly(request())).toBe(true);
+	});
+
+	it('takes any other method, or one it does not know, to change something', () => {
+		for (const name of ['Email/set', 'EmailSubmission/set', 'Email/import', 'Email/copy'])
+			expect(readsOnly(request('Mailbox/get', name)), name).toBe(false);
+		for (const name of ['Email/parse', 'Email/getAll', 'get', 'Email/get/x', 'X/Get'])
+			expect(readsOnly(request(name)), name).toBe(false);
 	});
 });

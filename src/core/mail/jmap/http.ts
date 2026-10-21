@@ -52,6 +52,8 @@ export interface JmapHttpInit {
 	anyStatus?: boolean;
 	/** `exchange` waits for a slot of this before the request goes, and holds it until read. */
 	gate?: JmapGate;
+	/** A POST the server may get twice: sent again after a redirect a browser hides. */
+	repeatable?: boolean;
 }
 
 /** Slots for exchanges in flight at once: a server takes so many at a time (RFC 8620 2). */
@@ -200,6 +202,7 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 				headers: { ...init.headers },
 				...(init.body === undefined ? {} : { body: init.body }),
 				credentials: true,
+				...(init.repeatable ? { repeatable: true } : {}),
 			},
 			(hop, redirect) => send(hop, redirect, signal, what),
 			redirects,

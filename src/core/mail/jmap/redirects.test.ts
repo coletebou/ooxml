@@ -1,6 +1,8 @@
+import type { Draft } from '../model';
 import { createJmapClient } from './client';
 import { createJmapHttp } from './http';
 import { createFakeServer, json, type Recorded } from './test-support/fake-server';
+import { installMailStore } from './test-support/mail-store';
 import { AUTH, failure, setup, TOKEN } from './test-support/setup';
 
 const ORIGIN = 'https://jmap.example.com';
@@ -135,5 +137,83 @@ describe('redirects of API calls, uploads, downloads and push', () => {
 		attacked.redirect(API, PLAIN, 307);
 		expect(await failure(echo(client(attacked.fetch)))).toMatchObject({ code: 'network' });
 		expect(plain(attacked.requests)).toEqual([]);
+	});
+});
+
+/** A browser's fetch to a mail store, and the redirect mode of each request sent with a body. */
+function browser() {
+	const server = createFakeServer();
+	server.runtime = 'browser';
+	const modes: string[] = [];
+	const fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+		if (init?.method === 'POST') modes.push(`${init.redirect} ${String(input)}`);
+		return server.fetch(input, init);
+	}) as typeof globalThis.fetch;
+	const { transport } = setup({ server, fetch });
+	return { server, transport, store: installMailStore(server), modes };
+}
+
+describe('a redirect a browser hides, found out once the request reached the server', () => {
+	const message: Draft = {
+		to: [{ name: 'John', email: 'john@example.com' }],
+		cc: [],
+		bcc: [],
+		subject: 'World domination',
+		text: 'I have the most brilliant plan.',
+		attachments: [],
+	};
+
+	it('sends a request that changes the server once, failing as not known to be done', async () => {
+		const { server, transport, store, modes } = browser();
+		// The server sends the message, then answers with a 303 to its result, as HTTP lets it.
+		const result = `${ORIGIN}/api/result`;
+		let answer = '';
+		server.route(
+			(request) => request.url === API && (request.body?.includes('EmailSubmission/set') ?? false),
+			async (request) => {
+				answer = await server.process(request).text();
+				return new Response(null, { status: 303, headers: { Location: result } });
+			},
+		);
+		server.route(
+			(request) => request.url === result,
+			() => new Response(answer, { headers: { 'Content-Type': 'application/json' } }),
+		);
+		const outcome = await transport.send(message).catch((error: unknown) => error);
+		expect(store.submissions).toHaveLength(1);
+		expect(outcome).toMatchObject({ code: 'uncertain', cause: { code: 'network' } });
+		// Every later request lets the browser follow redirects from the start. The same message sent
+		// again asks the server first, and finishes the first send without sending it again.
+		const before = modes.length;
+		expect(await transport.send(message)).toEqual({ id: 'E1' });
+		expect(store.submissions).toHaveLength(1);
+		expect(modes.slice(before).length).toBeGreaterThan(0);
+		expect(modes.slice(before).filter((mode) => !mode.startsWith('follow '))).toEqual([]);
+	});
+
+	it('sends again for the browser to follow a request that only reads, and an upload', async () => {
+		const reads = browser();
+		reads.server.redirect(API, MOVED, 307);
+		reads.server.route(
+			(request) => request.url === MOVED,
+			(request) => reads.server.process(request),
+		);
+		expect((await reads.transport.mailboxes()).map((mailbox) => mailbox.id)).toContain('MBinbox');
+		expect(reads.modes).toEqual([`manual ${API}`, `follow ${API}`]);
+		await reads.transport.mailboxes();
+		expect(reads.modes.slice(2)).toEqual([`follow ${API}`]);
+
+		const uploads = browser();
+		const moved = `${ORIGIN}/upload/v2/A13824/`;
+		uploads.server.redirect(UPLOAD, moved, 307);
+		uploads.server.route(
+			(request) => request.url === moved,
+			(request) => json({ accountId: 'A13824', blobId: 'G9', size: request.bytes?.length }, 201),
+		);
+		const file = new Uint8Array([1, 2]);
+		expect(await uploads.transport.upload(file, 'image/png')).toMatchObject({ blobId: 'G9' });
+		expect(uploads.modes).toEqual([`manual ${UPLOAD}`, `follow ${UPLOAD}`]);
+		await uploads.transport.upload(file, 'image/png');
+		expect(uploads.modes.slice(2)).toEqual([`follow ${UPLOAD}`]);
 	});
 });

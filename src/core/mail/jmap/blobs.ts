@@ -35,6 +35,8 @@ export function createBlobMethods(client: JmapClient, nudge: () => void): BlobMe
 				headers: { 'Content-Type': contentType, Accept: 'application/json' },
 				body: bodyOf(bytes),
 				gate: client.uploads,
+				// Sent twice, the file is a second blob that nothing refers to and the server may drop.
+				repeatable: true,
 			},
 			what,
 			(response) => http.json(response, what),

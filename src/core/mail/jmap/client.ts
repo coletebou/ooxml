@@ -12,7 +12,7 @@ import {
 } from './http';
 import { JmapRequestBuilder, JmapResult, parseJmapResponse, type JmapCall } from './request';
 import { loadJmapSession, mailAccountId, type JmapLimits, type JmapSession } from './session';
-import { CORE, MAIL, SUBMISSION, type JmapResponse } from './types';
+import { CORE, MAIL, SUBMISSION, type JmapRequest, type JmapResponse } from './types';
 
 export interface JmapClientOptions {
 	url: string;
@@ -65,6 +65,16 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
 		out.push(items.slice(index, index + size));
 	return out;
 }
+
+/** Methods that change nothing on the server (RFC 8620 4, 5.1, 5.2, 5.5 and 5.6). */
+const READS = /^(?:Core\/echo|[A-Za-z0-9]+\/(?:get|changes|query|queryChanges))$/;
+
+/**
+ * True when every call of `request` only reads, so the server may get it twice. A method not known
+ * to change nothing is taken to change something.
+ */
+export const readsOnly = (request: JmapRequest): boolean =>
+	request.methodCalls.every(([name]) => READS.test(name));
 
 const using = (session: JmapSession): string[] => [
 	CORE,
@@ -144,14 +154,16 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 			const active = session!;
 			const builder = new JmapRequestBuilder(using(active));
 			const calls = build(builder, accountId);
+			const body = builder.build();
 			const what = 'The JMAP request';
 			const response = await http.exchange(
 				active.apiUrl,
 				{
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-					body: JSON.stringify(builder.build()),
+					body: JSON.stringify(body),
 					gate: requests,
+					repeatable: readsOnly(body),
 					...(signal ? { signal } : {}),
 				},
 				what,
