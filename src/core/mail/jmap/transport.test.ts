@@ -58,6 +58,41 @@ describe('connect', () => {
 		expect(sessionReads).toBe(2);
 	});
 
+	it('tries a failed session refetch again, a few times at most', async () => {
+		const { server, transport } = setup();
+		await transport.connect();
+		server.sessionState = 'changed';
+		const reads = () => server.requests.filter((request) => request.method === 'GET').length;
+		let failures = 1;
+		server.route(
+			(request) => request.method === 'GET' && failures > 0,
+			() => {
+				failures--;
+				return new Response('down', { status: 503 });
+			},
+		);
+		// The refetch the first response asks for fails; the next response asks again, and it works.
+		await transport.mailboxes();
+		await transport.mailboxes();
+		await transport.mailboxes();
+		expect(reads()).toBe(3);
+		// Done for that state: the session it read still names another one, and that is no reason
+		// to ask again on every response.
+		await transport.mailboxes();
+		expect(reads()).toBe(3);
+
+		// A session resource that keeps failing is asked three times for one state, then left.
+		const down = setup();
+		await down.transport.connect();
+		down.server.sessionState = 'changed';
+		down.server.route(
+			(request) => request.method === 'GET',
+			() => new Response('down', { status: 503 }),
+		);
+		for (let call = 0; call < 6; call++) await down.transport.mailboxes();
+		expect(down.server.requests.filter((request) => request.method === 'GET')).toHaveLength(4);
+	});
+
 	it('lets the caller cancel, and connects again afterwards', async () => {
 		const { server, transport } = setup();
 		let hang = true;
@@ -117,6 +152,54 @@ describe('mailboxes', () => {
 			[MAILBOXES[2]!.id, 'MBall'],
 			['MBwork'],
 		]);
+	});
+
+	/** A server that needs the query fallback and answers each `Mailbox/query` with `page`. */
+	const paged = (page: (position: number) => Record<string, unknown>) => {
+		const context = setup();
+		const { server } = context;
+		server.session = rfcSession();
+		const core = (server.session.capabilities as Record<string, Record<string, unknown>>)[
+			'urn:ietf:params:jmap:core'
+		]!;
+		core.maxObjectsInGet = 2;
+		server.on('Mailbox/get', (args, call) =>
+			args.ids === null
+				? [['error', { type: 'requestTooLarge' }, call.id]]
+				: {
+						state: 'M1',
+						list: MAILBOXES.filter((item) => (args.ids as string[]).includes(item.id)),
+					},
+		);
+		server.on('Mailbox/query', (args) =>
+			page(typeof args.position === 'number' ? args.position : 0),
+		);
+		return context;
+	};
+
+	it('pages through Mailbox/query when the server returns fewer ids than there are', async () => {
+		// The server keeps every page to two ids, whatever the request asks (RFC 8620 5.5).
+		const { server, transport } = paged((position) => ({
+			ids: MAILBOXES.slice(position, position + 2).map((item) => item.id),
+			position,
+			total: MAILBOXES.length,
+			limit: 2,
+		}));
+		const list = await transport.mailboxes();
+		expect(list.map((item) => item.id)).toEqual(MAILBOXES.map((item) => item.id));
+		expect(server.argsOf('Mailbox/query').map((args) => args.position ?? 0)).toEqual([0, 2, 4]);
+	});
+
+	it('stops paging a server that never moves past its first page', async () => {
+		const { server, transport } = paged(() => ({
+			ids: ['MBinbox', DRAFTS],
+			position: 0,
+			total: 5,
+		}));
+		const list = await transport.mailboxes();
+		expect(list.map((item) => item.id)).toEqual(['MBinbox', DRAFTS]);
+		// The second page brought no id it did not have: asking on would never end.
+		expect(server.argsOf('Mailbox/query')).toHaveLength(2);
 	});
 
 	it('creates and renames with Mailbox/set', async () => {

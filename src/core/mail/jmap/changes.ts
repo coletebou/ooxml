@@ -1,12 +1,13 @@
 // State tracking for `watch` (RFC 8620 5.1, 5.2): the known Mailbox and Email states, the
 // `/changes` calls that move them forward and the `MailChange`s they produce. A state is taken from
-// the first `/get` that shows one and then only from `/changes`, so no change between two states
-// is skipped; a `/get` with a newer state, a push or a poll asks for what happened in between.
-// New code.
+// the first `/get` that shows one, or from the `oldState` of a write that comes first, and then
+// only from `/changes`, so no change between two states is skipped (the write's own included); a
+// `/get` with a newer state, a push or a poll asks for what happened in between. New code.
 import type { MailChange } from '../transport';
 import type { JmapClient } from './client';
 import { strings } from './convert';
 import type { JmapCall, JmapResult } from './request';
+import type { JmapResponse } from './types';
 
 export type TrackedType = 'Mailbox' | 'Email';
 export const TRACKED: readonly TrackedType[] = ['Mailbox', 'Email'];
@@ -14,9 +15,21 @@ export const TRACKED: readonly TrackedType[] = ['Mailbox', 'Email'];
 /** `/changes` pages followed (while `hasMoreChanges`) before giving up with a reset. */
 export const MAX_CHANGE_PAGES = 16;
 
+/** The methods that write a tracked type and answer with the state before (RFC 8620 5.3). */
+const WRITES = new Map<string, TrackedType>([
+	['Mailbox/set', 'Mailbox'],
+	['Email/set', 'Email'],
+	['Email/import', 'Email'],
+]);
+
 export interface ChangeTracker {
 	/** A state seen in a `/get` response. */
 	observe(type: TrackedType, state: unknown): void;
+	/**
+	 * A response the client got: the first write of a type the tracker knows no state of yet gives
+	 * the state before it (`oldState`), so the change the write made is fetched and emitted too.
+	 */
+	wrote(response: JmapResponse): void;
 	/** The known state, or `null` before the first. */
 	state(type: TrackedType): string | null;
 	/** Fetches what changed since the known states, when someone is watching. */
@@ -61,15 +74,18 @@ export function createChangeTracker(
 	let active = false;
 	let running: Promise<void> | null = null;
 
-	/** `type/get` with no ids: the current state, cheaply. */
-	const baseline = async (types: readonly TrackedType[]): Promise<void> => {
+	/**
+	 * `type/get` with no ids: the current state, cheaply. A state learnt meanwhile (a write's
+	 * `oldState`) is kept unless `replace`: it may be older, which only means more changes to fetch.
+	 */
+	const baseline = async (types: readonly TrackedType[], replace = false): Promise<void> => {
 		if (!types.length) return;
 		const { result, calls } = await client.request((builder, accountId) =>
 			types.map((type) => [type, builder.call(`${type}/get`, { accountId, ids: [] })] as const),
 		);
 		for (const [type, call] of calls) {
 			const state = result.get(call).state;
-			if (typeof state === 'string') states.set(type, state);
+			if (typeof state === 'string' && (replace || !states.has(type))) states.set(type, state);
 		}
 	};
 
@@ -129,7 +145,7 @@ export function createChangeTracker(
 				todo = readPage(result, calls, into, reached);
 			}
 			// Take the current state before anyone reloads, so nothing after it is missed.
-			await baseline([...into.reset]);
+			await baseline([...into.reset], true);
 		} finally {
 			for (const [type, state] of reached) if (!into.reset.has(type)) states.set(type, state);
 			if (into.mailboxes || into.reset.has('Mailbox')) {
@@ -177,6 +193,14 @@ export function createChangeTracker(
 			else if (known !== state && active) {
 				pending.add(type);
 				void kick();
+			}
+		},
+		wrote(response) {
+			for (const [name, args] of response.methodResponses) {
+				const type = WRITES.get(name);
+				const before = args.oldState;
+				if (type && !states.has(type) && typeof before === 'string' && before)
+					states.set(type, before);
 			}
 		},
 		state: (type) => states.get(type) ?? null,

@@ -46,6 +46,8 @@ export function createJmapTransport(options: JmapTransportOptions): MailTranspor
 		...(options.fetch ? { fetch: options.fetch } : {}),
 		...(options.accountId === undefined ? {} : { accountId: options.accountId }),
 		signal: lifetime.signal,
+		// Every request is made after the tracker below exists.
+		onResponse: (response) => tracker.wrote(response),
 	});
 	const timers: Timers = {
 		setTimeout: (callback, ms) => (options.setTimeout ?? globalThis.setTimeout)(callback, ms),

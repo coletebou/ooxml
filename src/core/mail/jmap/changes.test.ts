@@ -4,7 +4,7 @@ import type { MailChange } from '../transport';
 import { MAX_CHANGE_PAGES } from './changes';
 import { createClock } from './test-support/clock';
 import { until } from './test-support/fake-server';
-import { setup } from './test-support/setup';
+import { MAILBOXES, setup } from './test-support/setup';
 import type { JmapInvocation } from './types';
 
 const payload = (invocation: unknown): Record<string, unknown> => (invocation as JmapInvocation)[1];
@@ -187,6 +187,70 @@ describe('watch without push or polling', () => {
 		await until(() => changes.length > 0);
 		expect(changes).toEqual([{ type: 'emails', created: [], updated: ['x'], destroyed: [] }]);
 		expect(server.argsOf('Mailbox/changes')).toEqual([{ accountId: 'A13824', sinceState: 'M1' }]);
+	});
+
+	/** A server whose writes move the states on, watched before anything was read. */
+	function unread() {
+		const context = setup({ push: 'off' });
+		const { server } = context;
+		const state = { mailbox: 'M1', email: 'E1' };
+		server.on('Mailbox/get', (args) => ({
+			state: state.mailbox,
+			list: MAILBOXES.filter((item) => !Array.isArray(args.ids) || args.ids.includes(item.id)),
+		}));
+		server.on('Email/get', () => ({ state: state.email, list: [] }));
+		server.on('Mailbox/set', () => {
+			state.mailbox = 'M2';
+			return { oldState: 'M1', newState: 'M2', created: { mailbox: { id: 'MBnew' } } };
+		});
+		server.on('Email/set', () => {
+			state.email = 'E2';
+			return { oldState: 'E1', newState: 'E2', created: { draft: { id: 'E9' } } };
+		});
+		// What changed is what the writes did: nothing while a state is still the first one.
+		server.on('Mailbox/changes', (args) =>
+			args.sinceState === 'M1' && state.mailbox === 'M2'
+				? { ...noChanges('M1', 'M2'), created: ['MBnew'] }
+				: noChanges(args.sinceState),
+		);
+		server.on('Email/changes', (args) =>
+			args.sinceState === 'E1' && state.email === 'E2'
+				? { ...noChanges('E1', 'E2'), created: ['E9'] }
+				: noChanges(args.sinceState),
+		);
+		const changes: MailChange[] = [];
+		context.transport.watch((change) => changes.push(change));
+		return { ...context, changes };
+	}
+
+	it('reports its own first change when no state was known before it', async () => {
+		// The write is the first the tracker hears of the type: its response says what came before.
+		const folder = unread();
+		await folder.transport.createMailbox({ name: 'Projects' });
+		await until(() => folder.changes.length > 0);
+		expect(folder.changes).toEqual([{ type: 'mailboxes' }]);
+		expect(folder.server.argsOf('Mailbox/changes')).toEqual([
+			{ accountId: 'A13824', sinceState: 'M1' },
+		]);
+
+		const draft = unread();
+		await draft.transport.saveDraft({
+			to: [],
+			cc: [],
+			bcc: [],
+			subject: 'Plan',
+			text: 'Notes',
+			attachments: [],
+			inReplyTo: [],
+			references: [],
+		});
+		await until(() => draft.changes.length > 0);
+		expect(draft.changes).toEqual([
+			{ type: 'emails', created: ['E9'], updated: [], destroyed: [] },
+		]);
+		expect(draft.server.argsOf('Email/changes')).toEqual([
+			{ accountId: 'A13824', sinceState: 'E1' },
+		]);
 	});
 
 	it('tells every listener and stops when the last one leaves', async () => {

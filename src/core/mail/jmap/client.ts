@@ -4,7 +4,7 @@
 import { createJmapHttp, sessionResourceUrl, type JmapAuth, type JmapHttp } from './http';
 import { JmapRequestBuilder, JmapResult, parseJmapResponse, type JmapCall } from './request';
 import { loadJmapSession, mailAccountId, type JmapLimits, type JmapSession } from './session';
-import { CORE, MAIL, SUBMISSION } from './types';
+import { CORE, MAIL, SUBMISSION, type JmapResponse } from './types';
 
 export interface JmapClientOptions {
 	url: string;
@@ -13,7 +13,12 @@ export interface JmapClientOptions {
 	accountId?: string;
 	/** Aborts everything in flight (the transport's lifetime). */
 	signal?: AbortSignal;
+	/** Sees every response before its caller does (the change tracker reads write states). */
+	onResponse?: (response: JmapResponse) => void;
 }
+
+/** Failed session refetches for one state before that state is left alone. */
+const MAX_REFRESH_TRIES = 3;
 
 export interface JmapClient {
 	readonly http: JmapHttp;
@@ -64,7 +69,11 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 	let accountId = '';
 	let loading: Promise<JmapSession> | null = null;
 	let refreshing: Promise<void> | null = null;
+	/** The state a refetch was done for: responses naming it ask for no other. */
 	let refreshedFor = '';
+	/** The state the last refetch failed for, and how often in a row. */
+	let failedFor = '';
+	let failures = 0;
 
 	const discover = (signal?: AbortSignal): Promise<JmapSession> => {
 		const attempt = (async () => {
@@ -86,15 +95,21 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 		session ? Promise.resolve(session) : (loading ?? discover(signal));
 
 	// A changed `sessionState` means accounts, capabilities or URLs may have changed (RFC 8620 2).
-	// The next request waits for the refetch; a failed refetch keeps the session it had.
+	// The next request waits for the refetch, one at a time. A failed refetch keeps the session it
+	// had and is tried again by the next response naming that state, `MAX_REFRESH_TRIES` times at
+	// most, so a session resource that keeps failing is not asked on every response.
 	const refresh = (state: string): void => {
 		if (refreshing || !session || state === refreshedFor) return;
-		refreshedFor = state;
 		refreshing = loadJmapSession(http, session.url)
 			.then((next) => {
+				refreshedFor = state;
 				if (Object.hasOwn(next.accounts, accountId)) session = next;
 			})
-			.catch(() => {})
+			.catch(() => {
+				failures = failedFor === state ? failures + 1 : 1;
+				failedFor = state;
+				if (failures >= MAX_REFRESH_TRIES) refreshedFor = state;
+			})
 			.finally(() => {
 				refreshing = null;
 			});
@@ -123,6 +138,7 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 				what,
 				async (reply) => parseJmapResponse(await http.json(reply, what)),
 			);
+			options.onResponse?.(response);
 			if (response.sessionState && response.sessionState !== active.state)
 				refresh(response.sessionState);
 			return { result: new JmapResult(response, http.redact), calls };

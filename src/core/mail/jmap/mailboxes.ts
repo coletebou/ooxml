@@ -8,6 +8,8 @@ import type { JmapClient } from './client';
 import { objects, strings, toMailbox, type JmapObject } from './convert';
 
 const PROPERTIES = ['name', 'parentId', 'role', 'sortOrder', 'totalEmails', 'unreadEmails'];
+/** `Mailbox/query` pages asked for at most, which bounds a server that never says it is done. */
+const MAX_QUERY_PAGES = 1000;
 
 export interface MailboxMethods {
 	mailboxes(): Promise<Mailbox[]>;
@@ -34,14 +36,35 @@ export function createMailboxMethods(
 				roles.set(mailbox.role.toLowerCase(), mailbox.id);
 	};
 
+	/**
+	 * Every mailbox id. A server may cap a query's results even without a `limit` (RFC 8620 5.5),
+	 * so the pages are asked for until the total is reached, or one brings no id not seen yet.
+	 */
+	const queryIds = async (): Promise<string[]> => {
+		const ids = new Set<string>();
+		for (let page = 0; page < MAX_QUERY_PAGES; page++) {
+			const position = ids.size;
+			const { result, calls } = await client.request((builder, accountId) =>
+				builder.call('Mailbox/query', {
+					accountId,
+					...(position ? { position } : {}),
+					calculateTotal: true,
+				}),
+			);
+			const args = result.get(calls);
+			const before = ids.size;
+			for (const id of strings(args.ids)) ids.add(id);
+			const total = typeof args.total === 'number' ? args.total : Number.POSITIVE_INFINITY;
+			if (ids.size === before || ids.size >= total) break;
+		}
+		return [...ids];
+	};
+
 	/** More mailboxes than one `/get` may return: list their ids, then fetch them in batches. */
 	const getByQuery = async (properties: readonly string[]): Promise<JmapObject[]> => {
-		const { result, calls } = await client.request((builder, accountId) =>
-			builder.call('Mailbox/query', { accountId }),
-		);
 		const found: JmapObject[] = [];
 		await client.batch(
-			strings(result.get(calls).ids),
+			await queryIds(),
 			(limits) => limits.maxObjectsInGet,
 			(builder, accountId, ids) => builder.call('Mailbox/get', { accountId, ids, properties }),
 			(page, call) => {
