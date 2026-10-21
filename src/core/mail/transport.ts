@@ -80,6 +80,14 @@ export interface NewMailbox {
 	role?: MailboxRole | null;
 }
 
+export interface MessageReadOptions {
+	/**
+	 * Every body in full, to quote in an answer or edit as a draft; `tooLarge` when the server will
+	 * not send it whole. Without it a long body may come cut short for display, `truncated` set.
+	 */
+	whole?: boolean;
+}
+
 export interface MailTransport {
 	/** `memory`, `jmap`, ...: for diagnostics, never for branching in the UI. */
 	readonly kind: string;
@@ -92,7 +100,7 @@ export interface MailTransport {
 	query(query: MailQuery, page?: MailQueryPage): Promise<MailQueryResult>;
 	/** Summaries in the order of `ids`; unknown ids are left out. */
 	summaries(ids: readonly string[]): Promise<EmailSummary[]>;
-	message(id: string): Promise<MailMessage>;
+	message(id: string, options?: MessageReadOptions): Promise<MailMessage>;
 	update(patches: Readonly<Record<string, EmailPatch>>): Promise<void>;
 	/** Deletes for good (the client moves to Trash first and only destroys from there). */
 	destroy(ids: readonly string[]): Promise<void>;

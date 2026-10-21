@@ -8,6 +8,7 @@ import {
 	DRAFT,
 	FORWARDED,
 	SEEN,
+	isWildcardAddress,
 	type Draft,
 	type Identity,
 	type MailAccount,
@@ -118,10 +119,14 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		for (const mailbox of mailboxes.values()) if (mailbox.role === role) return mailbox;
 		throw new MailTransportError('notFound', `No ${role} mailbox.`);
 	};
-	/** The address a draft is sent from: its identity's, else the first identity's. */
-	const senderOf = (draft: Draft): MailAddress => {
+	/**
+	 * The address a draft is sent from: its own, else its identity's, else the first identity's. A
+	 * `*@domain` wildcard is never one, as a server would never send from it.
+	 */
+	const senderOf = (draft: Draft): MailAddress | undefined => {
 		const identity = identities.find((i) => i.id === draft.identityId) ?? identities[0]!;
-		return { name: identity.name, email: identity.email };
+		const own = { name: identity.name, email: identity.email };
+		return [draft.from, own].find((address) => address && !isWildcardAddress(address.email));
 	};
 	/** Removes the saved draft that a save or a send replaces; returns its id for the change feed. */
 	const dropDraft = (draft: Draft): string[] =>

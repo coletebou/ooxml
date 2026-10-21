@@ -1,6 +1,7 @@
 import {
 	answerReferences,
 	composeDraft,
+	draftFromMessage,
 	isEmptyDraft,
 	replyRecipients,
 	type QuoteFormat,
@@ -17,6 +18,8 @@ const identity: Identity = {
 	textSignature: '',
 	htmlSignature: '',
 };
+/** May write as any address of its domain (RFC 8621 6). */
+const wildcard: Identity = { ...identity, id: 'i2', name: 'Sales', email: '*@example.net' };
 const format: QuoteFormat = {
 	attribution: (m) => `On day, ${m.from[0]!.email} wrote:`,
 	forwardHeader: (m) => ['-- Forwarded --', `Subject: ${m.subject}`],
@@ -103,8 +106,77 @@ describe('composeDraft', () => {
 		expect(draft.subject).toBe('Fwd: Plan');
 		expect(draft.to).toEqual([]);
 		expect(draft.text).toContain('-- Forwarded --\nSubject: Plan');
-		expect(draft.attachments.map((a) => a.blobId)).toEqual(['b1']);
+		// Every part, the inline one as inline: a text message's inline part is listed as a file.
+		expect(draft.attachments).toEqual([
+			{ blobId: 'b1', name: 'a.pdf', type: 'application/pdf', size: 3 },
+			{ blobId: 'b2', name: 'logo.png', type: 'image/png', size: 3, cid: 'logo', inline: true },
+		]);
 		expect(draft.forwardOfEmailId).toBe('m1');
+	});
+	it('forwards the images its copied HTML shows with their Content-ID, so they still show', () => {
+		const original = message({
+			html: '<p>Our logo: <img src="cid:Logo@example.test"></p>',
+			attachments: [
+				{
+					partId: '2',
+					blobId: 'b2',
+					name: 'logo.png',
+					type: 'image/png',
+					size: 3,
+					disposition: 'inline',
+					cid: 'Logo@example.test',
+				},
+				// A part of a related with no disposition, as many senders write them: still inline.
+				{
+					partId: '3',
+					blobId: 'b3',
+					name: 'line.png',
+					type: 'image/png',
+					size: 3,
+					disposition: null,
+					cid: 'line@example.test',
+				},
+			],
+		});
+		const draft = composeDraft('forward', original, { identity, me: [me], format });
+		expect(draft.html).toContain('<img src="cid:Logo@example.test">');
+		expect(draft.attachments).toEqual([
+			{
+				blobId: 'b2',
+				name: 'logo.png',
+				type: 'image/png',
+				size: 3,
+				cid: 'Logo@example.test',
+				inline: true,
+			},
+			{
+				blobId: 'b3',
+				name: 'line.png',
+				type: 'image/png',
+				size: 3,
+				cid: 'line@example.test',
+				inline: true,
+			},
+		]);
+	});
+	it('answers from the address a wildcard identity was written to, never as the wildcard', () => {
+		const original = message({
+			to: [
+				{ name: 'Sales desk', email: 'Desk@Example.net' },
+				{ name: 'Ben', email: 'ben@example.org' },
+			],
+			cc: [],
+		});
+		const options = { identity: wildcard, me: [{ name: 'Sales', email: '*@example.net' }], format };
+		const draft = composeDraft('replyAll', original, options);
+		expect(draft.identityId).toBe('i2');
+		expect(draft.from).toEqual({ name: 'Sales', email: 'Desk@Example.net' });
+		// The address the answer is written from is not copied in to it.
+		expect(draft.to.map((a) => a.email)).toEqual(['ada@example.com', 'ben@example.org']);
+		// Nothing to answer, or no address of the domain written to: no From, as the transport expects.
+		expect(composeDraft('new', null, options)).not.toHaveProperty('from');
+		const elsewhere = message({ to: [{ name: 'Ben', email: 'ben@example.org' }], cc: [] });
+		expect(composeDraft('reply', elsewhere, options)).not.toHaveProperty('from');
 	});
 	it('escapes quoted text that looks like markup', () => {
 		const draft = composeDraft('reply', message({ text: '<script>x</script>' }), {
@@ -127,5 +199,42 @@ describe('composeDraft', () => {
 		);
 		for (const html of ['<p><br></p>', '<div>&nbsp; </div>', ' <br> ', '<p></p><p>&#160;</p>'])
 			expect(isEmptyDraft({ ...draft, html })).toBe(true);
+	});
+});
+
+describe('draftFromMessage', () => {
+	it('reopens a saved draft with its inline images still inline', () => {
+		const saved = message({
+			html: '<p><img src="cid:logo@example.test"></p>',
+			attachments: [
+				{
+					partId: '2',
+					blobId: 'b2',
+					name: 'logo.png',
+					type: 'image/png',
+					size: 3,
+					disposition: 'inline',
+					cid: 'logo@example.test',
+				},
+			],
+		});
+		expect(draftFromMessage(saved, identity).attachments).toEqual([
+			{
+				blobId: 'b2',
+				name: 'logo.png',
+				type: 'image/png',
+				size: 3,
+				cid: 'logo@example.test',
+				inline: true,
+			},
+		]);
+	});
+	it('gives a draft saved with only HTML a plain text made from that HTML', () => {
+		const html = '<div>Dear Ada,</div><div>the plan &amp; the budget.</div>';
+		const draft = draftFromMessage(message({ text: null, html }), identity);
+		expect(draft.text.split('\n').filter(Boolean)).toEqual(['Dear Ada,', 'the plan & the budget.']);
+		expect(draft.html).toBe(html);
+		expect(draftFromMessage(message({ text: 'Own text', html }), identity).text).toBe('Own text');
+		expect(draftFromMessage(message({ text: null, html: null }), identity).text).toBe('');
 	});
 });

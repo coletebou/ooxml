@@ -400,6 +400,35 @@ describe('message', () => {
 		]);
 	});
 
+	it('marks a message the limit cut short, and fetches it whole when asked', async () => {
+		const { server, transport } = setup();
+		const whole = 'Received text past the limit.';
+		server.on('Email/get', cutting({ $seen: true }, whole));
+		expect(await transport.message('m1')).toMatchObject({ text: 'Received', truncated: true });
+		const full = await transport.message('m1', { whole: true });
+		expect(full.text).toBe(whole);
+		expect(full).not.toHaveProperty('truncated');
+		expect(server.argsOf('Email/get').map((args) => args.maxBodyValueBytes)).toEqual([
+			2 * 1024 * 1024,
+			undefined,
+		]);
+		// A server that cuts even when asked for whole values: nothing to quote or edit from.
+		server.on('Email/get', () => ({
+			state: 'E1',
+			list: [
+				{
+					id: 'm1',
+					keywords: { $seen: true },
+					textBody: [{ partId: '1', type: 'text/plain' }],
+					bodyValues: { '1': { value: 'Cut', isTruncated: true } },
+				},
+			],
+		}));
+		expect(await failure(transport.message('m1', { whole: true }))).toMatchObject({
+			code: 'tooLarge',
+		});
+	});
+
 	it('keeps other messages to the limit and refuses a draft the server still cuts', async () => {
 		const { server, transport } = setup();
 		server.on('Email/get', cutting({ $seen: true }, 'Received text past the limit.'));

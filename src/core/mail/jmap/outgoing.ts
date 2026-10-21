@@ -1,32 +1,32 @@
 // The Email a draft becomes (RFC 8621 4.6 creation rules): addresses, the threading headers, one
-// `text/plain` part, one `text/html` part when the draft has rich text, attachments by blob id,
-// and the identity it is written as. New code.
-import { sameAddress, type Draft, type Identity, type MailAddress } from '../model';
+// `text/plain` part, one `text/html` part when the draft has rich text, attachments by blob id
+// (the pictures the HTML shows inline, with their Content-ID), and the identity it is written as.
+// New code.
+import {
+	identityFor,
+	isWildcardAddress,
+	type Draft,
+	type Identity,
+	type MailAddress,
+} from '../model';
 import { toJmapAddresses } from './convert';
 
-/** True when `identity` may write as `email`: the same address, or `*@domain` for its domain. */
-export function identityCovers(identity: Identity, email: string): boolean {
-	const own = identity.email.trim().toLowerCase();
-	const address = email.trim().toLowerCase();
-	return own.startsWith('*@') ? address.endsWith(own.slice(1)) : sameAddress(own, address);
-}
+export { identityCovers } from '../model';
 
-/** The draft's identity (`identityId`), else one covering its `from`, else the first. */
+/** The draft's identity (`identityId`), else the one for its `from`, else the first. */
 export function pickIdentity(identities: readonly Identity[], draft: Draft): Identity | undefined {
 	const chosen = identities.find((identity) => identity.id === draft.identityId);
 	if (chosen) return chosen;
-	const from = draft.from?.email;
-	return (
-		(from ? identities.find((identity) => identityCovers(identity, from)) : undefined) ??
-		identities[0]
-	);
+	return (draft.from ? identityFor(identities, [draft.from]) : undefined) ?? identities[0];
 }
 
-/** The sender: the draft's `from`, else the identity unless it is a `*@domain` wildcard. */
+/**
+ * The sender: the draft's `from`, else the identity's address. A `*@domain` wildcard is never
+ * written, wherever it comes from: without a real address the From is left to the server.
+ */
 function sender(draft: Draft, identity: Identity | undefined): MailAddress | undefined {
-	if (draft.from) return draft.from;
-	if (!identity || identity.email.startsWith('*@')) return undefined;
-	return { name: identity.name, email: identity.email };
+	const own = identity ? { name: identity.name, email: identity.email } : undefined;
+	return [draft.from, own].find((address) => address && !isWildcardAddress(address.email));
 }
 
 const addresses = (list: readonly MailAddress[]) =>
@@ -63,7 +63,8 @@ export function emailToCreate(
 					blobId: attachment.blobId,
 					type: attachment.type || 'application/octet-stream',
 					name: attachment.name,
-					disposition: 'attachment',
+					disposition: attachment.inline ? 'inline' : 'attachment',
+					...(attachment.cid ? { cid: attachment.cid } : {}),
 				}))
 			: undefined,
 	};

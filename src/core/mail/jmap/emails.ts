@@ -8,6 +8,7 @@ import {
 	type MailQuery,
 	type MailQueryPage,
 	type MailQueryResult,
+	type MessageReadOptions,
 } from '../transport';
 import type { ChangeTracker } from './changes';
 import type { JmapClient } from './client';
@@ -60,8 +61,9 @@ const MESSAGE_PROPERTIES: readonly string[] = [
 ];
 
 /**
- * The most of one body part's text a message fetch returns (`maxBodyValueBytes`). Drafts are the
- * exception: one cut short is fetched again whole, since editing saves it back.
+ * The most of one body part's text a message fetch for display returns (`maxBodyValueBytes`); a
+ * message cut to it is marked `truncated`. Drafts are the exception: one cut short is fetched again
+ * whole, since editing saves it back. So is a message read `whole`, to quote.
  */
 export const MAX_BODY_VALUE_BYTES = 2 * 1024 * 1024;
 
@@ -84,7 +86,7 @@ export function emailPatch(patch: EmailPatch): Record<string, true | null> {
 export interface EmailMethods {
 	query(query: MailQuery, page?: MailQueryPage): Promise<MailQueryResult>;
 	summaries(ids: readonly string[]): Promise<EmailSummary[]>;
-	message(id: string): Promise<MailMessage>;
+	message(id: string, options?: MessageReadOptions): Promise<MailMessage>;
 	update(patches: Readonly<Record<string, EmailPatch>>): Promise<void>;
 	destroy(ids: readonly string[]): Promise<void>;
 }
@@ -138,7 +140,7 @@ export function createEmailMethods(
 			});
 		},
 
-		async message(id) {
+		async message(id, options = {}) {
 			/** The email with its bodies, each value cut to `maxBodyValueBytes` when one is given. */
 			const read = async (maxBodyValueBytes?: number): Promise<JmapObject> => {
 				const { result, calls } = await client.request((builder, accountId) =>
@@ -158,15 +160,19 @@ export function createEmailMethods(
 				if (!email) throw new MailTransportError('notFound', 'The message no longer exists.');
 				return email;
 			};
+			/** Every value in full (no limit), or not at all: never a prefix to quote or save back. */
+			const whole = async (): Promise<MailMessage> => {
+				const email = await read();
+				if (isCut(email))
+					throw new MailTransportError('tooLarge', 'The server would only send part of it.');
+				return toMessage(email);
+			};
+			if (options.whole) return whole();
 			const email = await read(MAX_BODY_VALUE_BYTES);
 			const message = toMessage(email);
-			// Editing a draft saves it in place of itself, so a cut body would replace the whole one:
-			// a draft comes whole (no limit), or not at all.
-			if (!message.keywords[DRAFT] || !isCut(email)) return message;
-			const whole = await read();
-			if (isCut(whole))
-				throw new MailTransportError('tooLarge', 'The server would only send part of the draft.');
-			return toMessage(whole);
+			if (!isCut(email)) return message;
+			// Editing a draft saves it in place of itself, so a cut body would replace the whole one.
+			return message.keywords[DRAFT] ? whole() : { ...message, truncated: true };
 		},
 
 		async update(patches) {

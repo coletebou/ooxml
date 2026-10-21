@@ -1,7 +1,7 @@
 import { createMailClient } from './client';
 import type { FileInput, MailNotice } from './client-types';
-import { createMemoryTransport } from './memory-transport';
-import { DRAFT, type MailMessage } from './model';
+import { createMemoryTransport, type MemoryTransportOptions } from './memory-transport';
+import { DRAFT, type Identity, type MailMessage } from './model';
 import { createGate, until } from './test-support/client';
 import { MailTransportError, type MailTransport } from './transport';
 
@@ -75,8 +75,36 @@ function setup() {
 		const { ids } = await memory.query({ mailboxId: 'sent' });
 		return Promise.all(ids.map((id) => memory.message(id)));
 	};
-	return { client, control, notices, drafts, sent };
+	return { client, control, notices, drafts, sent, memory };
 }
+
+/** A client over a plain memory server, its autosave timer never firing on its own. */
+function plain(options: MemoryTransportOptions) {
+	const memory = createMemoryTransport({ now: () => T0, ...options });
+	const notices: MailNotice[] = [];
+	const client = createMailClient({
+		transport: memory,
+		now: () => T0,
+		setTimeout: () => 0,
+		clearTimeout: () => undefined,
+	});
+	client.onNotice((notice) => notices.push(notice));
+	const inMailbox = async (mailboxId: string) => {
+		const { ids } = await memory.query({ mailboxId });
+		return Promise.all(ids.map((id) => memory.message(id)));
+	};
+	return { client, memory, notices, inMailbox };
+}
+
+const identityOf = (id: string, name: string, email: string): Identity => ({
+	id,
+	name,
+	email,
+	replyTo: [],
+	bcc: [],
+	textSignature: '',
+	htmlSignature: '',
+});
 
 describe('the compose window', () => {
 	it('stays open with the edits when its draft cannot be saved, and closes once it is', async () => {
@@ -340,6 +368,174 @@ describe('the compose window', () => {
 		expect(await client.closeCompose()).toBe(true);
 		expect(await client.editDraft('old')).toBe(true);
 		expect(client.getState().compose?.draft).toMatchObject({ id: 'old', text: 'Newer' });
+		client.destroy();
+	});
+
+	it('saves a saved draft emptied of everything, so reopening it shows it empty', async () => {
+		const { client, drafts, memory } = setup();
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.editDraft('old')).toBe(true);
+		await client.attach([file('notes.txt')]);
+		await client.saveDraft();
+		expect((await drafts()).map((draft) => draft.attachments.length)).toEqual([1]);
+		// Everything taken out again, the file too.
+		const [notes] = client.getState().compose!.draft.attachments;
+		client.detach(notes!.blobId);
+		client.updateDraft({ subject: '', text: '' });
+		expect(await client.closeCompose()).toBe(true);
+		const kept = await drafts();
+		expect(kept.map((draft) => [draft.subject, draft.text, draft.attachments.length])).toEqual([
+			['', '', 0],
+		]);
+		await expect(memory.message('old')).rejects.toMatchObject({ code: 'notFound' });
+		expect(await client.editDraft(kept[0]!.id)).toBe(true);
+		expect(client.getState().compose?.draft).toMatchObject({
+			subject: '',
+			text: '',
+			attachments: [],
+		});
+		client.destroy();
+	});
+
+	it('forwards an inline image with its message, and keeps it inline through a saved draft', async () => {
+		const logo = new Uint8Array([137, 80, 78, 71]);
+		const { client, memory, inMailbox } = plain({
+			messages: [
+				{
+					id: 'welcome',
+					mailboxId: 'inbox',
+					from: ada,
+					to: [me],
+					subject: 'Welcome',
+					html: '<p>Our logo:</p><p><img src="cid:logo@example.test" alt="Logo"></p>',
+					attachments: [
+						{
+							name: 'logo.png',
+							type: 'image/png',
+							bytes: logo,
+							cid: 'logo@example.test',
+							inline: true,
+						},
+					],
+					receivedAt: T0,
+				},
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.compose('forward', 'welcome')).toBe(true);
+		client.updateDraft({ to: [{ name: 'Ben', email: 'ben@example.com' }] });
+		expect(await client.closeCompose()).toBe(true);
+		const [saved] = await inMailbox('drafts');
+		expect(saved?.attachments).toMatchObject([{ disposition: 'inline', cid: 'logo@example.test' }]);
+		expect(await client.editDraft(saved!.id)).toBe(true);
+		expect(client.getState().compose?.draft.attachments).toMatchObject([
+			{ name: 'logo.png', cid: 'logo@example.test', inline: true },
+		]);
+		expect(await client.send()).toBe(true);
+		const [sent] = await inMailbox('sent');
+		expect(sent?.html).toContain('<img src="cid:logo@example.test" alt="Logo">');
+		expect(sent?.attachments).toMatchObject([
+			{ name: 'logo.png', disposition: 'inline', cid: 'logo@example.test' },
+		]);
+		expect(sent?.hasAttachment).toBe(false);
+		const raw = new TextDecoder().decode(
+			await memory.download(sent!.blobId, { type: 'message/rfc822', name: 'sent.eml' }),
+		);
+		expect(raw).toContain('Content-Type: multipart/related');
+		expect(raw).toContain('Content-ID: <logo@example.test>');
+		client.destroy();
+	});
+
+	it('answers from the address a wildcard identity covers, and reopens the draft as it', async () => {
+		const desk = { name: 'Sales desk', email: 'desk@example.net' };
+		const { client, inMailbox } = plain({
+			identities: [
+				identityOf('own', 'You', me.email),
+				identityOf('desk', 'Sales', '*@example.net'),
+			],
+			messages: [
+				{ id: 'ask', mailboxId: 'inbox', from: ada, to: [desk], subject: 'Prices', receivedAt: T0 },
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.compose('reply', 'ask')).toBe(true);
+		const answer = { identityId: 'desk', from: { name: 'Sales', email: 'desk@example.net' } };
+		expect(client.getState().compose?.draft).toMatchObject(answer);
+		expect(await client.closeCompose()).toBe(true);
+		const [saved] = await inMailbox('drafts');
+		expect(saved?.from).toEqual([{ name: 'Sales', email: 'desk@example.net' }]);
+		expect(await client.editDraft(saved!.id)).toBe(true);
+		expect(client.getState().compose?.draft).toMatchObject(answer);
+		client.destroy();
+	});
+
+	it('sends a reopened draft saved with only HTML with a plain text made from it', async () => {
+		const { client, inMailbox } = plain({
+			messages: [
+				{
+					id: 'rich',
+					mailboxId: 'drafts',
+					from: me,
+					to: [ada],
+					subject: 'Rich only',
+					html: '<div>Hello Ada,</div><div>see you at <b>noon</b>.</div>',
+					receivedAt: T0,
+					keywords: [DRAFT],
+				},
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.editDraft('rich')).toBe(true);
+		expect(await client.send()).toBe(true);
+		const [sent] = await inMailbox('sent');
+		expect(sent?.text?.split('\n').filter(Boolean)).toEqual(['Hello Ada,', 'see you at noon.']);
+		client.destroy();
+	});
+
+	it('quotes the whole of a message the reading pane shows cut short, or does not answer', async () => {
+		const memory = createMemoryTransport({
+			now: () => T0,
+			messages: ['long', 'longer'].map((id) => ({
+				id,
+				mailboxId: 'inbox',
+				from: ada,
+				to: [me],
+				subject: id,
+				text: 'The start. And all the rest of it.',
+				receivedAt: T0,
+			})),
+		});
+		/** Cuts every body to its first sentence unless asked for it whole; `longer` never comes whole. */
+		const transport: MailTransport = {
+			...memory,
+			async message(id, options) {
+				const message = await memory.message(id);
+				if (!options?.whole) return { ...message, text: 'The start.', truncated: true };
+				if (id === 'longer') throw new MailTransportError('tooLarge', 'Only part of it.');
+				return message;
+			},
+		};
+		const notices: MailNotice[] = [];
+		const client = createMailClient({
+			transport,
+			now: () => T0,
+			setTimeout: () => 0,
+			clearTimeout: () => undefined,
+		});
+		client.onNotice((notice) => notices.push(notice));
+		await until(client, (s) => s.status === 'ready' && s.conversations.length === 2);
+		await client.open('long');
+		expect(client.getState().open?.messages[0]?.message).toMatchObject({
+			text: 'The start.',
+			truncated: true,
+		});
+		expect(await client.compose('reply', 'long')).toBe(true);
+		expect(client.getState().compose?.draft.text).toContain('> The start. And all the rest of it.');
+		await client.discardDraft();
+		await client.open('longer');
+		expect(await client.compose('forward', 'longer')).toBe(false);
+		expect(client.getState().compose).toBeNull();
+		expect(notices).toContainEqual({ kind: 'error', action: 'open', code: 'tooLarge' });
 		client.destroy();
 	});
 

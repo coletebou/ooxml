@@ -22,6 +22,9 @@ describe('pickIdentity', () => {
 		).toBe(joe);
 		expect(pickIdentity(identities, { ...draft, identityId: 'gone' })).toBe(joe);
 		expect(pickIdentity([], draft)).toBeUndefined();
+		// The identity of exactly that address, before a wildcard that covers it too.
+		const from = { name: '', email: 'joe@example.com' };
+		expect(pickIdentity([wildcard, joe], { ...draft, from })).toBe(joe);
 	});
 
 	it('reads `*@domain` as every address of that domain (RFC 8621 6)', () => {
@@ -49,5 +52,47 @@ describe('emailToCreate', () => {
 		expect(signed.from).toEqual([{ name: 'Joe Bloggs', email: 'joe@example.com' }]);
 		expect(signed.replyTo).toEqual([{ name: null, email: 'desk@example.com' }]);
 		expect(emailToCreate(draft, 'D', [], undefined).from).toBeUndefined();
+	});
+
+	it('never writes a wildcard address as the sender, even one the draft names', () => {
+		const named = { name: 'Joe B', email: '*@example.com' };
+		expect(emailToCreate({ ...draft, from: named }, 'D', [], wildcard).from).toBeUndefined();
+		const covered = { name: 'Joe B', email: 'sales@example.com' };
+		expect(emailToCreate({ ...draft, from: covered }, 'D', [], wildcard).from).toEqual([
+			{ name: 'Joe B', email: 'sales@example.com' },
+		]);
+	});
+
+	it('writes an inline part with its Content-ID and inline disposition', () => {
+		const create = emailToCreate(
+			{
+				...draft,
+				html: '<p><img src="cid:logo@example.test"></p>',
+				attachments: [
+					{
+						blobId: 'B1',
+						name: 'logo.png',
+						type: 'image/png',
+						size: 3,
+						cid: 'logo@example.test',
+						inline: true,
+					},
+					{ blobId: 'B2', name: 'plan.pdf', type: 'application/pdf', size: 3 },
+				],
+			},
+			'D',
+			[],
+			joe,
+		);
+		expect(JSON.parse(JSON.stringify(create.attachments))).toEqual([
+			{
+				blobId: 'B1',
+				type: 'image/png',
+				name: 'logo.png',
+				disposition: 'inline',
+				cid: 'logo@example.test',
+			},
+			{ blobId: 'B2', type: 'application/pdf', name: 'plan.pdf', disposition: 'attachment' },
+		]);
 	});
 });

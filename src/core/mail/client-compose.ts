@@ -11,7 +11,7 @@ import {
 	isEmptyDraft,
 	type QuoteFormat,
 } from './compose';
-import { formatAddress, sameAddress, type Draft, type Identity, type MailMessage } from './model';
+import { formatAddress, identityFor, type Draft, type Identity, type MailMessage } from './model';
 import { messageDate } from './threading';
 import type { MailErrorCode } from './transport';
 
@@ -59,25 +59,21 @@ export function createCompose(core: ClientCore): ComposeActions {
 		const current = compose();
 		if (current) core.patch({ compose: { ...current, ...next } });
 	};
-	/** The open draft has edits the server does not hold yet (an empty draft is never saved). */
+	/**
+	 * The open draft has edits the server does not hold yet. A draft never saved is not saved while
+	 * it is empty; one the server holds is, emptied or not, or reopening it would bring back what
+	 * the person took out.
+	 */
 	const unsaved = (): boolean => {
 		const current = compose();
-		return !!current && saved !== edits && !isEmptyDraft(current.draft);
+		return !!current && saved !== edits && (!!current.draft.id || !isEmptyDraft(current.draft));
 	};
 	const identities = (): readonly Identity[] => core.state.identities;
-	/** For an answer, the identity the original was sent to; else the first. */
-	const identityFor = (source: MailMessage | null): Identity | null => {
-		const recipients = source ? [...source.to, ...source.cc, ...source.bcc] : [];
-		return (
-			identities().find((identity) => recipients.some((r) => sameAddress(r, identity.email))) ??
-			identities()[0] ??
-			null
-		);
-	};
+	/** A message to answer or edit, whole: a body the reading pane holds cut short is read again. */
 	const source = async (emailId: string): Promise<MailMessage> => {
 		const cached = core.bodies.get(emailId);
-		if (cached) return cached;
-		const message = await core.transport.message(emailId);
+		if (cached && !cached.truncated) return cached;
+		const message = await core.transport.message(emailId, { whole: true });
 		core.keepBody(message);
 		return message;
 	};
@@ -190,8 +186,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 			try {
 				const original = emailId ? await source(emailId) : null;
 				const me = identities().map((identity) => ({ name: identity.name, email: identity.email }));
+				// For an answer, the identity the original was sent to; else the first.
+				const recipients = original ? [...original.to, ...original.cc, ...original.bcc] : [];
 				const draft = composeDraft(mode, original, {
-					identity: identityFor(original),
+					identity: identityFor(identities(), recipients) ?? identities()[0] ?? null,
 					me,
 					format: core.options.quoteFormat ?? ENGLISH_QUOTE_FORMAT,
 				});
@@ -207,8 +205,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (compose()?.draft.id === emailId) return true;
 			try {
 				const message = await source(emailId);
-				const from = message.from[0];
-				const identity = identities().find((i) => from && sameAddress(i.email, from));
+				const identity = identityFor(identities(), message.from.slice(0, 1));
 				if (!(await close())) return false;
 				start(draftFromMessage(message, identity), 'new');
 				return true;

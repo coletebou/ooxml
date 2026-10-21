@@ -1,9 +1,12 @@
-// New, reply, reply all and forward: who a draft goes to, its subject, the `In-Reply-To` and
-// `References` that thread it (RFC 5322 section 3.6.4) and the quoted original; a saved draft read
-// back to edit; whether a draft holds anything. The words around a quote ("On ... Ada wrote:") are
-// the UI's, passed in through `QuoteFormat`, so they are localised. New code.
+// New, reply, reply all and forward: who a draft goes to and is from, its subject, the
+// `In-Reply-To` and `References` that thread it (RFC 5322 section 3.6.4), the quoted original and
+// the parts a forward carries; a saved draft read back to edit; whether a draft holds anything. The
+// words around a quote ("On ... Ada wrote:") are the UI's, passed in through `QuoteFormat`, so they
+// are localised. New code.
 import { textToHtml } from './mime/structure';
 import {
+	identityCovers,
+	isWildcardAddress,
 	sameAddress,
 	type Draft,
 	type DraftAttachment,
@@ -44,14 +47,28 @@ function quoteText(text: string): string {
 		.join('\n');
 }
 
-/** The address a draft is written from: the chosen identity's, if there is one. */
-function sender(identity: Identity | null): MailAddress | undefined {
-	return identity ? { name: identity.name, email: identity.email } : undefined;
+/**
+ * The address a draft is written from: the identity's own, or for a `*@domain` identity the
+ * address of that domain the original was written to (To, then Cc, then Bcc). A wildcard is never
+ * an address to write from, so without such an original there is none (RFC 8621 section 6).
+ */
+function sender(identity: Identity | null, source: MailMessage | null): MailAddress | undefined {
+	if (!identity) return undefined;
+	if (!isWildcardAddress(identity.email)) return { name: identity.name, email: identity.email };
+	const recipients = source ? [...source.to, ...source.cc, ...source.bcc] : [];
+	const covered = recipients.find((address) => identityCovers(identity, address.email));
+	return covered ? { name: identity.name, email: covered.email } : undefined;
 }
 
-/** A message's file as a draft refers to it: by the blob the server already holds. */
-function draftAttachment({ blobId, name, type, size }: MailAttachment): DraftAttachment {
-	return { blobId, name, type, size };
+/**
+ * A message's part as a draft refers to it: by the blob the server already holds, with its
+ * `Content-ID` and, when it is shown in the body, its inline disposition. A part with a
+ * `Content-ID` and no disposition (a picture of a `multipart/related`) counts as inline.
+ */
+function draftAttachment(attachment: MailAttachment): DraftAttachment {
+	const { blobId, name, type, size, cid, disposition } = attachment;
+	const inline = disposition === 'inline' || (disposition === null && !!cid);
+	return { blobId, name, type, size, ...(cid ? { cid } : {}), ...(inline ? { inline } : {}) };
 }
 
 /**
@@ -94,7 +111,7 @@ export function composeDraft(
 	source: MailMessage | null,
 	options: ComposeOptions,
 ): Draft {
-	const from = sender(options.identity);
+	const from = sender(options.identity, mode === 'new' ? null : source);
 	const base: Draft = {
 		...(options.identity ? { identityId: options.identity.id } : {}),
 		...(from ? { from } : {}),
@@ -114,14 +131,14 @@ export function composeDraft(
 			subject: forwardSubject(source.subject),
 			text: `\n\n${header.join('\n')}\n\n${original}`,
 			html: `<p><br></p><div>${header.map(textToHtml).join('<br>')}</div><br>${source.html ?? textToHtml(original)}`,
-			attachments: source.attachments
-				.filter((attachment) => attachment.disposition !== 'inline' || !attachment.cid)
-				.map(draftAttachment),
+			// Every part, the pictures the copied HTML shows by `cid:` too, so they still show.
+			attachments: source.attachments.map(draftAttachment),
 			references: answerReferences(source),
 			forwardOfEmailId: source.id,
 		};
 	}
-	const { to, cc } = replyRecipients(source, mode, options.me);
+	// The address it is written from is the person's own too: for a wildcard identity, `me` lacks it.
+	const { to, cc } = replyRecipients(source, mode, from ? [...options.me, from] : options.me);
 	const attribution = options.format.attribution(source);
 	const inReplyTo = source.messageId.slice(0, 1);
 	return {
@@ -137,7 +154,10 @@ export function composeDraft(
 	};
 }
 
-/** A saved draft, as the server holds it, to edit again; `identity` is the one it is from. */
+/**
+ * A saved draft, as the server holds it, to edit again; `identity` is the one it is from. One saved
+ * with only HTML gets a plain text made from it, since a draft always sends one.
+ */
 export function draftFromMessage(message: MailMessage, identity: Identity | undefined): Draft {
 	const from = message.from[0];
 	return {
@@ -148,7 +168,7 @@ export function draftFromMessage(message: MailMessage, identity: Identity | unde
 		cc: message.cc,
 		bcc: message.bcc,
 		subject: message.subject,
-		text: message.text ?? '',
+		text: bodyText({ text: message.text, html: message.html }),
 		...(message.html ? { html: message.html } : {}),
 		attachments: message.attachments.map(draftAttachment),
 		inReplyTo: message.inReplyTo,

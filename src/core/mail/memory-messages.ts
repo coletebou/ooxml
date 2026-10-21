@@ -101,6 +101,10 @@ export function withCounts(
 	}));
 }
 
+/** True when a message carries a file to list: a part not inline, or one without a Content-ID. */
+const hasFile = (attachments: readonly MailAttachment[]): boolean =>
+	attachments.some((a) => a.disposition === 'attachment' || !a.cid);
+
 function attachmentsOf(
 	id: string,
 	attachments: readonly OutgoingAttachment[],
@@ -154,18 +158,28 @@ export function messageFromSeed(seed: SeedMessage, id: string, blobs: BlobStore)
 		replyTo: [...(seed.replyTo ?? [])],
 		subject: seed.subject,
 		preview: preview(seed),
-		hasAttachment: attachments.some((a) => a.disposition === 'attachment' || !a.cid),
+		hasAttachment: hasFile(attachments),
 		text: seed.text ?? null,
 		html: seed.html ?? null,
 		attachments,
 	};
 }
 
-/** A stored message from a draft (`$draft` in Drafts) or a sent copy (in Sent). */
+/**
+ * A stored message from a draft (`$draft` in Drafts) or a sent copy (in Sent), its parts kept as
+ * the draft has them: inline with their Content-ID, or attached. `from` is the address the
+ * transport writes it from; without one it has no From.
+ */
 export function messageFromDraft(
 	draft: Draft,
 	id: string,
-	options: { mailboxId: string; sent: boolean; now: number; from: MailAddress; blobs: BlobStore },
+	options: {
+		mailboxId: string;
+		sent: boolean;
+		now: number;
+		from: MailAddress | undefined;
+		blobs: BlobStore;
+	},
 ): MailMessage {
 	const attachments: MailAttachment[] = draft.attachments.map((attachment, index) => ({
 		partId: String(index + 2),
@@ -173,8 +187,8 @@ export function messageFromDraft(
 		name: attachment.name,
 		type: attachment.type,
 		size: options.blobs.get(attachment.blobId)?.bytes.length ?? attachment.size,
-		disposition: 'attachment',
-		cid: null,
+		disposition: attachment.inline ? 'inline' : 'attachment',
+		cid: attachment.cid ?? null,
 	}));
 	return {
 		id,
@@ -189,14 +203,14 @@ export function messageFromDraft(
 		messageId: [`${id}@memory.invalid`],
 		inReplyTo: [...(draft.inReplyTo ?? [])],
 		references: [...(draft.references ?? [])],
-		from: [draft.from ?? options.from],
+		from: options.from ? [options.from] : [],
 		to: [...draft.to],
 		cc: [...draft.cc],
 		bcc: [...draft.bcc],
 		replyTo: [],
 		subject: draft.subject,
 		preview: preview(draft),
-		hasAttachment: attachments.length > 0,
+		hasAttachment: hasFile(attachments),
 		text: draft.text,
 		html: draft.html ?? null,
 		attachments,

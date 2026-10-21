@@ -92,12 +92,18 @@ export interface MailMessage extends EmailSummary {
 	 */
 	html: string | null;
 	attachments: readonly MailAttachment[];
+	/**
+	 * Set when the transport sent only the start of a long body, enough to show it. Quoting or
+	 * editing needs the whole message: read it again with `{ whole: true }`.
+	 */
+	truncated?: true;
 }
 
 /** Who a person can send as (RFC 8621 `Identity`). */
 export interface Identity {
 	id: string;
 	name: string;
+	/** The address, or `*@domain` for any address of that domain (RFC 8621 section 6). */
 	email: string;
 	replyTo: readonly MailAddress[];
 	bcc: readonly MailAddress[];
@@ -117,6 +123,10 @@ export interface DraftAttachment {
 	name: string;
 	type: string;
 	size: number;
+	/** `Content-ID` without angle brackets, for `cid:` references from the HTML body. */
+	cid?: string;
+	/** Shown in the body rather than listed (`Content-Disposition: inline`). */
+	inline?: boolean;
 }
 
 /** What the compose window edits and the transport saves or sends. */
@@ -124,6 +134,10 @@ export interface Draft {
 	/** The saved draft's email id, once it has been saved. */
 	id?: string;
 	identityId?: string;
+	/**
+	 * The From address. Unset, the transport writes the identity's own; a `*@domain` identity has
+	 * none, so a real address of its domain goes here, never the wildcard.
+	 */
 	from?: MailAddress;
 	to: readonly MailAddress[];
 	cc: readonly MailAddress[];
@@ -172,4 +186,33 @@ export function sameAddress(a: MailAddress | string, b: MailAddress | string): b
 	const left = typeof a === 'string' ? a : a.email;
 	const right = typeof b === 'string' ? b : b.email;
 	return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+/** True for the `*@domain` of an identity that may write as any address of a domain. */
+export const isWildcardAddress = (email: string): boolean => email.trim().startsWith('*@');
+
+/** True when `identity` may write as `email`: the same address, or `*@domain` for its domain. */
+export function identityCovers(identity: Identity, email: string): boolean {
+	const own = identity.email.trim().toLowerCase();
+	const address = email.trim().toLowerCase();
+	return isWildcardAddress(own) ? address.endsWith(own.slice(1)) : sameAddress(own, address);
+}
+
+/**
+ * The identity that may write as one of `addresses`, tried in order: one with exactly that address
+ * first, else a `*@domain` one covering it. `undefined` when none does.
+ */
+export function identityFor(
+	identities: readonly Identity[],
+	addresses: readonly MailAddress[],
+): Identity | undefined {
+	for (const address of addresses) {
+		const exact = identities.find((identity) => sameAddress(identity.email, address));
+		if (exact) return exact;
+	}
+	for (const address of addresses) {
+		const covering = identities.find((identity) => identityCovers(identity, address.email));
+		if (covering) return covering;
+	}
+	return undefined;
 }
