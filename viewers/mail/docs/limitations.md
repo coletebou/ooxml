@@ -8,6 +8,10 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   server they are kept in local storage). JMAP for contacts and calendars is not used yet. They are
   kept per server address, not per account: two accounts on one server in the same browser profile
   share them (as do all custom transports).
+- **Commas in a contact's name and address**: the parts of a vCard's `N` and `ADR` are lists, their
+  values separated by commas (RFC 6350), and they are written back as lists. A comma a card escaped
+  inside one value (`1 Main St\, Apt 2`) is read as the comma it is, and written back as a list
+  separator, which another program may read as two values.
 - **No invitations.** Calendar events import and export as iCalendar files, but meeting requests
   and replies (iTIP) are not handled.
 - **iCalendar import is partial**: repeating rules the calendar cannot represent (an interval
@@ -25,12 +29,15 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   its background: what is sent is what the editor shows.
 - **A send the server did not confirm** (it failed part way, said nothing of the submission, or
   sent no answer at all) is reported as possibly sent. Sent again unchanged from the same open app,
-  the message is first checked with the server and goes out only if it did not the first time;
-  while the server cannot be reached, nothing is sent. After a reload, or once the message is
-  changed, it is a new message, and so is one whose copy was deleted meanwhile. After a send that
-  got no answer at all, the copy is looked for by the message's Message-ID: a server that cannot
-  search messages by header field cannot say whether it went out, and it is sent again, so look in
-  Sent first.
+  the message is first checked with the server and goes out again only if the server shows no
+  sign that it went out: every submission of it was canceled, or there is none and its copy is
+  still a draft (a server may drop the record of a submission, and the change that files the copy
+  as sent can fail on its own, so this can be wrong); while the server cannot be reached, nothing
+  is sent. After a reload, or once the
+  message is changed, it is a new message, and so is one whose copy was deleted meanwhile. After a
+  send that got no answer at all, the copy is looked for by the message's Message-ID: a server
+  that cannot search messages by header field cannot say whether it went out, and it is sent
+  again, so look in Sent first.
 - **Unsaved drafts when the app goes away**: if the app is removed, or connects to another mailbox,
   while a draft cannot be saved (offline, over quota), it keeps trying in the background (after 5,
   15 and 40 seconds, then once a minute) until the draft is saved; closing the page before then
