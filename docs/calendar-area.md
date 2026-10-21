@@ -60,23 +60,25 @@ DTSTART (RFC 5545): without it a timed event ends where it starts and an all-day
 
 `parseIcs` never throws. It reads every VEVENT: UID, SUMMARY, DESCRIPTION, LOCATION, DTSTART with
 DTEND or DURATION (UTC times; floating times and all-day dates in the `zone` option, UTC by default;
-a TZID that names an IANA zone; any other TZID through the file's VTIMEZONE, its STANDARD and
-DAYLIGHT rules converting the times while a repeat keeps its time in the IANA zone whose clock
-changes match), STATUS:CANCELLED, the RRULE subset a series holds (FREQ=DAILY, WEEKLY, MONTHLY or
-YEARLY with COUNT or UNTIL, BYMONTHDAY, BYDAY with an ordinal or with BYSETPOS for monthly
-repeats), EXDATE, RECURRENCE-ID overrides, the first reminder, ORGANIZER and ATTENDEE with PARTSTAT
-and ROLE. Of two versions of a UID, or of one changed occurrence (a UID and its RECURRENCE-ID), the
-higher SEQUENCE wins (of two equal versions of an occurrence, the later in the file). A changed
-occurrence whose series is not in the file joins the series a calendar holds (`stored`, an event
-with that UID that repeats), else it is imported as an event of its own (id `<uid>-<RECURRENCE-ID
-in UTC>`, no UID), never in place of the series; an event without a UID takes no id `taken`
-reports in use. With `uidDomain`, a UID
-`<id>@<uidDomain>` (what `eventsToIcs` writes) gives back the event id, so a file this package
-wrote reads back as the same events. Everything else is listed once in `unsupported` as a short
-sentence: a property, another component (VTODO, VJOURNAL), a repeat rule the series cannot hold
-(the event is imported as its first occurrence), a zone that cannot be resolved (its times are
-read as UTC), what a changed occurrence alters that an exception cannot hold. Nothing is dropped
-silently.
+a TZID that names an IANA zone; any other TZID through the file's VTIMEZONE, whose TZID is TEXT
+(`Example\, Zone` is the zone `TZID="Example, Zone"` names), its STANDARD and DAYLIGHT rules
+converting the times while a repeat keeps its time in the IANA zone whose clock changes match),
+STATUS:CANCELLED, the RRULE subset a series holds (FREQ=DAILY, WEEKLY, MONTHLY or YEARLY with COUNT
+or UNTIL, BYMONTHDAY, BYDAY with an ordinal or with BYSETPOS for monthly repeats), EXDATE,
+RECURRENCE-ID overrides, the first reminder, ORGANIZER and ATTENDEE with PARTSTAT and ROLE. Of two
+versions of a UID, or of one changed occurrence (a UID and its RECURRENCE-ID), the higher SEQUENCE
+wins (of two equal versions of an occurrence, the later in the file). A changed occurrence whose
+series is not in the file joins the series a calendar holds (`stored`, an event with that UID that
+repeats), else it is imported as an event of its own (id `<uid>-<RECURRENCE-ID in UTC>`, no UID),
+never in place of the series. An event takes the id of one the calendar holds (`taken`, `stored`)
+only when it is that event again, the same UID (a stored event without a `uid` has the one
+`eventsToIcs` writes for it). Any other event, with or without a UID, takes the next free id
+(`<id>-2`, ...), keeping its UID, so an import never replaces another event. With `uidDomain`, a UID
+`<id>@<uidDomain>` (what `eventsToIcs` writes) gives back the event id, so a file this package wrote
+reads back as the same events. Everything else is listed once in `unsupported` as a short sentence:
+a property, another component (VTODO, VJOURNAL), a repeat rule the series cannot hold (the event is
+imported as its first occurrence), a zone that cannot be resolved (its times are read as UTC), what
+a changed occurrence alters that an exception cannot hold. Nothing is dropped silently.
 
 ## Honest limits
 

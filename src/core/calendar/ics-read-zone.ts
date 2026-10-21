@@ -8,7 +8,7 @@
 // changes match them in the event's year (a city named in the TZID first, then a short list of
 // common zones, then every zone the platform knows). Without a match a repeat keeps UTC time.
 // DOM-free. New code.
-import { type ContentLine, type Component } from './ics-lines';
+import { type ContentLine, type Component, unescapeText } from './ics-lines';
 import { type Wall, readDateValue, readUtcOffset, wallAsUtc } from './ics-read-time';
 import { daysInMonth, nthWeekdayOfMonth } from './recurrence-calendar';
 import { MINUTE_MS, isValidZone, offsetMinutes } from './time-zone';
@@ -115,9 +115,13 @@ function readObservance(c: Component): Observance | null {
 	return { onset: onset.wall, from, to, ...(rule ? { rule } : {}), dates };
 }
 
-/** The observances of a VTIMEZONE, or null when it has no TZID or no readable observance. */
+/**
+ * The observances of a VTIMEZONE, or null when it has no TZID or no readable observance. The TZID
+ * property is TEXT (RFC 5545 3.8.3.1), so `Example\, Zone` is the zone a `TZID="Example, Zone"`
+ * parameter names: its escapes are decoded.
+ */
 export function readFileZone(c: Component): FileZone | null {
-	const tzid = first(c, 'TZID')?.value.trim() ?? '';
+	const tzid = unescapeText(first(c, 'TZID')?.value ?? '').trim();
 	const observances = c.components
 		.filter((o) => o.name === 'STANDARD' || o.name === 'DAYLIGHT')
 		.map(readObservance)

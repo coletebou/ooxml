@@ -3,11 +3,12 @@
 // series, a cancelled one (STATUS:CANCELLED or an EXDATE) a cancelled exception
 // (`ics-read-changes.ts`), and of a UID, or a UID and RECURRENCE-ID, that appears twice the higher
 // SEQUENCE wins. A changed occurrence whose series is not in the file joins the series the calendar
-// holds (`stored`), else it is an event of its own, never one that replaces the series. Time zones
-// come from `ics-read-zone.ts`. The importer never throws: what cannot be read is skipped, and what
-// the events cannot hold (a property, a repeat rule, another component, an unknown zone) is listed
-// once in `unsupported`, never dropped silently. DOM-free. New code.
-import { type Component, readComponents } from './ics-lines';
+// holds (`stored`), else it is an event of its own, never one that replaces the series. An event
+// takes the id of a stored one only when it is that event again (the same UID). Time zones come
+// from `ics-read-zone.ts`. The importer never throws: what cannot be read is skipped, and what the
+// events cannot hold (a property, a repeat rule, another component, an unknown zone) is listed once
+// in `unsupported`, never dropped silently. DOM-free. New code.
+import { type Component, readComponents, unescapeText } from './ics-lines';
 import { exceptionsOf } from './ics-read-changes';
 import {
 	type EventDraft,
@@ -31,13 +32,17 @@ export interface ParseIcsOptions {
 	 */
 	uidDomain?: string;
 	/**
-	 * Ids in use already, such as those of a calendar's events: an event without a UID, which has
-	 * no identity of its own, gets an id that is not, so it never replaces one an earlier import
-	 * brought. Without it, such events are `event`, `event-2`, ... in file order.
+	 * Ids in use already, such as those of a calendar's events. An imported event takes one only
+	 * when `stored` shows the event there is this same event; any other takes the next free id
+	 * (`<id>-2`, `<id>-3`, ...), so an import never replaces another event. An event without a UID
+	 * has no identity of its own: without this option such events are `event`, `event-2`, ... in
+	 * file order.
 	 */
 	taken?: (id: string) => boolean;
 	/**
-	 * The calendar's event with an id, if any. A changed occurrence whose series is not in the file
+	 * The calendar's event with an id, if any. It is the event a file brings again when it has the
+	 * same UID; one without a `uid` has the UID `eventsToIcs` writes for it, `<id>@<uidDomain>`. Its
+	 * id is then kept, so the import updates it. A changed occurrence whose series is not in the file
 	 * but is this event (the same UID, repeating) becomes its exception, and the event is returned
 	 * with it: an update to one occurrence then changes that occurrence of the series.
 	 */
@@ -69,7 +74,9 @@ function zoneResolver(
 		const hit = cache.get(name);
 		if (hit) return hit;
 		const iana = ianaZone(name);
-		const file = files.get(name);
+		// A parameter value is not TEXT, so it is looked up as written; a file that escaped it as the
+		// TZID property is escaped still finds its zone.
+		const file = files.get(name) ?? files.get(unescapeText(name));
 		let resolved: ReadZone;
 		if (iana) resolved = { zone: iana, toUtc: (w) => zonedToUtc(w, iana) };
 		else if (file) {
@@ -133,30 +140,51 @@ function assemble(
 	const mine = (uid: string): boolean => own !== '' && uid.length > own.length && uid.endsWith(own);
 	/** The id a UID gives: `<id>` of a UID `<id>@<uidDomain>`, else the UID itself. */
 	const idOf = (uid: string): string => (mine(uid) ? uid.slice(0, -own.length) : uid || 'event');
+	/** The id `<id>@<uidDomain>` gives back, which an event there holds without a `uid`. */
+	const plainOf = (uid: string): string | undefined => (mine(uid) ? idOf(uid) : undefined);
 	const used = new Set<string>();
-	// An event with a UID is the same event again on a second import; one without has no identity,
-	// so it takes no id in use (`taken`).
-	const unique = (base: string, identity: boolean): string => {
-		const free = (id: string): boolean => !used.has(id) && (identity || !options.taken?.(id));
-		let id = base;
-		for (let n = 2; !free(id); n++) id = `${base}-${n}`;
+	/** For each base id, where the search for an event without an identity starts again. */
+	const resume = new Map<string, number>();
+	/**
+	 * The first of `base`, `base-2`, `base-3`, ... that no event of this file took and that the
+	 * calendar does not use (`taken`, `stored`) or uses for this same event: the stored event there
+	 * has the UID `key`, or no `uid` and stands at `plain`, the id that UID gives back. An event
+	 * with neither (no UID) has no identity and never takes an id in use, so an import replaces no
+	 * event but the one it brings again.
+	 */
+	const slot = (base: string, key?: string, plain?: string): [string, CalendarEvent?] => {
+		const anonymous = key === undefined && plain === undefined;
+		for (let n = anonymous ? (resume.get(base) ?? 1) : 1; ; n++) {
+			const id = n === 1 ? base : `${base}-${n}`;
+			if (used.has(id)) continue;
+			const event = options.stored?.(id);
+			if (!event && !options.taken?.(id)) {
+				if (anonymous) resume.set(base, n + 1);
+				return [id];
+			}
+			if (event?.id === id && (event.uid ? event.uid === key : id === plain)) return [id, event];
+		}
+	};
+	/** An id for an event, and its UID unless the id gives the UID back. */
+	const claim = (base: string, key?: string, plain?: string): Pick<CalendarEvent, 'id' | 'uid'> => {
+		const [id] = slot(base, key, plain);
 		used.add(id);
-		return id;
+		return key === undefined || id === plain ? { id } : { id, uid: key };
 	};
-	const identify = (uid: string): Pick<CalendarEvent, 'id' | 'uid'> => {
-		const id = unique(idOf(uid), uid !== '');
-		return mine(uid) || !uid ? { id } : { id, uid };
-	};
+	const identify = (uid: string): Pick<CalendarEvent, 'id' | 'uid'> =>
+		uid ? claim(idOf(uid), uid, plainOf(uid)) : claim('event');
 	// An occurrence as an event of its own is that occurrence again on every import: its id comes
 	// from its series' UID and its RECURRENCE-ID. It takes no UID: one UID is one series, and in a
-	// file the occurrence would replace it.
-	const single = (uid: string, rid: number): string => unique(`${idOf(uid)}-${icsUtc(rid)}`, true);
-	/** The calendar's series of a UID: the event with its id, repeating, of the same UID. */
+	// file the occurrence would replace it. Moved on by an event at that id, it takes the UID this
+	// app would write for its own id, so it is still itself the next time.
+	const single = (uid: string, rid: number): Pick<CalendarEvent, 'id' | 'uid'> => {
+		const base = `${idOf(uid)}-${icsUtc(rid)}`;
+		return claim(base, own ? `${base}${own}` : undefined, base);
+	};
+	/** The calendar's series of a UID: the stored event of that UID, if it repeats. */
 	const held = (uid: string): CalendarEvent | undefined => {
-		const id = idOf(uid);
-		const event = options.stored?.(id);
-		const same = event?.id === id && (event.uid ?? '') === (mine(uid) ? '' : uid);
-		return same && event.repeat !== 'none' && !used.has(id) ? event : undefined;
+		const [, event] = slot(idOf(uid), uid, plainOf(uid));
+		return event && event.repeat !== 'none' ? event : undefined;
 	};
 	const out: CalendarEvent[] = [];
 	/** A series with its changed occurrences, and after it those an exception cannot hold. */
@@ -165,7 +193,7 @@ function assemble(
 		const changed = [...(slots?.values() ?? [])];
 		const exceptions = exceptionsOf(series, changed, note, (e, rid) => apart.push([e, rid]));
 		out.push(withExceptions(series.event, exceptions));
-		for (const [e, rid] of apart) out.push({ ...e, id: single(series.uid, rid) });
+		for (const [e, rid] of apart) out.push({ ...e, ...single(series.uid, rid) });
 	};
 	for (const d of order) {
 		join({ ...d, event: { ...d.event, ...identify(d.uid) } }, changes.get(d.uid));
@@ -182,7 +210,7 @@ function assemble(
 		note(
 			'An occurrence of a repeating event was imported on its own: the file does not hold its series',
 		);
-		for (const [rid, d] of slots) out.push({ ...d.event, id: single(uid, rid) });
+		for (const [rid, d] of slots) out.push({ ...d.event, ...single(uid, rid) });
 	}
 	return out;
 }

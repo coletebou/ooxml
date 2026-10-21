@@ -335,6 +335,24 @@ describe('zones and times', () => {
 		expect(parseIcs(text).events[0]?.zone).toBe('Europe/Amsterdam');
 	});
 
+	it('finds a VTIMEZONE whose TZID, a TEXT value, escapes the commas the parameter quotes', () => {
+		// RFC 5545 3.8.3.1: the property is TEXT (`\,` is a comma); the parameter is a param-value.
+		const named = (property: string, parameter: string): string =>
+			INVITATION.replaceAll('TZID=W. Europe Standard Time', `TZID=${parameter}`).replaceAll(
+				'TZID:W. Europe Standard Time',
+				`TZID:${property}`,
+			);
+		const nine = zonedToUtc({ year: 2026, month: 3, day: 25, hour: 9 }, BERLIN);
+		const escaped = parseIcs(named('Example\\, Zone', '"Example, Zone"'));
+		expect(escaped.events[0]).toMatchObject({ zone: BERLIN, start: nine });
+		expect(escaped.unsupported).not.toContainEqual(expect.stringContaining('Time zone'));
+		// A parameter written with the same backslash as the property still finds it.
+		expect(parseIcs(named('Example\\, Zone', '"Example\\, Zone"')).events[0]).toMatchObject({
+			zone: BERLIN,
+			start: nine,
+		});
+	});
+
 	it('reads BYSETPOS in a zone rule: -1 is the last Sunday, not the first', () => {
 		// Twelve hours ahead, thirteen from the last Sunday of September to the first of April.
 		const zone = (daylight: string): string[] => [
@@ -897,5 +915,116 @@ describe('what is not an event', () => {
 		expect(unsupported).toEqual([
 			'The zone "Mars/Olympus" is unknown: floating times and dates were read in UTC',
 		]);
+	});
+});
+
+describe('the ids of imported events in a calendar', () => {
+	const at = 'DTSTART:20261020T090000Z';
+	const mine: CalendarEvent = {
+		id: 'm1',
+		title: 'Mine',
+		description: '',
+		zone: 'UTC',
+		start: Date.UTC(2026, 9, 20, 9),
+		end: Date.UTC(2026, 9, 20, 10),
+		repeat: 'none',
+	};
+	const options = { prodId: '-//Example//Test//EN', uidDomain: 'example.com' };
+	/** A calendar that saves each imported event by its id, as the mail client does. */
+	const holding = (...held: CalendarEvent[]) => {
+		const events = new Map(held.map((event) => [event.id, event]));
+		const load = (text: string) => {
+			const read = parseIcs(text, {
+				uidDomain: 'example.com',
+				taken: (id) => events.has(id),
+				stored: (id) => events.get(id),
+			});
+			for (const event of read.events) events.set(event.id, event);
+			return read.events.map((event) => [event.id, event.uid, event.title]);
+		};
+		return { events, load, add: (...lines: string[][]) => load(calendar(...lines.flat())) };
+	};
+
+	it('never replaces an event without a UID with one whose UID is its id', () => {
+		const held = holding();
+		expect(held.add(vevent(at, 'SUMMARY:First'))).toEqual([['event', undefined, 'First']]);
+		expect(held.add(vevent('UID:event', at, 'SUMMARY:Unrelated'))).toEqual([
+			['event-2', 'event', 'Unrelated'],
+		]);
+		// The same UID again is the same event again.
+		expect(held.add(vevent('UID:event', at, 'SUMMARY:Unrelated, moved'))).toEqual([
+			['event-2', 'event', 'Unrelated, moved'],
+		]);
+		expect(held.events.get('event')?.title).toBe('First');
+	});
+
+	it('tells an event this app wrote from another with the same id', () => {
+		const held = holding(mine, { ...mine, id: 'x', uid: 'x', title: 'Theirs' });
+		// `m1@example.com` is how this app writes `m1`; a bare `m1` is another program's event.
+		expect(held.add(vevent('UID:m1', at, 'SUMMARY:Elsewhere'))).toEqual([
+			['m1-2', 'm1', 'Elsewhere'],
+		]);
+		expect(held.add(vevent('UID:m1@example.com', at, 'SUMMARY:Mine, moved'))).toEqual([
+			['m1', undefined, 'Mine, moved'],
+		]);
+		// Of this app's domain but at the id of another UID: it keeps its UID, so it stays itself.
+		expect(held.add(vevent('UID:x@example.com', at, 'SUMMARY:Copied'))).toEqual([
+			['x-2', 'x@example.com', 'Copied'],
+		]);
+		expect(held.add(vevent('UID:x', at, 'SUMMARY:Theirs, moved'))).toEqual([
+			['x', 'x', 'Theirs, moved'],
+		]);
+		// Written out and read back, every event is the one it was.
+		const before = [...held.events.values()];
+		held.load(eventsToIcs(before, options));
+		expect([...held.events.values()]).toEqual(before);
+	});
+
+	it('gives an occurrence imported on its own an id no other event holds', () => {
+		const lookalike = {
+			...mine,
+			id: 'lonely-20261105T090000Z',
+			uid: 'lonely-20261105T090000Z',
+			title: 'Look-alike',
+		};
+		const held = holding(lookalike);
+		const occurrence = vevent(
+			'UID:lonely',
+			'SUMMARY:One time',
+			'RECURRENCE-ID:20261105T090000Z',
+			'DTSTART:20261105T100000Z',
+		);
+		const moved = [
+			['lonely-20261105T090000Z-2', 'lonely-20261105T090000Z@example.com', 'One time'],
+		];
+		expect(held.add(occurrence)).toEqual(moved);
+		expect(held.add(occurrence)).toEqual(moved);
+		expect(held.events.get(lookalike.id)).toEqual(lookalike);
+		const before = [...held.events.values()];
+		held.load(eventsToIcs(before, options));
+		expect([...held.events.values()]).toEqual(before);
+	});
+
+	it('adds a changed occurrence to the series it holds at another id', () => {
+		const held = holding({ ...mine, id: 'r' });
+		expect(held.add(vevent('UID:r', 'SUMMARY:Review', at, 'RRULE:FREQ=DAILY;COUNT=5'))).toEqual([
+			['r-2', 'r', 'Review'],
+		]);
+		const change = vevent(
+			'UID:r',
+			'SUMMARY:Review',
+			'RECURRENCE-ID:20261021T090000Z',
+			'DTSTART:20261021T140000Z',
+		);
+		expect(held.add(change)).toEqual([['r-2', 'r', 'Review']]);
+		expect(held.events.get('r-2')?.exceptions).toEqual([
+			{
+				originalStart: Date.UTC(2026, 9, 21, 9),
+				cancelled: false,
+				start: Date.UTC(2026, 9, 21, 14),
+				end: Date.UTC(2026, 9, 21, 14),
+			},
+		]);
+		expect(held.events.get('r')).toEqual({ ...mine, id: 'r' });
 	});
 });
