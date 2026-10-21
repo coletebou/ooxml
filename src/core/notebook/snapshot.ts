@@ -2,7 +2,13 @@
 // visible is captured (soft-deleted sections and pages are left out); text is ProseMirror-shaped
 // JSON, ink keeps its points, pictures and files carry their bytes. New code.
 import * as Y from 'yjs';
-import type { Container, InkStroke, PageEntry, SectionEntry } from './model';
+import {
+	type Container,
+	type InkStroke,
+	MAX_TEXT_LENGTH,
+	type PageEntry,
+	type SectionEntry,
+} from './model';
 import { addFile, addImage, addStroke, addText, containerBytes } from './canvas';
 import {
 	deletedSectionIds,
@@ -20,6 +26,8 @@ export interface SnapshotContainer {
 	container: Container;
 	/** Text containers only. */
 	content?: RichNode[];
+	/** The text box holds more than MAX_TEXT_LENGTH (a collaborator's edits can merge past it). */
+	overLimit?: boolean;
 	/** Pictures and files only. */
 	bytes?: Uint8Array;
 }
@@ -50,7 +58,10 @@ export function readSnapshot(ctx: Pick<NotebookEditContext, 'types'>): NotebookS
 			if (container.kind === 'text') {
 				const map = entityMap(types.containers, container.id);
 				const fragment = map && containerFragment(map);
-				return { container, content: fragment ? readRichText(fragment) : [] };
+				const content = fragment ? readRichText(fragment) : [];
+				return fragment && textLength(fragment) > MAX_TEXT_LENGTH
+					? { container, content, overLimit: true }
+					: { container, content };
 			}
 			const bytes = containerBytes(ctx, container.id);
 			return bytes ? { container, bytes } : { container };
@@ -118,4 +129,16 @@ export function writeSnapshot(ctx: NotebookEditContext, snapshot: NotebookSnapsh
 				skipped++;
 	}, ctx.origin);
 	return skipped;
+}
+
+/** All the text in a fragment, counted without building it. */
+function textLength(fragment: Y.XmlFragment): number {
+	let length = 0;
+	const stack: unknown[] = fragment.toArray();
+	while (stack.length) {
+		const item = stack.pop();
+		if (item instanceof Y.XmlText) length += item.length;
+		else if (item instanceof Y.XmlElement) stack.push(...item.toArray());
+	}
+	return length;
 }

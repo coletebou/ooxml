@@ -6,6 +6,7 @@ import { NotebookArchiveError, exportNotebookArchive, importNotebookArchive } fr
 import { addFile, addImage, addStroke, addText } from './canvas';
 import { NOTEBOOK_ORIGIN, NOTEBOOK_SEED_ORIGIN, notebookTypes } from './schema';
 import { readSnapshot, writeSnapshot } from './snapshot';
+import { MAX_INK_POINTS } from './ink';
 import { type NotebookEditContext, addPage, addSection, deletePage, writeMeta } from './structure';
 
 const context = (origin: unknown = NOTEBOOK_ORIGIN, client = 'a'): NotebookEditContext => ({
@@ -222,5 +223,42 @@ describe('notebook archive', () => {
 			strokes: many,
 		} as never;
 		await expect(exportNotebookArchive(snapshot)).rejects.toThrow(NotebookArchiveError);
+	});
+
+	it('exports only what it can import again: size, text and stroke length', async () => {
+		const base = { name: 'N', color: '#202020', created: 0, sections: [], pages: [], strokes: [] };
+		const container = {
+			id: 'c1',
+			pageId: 'p1',
+			kind: 'file',
+			x: 0,
+			y: 0,
+			width: 1,
+			height: 1,
+			z: 0,
+		};
+		const huge = { length: 600 * 1024 * 1024 } as unknown as Uint8Array;
+		await expect(
+			exportNotebookArchive({ ...base, containers: [{ container, bytes: huge }] } as never),
+		).rejects.toThrow(NotebookArchiveError);
+		await expect(
+			exportNotebookArchive({
+				...base,
+				containers: [{ container: { ...container, kind: 'text' }, content: [], overLimit: true }],
+			} as never),
+		).rejects.toThrow(NotebookArchiveError);
+		const zip = new JSZip();
+		const points = Array.from({ length: (MAX_INK_POINTS + 1) * 3 }, () => 1);
+		zip.file(
+			'notebook.json',
+			JSON.stringify({
+				format: 'ooxml-notebook',
+				version: 1,
+				ink: [{ id: 's1', pageId: 'p1', points }],
+			}),
+		);
+		await expect(
+			importNotebookArchive(await zip.generateAsync({ type: 'uint8array' })),
+		).rejects.toThrow(NotebookArchiveError);
 	});
 });

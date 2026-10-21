@@ -20,9 +20,12 @@ export interface Rect {
 export function encodeInkPoints(points: readonly number[]): number[] {
 	const out: number[] = [];
 	const n = Math.min(Math.floor(points.length / 3), MAX_INK_POINTS);
+	// Clamped as the reader checks, so what is stored can always be drawn, exported and erased.
+	const clamp = (v: number): number =>
+		Number.isFinite(v) ? Math.min(MAX_COORDINATE, Math.max(-MAX_COORDINATE, v)) : 0;
 	for (let i = 0; i < n; i++) {
-		const x = points[i * 3] ?? 0;
-		const y = points[i * 3 + 1] ?? 0;
+		const x = clamp(points[i * 3] ?? 0);
+		const y = clamp(points[i * 3 + 1] ?? 0);
 		const p = points[i * 3 + 2] ?? 0.5;
 		out.push(Math.round(x * XY), Math.round(y * XY), Math.round(Math.min(1, Math.max(0, p)) * P));
 	}

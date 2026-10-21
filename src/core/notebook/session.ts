@@ -141,7 +141,7 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 
 	const undo = new Y.UndoManager(
 		[types.meta, types.sections, types.pages, types.containers, types.ink],
-		{ trackedOrigins: new Set([NOTEBOOK_ORIGIN]), captureTimeout: 500 },
+		{ trackedOrigins: new Set([NOTEBOOK_ORIGIN]), captureTimeout: 500, deleteFilter: keepFilled },
 	);
 	undo.on('stack-item-added', options.onChange);
 	undo.on('stack-item-popped', options.onChange);
@@ -174,4 +174,17 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 			doc.destroy();
 		},
 	};
+}
+
+const PROTECTED = new Set(['paragraph', 'heading']);
+/**
+ * What undo may delete: not a paragraph or text that still holds something, as y-prosemirror's own
+ * undo does, so undoing a new paragraph keeps the text a collaborator typed into it.
+ */
+export function keepFilled(item: Y.Item): boolean {
+	if (!(item.content instanceof Y.ContentType)) return true;
+	const type = item.content.type;
+	const kept =
+		type instanceof Y.XmlText || (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName));
+	return !kept || type.length === 0;
 }

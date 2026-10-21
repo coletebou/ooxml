@@ -19,9 +19,11 @@ import {
 	inkBounds,
 	inkHits,
 	inkOutline,
+	MAX_INK_POINTS,
 	simplifyInk,
 	strokesBounds,
 } from './ink';
+import { MAX_COORDINATE } from './model';
 import { readContainers, readStrokes } from './read';
 import { readingOrder } from './reading-order';
 import { plainText, readRichText } from './rich-text';
@@ -190,5 +192,45 @@ describe('reading order', () => {
 		}
 		// A tap that reports the same point twice is still a dot.
 		expect(inkOutline([10, 0, 0.5, 10, 0, 0.5], 4)).toMatch(/a2 2 0 1 0/u);
+	});
+});
+
+describe('ink storage', () => {
+	it('splits a long stroke, clamps far points and keeps the drawing order across sessions', () => {
+		const doc = new Y.Doc();
+		const types = notebookTypes(doc);
+		const ctx = (prefix: string, start: number) => {
+			let n = start;
+			const edit: NotebookEditContext = {
+				types,
+				newId: () => `${prefix}-${n++}`,
+				now: () => 0,
+				origin: NOTEBOOK_ORIGIN,
+			};
+			return edit;
+		};
+		const first = ctx('ink-a', 9);
+		const points: number[] = [];
+		for (let i = 0; i < MAX_INK_POINTS + 1000; i++) points.push(i % 2 ? i : -i, i, 0.5);
+		const page = 'p1';
+		addStroke(first, page, { tool: 'pen', color: '#000000', width: 2, points });
+		expect(readStrokes(types, page)).toHaveLength(2);
+		addStroke(first, page, {
+			tool: 'pen',
+			color: '#000000',
+			width: 2,
+			points: [0, 0, 0.5, 1e9, 10, 0.5],
+		});
+		// A later session's counter starts low again; its stroke still comes last.
+		const later = addStroke(ctx('ink-b', 1), page, {
+			tool: 'pen',
+			color: '#ff0000',
+			width: 2,
+			points: [5, 5, 0.5, 9, 9, 0.5],
+		});
+		const strokes = readStrokes(types, page);
+		expect(strokes).toHaveLength(4);
+		expect(strokes.at(-1)!.id).toBe(later);
+		expect(strokes[2]!.points[3]).toBe(MAX_COORDINATE);
 	});
 });

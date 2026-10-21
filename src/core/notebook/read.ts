@@ -212,12 +212,20 @@ function readStroke(id: string, value: unknown): InkStroke | undefined {
 /** Ink strokes of one page (or all pages), oldest first. */
 export function readStrokes(types: NotebookTypes, pageId?: string): InkStroke[] {
 	const out: InkStroke[] = [];
+	const order = new Map<string, number>();
 	types.ink.forEach((value, id) => {
 		if (pageId !== undefined && (value as { page?: unknown } | null)?.page !== pageId) return;
 		const stroke = readStroke(id, value);
-		if (stroke) out.push(stroke);
+		if (!stroke) return;
+		out.push(stroke);
+		const seq = (value as { seq?: unknown }).seq;
+		if (typeof seq === 'number' && Number.isFinite(seq)) order.set(id, seq);
 	});
-	return out.sort((a, b) => strokeSeq(a.id) - strokeSeq(b.id) || (a.id < b.id ? -1 : 1));
+	// The stored drawing order first (strokes from before it existed come first, by id counter).
+	const rank = (s: InkStroke): number => order.get(s.id) ?? 0;
+	return out.sort(
+		(a, b) => rank(a) - rank(b) || strokeSeq(a.id) - strokeSeq(b.id) || (a.id < b.id ? -1 : 1),
+	);
 }
 
 // Stroke ids end in a per-client counter (`createIdGenerator`); within one client that is the

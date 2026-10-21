@@ -16,7 +16,7 @@ import {
 	sanitizeLine,
 	sanitizeMime,
 } from './model';
-import { encodeInkPoints, simplifyInk } from './ink';
+import { MAX_INK_POINTS, encodeInkPoints, simplifyInk } from './ink';
 import { type RichNode, writeRichText } from './rich-text';
 import { NOTEBOOK_ASSETS, entityMap } from './schema';
 import type { NotebookEditContext } from './structure';
@@ -210,19 +210,34 @@ export interface StrokeInput {
 
 /** Add an ink stroke; returns its id, or `''` without enough points. */
 export function addStroke(ctx: NotebookEditContext, pageId: string, input: StrokeInput): string {
-	const points = encodeInkPoints(simplifyInk(input.points));
-	if (!isEntityId(pageId) || points.length < 3) return '';
-	const id = ctx.newId('ink');
-	transact(ctx, () =>
-		ctx.types.ink.set(id, {
-			page: pageId,
-			tool: input.tool === 'highlighter' ? 'highlighter' : 'pen',
-			color: sanitizeHexColor(input.color, '#202020'),
-			width: clampNumber(input.width, 0.5, 64, 2),
-			pts: points,
-		}),
-	);
-	return id;
+	const all = simplifyInk(input.points);
+	if (!isEntityId(pageId) || all.length < 3) return '';
+	// The drawing order is stored: ids end in a per-client counter, which says nothing across
+	// sessions or peers. Later strokes get a higher number than any on the page.
+	let seq = 0;
+	ctx.types.ink.forEach((value) => {
+		const raw = value as { page?: unknown; seq?: unknown } | null;
+		if (raw?.page === pageId && typeof raw.seq === 'number') seq = Math.max(seq, raw.seq);
+	});
+	let first = '';
+	transact(ctx, () => {
+		// A stroke longer than one stored stroke holds becomes several, so none of it is lost.
+		for (let at = 0; at < all.length; at += MAX_INK_POINTS * 3) {
+			const points = encodeInkPoints(all.slice(at, at + MAX_INK_POINTS * 3));
+			if (points.length < 3) continue;
+			const id = ctx.newId('ink');
+			first ||= id;
+			ctx.types.ink.set(id, {
+				page: pageId,
+				tool: input.tool === 'highlighter' ? 'highlighter' : 'pen',
+				color: sanitizeHexColor(input.color, '#202020'),
+				width: clampNumber(input.width, 0.5, 64, 2),
+				pts: points,
+				seq: ++seq,
+			});
+		}
+	});
+	return first;
 }
 
 /** Erase whole strokes. */

@@ -3,6 +3,7 @@
 // zip guards (input size, entry count, inflated size, safe part names), and every value is
 // re-validated with the same sanitisers the shared document uses. New code.
 import JSZip from 'jszip';
+import { MAX_INK_POINTS } from './ink';
 import { openZip } from '../opc/zip-limits';
 import {
 	type Container,
@@ -29,6 +30,8 @@ import type { NotebookSnapshot, SnapshotContainer } from './snapshot';
 export const NOTEBOOK_ARCHIVE_FORMAT = 'ooxml-notebook';
 export const NOTEBOOK_ARCHIVE_VERSION = 1;
 const MANIFEST = 'notebook.json';
+/** The inflated size an archive may have: export refuses a notebook that would not import. */
+const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 /** Sections, pages, containers or strokes an archive holds at most (each); more is refused. */
 const MAX_ITEMS = 500_000;
 
@@ -56,6 +59,11 @@ export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise
 	const counts = [snapshot.sections, snapshot.pages, snapshot.containers, snapshot.strokes];
 	if (counts.some((list) => list.length > MAX_ITEMS))
 		throw new NotebookArchiveError('This notebook holds more items than an archive takes');
+	const media = snapshot.containers.reduce((sum, c) => sum + (c.bytes?.length ?? 0), 0);
+	if (media > MAX_ARCHIVE_BYTES)
+		throw new NotebookArchiveError('This notebook is larger than an archive takes');
+	if (snapshot.containers.some((c) => c.overLimit))
+		throw new NotebookArchiveError('A text box holds more text than an archive takes');
 	const zip = new JSZip();
 	const containers = snapshot.containers.map(({ container, content, bytes }) => {
 		const media = bytes ? mediaName(container) : undefined;
@@ -104,7 +112,7 @@ export async function importNotebookArchive(
 	// stay within a budget: a small archive that names one entry thousands of times stays small.
 	const media = new Map<string, Uint8Array | null>();
 	let budget = options.maxMediaBytes ?? 512 * 1024 * 1024;
-	const zip = await openZip(bytes, { label: 'Notebook archive', maxTotalBytes: 512 * 1024 * 1024 });
+	const zip = await openZip(bytes, { label: 'Notebook archive', maxTotalBytes: MAX_ARCHIVE_BYTES });
 	const entry = zip.file(MANIFEST);
 	if (!entry) throw new NotebookArchiveError('Not a notebook archive: notebook.json is missing');
 	let manifest: Raw;
@@ -185,7 +193,12 @@ export async function importNotebookArchive(
 		containers.push({ container, bytes: data });
 	}
 	const strokes = records(manifest.ink)
-		.filter((s) => isEntityId(s.id) && isEntityId(s.pageId) && Array.isArray(s.points))
+		.filter((s) => {
+			if (!isEntityId(s.id) || !isEntityId(s.pageId) || !Array.isArray(s.points)) return false;
+			if (s.points.length > MAX_INK_POINTS * 3)
+				throw new NotebookArchiveError('This archive has a stroke longer than a notebook holds');
+			return true;
+		})
 		.map((s): InkStroke => ({
 			id: s.id as string,
 			pageId: s.pageId as string,
