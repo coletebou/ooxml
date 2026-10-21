@@ -160,6 +160,34 @@ describe('readEmail limits', () => {
 });
 
 describe('readEmail on other structures and malformed input', () => {
+	it('reads the HTML a multipart/related `start` names, though an image comes first', () => {
+		const email = readEmail(
+			crlf([
+				'Subject: logo',
+				'Content-Type: multipart/related; boundary=r; type="text/html";',
+				' start="<root@example.com>"',
+				'',
+				'--r',
+				'Content-Type: image/png',
+				'Content-ID: <logo@example.com>',
+				'Content-Transfer-Encoding: base64',
+				'',
+				'iVBORw0KGgo=',
+				'--r',
+				'Content-Type: text/html; charset=utf-8',
+				'Content-ID: <root@example.com>',
+				'',
+				'<p>Hello <img src="cid:logo@example.com"></p>',
+				'--r--',
+				'',
+			]),
+		);
+		expect(email.html).toBe('<p>Hello <img src="cid:logo@example.com"></p>');
+		expect(email.attachments.map((a) => [a.type, a.cid])).toEqual([
+			['image/png', 'logo@example.com'],
+		]);
+	});
+
 	it('gives the parts of multipart/digest the default type message/rfc822', () => {
 		const email = readEmail(
 			crlf([

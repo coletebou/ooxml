@@ -1,5 +1,6 @@
 // Which parts of a message are its text body, its HTML body and its attachments: the algorithm of
 // RFC 8621 section 4.1.4, and the text and HTML a reader shows from them. New code.
+import { parseContentId } from './addresses';
 import { decodeCharset } from './charset';
 import type { MimePart } from './types';
 
@@ -20,7 +21,20 @@ export function isInlineMediaType(type: string): boolean {
 	return type.startsWith('image/') || type.startsWith('audio/') || type.startsWith('video/');
 }
 
-/** RFC 8621 section 4.1.4 `parseStructure`, statement for statement but for one fix below. */
+/**
+ * The root of a multipart/related: the part its `start` parameter names by Content-ID, else the
+ * first (RFC 2387 3.2). RFC 8621's algorithm always takes the first.
+ */
+function relatedRoot(related: MimePart): number {
+	const start = parseContentId(related.params.start);
+	const index = start === null ? -1 : related.parts.findIndex((part) => part.cid === start);
+	return Math.max(0, index);
+}
+
+/**
+ * RFC 8621 section 4.1.4 `parseStructure`, statement for statement but for one fix below and
+ * `root`: the part of a multipart/related its `start` names (RFC 2387), where the RFC has 0.
+ */
 function parseStructure(
 	parts: readonly MimePart[],
 	multipartType: string,
@@ -28,6 +42,7 @@ function parseStructure(
 	htmlBody: MimePart[] | null,
 	textBody: MimePart[] | null,
 	attachments: MimePart[],
+	root = 0,
 ): void {
 	const textLength = textBody ? textBody.length : -1;
 	const htmlLength = htmlBody ? htmlBody.length : -1;
@@ -36,7 +51,7 @@ function parseStructure(
 		const isInline =
 			part.disposition !== 'attachment' &&
 			(part.type === 'text/plain' || part.type === 'text/html' || isInlineMediaType(part.type)) &&
-			(i === 0 || (multipartType !== 'related' && (isInlineMediaType(part.type) || !part.name)));
+			(i === root || (multipartType !== 'related' && (isInlineMediaType(part.type) || !part.name)));
 		if (isMultipart) {
 			const subMultiType = part.type.slice('multipart/'.length);
 			parseStructure(
@@ -46,6 +61,7 @@ function parseStructure(
 				htmlBody,
 				textBody,
 				attachments,
+				subMultiType === 'related' ? relatedRoot(part) : 0,
 			);
 		} else if (isInline) {
 			// One change from the RFC: where an alternative higher up already dropped the body a part

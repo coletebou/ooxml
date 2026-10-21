@@ -114,6 +114,24 @@ describe('bodyStructure (RFC 8621 section 4.1.4)', () => {
 		const extra = textPart('text/plain', 'x');
 		expect(bodyStructure(multi('related', html, extra)).attachments).toEqual([extra]);
 	});
+
+	it('takes the part `start` names as the root of multipart/related (RFC 2387)', () => {
+		const image = part('image/png', { cid: 'logo@example.com' });
+		const html = textPart('text/html', '<p><img src="cid:logo@example.com"></p>', {
+			cid: 'root@example.com',
+		});
+		const related = (start: string, ...parts: MimePart[]): MimePart =>
+			part('multipart/related', { parts, params: { start } });
+		expect(bodyStructure(related('<root@example.com>', image, html))).toEqual({
+			textBody: [html],
+			htmlBody: [html],
+			attachments: [image],
+		});
+		// Written without the angle brackets, or naming no part (then the first is the root).
+		expect(bodyStructure(related('root@example.com', image, html)).htmlBody).toEqual([html]);
+		expect(bodyStructure(related('<other@example.com>', html, image)).htmlBody).toEqual([html]);
+		expect(bodyStructure(related('<other@example.com>', image, html)).attachments).toEqual([html]);
+	});
 });
 
 describe('messageBodies', () => {
