@@ -78,17 +78,20 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 			return { ...email, mailboxIds: [...boxes] };
 		});
 
-	/** The patches that undo `patches`, from the messages' current mailboxes. */
-	const inverse = (patches: Record<string, EmailPatch>): Record<string, EmailPatch> =>
+	/**
+	 * The patches that undo `patches`: each mailbox they touch set back to whether the message is in
+	 * it now, so a message that was in the target already stays there.
+	 */
+	const restorePatches = (patches: Record<string, EmailPatch>): Record<string, EmailPatch> =>
 		Object.fromEntries(
-			Object.entries(patches).map(([id, patch]) => [
-				id,
-				{
-					mailboxIds: Object.fromEntries(
-						Object.entries(patch.mailboxIds ?? {}).map(([box, on]) => [box, !on]),
-					),
-				},
-			]),
+			Object.entries(patches).map(([id, patch]) => {
+				const boxes = new Set(core.emails.get(id)?.mailboxIds);
+				const touched = Object.keys(patch.mailboxIds ?? {});
+				return [
+					id,
+					{ mailboxIds: Object.fromEntries(touched.map((box) => [box, boxes.has(box)])) },
+				];
+			}),
 		);
 
 	const hideMoved = (patches: Record<string, EmailPatch>): void => {
@@ -112,6 +115,7 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		const patches = movePatches(core.emailIdsOf(ids), mailboxId);
 		const count = Object.keys(patches).length;
 		if (!count) return;
+		const restore = restorePatches(patches);
 		const listBefore = core.listIds;
 		const revert = applyPatches(patches);
 		hideMoved(patches);
@@ -130,13 +134,16 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 			count,
 			...(target ? { target } : {}),
 			undo: async () => {
+				const putBack = applyPatches(restore);
 				try {
-					await core.transport.update(inverse(patches));
-					await list.loadList();
-					core.notice({ kind: 'done', action: 'undone', count });
+					await core.transport.update(restore);
 				} catch (error) {
+					putBack();
 					core.fail('move', error);
+					return;
 				}
+				await list.loadList();
+				core.notice({ kind: 'done', action: 'undone', count });
 			},
 		};
 		core.notice(notice);
@@ -181,14 +188,20 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		archive: (ids) => moveToRole('archive', ids, 'archived'),
 		markJunk: (ids) => moveToRole('junk', ids, 'junk'),
 		async remove(ids) {
-			const trash = core.mailboxByRole('trash');
 			const targets = core.emailIdsOf(ids);
+			if (!targets.length) return;
+			// Roles are optional (RFC 8621): with no Trash to undo from, refuse rather than destroy.
+			const trash = core.mailboxByRole('trash');
+			if (!trash) {
+				core.fail('delete', new MailTransportError('unsupported', 'No trash folder.'));
+				return;
+			}
 			const inTrash = targets.filter((id) => {
 				const boxes = core.emails.get(id)?.mailboxIds ?? [];
-				return !trash || (boxes.length === 1 && boxes[0] === trash.id);
+				return boxes.length === 1 && boxes[0] === trash.id;
 			});
 			const elsewhere = targets.filter((id) => !inTrash.includes(id));
-			if (elsewhere.length) await moveToRole('trash', elsewhere, 'deleted');
+			if (elsewhere.length) await move(trash.id, elsewhere, 'deleted');
 			if (!inTrash.length) return;
 			core.listIds = core.listIds.filter((id) => !inTrash.includes(id));
 			core.rebuild();

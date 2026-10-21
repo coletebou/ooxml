@@ -25,6 +25,8 @@ export interface PeopleLoader extends PeopleActions {
 }
 
 const PROD_ID = '-//ooxml//Mail//EN';
+/** The domain of the UIDs exported events get, so importing the file again finds the same events. */
+const UID_DOMAIN = 'ooxml-mail.invalid';
 
 export function createPeople(core: ClientCore): PeopleLoader {
 	const contacts = core.options.contacts;
@@ -98,7 +100,10 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			}),
 		async importIcs(text, zone) {
 			if (!calendar) return 0;
-			const { events, unsupported } = parseIcs(text, zone ? { zone } : {});
+			const { events, unsupported } = parseIcs(text, {
+				uidDomain: UID_DOMAIN,
+				...(zone ? { zone } : {}),
+			});
 			let count = 0;
 			await guard('calendar', async () => {
 				for (const event of events) {
@@ -116,7 +121,7 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			const wanted = ids ? new Set(ids) : null;
 			return eventsToIcs(
 				core.state.events.filter((event) => !wanted || wanted.has(event.id)),
-				{ prodId: PROD_ID, uidDomain: 'ooxml-mail.invalid', now: core.now() },
+				{ prodId: PROD_ID, uidDomain: UID_DOMAIN, now: core.now() },
 			);
 		},
 	};

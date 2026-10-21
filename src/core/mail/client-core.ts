@@ -1,7 +1,7 @@
 // The mail client's internal state holder, shared by the modules that implement its actions
-// (`client.ts`, `client-mutations.ts`, `client-compose.ts`, `client-people.ts`). It owns the caches
-// (summaries, loaded bodies), rebuilds the derived state when they change and coalesces
-// notifications per tick, like the Teams client. Not exported from the area. New code.
+// (`client.ts`, `client-mutations.ts`, `client-compose.ts`, `client-files.ts`, `client-people.ts`).
+// It owns the caches (summaries, loaded bodies), rebuilds the derived state when they change and
+// coalesces notifications per tick, like the Teams client. Not exported from the area. New code.
 import { Emitter } from '../collab/emitter';
 import type { MailAction, MailClientOptions, MailNotice, MailState, Targets } from './client-types';
 import { conversationView, mailboxViews, openConversationView } from './client-views';

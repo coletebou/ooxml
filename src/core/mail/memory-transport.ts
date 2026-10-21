@@ -76,11 +76,20 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 	const listeners = new Set<(change: MailChange) => void>();
 	let sequence = 0;
 	let closed = false;
-	const nextId = (prefix: string): string => `${prefix}${(++sequence).toString(36)}`;
+	/** The next id in the transport's numbering that is not taken: seeds may use the same names. */
+	const nextId = (prefix: string, taken: { has(id: string): boolean }): string => {
+		let id: string;
+		do {
+			id = `${prefix}${(++sequence).toString(36)}`;
+		} while (taken.has(id));
+		return id;
+	};
 	for (const seed of options.mailboxes ?? DEFAULT_MAILBOXES)
 		mailboxes.set(seed.id, mailboxOf(seed));
-	for (const seed of options.messages ?? []) {
-		const id = seed.id ?? nextId('m');
+	const seeds = options.messages ?? [];
+	const named = new Set(seeds.flatMap((seed) => (seed.id === undefined ? [] : [seed.id])));
+	for (const seed of seeds) {
+		const id = seed.id ?? nextId('m', named);
 		messages.set(id, messageFromSeed(seed, id, blobs));
 	}
 	const own = new Set(
@@ -160,7 +169,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		async createMailbox(input) {
 			await settle();
 			const mailbox = mailboxOf({
-				id: nextId('f'),
+				id: nextId('f', mailboxes),
 				name: input.name,
 				parentId: input.parentId ?? null,
 				role: input.role ?? null,
@@ -244,7 +253,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		async saveDraft(draft) {
 			await settle();
 			const from = senderOf(draft);
-			const id = nextId('d');
+			const id = nextId('d', messages);
 			messages.set(
 				id,
 				messageFromDraft(draft, id, {
@@ -264,7 +273,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			if (!recipients.length)
 				throw new MailTransportError('invalid', 'The message has no recipients.');
 			const from = senderOf(draft);
-			const id = nextId('s');
+			const id = nextId('s', messages);
 			const sent = messageFromDraft(draft, id, {
 				mailboxId: byRole('sent').id,
 				sent: true,
@@ -275,7 +284,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			messages.set(id, sent);
 			const created = [id];
 			if (recipients.some((address) => own.has(address.email.toLowerCase()))) {
-				const copy = nextId('m');
+				const copy = nextId('m', messages);
 				messages.set(copy, {
 					...sent,
 					id: copy,
@@ -297,7 +306,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		},
 		async upload(bytes, type) {
 			await settle();
-			const blobId = nextId('b');
+			const blobId = nextId('b', blobs);
 			blobs.set(blobId, { bytes: bytes.slice(), type });
 			return { blobId, type, size: bytes.length };
 		},
@@ -313,7 +322,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			await settle();
 			if (!mailboxes.has(mailboxId))
 				throw new MailTransportError('notFound', `No mailbox ${mailboxId}.`);
-			const id = nextId('i');
+			const id = nextId('i', messages);
 			const imported = messageFromRaw(bytes, id, { mailboxId, now: now(), blobs });
 			messages.set(id, { ...imported, keywords: { [SEEN]: true } });
 			emailsChanged([id], [], []);
@@ -328,7 +337,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			listeners.clear();
 		},
 		deliver(seed) {
-			const id = seed.id ?? nextId('m');
+			const id = seed.id ?? nextId('m', messages);
 			messages.set(id, messageFromSeed(seed, id, blobs));
 			emailsChanged([id], [], []);
 			return id;

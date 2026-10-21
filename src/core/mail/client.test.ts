@@ -1,8 +1,9 @@
 import { createMailClient } from './client';
-import type { MailClient, MailNotice, MailState } from './client-types';
+import type { MailNotice } from './client-types';
 import { createMemoryContactStore } from './contacts';
 import { createMemoryTransport, type MemoryTransport } from './memory-transport';
 import type { SeedMessage } from './memory-messages';
+import { until } from './test-support/client';
 
 const T0 = Date.UTC(2026, 0, 5, 9, 0, 0);
 const ada = { name: 'Ada', email: 'ada@example.com' };
@@ -44,14 +45,6 @@ function seed(): SeedMessage[] {
 			receivedAt: T0 - 60_000,
 		},
 	];
-}
-
-async function until(client: MailClient, test: (state: MailState) => boolean): Promise<MailState> {
-	for (let i = 0; i < 200; i++) {
-		if (test(client.getState())) return client.getState();
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-	throw new Error(`state never matched: ${JSON.stringify(client.getState().status)}`);
 }
 
 function setup(options: { timers?: boolean } = {}) {

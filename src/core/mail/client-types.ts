@@ -211,9 +211,14 @@ export interface MailClient {
 	createMailbox(name: string, parentId?: string | null): Promise<void>;
 	renameMailbox(id: string, name: string): Promise<void>;
 	deleteMailbox(id: string): Promise<void>;
-	compose(mode: ComposeMode, emailId?: string): Promise<void>;
-	/** Reopen a saved draft from Drafts in the compose window. */
-	editDraft(emailId: string): Promise<void>;
+	/**
+	 * Open the compose window on a new message, or an answer to or forward of `emailId`. False when
+	 * it did not open: the message could not be read, or the open draft could not be saved (that
+	 * window stays open, its status saying why).
+	 */
+	compose(mode: ComposeMode, emailId?: string): Promise<boolean>;
+	/** Reopen a saved draft from Drafts in the compose window; false as for `compose`. */
+	editDraft(emailId: string): Promise<boolean>;
 	updateDraft(patch: Partial<Omit<Draft, 'id' | 'attachments'>>): void;
 	attach(files: readonly FileInput[]): Promise<void>;
 	detach(blobId: string): void;
@@ -221,8 +226,12 @@ export interface MailClient {
 	/** True when the message was handed to the server. */
 	send(): Promise<boolean>;
 	discardDraft(): Promise<void>;
-	/** Close the compose window, saving a draft that has anything in it. */
-	closeCompose(): Promise<void>;
+	/**
+	 * Close the compose window once the server holds its last edit, saving a draft that has anything
+	 * in it. A draft that cannot be saved keeps the window open, its status saying why, and the
+	 * result is false.
+	 */
+	closeCompose(): Promise<boolean>;
 	download(attachment: MailAttachment): Promise<Uint8Array>;
 	exportEml(emailId: string): Promise<FileInput>;
 	importEml(files: readonly FileInput[], mailboxId?: string): Promise<void>;

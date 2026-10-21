@@ -4,6 +4,7 @@
 // lines. DOM-free: the transport, the stores and the timers are injected. New code.
 import { ClientCore, errorCode } from './client-core';
 import { createCompose } from './client-compose';
+import { createFileActions } from './client-files';
 import { createListLoader } from './client-list';
 import { createMutations } from './client-mutations';
 import { createPeople } from './client-people';
@@ -120,7 +121,8 @@ export function createMailClient(options: MailClientOptions): MailClient {
 			core.patch({ open: null });
 		},
 		...createMutations(core, list),
-		...createCompose(core, list),
+		...createCompose(core),
+		...createFileActions(core, list),
 		...people,
 		destroy() {
 			list.stop();

@@ -1,4 +1,5 @@
 import { createDemoSeed } from './demo-seed';
+import { DEFAULT_MAILBOXES } from './memory-messages';
 import { createMemoryTransport } from './memory-transport';
 import type { MailChange } from './transport';
 
@@ -61,6 +62,47 @@ describe('createMemoryTransport', () => {
 		await expect(
 			transport.send({ to: [], cc: [], bcc: [], subject: 'x', text: '', attachments: [] }),
 		).rejects.toMatchObject({ code: 'invalid' });
+	});
+
+	it('never hands out an id that a seed already uses', async () => {
+		// Seeds named the way the transport numbers what it creates (`m1`, `d1`, `f1`, ...).
+		const numbers = Array.from({ length: 12 }, (_, n) => (n + 1).toString(36));
+		const seeded = numbers.flatMap((n) => [`m${n}`, `d${n}`]);
+		const transport = createMemoryTransport({
+			mailboxes: [...DEFAULT_MAILBOXES, ...numbers.map((n) => ({ id: `f${n}`, name: `f${n}` }))],
+			messages: [
+				{ mailboxId: 'inbox', from: me, subject: 'Without an id', receivedAt: 0 },
+				...seeded.map((id, i) => ({
+					id,
+					mailboxId: id.startsWith('d') ? 'drafts' : 'inbox',
+					from: me,
+					subject: id,
+					receivedAt: i + 1,
+				})),
+			],
+		});
+		const delivered = transport.deliver({
+			mailboxId: 'inbox',
+			from: me,
+			subject: 'Delivered',
+			receivedAt: 100,
+		});
+		const { id: draft } = await transport.saveDraft({
+			to: [],
+			cc: [],
+			bcc: [],
+			subject: 'Saved draft',
+			text: '',
+			attachments: [],
+		});
+		await transport.createMailbox({ name: 'Created folder' });
+		expect((await transport.query({})).total).toBe(seeded.length + 3);
+		expect(
+			(await transport.summaries([...seeded, delivered, draft])).map((m) => m.subject),
+		).toEqual([...seeded, 'Delivered', 'Saved draft']);
+		expect(
+			(await transport.mailboxes()).map((m) => m.name).slice(DEFAULT_MAILBOXES.length),
+		).toEqual([...numbers.map((n) => `f${n}`), 'Created folder']);
 	});
 
 	it('serves the demo seed, thousands of messages included', async () => {

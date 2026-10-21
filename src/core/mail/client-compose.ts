@@ -1,14 +1,13 @@
 // The compose window's actions: open a new message, a reply, a reply all or a forward; edit it;
 // attach files; save the draft automatically after a quiet moment (never two saves at once); send;
-// discard. Also the file actions on messages: download an attachment, export and import `.eml`.
-// New code.
+// discard. Only edits the server has saved count as saved, and a window whose draft cannot be
+// saved stays open rather than losing it. New code.
 import { errorCode, type ClientCore } from './client-core';
-import type { ListLoader } from './client-list';
-import type { ComposeState, FileInput, MailClient } from './client-types';
+import type { ComposeState, MailClient } from './client-types';
 import { composeDraft, draftRecipients, isEmptyDraft, type QuoteFormat } from './compose';
-import { emlFileName } from './eml';
 import { formatAddress, sameAddress, type Draft, type Identity, type MailMessage } from './model';
 import { messageDate } from './threading';
+import type { MailErrorCode } from './transport';
 
 type ComposeActions = Pick<
 	MailClient,
@@ -21,9 +20,6 @@ type ComposeActions = Pick<
 	| 'send'
 	| 'discardDraft'
 	| 'closeCompose'
-	| 'download'
-	| 'exportEml'
-	| 'importEml'
 >;
 
 const DEFAULT_SAVE_MS = 2000;
@@ -43,16 +39,24 @@ export const ENGLISH_QUOTE_FORMAT: QuoteFormat = {
 	],
 };
 
-export function createCompose(core: ClientCore, list: ListLoader): ComposeActions {
+export function createCompose(core: ClientCore): ComposeActions {
 	let timer: unknown;
-	let saving: Promise<void> | undefined;
+	let saving: Promise<MailErrorCode | null> | undefined;
 	let again = false;
 	let session = 0;
+	/** Edits made in the open window, and how many of them the server's copy holds (-1: none). */
+	let edits = 0;
+	let saved = -1;
 
 	const compose = (): ComposeState | null => core.state.compose;
 	const setCompose = (next: Partial<ComposeState>): void => {
 		const current = compose();
 		if (current) core.patch({ compose: { ...current, ...next } });
+	};
+	/** The open draft has edits the server does not hold yet (an empty draft is never saved). */
+	const unsaved = (): boolean => {
+		const current = compose();
+		return !!current && saved !== edits && !isEmptyDraft(current.draft);
 	};
 	const identities = (): readonly Identity[] => core.state.identities;
 	/** For an answer, the identity the original was sent to; else the first. */
@@ -72,40 +76,53 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 		return message;
 	};
 
-	const save = async (): Promise<void> => {
+	/** Saves the open draft once if it has unsaved edits; resolves to the error, if it failed. */
+	const saveOnce = async (): Promise<MailErrorCode | null> => {
+		const current = compose();
+		if (!current || !unsaved()) return null;
+		const revision = edits;
+		setCompose({ status: 'saving' });
+		try {
+			const { id } = await core.transport.saveDraft(current.draft);
+			const latest = compose();
+			if (!latest || latest.session !== current.session) return null;
+			saved = revision;
+			// Edits made meanwhile stay, unsaved; the draft adopts the saved id.
+			core.patch({
+				compose: {
+					...latest,
+					draft: { ...latest.draft, id },
+					status: saved === edits ? 'saved' : 'editing',
+					savedAt: core.now(),
+					error: null,
+				},
+			});
+			return null;
+		} catch (error) {
+			const code = errorCode(error);
+			if (compose()?.session === current.session) setCompose({ status: 'error', error: code });
+			return code;
+		}
+	};
+
+	/** Saves the open draft, again when asked to meanwhile, never two saves at once. */
+	const save = (): Promise<MailErrorCode | null> => {
 		core.cancel(timer);
 		timer = undefined;
 		if (saving) {
 			again = true;
 			return saving;
 		}
-		const current = compose();
-		if (!current || isEmptyDraft(current.draft)) return;
-		setCompose({ status: 'saving' });
 		saving = (async () => {
 			try {
-				const { id } = await core.transport.saveDraft(current.draft);
-				// The draft may have been edited meanwhile: keep the edits, adopt the id.
-				const latest = compose();
-				if (latest) {
-					core.patch({
-						compose: {
-							...latest,
-							draft: { ...latest.draft, id },
-							status: again ? 'editing' : 'saved',
-							savedAt: core.now(),
-							error: null,
-						},
-					});
-				}
-			} catch (error) {
-				setCompose({ status: 'error', error: errorCode(error) });
+				let error: MailErrorCode | null;
+				do {
+					again = false;
+					error = await saveOnce();
+				} while (again);
+				return error;
 			} finally {
 				saving = undefined;
-			}
-			if (again) {
-				again = false;
-				await save();
 			}
 		})();
 		return saving;
@@ -116,7 +133,16 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 		timer = core.later(() => void save(), core.options.draftSaveMs ?? DEFAULT_SAVE_MS);
 	};
 
+	/** Shows an edit of the open draft and saves it after a quiet moment. */
+	const edit = (draft: Draft): void => {
+		edits++;
+		setCompose({ draft, status: 'editing' });
+		schedule();
+	};
+
 	const start = (draft: Draft, mode: ComposeState['mode']): void => {
+		edits = 0;
+		saved = draft.id ? 0 : -1;
 		core.patch({
 			compose: {
 				session: ++session,
@@ -130,18 +156,24 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 		});
 	};
 
-	const close = async (keep: boolean): Promise<void> => {
-		const current = compose();
-		if (!current) return;
-		if (keep && current.status !== 'saved' && !isEmptyDraft(current.draft)) await save();
-		else core.cancel(timer);
+	/** Closes the window once the server holds its last edit; a draft it cannot save stays open. */
+	const close = async (): Promise<boolean> => {
+		if (!compose()) return true;
+		while (unsaved()) {
+			const error = await save();
+			if (error) {
+				core.notice({ kind: 'error', action: 'save', code: error });
+				return false;
+			}
+		}
+		core.cancel(timer);
 		timer = undefined;
 		core.patch({ compose: null });
+		return true;
 	};
 
 	return {
 		async compose(mode, emailId) {
-			await close(true);
 			try {
 				const original = emailId ? await source(emailId) : null;
 				const me = identities().map((identity) => ({ name: identity.name, email: identity.email }));
@@ -150,17 +182,21 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 					me,
 					format: core.options.quoteFormat ?? ENGLISH_QUOTE_FORMAT,
 				});
+				if (!(await close())) return false;
 				start(draft, mode);
+				return true;
 			} catch (error) {
 				core.fail('open', error);
+				return false;
 			}
 		},
 		async editDraft(emailId) {
-			await close(true);
+			if (compose()?.draft.id === emailId) return true;
 			try {
 				const message = await source(emailId);
 				const from = message.from[0];
 				const identity = identities().find((i) => from && sameAddress(i.email, from));
+				if (!(await close())) return false;
 				start(
 					{
 						id: message.id,
@@ -183,18 +219,24 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 					},
 					'new',
 				);
+				return true;
 			} catch (error) {
 				core.fail('open', error);
+				return false;
 			}
 		},
 		updateDraft(patch) {
 			const current = compose();
-			if (!current) return;
-			setCompose({ draft: { ...current.draft, ...patch }, status: 'editing' });
-			schedule();
+			if (current) edit({ ...current.draft, ...patch });
 		},
 		async attach(files) {
-			if (!compose() || !files.length) return;
+			const owner = compose()?.session;
+			if (owner === undefined || !files.length) return;
+			// The window the files were added to, while it is open: it may close or give way meanwhile.
+			const owned = (): ComposeState | null => {
+				const current = compose();
+				return current?.session === owner ? current : null;
+			};
 			setCompose({ uploading: (compose()?.uploading ?? 0) + files.length });
 			for (const file of files) {
 				try {
@@ -202,7 +244,7 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 						file.bytes,
 						file.type || 'application/octet-stream',
 					);
-					const current = compose();
+					const current = owned();
 					if (!current) return;
 					const attachment = {
 						blobId: blob.blobId,
@@ -210,30 +252,26 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 						type: blob.type,
 						size: blob.size,
 					};
-					setCompose({
-						draft: { ...current.draft, attachments: [...current.draft.attachments, attachment] },
-					});
+					edit({ ...current.draft, attachments: [...current.draft.attachments, attachment] });
 				} catch (error) {
 					core.fail('upload', error);
 				} finally {
-					setCompose({ uploading: Math.max(0, (compose()?.uploading ?? 1) - 1) });
+					const current = owned();
+					if (current) setCompose({ uploading: Math.max(0, current.uploading - 1) });
 				}
 			}
-			schedule();
 		},
 		detach(blobId) {
 			const current = compose();
 			if (!current) return;
-			setCompose({
-				draft: {
-					...current.draft,
-					attachments: current.draft.attachments.filter((a) => a.blobId !== blobId),
-				},
-				status: 'editing',
+			edit({
+				...current.draft,
+				attachments: current.draft.attachments.filter((a) => a.blobId !== blobId),
 			});
-			schedule();
 		},
-		saveDraft: save,
+		async saveDraft() {
+			await save();
+		},
 		async send() {
 			const current = compose();
 			if (!current || current.status === 'sending') return false;
@@ -272,43 +310,6 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 				core.fail('delete', error);
 			}
 		},
-		closeCompose: () => close(true),
-		async download(attachment) {
-			try {
-				return await core.transport.download(attachment.blobId, {
-					type: attachment.type,
-					name: attachment.name,
-				});
-			} catch (error) {
-				core.fail('download', error);
-				throw error;
-			}
-		},
-		async exportEml(emailId) {
-			const email =
-				core.emails.get(emailId) ??
-				core.bodies.get(emailId) ??
-				(await core.transport.message(emailId));
-			const name = emlFileName(email.subject);
-			const bytes = await core.transport.download(email.blobId, { type: 'message/rfc822', name });
-			return { name, type: 'message/rfc822', bytes };
-		},
-		async importEml(files: readonly FileInput[], mailboxId) {
-			const target = mailboxId ?? core.state.mailboxId ?? core.mailboxByRole('inbox')?.id;
-			if (!target || !files.length) return;
-			let count = 0;
-			for (const file of files) {
-				try {
-					await core.transport.importMessage(file.bytes, target);
-					count++;
-				} catch (error) {
-					core.fail('import', error);
-				}
-			}
-			if (count) {
-				core.notice({ kind: 'done', action: 'imported', count });
-				await list.loadList();
-			}
-		},
+		closeCompose: close,
 	};
 }
