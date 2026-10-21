@@ -55,4 +55,69 @@ describe('the calendar actions', () => {
 		expect(titles()).toEqual(['First', 'Second', 'Review, moved']);
 		client.destroy();
 	});
+
+	it('adds an occurrence changed on its own to the series it holds, never replacing the series', async () => {
+		const client = createMailClient({
+			transport: createMemoryTransport(),
+			calendar: createMemoryCalendarStore({ seed: [STAND_UP] }),
+		});
+		await until(client, (s) => s.events.length === 1);
+		const file = (uid: string, ...lines: string[]): string =>
+			[
+				'BEGIN:VCALENDAR',
+				'VERSION:2.0',
+				'BEGIN:VEVENT',
+				`UID:${uid}`,
+				'SUMMARY:Review',
+				...lines,
+				'END:VEVENT',
+				'END:VCALENDAR',
+			].join('\r\n');
+		const week = (n: number): number => Date.UTC(2026, 9, 20 + 7 * n, 9);
+		expect(
+			await client.importIcs(
+				file('review@example.com', 'DTSTART:20261020T090000Z', 'RRULE:FREQ=WEEKLY;COUNT=4'),
+			),
+		).toBe(1);
+		// The way an update to one occurrence comes: that occurrence alone, moved or cancelled.
+		const moved = ['RECURRENCE-ID:20261027T090000Z', 'DTSTART:20261028T140000Z'];
+		expect(await client.importIcs(file('review@example.com', 'SEQUENCE:1', ...moved))).toBe(1);
+		const cancelled = ['RECURRENCE-ID:20261103T090000Z', 'DTSTART:20261103T090000Z'];
+		await client.importIcs(file('review@example.com', ...cancelled, 'STATUS:CANCELLED'));
+		// Of an event this client exported, too (at 09:00 in Berlin, 08:00 UTC after the clocks change).
+		const own = ['RECURRENCE-ID:20261028T080000Z', 'DTSTART:20261028T090000Z'];
+		await client.importIcs(file('stand-up@ooxml-mail.invalid', ...own));
+		const events = client.getState().events;
+		expect(events.map((e) => [e.id, e.repeat])).toEqual([
+			['review@example.com', 'weekly'],
+			['stand-up', 'weekly'],
+		]);
+		expect(events[0]?.exceptions).toEqual([
+			{
+				originalStart: week(1),
+				cancelled: false,
+				start: Date.UTC(2026, 9, 28, 14),
+				end: Date.UTC(2026, 9, 28, 14),
+			},
+			{ originalStart: week(2), cancelled: true },
+		]);
+		expect(events[1]?.exceptions).toEqual([
+			{
+				originalStart: Date.UTC(2026, 9, 28, 8),
+				cancelled: false,
+				start: Date.UTC(2026, 9, 28, 9),
+				end: Date.UTC(2026, 9, 28, 9),
+				title: 'Review',
+				description: '',
+			},
+		]);
+		// An occurrence of a series the calendar does not hold stands beside the others.
+		await client.importIcs(file('other@example.com', ...moved));
+		expect(client.getState().events.map((e) => e.id)).toEqual([
+			'review@example.com',
+			'stand-up',
+			'other@example.com-20261027T090000Z',
+		]);
+		client.destroy();
+	});
 });

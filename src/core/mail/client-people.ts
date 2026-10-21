@@ -103,12 +103,14 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			let count = 0;
 			let unsupported: string[] = [];
 			await guard('calendar', async () => {
-				// An event without a UID gets an id no stored event has, so it never replaces one.
-				const stored = new Set((await calendar.list()).map((event) => event.id));
+				// An event without a UID gets an id no stored event has, so it never replaces one, and an
+				// update to one occurrence of a stored series changes that occurrence of it.
+				const stored = new Map((await calendar.list()).map((event) => [event.id, event]));
 				const read = parseIcs(text, {
 					uidDomain: UID_DOMAIN,
 					...(zone ? { zone } : {}),
 					taken: (id) => stored.has(id),
+					stored: (id) => stored.get(id),
 				});
 				unsupported = read.unsupported;
 				for (const event of read.events) {
