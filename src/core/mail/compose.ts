@@ -224,6 +224,24 @@ export function draftFromMessage(
 	};
 }
 
+/**
+ * `draft` with a host's `patch` (`MailClient.updateDraft`). A new text without HTML leaves out an
+ * HTML the host did not give (`hostHtml` false: an answer's or a forward's quote, a reopened
+ * draft's): it still says what the text said before, and a reader shows one alternative or the
+ * other (RFC 2046 5.1.4), so the message goes as its text alone. HTML the host gave, in `patch` or
+ * before, is its own and stays.
+ */
+export function patchDraft(
+	draft: Draft,
+	patch: Partial<Omit<Draft, 'id' | 'attachments'>>,
+	hostHtml: boolean,
+): Draft {
+	const next = { ...draft, ...patch };
+	const retext = patch.text !== undefined && patch.text !== draft.text;
+	if (retext && !hostHtml && !('html' in patch)) delete next.html;
+	return next;
+}
+
 /** Markup that shows something without any text: a picture or other media. */
 const MEDIA = /<(?:img|picture|svg|video|audio|canvas|object|embed)\b/i;
 

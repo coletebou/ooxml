@@ -579,6 +579,46 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('sends an answer whose text alone a host changed as that text, without the quote it made', async () => {
+		const { client, inMailbox } = plain({
+			messages: [
+				{
+					id: 'ask',
+					mailboxId: 'inbox',
+					from: ada,
+					to: [me],
+					subject: 'Lunch?',
+					html: '<p>At <b>noon</b>?</p>',
+					receivedAt: T0,
+				},
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		const draft = () => client.getState().compose!.draft;
+		expect(await client.compose('reply', 'ask')).toBe(true);
+		const made = draft().html;
+		// Other fields, or the text as it was, leave the HTML made with it, which still says the same.
+		client.updateDraft({ to: [ada], text: draft().text });
+		expect(draft().html).toBe(made);
+		// A new text alone: that HTML would show the answer empty, so the message is its text.
+		client.updateDraft({ text: `Yes, see you.${draft().text}` });
+		expect(draft()).not.toHaveProperty('html');
+		expect(await client.send()).toBe(true);
+		const [answer] = await inMailbox('sent');
+		expect(answer?.html).toBeNull();
+		expect(answer?.text).toMatch(/^Yes, see you\.\n\nOn .* wrote:\n> At noon\?/);
+		// HTML a host gives is its own: a new text alone later leaves it, in that window.
+		expect(await client.compose('reply', 'ask')).toBe(true);
+		client.updateDraft({ html: '<p>Yes, <i>see you</i>.</p>', text: 'Yes, see you.' });
+		client.updateDraft({ text: 'Yes, see you there.' });
+		expect(draft().html).toBe('<p>Yes, <i>see you</i>.</p>');
+		await client.discardDraft();
+		expect(await client.compose('reply', 'ask')).toBe(true);
+		client.updateDraft({ text: 'No.' });
+		expect(draft()).not.toHaveProperty('html');
+		client.destroy();
+	});
+
 	it('saves a draft that holds only formatted text', async () => {
 		const { client, drafts } = setup();
 		await until(client, (s) => s.status === 'ready');

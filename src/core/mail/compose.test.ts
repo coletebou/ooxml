@@ -3,6 +3,7 @@ import {
 	composeDraft,
 	draftFromMessage,
 	isEmptyDraft,
+	patchDraft,
 	replyRecipients,
 	type DraftHtml,
 	type QuoteFormat,
@@ -235,6 +236,25 @@ describe('composeDraft', () => {
 		);
 		for (const html of ['<p><br></p>', '<div>&nbsp; </div>', ' <br> ', '<p></p><p>&#160;</p>'])
 			expect(isEmptyDraft({ ...draft, html })).toBe(true);
+	});
+});
+
+describe('patchDraft', () => {
+	const answer = composeDraft('reply', message({ text: 'Lunch?' }), { identity, me: [me], format });
+
+	it('leaves out the HTML a new text alone makes stale, unless the host gave it', () => {
+		expect(answer.html).toContain('<blockquote');
+		const retexted = patchDraft(answer, { text: `Yes.${answer.text}` }, false);
+		expect(retexted).toEqual({ ...answer, text: `Yes.${answer.text}`, html: undefined });
+		expect(retexted).not.toHaveProperty('html');
+		// The host's HTML, given before or with the text, stays; so does any with the same text.
+		expect(patchDraft(answer, { text: 'Yes.' }, true).html).toBe(answer.html);
+		expect(patchDraft(answer, { text: 'Yes.', html: '<p>Yes.</p>' }, false).html).toBe(
+			'<p>Yes.</p>',
+		);
+		expect(patchDraft(answer, { subject: 'Lunch', text: answer.text }, false).html).toBe(
+			answer.html,
+		);
 	});
 });
 

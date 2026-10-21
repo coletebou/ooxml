@@ -248,6 +248,11 @@ export interface MailClient {
 	 * left as it is.
 	 */
 	editDraft(emailId: string): Promise<boolean>;
+	/**
+	 * Change the open draft. A new `text` without `html` leaves out an HTML no patch of this window
+	 * gave (an answer's or a forward's quote, a reopened draft's), which would still say what the
+	 * text said before: the message goes as its text alone (`patchDraft`).
+	 */
 	updateDraft(patch: Partial<Omit<Draft, 'id' | 'attachments'>>): void;
 	attach(files: readonly FileInput[]): Promise<void>;
 	detach(blobId: string): void;

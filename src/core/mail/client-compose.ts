@@ -5,7 +5,8 @@
 import { createAutosave, patchCompose } from './client-autosave';
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
-import { composeDraft, draftFromMessage, draftRecipients, type QuoteFormat } from './compose';
+import { composeDraft, draftFromMessage, draftRecipients, patchDraft } from './compose';
+import type { QuoteFormat } from './compose';
 import { DRAFT, formatAddress, identityFor } from './model';
 import type { Draft, EmailSummary, Identity, MailboxRole, MailMessage } from './model';
 import { messageDate } from './threading';
@@ -44,6 +45,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 	/** The send under way, resolving to whether the message went. */
 	let sending: Promise<boolean> | undefined;
 	let session = 0;
+	/** The window whose HTML a patch gave, the host's own: a new text alone keeps it (`patchDraft`). */
+	let htmlFrom = 0;
 	const autosave = createAutosave(core, () => !!sending);
 
 	const compose = (): ComposeState | null => core.state.compose;
@@ -205,7 +208,9 @@ export function createCompose(core: ClientCore): ComposeActions {
 		},
 		updateDraft(patch) {
 			const current = compose();
-			if (current) edit({ ...current.draft, ...patch });
+			if (!current) return;
+			if ('html' in patch) htmlFrom = current.session;
+			edit(patchDraft(current.draft, patch, htmlFrom === current.session));
 		},
 		async attach(files) {
 			const owner = compose()?.session;
