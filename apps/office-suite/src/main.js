@@ -518,11 +518,13 @@ document.addEventListener('dragover', (event) => {
 	if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
 });
 document.addEventListener('drop', (event) => {
-	// Teams and Mail take dropped files as attachments; elsewhere a drop imports them.
-	if (view !== 'teams' && view !== 'mail' && event.dataTransfer?.files.length) {
-		event.preventDefault();
+	if (!event.dataTransfer?.types.includes('Files')) return;
+	// A file dropped anywhere stays in the suite: the browser would open it in place of the page,
+	// losing Mail's mailbox and any unsaved edit. Teams and Mail take files dropped on their own
+	// targets as attachments; elsewhere a drop imports them.
+	event.preventDefault();
+	if (view !== 'teams' && view !== 'mail' && event.dataTransfer.files.length)
 		task(() => importFiles([...event.dataTransfer.files]));
-	}
 });
 // The home rises into place once; after that, switching back to it is instant (styles.css).
 document.body.classList.add('entering');
