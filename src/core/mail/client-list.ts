@@ -1,8 +1,8 @@
 // Loading what the client shows: the session, the folders, the message list of a folder or a
-// search (newest first, summaries fetched in batches), and the transport's change feed, which
-// refreshes what changed and re-runs the list. Stale responses from an earlier folder or search
-// are dropped by a generation counter; a connection that failed is made again on request, one
-// attempt at a time. New code.
+// search (newest first, page after page, summaries fetched in batches), and the transport's change
+// feed, which refreshes what changed and re-runs the list. Stale responses from an earlier folder
+// or search are dropped by a generation counter; a connection that failed is made again on
+// request, one attempt at a time. New code.
 import type { ClientCore } from './client-core';
 import { errorCode } from './client-core';
 import { parseSearch } from './search';
@@ -55,12 +55,40 @@ export function createListLoader(core: ClientCore): ListLoader {
 		}
 	};
 
+	/**
+	 * The first `limit` matches of the list's query, page after page: a server may answer with fewer
+	 * than it is asked for (RFC 8620 5.5 lets it cap `limit`), so each page starts where the last one
+	 * ended, until the list is full, the matches run out or a page brings nothing new (a transport
+	 * that does not page would bring the same ones for ever). Null once a newer load started.
+	 */
+	const queryList = async (
+		current: () => boolean,
+	): Promise<{ ids: string[]; total: number } | null> => {
+		const listed = query();
+		const ids: string[] = [];
+		const seen = new Set<string>();
+		for (let position = 0; ;) {
+			const page = await core.transport.query(listed, { position, limit: limit - ids.length });
+			if (!current()) return null;
+			const before = ids.length;
+			// A message that arrived meanwhile moves the rest down a place: one may come twice.
+			for (const id of page.ids) {
+				if (seen.has(id)) continue;
+				seen.add(id);
+				ids.push(id);
+			}
+			position = page.position + page.ids.length;
+			if (ids.length >= limit || position >= page.total || ids.length === before)
+				return { ids, total: page.total };
+		}
+	};
+
 	const loadList = async (options: { refetch?: boolean } = {}): Promise<void> => {
 		const mine = ++generation;
 		core.patch({ loading: true });
 		try {
-			const result = await core.transport.query(query(), { position: 0, limit });
-			if (mine !== generation || core.destroyed) return;
+			const result = await queryList(() => mine === generation && !core.destroyed);
+			if (!result) return;
 			const ids = options.refetch ? result.ids : result.ids.filter((id) => !core.emails.has(id));
 			await fetchSummaries(ids);
 			if (mine !== generation || core.destroyed) return;
