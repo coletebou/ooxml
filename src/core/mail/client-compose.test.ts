@@ -228,6 +228,63 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('opens only a draft to edit, so saving or discarding it never replaces another message', async () => {
+		const { client, notices, drafts, memory } = setup();
+		await until(client, (s) => s.status === 'ready');
+		// Saved, a window opened on a message replaces it; discarded, it deletes it.
+		const opened = await client.editDraft('hello');
+		client.updateDraft({ text: 'Typed over it' });
+		await client.saveDraft();
+		await client.discardDraft();
+		expect(await memory.message('hello')).toMatchObject({
+			subject: 'Hello',
+			mailboxIds: ['inbox'],
+		});
+		expect(opened).toBe(false);
+		expect(client.getState().compose).toBeNull();
+		expect(notices).toEqual([{ kind: 'error', action: 'open', code: 'invalid' }]);
+		// The window open when it is asked stays as it is, nothing saved, and closes as a new draft.
+		await client.compose('new');
+		client.updateDraft({ subject: 'Mine' });
+		const { session } = client.getState().compose!;
+		expect(await client.editDraft('hello')).toBe(false);
+		expect(client.getState().compose).toMatchObject({ session, draft: { subject: 'Mine' } });
+		expect(await drafts()).toEqual([]);
+		expect(await client.closeCompose()).toBe(true);
+		expect((await drafts()).map((draft) => draft.subject)).toEqual(['Mine']);
+		expect(await memory.message('hello')).toMatchObject({
+			subject: 'Hello',
+			mailboxIds: ['inbox'],
+		});
+		// A draft opens as before, and so does a message filed in Drafts, imported without `$draft`.
+		expect(await client.editDraft('old')).toBe(true);
+		expect(client.getState().compose?.draft).toMatchObject({ id: 'old', text: 'Saved before' });
+		const eml = new TextEncoder().encode('Subject: Imported\r\n\r\nKept to finish\r\n');
+		const { id } = await memory.importMessage(eml, 'drafts');
+		expect((await memory.message(id)).keywords).toEqual({ $seen: true });
+		expect(await client.editDraft(id)).toBe(true);
+		expect(client.getState().compose?.draft).toMatchObject({ id, subject: 'Imported' });
+		client.destroy();
+	});
+
+	it('does not open a draft sent from elsewhere since, though the body read before is a draft', async () => {
+		const timers = manualTimers();
+		const { client, notices, memory } = setup(timers);
+		await until(client, (s) => s.status === 'ready');
+		await client.selectMailbox('drafts');
+		expect(await client.editDraft('old')).toBe(true);
+		expect(await client.closeCompose()).toBe(true);
+		// Sent in place: the same raw message, so the body read before stays, saying it is a draft.
+		const sent = { keywords: { [DRAFT]: false }, mailboxIds: { drafts: false, sent: true } };
+		await memory.update({ old: sent });
+		timers.fire();
+		await until(client, (s) => !s.conversations.some((c) => c.emailIds.includes('old')));
+		expect(await client.editDraft('old')).toBe(false);
+		expect(notices).toEqual([{ kind: 'error', action: 'open', code: 'invalid' }]);
+		expect(await memory.message('old')).toMatchObject({ mailboxIds: ['sent'] });
+		client.destroy();
+	});
+
 	it('marks as saved only what the server saved, not edits made while it was saving', async () => {
 		const { client, control, drafts } = setup();
 		await until(client, (s) => s.status === 'ready');

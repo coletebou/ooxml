@@ -241,7 +241,12 @@ export interface MailClient {
 	 * says so).
 	 */
 	compose(mode: ComposeMode, emailId?: string): Promise<boolean>;
-	/** Reopen a saved draft from Drafts in the compose window; false as for `compose`. */
+	/**
+	 * Reopen a saved draft in the compose window; false as for `compose`. Saved, the window replaces
+	 * the message it opened, so only a draft opens: one marked `$draft` or filed in Drafts, as the
+	 * list knows it now. Any other message is refused with an `invalid` error notice, the open window
+	 * left as it is.
+	 */
 	editDraft(emailId: string): Promise<boolean>;
 	updateDraft(patch: Partial<Omit<Draft, 'id' | 'attachments'>>): void;
 	attach(files: readonly FileInput[]): Promise<void>;

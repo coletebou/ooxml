@@ -6,8 +6,10 @@ import { createAutosave, patchCompose } from './client-autosave';
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
 import { composeDraft, draftFromMessage, draftRecipients, type QuoteFormat } from './compose';
-import { formatAddress, identityFor, type Draft, type Identity, type MailMessage } from './model';
+import { DRAFT, formatAddress, identityFor } from './model';
+import type { Draft, EmailSummary, Identity, MailboxRole, MailMessage } from './model';
 import { messageDate } from './threading';
+import { MailTransportError } from './transport';
 
 type ComposeActions = Pick<
 	MailClient,
@@ -47,14 +49,12 @@ export function createCompose(core: ClientCore): ComposeActions {
 	const compose = (): ComposeState | null => core.state.compose;
 	const setCompose = (next: Partial<ComposeState>): void => patchCompose(core, next);
 	const identities = (): readonly Identity[] => core.state.identities;
-	/**
-	 * True when the person sent `message`: it is filed in Sent, as the list knows it now (a body
-	 * read before keeps the folders it had then).
-	 */
-	const isSent = (message: MailMessage): boolean => {
-		const sent = core.mailboxByRole('sent');
-		const boxes = core.emails.get(message.id)?.mailboxIds ?? message.mailboxIds;
-		return !!sent && boxes.includes(sent.id);
+	/** `message` as the list knows it now: a body read before keeps its old keywords and folders. */
+	const listed = (message: MailMessage): EmailSummary => core.emails.get(message.id) ?? message;
+	/** True when `message` is filed in the folder of `role`: in Sent, the person sent it. */
+	const filedIn = (message: MailMessage, role: MailboxRole): boolean => {
+		const box = core.mailboxByRole(role);
+		return !!box && listed(message).mailboxIds.includes(box.id);
 	};
 	/** A message to answer or edit, whole: a body the reading pane holds cut short is read again. */
 	const source = async (emailId: string): Promise<MailMessage> => {
@@ -164,7 +164,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 			try {
 				const original = emailId ? await source(emailId) : null;
 				const me = identities().map((identity) => ({ name: identity.name, email: identity.email }));
-				const sent = !!original && isSent(original);
+				const sent = !!original && filedIn(original, 'sent');
 				// For an answer, the identity the original was sent to, else for a message the person
 				// sent the one it was sent from; else the first.
 				const addresses = original
@@ -190,6 +190,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (compose()?.draft.id === emailId) return true;
 			try {
 				const message = await source(emailId);
+				// Saved, the window replaces the message it opened: only a draft opens so, one marked
+				// `$draft` or filed in Drafts.
+				if (!listed(message).keywords[DRAFT] && !filedIn(message, 'drafts'))
+					throw new MailTransportError('invalid', 'Only a draft opens to edit.');
 				const identity = identityFor(identities(), message.from.slice(0, 1));
 				if (!(await close())) return false;
 				start(draftFromMessage(message, identity, core.options.draftHtml), 'new');
