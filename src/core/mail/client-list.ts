@@ -54,8 +54,16 @@ export function createListLoader(core: ClientCore): ListLoader {
 
 	const fetchSummaries = async (ids: readonly string[]): Promise<void> => {
 		for (let i = 0; i < ids.length; i += BATCH) {
-			for (const email of await core.transport.summaries(ids.slice(i, i + BATCH)))
+			for (const email of await core.transport.summaries(ids.slice(i, i + BATCH))) {
+				// A new raw message under the same id (a draft saved in place elsewhere): the body read
+				// before is not this message's any more, and is read again when it is wanted.
+				const body = core.bodies.get(email.id);
+				if (body && body.blobId !== email.blobId) {
+					core.bodies.delete(email.id);
+					core.bodyErrors.delete(email.id);
+				}
 				core.emails.set(email.id, email);
+			}
 		}
 	};
 

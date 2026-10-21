@@ -1,8 +1,14 @@
 import { createMailClient } from './client';
 import type { MailNotice } from './client-types';
 import { createMemoryTransport } from './memory-transport';
+import { DRAFT } from './model';
 import { until } from './test-support/client';
-import { MailTransportError, type MailQueryPage, type MailTransport } from './transport';
+import {
+	MailTransportError,
+	type MailChange,
+	type MailQueryPage,
+	type MailTransport,
+} from './transport';
 
 const T0 = Date.UTC(2026, 0, 5, 9, 0, 0);
 
@@ -116,6 +122,63 @@ describe('changes to messages the list holds', () => {
 				['m1', true],
 			]),
 		);
+		client.destroy();
+	});
+
+	it('reads a message again whose raw message changed under its id', async () => {
+		const memory = createMemoryTransport({
+			now: () => T0,
+			messages: [
+				{
+					id: 'd1',
+					mailboxId: 'drafts',
+					from: { name: 'You', email: 'you@example.com' },
+					subject: 'Plan',
+					text: 'First words',
+					receivedAt: T0,
+					keywords: [DRAFT],
+				},
+			],
+		});
+		// Saved in place elsewhere, as the transport contract allows: the same id, a new raw message.
+		let version = 1;
+		const now = <T extends { id: string; blobId: string }>(item: T): T =>
+			item.id === 'd1' ? { ...item, blobId: `d1-v${version}` } : item;
+		const listeners = new Set<(change: MailChange) => void>();
+		const refreshed: string[][] = [];
+		const transport: MailTransport = {
+			...memory,
+			async summaries(ids) {
+				refreshed.push([...ids]);
+				return (await memory.summaries(ids)).map(now);
+			},
+			async message(id, options) {
+				const message = now(await memory.message(id, options));
+				return id === 'd1' && version > 1 ? { ...message, text: 'Newer words' } : message;
+			},
+			watch(listener) {
+				listeners.add(listener);
+				const stop = memory.watch(listener);
+				return () => {
+					listeners.delete(listener);
+					stop();
+				};
+			},
+		};
+		const client = createMailClient({ transport, threaded: false });
+		await until(client, (s) => s.status === 'ready');
+		await client.selectMailbox('drafts');
+		expect(await client.editDraft('d1')).toBe(true);
+		expect(client.getState().compose?.draft.text).toBe('First words');
+		expect(await client.closeCompose()).toBe(true);
+		version = 2;
+		const before = refreshed.length;
+		for (const listener of listeners)
+			listener({ type: 'emails', created: [], updated: ['d1'], destroyed: [] });
+		await vi.waitFor(() => expect(refreshed.slice(before)).toContainEqual(['d1']));
+		// Opened again, it shows what was saved over it, so a save cannot put the old words back.
+		expect(await client.editDraft('d1')).toBe(true);
+		expect(client.getState().compose?.draft.text).toBe('Newer words');
 		client.destroy();
 	});
 });

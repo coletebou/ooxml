@@ -46,7 +46,10 @@ export interface EmailSummary {
 	id: string;
 	/** The transport's thread id (JMAP `threadId`). The list threads by headers itself. */
 	threadId: string;
-	/** The raw RFC 5322 message, for `.eml` export. */
+	/**
+	 * The raw RFC 5322 message, for `.eml` export. A blob never changes (RFC 8620 6), so a message
+	 * whose content changes under its id (a draft saved in place) has a new one.
+	 */
 	blobId: string;
 	mailboxIds: readonly string[];
 	keywords: Readonly<Record<string, true>>;
