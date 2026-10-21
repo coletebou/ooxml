@@ -26,22 +26,28 @@ async function mount(): Promise<NotebookApp> {
 
 const shadowText = (el: Element | null | undefined): string => el?.shadowRoot?.textContent ?? '';
 
-/**
- * Let go of focus before unmounting. happy-dom keeps a removed element focused (a browser moves
- * focus to the body), and the next test's shadow roots then fail to resolve their active element.
- */
-function releaseFocus(): void {
-	let el: Element | null = document.activeElement;
-	while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
-	(el as HTMLElement | null)?.blur();
-}
+// happy-dom's ShadowRoot.activeElement throws when the focus is outside that shadow tree (its walk
+// up from the focused element runs past the document), where a browser returns null. ProseMirror
+// asks every editor's root on each update, so with focus in one text container (or a dialog) the
+// others threw. These tests use a getter that answers as a browser does.
+const shadowActive = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'activeElement')!;
+beforeAll(() =>
+	Object.defineProperty(ShadowRoot.prototype, 'activeElement', {
+		configurable: true,
+		get(this: ShadowRoot) {
+			try {
+				return shadowActive.get!.call(this);
+			} catch {
+				return null;
+			}
+		},
+	}),
+);
+afterAll(() => Object.defineProperty(ShadowRoot.prototype, 'activeElement', shadowActive));
 
 describe('<notebook-app>', () => {
 	let app: NotebookApp;
-	afterEach(() => {
-		releaseFocus();
-		app?.remove();
-	});
+	afterEach(() => app?.remove());
 
 	it('opens a first notebook with a section and an untitled page', async () => {
 		app = await mount();
@@ -138,10 +144,6 @@ describe('<notebook-app>', () => {
 		expect(dialog.shadowRoot!.querySelector<HTMLInputElement>('input[name="text"]')!.disabled).toBe(
 			true,
 		);
-		// The dialog focused its address field. happy-dom cannot resolve one shadow tree's active
-		// element while another tree holds focus (its walk runs past the document), so the field
-		// lets go first; the dialogs below are answered before they render.
-		dialog.shadowRoot!.querySelector<HTMLInputElement>('input[name="href"]')!.blur();
 		applyLink(app, 'https://example.com/guide');
 		expect(hrefAt(12)).toBe('https://example.com/guide');
 
