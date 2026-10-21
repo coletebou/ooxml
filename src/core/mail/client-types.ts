@@ -29,6 +29,8 @@ export interface ConversationView {
 	id: string;
 	/** Every message, in reading order. */
 	emailIds: readonly string[];
+	/** The newest message, the one a reply answers: reading order is the thread's, not by date. */
+	latestId: string;
 	/** The first message's subject. */
 	subject: string;
 	/** Senders, in the order they first wrote, each once. */

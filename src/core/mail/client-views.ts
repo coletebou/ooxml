@@ -69,6 +69,7 @@ export function conversationView(conversation: Conversation): ConversationView {
 	return {
 		id: conversation.id,
 		emailIds: emails.map((email) => email.id),
+		latestId: conversation.latest.id,
 		subject: chronological[0]?.subject ?? '',
 		participants: participantsOf(chronological),
 		recipients: [...conversation.latest.to, ...conversation.latest.cc],
