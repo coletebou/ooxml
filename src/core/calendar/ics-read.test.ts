@@ -1,4 +1,6 @@
 import { parseIcs } from './ics-read';
+import { eventsToIcs } from './ics-write';
+import type { CalendarEvent } from './model';
 import { occurrencesBetween } from './occurrences';
 import { HOUR_MS, minuteOfDay, zonedToUtc } from './time-zone';
 
@@ -556,12 +558,119 @@ describe('changed and cancelled occurrences', () => {
 		);
 		expect(events.map((e) => [e.id, e.repeat, e.exceptions?.length ?? 0])).toEqual([
 			['s', 'daily', 0],
-			['lonely', 'none', 0],
+			['lonely-20261105T090000Z', 'none', 0],
 		]);
 		expect(unsupported).toEqual([
 			'A change to "this and later occurrences" of "Sync" was not imported',
 			'A changed occurrence of "Sync" is not on its series and was not imported',
 			'An occurrence of a repeating event was imported on its own: the file does not hold its series',
+		]);
+	});
+
+	it('gives an occurrence imported without its series an id from its UID and RECURRENCE-ID', () => {
+		const one = vevent(
+			'UID:lonely',
+			'SUMMARY:One time',
+			'RECURRENCE-ID:20261105T090000Z',
+			'DTSTART:20261105T100000Z',
+		);
+		const two = vevent(
+			'UID:lonely',
+			'SUMMARY:Another time',
+			'RECURRENCE-ID:20261112T090000Z',
+			'DTSTART:20261112T100000Z',
+		);
+		const mine = vevent(
+			'UID:m1@example.com',
+			'RECURRENCE-ID:20261021T090000Z',
+			'DTSTART:20261021T100000Z',
+		);
+		const read = (...events: string[][]) =>
+			parseIcs(calendar(...events.flat()), { uidDomain: 'example.com' });
+		const { events, unsupported } = read(one, two, mine);
+		// Not the series' UID: written back, that would make each occurrence the series itself.
+		expect(events.map((e) => [e.id, e.uid, e.title, e.repeat])).toEqual([
+			['lonely-20261105T090000Z', undefined, 'One time', 'none'],
+			['lonely-20261112T090000Z', undefined, 'Another time', 'none'],
+			['m1-20261021T090000Z', undefined, '', 'none'],
+		]);
+		expect(unsupported).toEqual([
+			'An occurrence of a repeating event was imported on its own: the file does not hold its series',
+		]);
+		// The same id wherever it stands, so importing it again replaces only itself.
+		expect(read(two, one).events.map((e) => e.id)).toEqual([
+			'lonely-20261112T090000Z',
+			'lonely-20261105T090000Z',
+		]);
+		expect(read(two).events.map((e) => e.id)).toEqual(['lonely-20261112T090000Z']);
+		// Exported and read again, each is still the event it was.
+		const written = eventsToIcs(events, {
+			prodId: '-//Example//Test//EN',
+			uidDomain: 'example.com',
+		});
+		expect(parseIcs(written, { uidDomain: 'example.com' })).toEqual({ events, unsupported: [] });
+	});
+
+	it('adds changed occurrences to the series the calendar holds, never replacing it', () => {
+		const held: CalendarEvent = {
+			id: 'm1',
+			title: 'Sync',
+			description: '',
+			zone: 'UTC',
+			start: day(20),
+			end: day(20, 10),
+			repeat: 'daily',
+			count: 10,
+			exceptions: [{ originalStart: day(21), cancelled: true }],
+		};
+		const holds: Record<string, CalendarEvent> = {
+			m1: held,
+			m2: { ...held, id: 'm2', uid: 'm2@elsewhere.example' },
+			single: { ...held, id: 'single', repeat: 'none' },
+		};
+		const read = (...events: string[][]) =>
+			parseIcs(calendar(...events.flat()), {
+				uidDomain: 'example.com',
+				stored: (id) => (Object.hasOwn(holds, id) ? holds[id] : undefined),
+			});
+		const moved = vevent(
+			'UID:m1@example.com',
+			'SUMMARY:Sync',
+			'RECURRENCE-ID:20261022T090000Z',
+			'DTSTART:20261022T140000Z',
+			'DTEND:20261022T150000Z',
+		);
+		// Put back where it was: the cancelled occurrence happens again.
+		const back = vevent(
+			'UID:m1@example.com',
+			'SUMMARY:Sync',
+			'RECURRENCE-ID:20261021T090000Z',
+			'DTSTART:20261021T090000Z',
+			'DTEND:20261021T100000Z',
+		);
+		const merged = read(moved, back);
+		expect(merged.events).toEqual([
+			{
+				...held,
+				exceptions: [
+					{ originalStart: day(21), cancelled: false },
+					{ originalStart: day(22), cancelled: false, start: day(22, 14), end: day(22, 15) },
+				],
+			},
+		]);
+		expect(merged.unsupported).toEqual([]);
+		// The id of another UID, or of an event that does not repeat, is not this series.
+		const alone = read(
+			vevent('UID:m2', 'RECURRENCE-ID:20261022T090000Z', 'DTSTART:20261022T140000Z'),
+			vevent(
+				'UID:single@example.com',
+				'RECURRENCE-ID:20261022T090000Z',
+				'DTSTART:20261022T140000Z',
+			),
+		);
+		expect(alone.events.map((e) => e.id)).toEqual([
+			'm2-20261022T090000Z',
+			'single-20261022T090000Z',
 		]);
 	});
 
@@ -606,9 +715,10 @@ describe('changed and cancelled occurrences', () => {
 				),
 			),
 		);
+		// Its id is its series' and its RECURRENCE-ID, as for an occurrence without its series.
 		expect(events.map((e) => [e.id, e.uid, e.title, e.repeat, e.allDay])).toEqual([
 			['d', 'd', 'Offsite', 'daily', true],
-			['d-2', undefined, 'Offsite', 'none', undefined],
+			['d-20261022T000000Z', undefined, 'Offsite', 'none', undefined],
 		]);
 		expect(events[0]?.exceptions).toEqual([
 			{ originalStart: Date.UTC(2026, 9, 22), cancelled: true },
@@ -636,12 +746,50 @@ describe('changed and cancelled occurrences', () => {
 		).events;
 		expect(turned[0]?.exceptions).toEqual([{ originalStart: day(23), cancelled: true }]);
 		expect(turned[1]).toMatchObject({
-			id: 's-2',
+			id: 's-20261023T090000Z',
 			title: 'Holiday',
 			allDay: true,
 			start: Date.UTC(2026, 9, 23),
 			end: Date.UTC(2026, 9, 24),
 		});
+	});
+
+	it('keeps the latest version of a changed occurrence: the highest SEQUENCE, then the last', () => {
+		const change = (sequence: number | null, rid: string, ...lines: string[]): string[] =>
+			vevent(
+				'UID:s',
+				'SUMMARY:Sync',
+				...(sequence === null ? [] : [`SEQUENCE:${sequence}`]),
+				`RECURRENCE-ID:${rid}`,
+				...lines,
+			);
+		const { events, unsupported } = parseIcs(
+			calendar(
+				...vevent(...series),
+				// Cancelled, then put back at another time by a later version.
+				...change(1, '20261021T090000Z', 'DTSTART:20261021T090000Z', 'STATUS:CANCELLED'),
+				...change(2, '20261021T090000Z', 'DTSTART:20261021T140000Z', 'DTEND:20261021T150000Z'),
+				// The later version first in the file.
+				...change(3, '20261022T090000Z', 'DTSTART:20261022T160000Z', 'DTEND:20261022T170000Z'),
+				...change(1, '20261022T090000Z', 'DTSTART:20261022T120000Z', 'DTEND:20261022T130000Z'),
+				// Moved, then cancelled by a later version.
+				...change(4, '20261024T090000Z', 'DTSTART:20261024T090000Z', 'STATUS:CANCELLED'),
+				...change(0, '20261024T090000Z', 'DTSTART:20261024T100000Z', 'DTEND:20261024T110000Z'),
+				// The same SEQUENCE (none written is 0): the last in the file.
+				...change(null, '20261023T090000Z', 'DTSTART:20261023T100000Z', 'DTEND:20261023T110000Z'),
+				...change(0, '20261023T090000Z', 'DTSTART:20261023T110000Z', 'DTEND:20261023T120000Z'),
+			),
+		);
+		expect(events).toHaveLength(1);
+		expect(events[0]?.exceptions).toEqual([
+			{ originalStart: day(21), cancelled: false, start: day(21, 14), end: day(21, 15) },
+			{ originalStart: day(22), cancelled: false, start: day(22, 16), end: day(22, 17) },
+			{ originalStart: day(23), cancelled: false, start: day(23, 11), end: day(23, 12) },
+			{ originalStart: day(24), cancelled: true },
+		]);
+		expect(unsupported).toEqual([
+			'"Sync" has a changed occurrence that appears more than once; the latest version was kept',
+		]);
 	});
 
 	it('keeps the latest of two versions of an event', () => {

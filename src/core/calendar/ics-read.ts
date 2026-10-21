@@ -1,7 +1,9 @@
 // Import an iCalendar (RFC 5545) file as calendar events. Every VEVENT of every VCALENDAR is read
 // (`ics-read-event.ts`); a changed occurrence (same UID, RECURRENCE-ID) becomes an exception of its
 // series, a cancelled one (STATUS:CANCELLED or an EXDATE) a cancelled exception
-// (`ics-read-changes.ts`), and of a UID that appears twice the higher SEQUENCE wins. Time zones
+// (`ics-read-changes.ts`), and of a UID, or a UID and RECURRENCE-ID, that appears twice the higher
+// SEQUENCE wins. A changed occurrence whose series is not in the file joins the series the calendar
+// holds (`stored`), else it is an event of its own, never one that replaces the series. Time zones
 // come from `ics-read-zone.ts`. The importer never throws: what cannot be read is skipped, and what
 // the events cannot hold (a property, a repeat rule, another component, an unknown zone) is listed
 // once in `unsupported`, never dropped silently. DOM-free. New code.
@@ -16,7 +18,8 @@ import {
 } from './ics-read-event';
 import { type Wall, wallAsUtc } from './ics-read-time';
 import { type FileZone, fileZoneToUtc, ianaZone, matchZone, readFileZone } from './ics-read-zone';
-import type { CalendarEvent } from './model';
+import { icsUtc } from './ics-write';
+import type { CalendarEvent, EventException } from './model';
 import { isValidZone, zonedToUtc } from './time-zone';
 
 export interface ParseIcsOptions {
@@ -33,6 +36,12 @@ export interface ParseIcsOptions {
 	 * brought. Without it, such events are `event`, `event-2`, ... in file order.
 	 */
 	taken?: (id: string) => boolean;
+	/**
+	 * The calendar's event with an id, if any. A changed occurrence whose series is not in the file
+	 * but is this event (the same UID, repeating) becomes its exception, and the event is returned
+	 * with it: an update to one occurrence then changes that occurrence of the series.
+	 */
+	stored?: (id: string) => CalendarEvent | undefined;
 }
 
 export interface IcsImport {
@@ -78,6 +87,13 @@ function zoneResolver(
 	};
 }
 
+/** An event with these exceptions, and no `exceptions` when there are none. */
+function withExceptions(event: CalendarEvent, exceptions: EventException[]): CalendarEvent {
+	const out: CalendarEvent = { ...event, exceptions };
+	if (!exceptions.length) delete out.exceptions;
+	return out;
+}
+
 /** Series, their changed occurrences and duplicates joined; ids from the UIDs. */
 function assemble(
 	drafts: readonly EventDraft[],
@@ -86,10 +102,19 @@ function assemble(
 ): CalendarEvent[] {
 	const order: EventDraft[] = [];
 	const masters = new Map<string, EventDraft>();
-	const changes = new Map<string, EventDraft[]>();
+	/** The changed occurrences of each UID by RECURRENCE-ID, the latest version of each. */
+	const changes = new Map<string, Map<number, EventDraft>>();
 	for (const d of drafts) {
 		if (d.uid && d.recurrenceId !== undefined) {
-			changes.set(d.uid, [...(changes.get(d.uid) ?? []), d]);
+			const slots = changes.get(d.uid) ?? new Map<number, EventDraft>();
+			changes.set(d.uid, slots);
+			const seen = slots.get(d.recurrenceId);
+			if (seen)
+				note(
+					`${eventLabel(d.event.title)} has a changed occurrence that appears more than once; the latest version was kept`,
+				);
+			// The higher SEQUENCE wins, as for a series; of two equal ones, the later in the file.
+			if (!seen || d.sequence >= seen.sequence) slots.set(d.recurrenceId, d);
 			continue;
 		}
 		const seen = d.uid ? masters.get(d.uid) : undefined;
@@ -105,40 +130,60 @@ function assemble(
 		}
 	}
 	const own = options.uidDomain ? `@${options.uidDomain}` : '';
+	const mine = (uid: string): boolean => own !== '' && uid.length > own.length && uid.endsWith(own);
+	/** The id a UID gives: `<id>` of a UID `<id>@<uidDomain>`, else the UID itself. */
+	const idOf = (uid: string): string => (mine(uid) ? uid.slice(0, -own.length) : uid || 'event');
 	const used = new Set<string>();
-	const identify = (uid: string): Pick<CalendarEvent, 'id' | 'uid'> => {
-		const mine = own !== '' && uid.length > own.length && uid.endsWith(own);
-		const base = mine ? uid.slice(0, -own.length) : uid || 'event';
-		// An event with a UID is the same event again on a second import; one without has no
-		// identity, so it takes no id in use (`taken`).
-		const free = (id: string): boolean => !used.has(id) && (uid !== '' || !options.taken?.(id));
+	// An event with a UID is the same event again on a second import; one without has no identity,
+	// so it takes no id in use (`taken`).
+	const unique = (base: string, identity: boolean): string => {
+		const free = (id: string): boolean => !used.has(id) && (identity || !options.taken?.(id));
 		let id = base;
 		for (let n = 2; !free(id); n++) id = `${base}-${n}`;
 		used.add(id);
-		return mine || !uid ? { id } : { id, uid };
+		return id;
+	};
+	const identify = (uid: string): Pick<CalendarEvent, 'id' | 'uid'> => {
+		const id = unique(idOf(uid), uid !== '');
+		return mine(uid) || !uid ? { id } : { id, uid };
+	};
+	// An occurrence as an event of its own is that occurrence again on every import: its id comes
+	// from its series' UID and its RECURRENCE-ID. It takes no UID: one UID is one series, and in a
+	// file the occurrence would replace it.
+	const single = (uid: string, rid: number): string => unique(`${idOf(uid)}-${icsUtc(rid)}`, true);
+	/** The calendar's series of a UID: the event with its id, repeating, of the same UID. */
+	const held = (uid: string): CalendarEvent | undefined => {
+		const id = idOf(uid);
+		const event = options.stored?.(id);
+		const same = event?.id === id && (event.uid ?? '') === (mine(uid) ? '' : uid);
+		return same && event.repeat !== 'none' && !used.has(id) ? event : undefined;
 	};
 	const out: CalendarEvent[] = [];
+	/** A series with its changed occurrences, and after it those an exception cannot hold. */
+	const join = (series: EventDraft, slots: ReadonlyMap<number, EventDraft> | undefined): void => {
+		const apart: [CalendarEvent, number][] = [];
+		const changed = [...(slots?.values() ?? [])];
+		const exceptions = exceptionsOf(series, changed, note, (e, rid) => apart.push([e, rid]));
+		out.push(withExceptions(series.event, exceptions));
+		for (const [e, rid] of apart) out.push({ ...e, id: single(series.uid, rid) });
+	};
 	for (const d of order) {
-		const apart: CalendarEvent[] = [];
-		const exceptions = exceptionsOf(d, (d.uid && changes.get(d.uid)) || [], note, (e) =>
-			apart.push(e),
-		);
+		join({ ...d, event: { ...d.event, ...identify(d.uid) } }, changes.get(d.uid));
 		changes.delete(d.uid);
-		const event: CalendarEvent = { ...d.event, ...identify(d.uid) };
-		if (exceptions.length) event.exceptions = exceptions;
-		else delete event.exceptions;
-		out.push(event);
-		// Without the series' UID: one UID is one series, and a file that had two would lose one.
-		for (const e of apart) out.push({ ...e, id: identify(d.uid).id });
 	}
 	// Changed occurrences whose series is not in the file (an invitation to one occurrence).
-	for (const [uid, list] of changes)
-		for (const d of list) {
-			note(
-				'An occurrence of a repeating event was imported on its own: the file does not hold its series',
-			);
-			out.push({ ...d.event, ...identify(uid) });
+	for (const [uid, slots] of changes) {
+		const series = held(uid);
+		if (series) {
+			used.add(series.id);
+			join({ event: series, uid, sequence: 0 }, slots);
+			continue;
 		}
+		note(
+			'An occurrence of a repeating event was imported on its own: the file does not hold its series',
+		);
+		for (const [rid, d] of slots) out.push({ ...d.event, id: single(uid, rid) });
+	}
 	return out;
 }
 

@@ -40,7 +40,7 @@ The area never imports `teams`.
 | `layout.ts`       | `layoutDay(occurrences, day, zone)`: minutes after midnight and side-by-side columns for overlapping timed occurrences                                                   |
 | `ics-write.ts`    | `eventsToIcs(events, { prodId, uidDomain, now?, method?, organizer?, attendees? })`, `icsRecurrence`, `icsUtc`, `icsLocal`, `icsDateTime`, `icsDate`, `icsDuration`, ... |
 | `ics-timezone.ts` | `vtimezoneLines(zone, firstYear)`, `zoneTransitions(zone, year)`                                                                                                         |
-| `ics-read.ts`     | `parseIcs(text, { zone?, uidDomain? }): { events, unsupported }`                                                                                                         |
+| `ics-read.ts`     | `parseIcs(text, { zone?, uidDomain?, taken?, stored? }): { events, unsupported }`                                                                                        |
 | `ics-lines.ts`    | `unfoldLines`, `parseContentLine`, `unescapeText`, `readComponents`: the content-line reader (vCard uses the same line format)                                           |
 
 `CalendarMode` is `workweek`, `week`, `day` or `month`. `monthGrid` always returns six weeks of
@@ -55,7 +55,8 @@ every day it touches.
 `eventsToIcs` writes one VCALENDAR: a VTIMEZONE for each zone a timed event uses, then each event
 with its RRULE, EXDATEs and a RECURRENCE-ID event per changed occurrence (as `meetingToIcs` does
 for a meeting), LOCATION, ORGANIZER and ATTENDEE (only people with an address), STATUS and a VALARM
-for the reminder. All-day events are written as dates.
+for the reminder. All-day events are written as dates. DTEND is written only when it is after
+DTSTART (RFC 5545): without it a timed event ends where it starts and an all-day one lasts its day.
 
 `parseIcs` never throws. It reads every VEVENT: UID, SUMMARY, DESCRIPTION, LOCATION, DTSTART with
 DTEND or DURATION (UTC times; floating times and all-day dates in the `zone` option, UTC by default;
@@ -64,7 +65,12 @@ DAYLIGHT rules converting the times while a repeat keeps its time in the IANA zo
 changes match), STATUS:CANCELLED, the RRULE subset a series holds (FREQ=DAILY, WEEKLY, MONTHLY or
 YEARLY with COUNT or UNTIL, BYMONTHDAY, BYDAY with an ordinal or with BYSETPOS for monthly
 repeats), EXDATE, RECURRENCE-ID overrides, the first reminder, ORGANIZER and ATTENDEE with PARTSTAT
-and ROLE. Of two versions of a UID the higher SEQUENCE wins. With `uidDomain`, a UID
+and ROLE. Of two versions of a UID, or of one changed occurrence (a UID and its RECURRENCE-ID), the
+higher SEQUENCE wins (of two equal versions of an occurrence, the later in the file). A changed
+occurrence whose series is not in the file joins the series a calendar holds (`stored`, an event
+with that UID that repeats), else it is imported as an event of its own (id `<uid>-<RECURRENCE-ID
+in UTC>`, no UID), never in place of the series; an event without a UID takes no id `taken`
+reports in use. With `uidDomain`, a UID
 `<id>@<uidDomain>` (what `eventsToIcs` writes) gives back the event id, so a file this package
 wrote reads back as the same events. Everything else is listed once in `unsupported` as a short
 sentence: a property, another component (VTODO, VJOURNAL), a repeat rule the series cannot hold

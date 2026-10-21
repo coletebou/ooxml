@@ -2,8 +2,9 @@
 // (VEVENTs with its UID and a RECURRENCE-ID). An occurrence moved to another time keeps only what
 // changed; one cancelled, by STATUS:CANCELLED or an EXDATE, is a cancelled exception, though an
 // occurrence written for a slot an EXDATE cancelled wins over the EXDATE; one changed between all
-// day and a set time, which an exception cannot hold, becomes an event of its own. What cannot be
-// kept is reported through `note`. Split from `ics-read.ts`. DOM-free. New code.
+// day and a set time, which an exception cannot hold, becomes an event of its own. The series may
+// also be one the calendar holds already, its exceptions then the ones it had. What cannot be kept
+// is reported through `note`. Split from `ics-read.ts`. DOM-free. New code.
 import { type EventDraft, eventLabel } from './ics-read-event';
 import type { CalendarEvent, EventException } from './model';
 import { occurrenceEnd } from './occurrences';
@@ -30,24 +31,22 @@ function single(occurrence: CalendarEvent, title: string): CalendarEvent {
 }
 
 /**
- * The exceptions of a series: its EXDATEs and its changed occurrences. An occurrence an exception
- * cannot hold is cancelled in the series and handed to `apart` as an event of its own.
+ * The exceptions of a series: the ones it has (its EXDATEs) and its changed occurrences, the latest
+ * version of each (one per RECURRENCE-ID). An occurrence an exception cannot hold is cancelled in
+ * the series and handed to `apart`, with its RECURRENCE-ID, as an event of its own.
  */
 export function exceptionsOf(
 	master: EventDraft,
 	changes: readonly EventDraft[],
 	note: (text: string) => void,
-	apart: (event: CalendarEvent) => void,
+	apart: (event: CalendarEvent, recurrenceId: number) => void,
 ): EventException[] {
 	const m = master.event;
 	const label = eventLabel(m.title);
 	const out = new Map<number, EventException>();
+	// Some calendars write a moved occurrence as an EXDATE of its slot plus the occurrence on its own
+	// (RECURRENCE-ID), so an occurrence replaces whatever exception its slot had.
 	for (const e of m.exceptions ?? []) out.set(e.originalStart, e);
-	/**
-	 * The slots an EXDATE cancelled. Some calendars write a moved occurrence as an EXDATE of its
-	 * slot plus the occurrence on its own (RECURRENCE-ID), so the occurrence wins over the EXDATE.
-	 */
-	const excluded = new Set(out.keys());
 	for (const change of changes) {
 		const rid = change.recurrenceId;
 		const o = change.event;
@@ -64,8 +63,6 @@ export function exceptionsOf(
 			note(`A changed occurrence of ${label} is not on its series and was not imported`);
 			continue;
 		}
-		if (out.get(rid)?.cancelled && !excluded.has(rid)) continue;
-		excluded.delete(rid);
 		if (o.cancelled) {
 			out.set(rid, { originalStart: rid, cancelled: true });
 			continue;
@@ -77,7 +74,7 @@ export function exceptionsOf(
 				`An occurrence of ${label} changed between all day and a set time; it was imported as an event of its own`,
 			);
 			out.set(rid, { originalStart: rid, cancelled: true });
-			apart(single(o, o.title || m.title));
+			apart(single(o, o.title || m.title), rid);
 			continue;
 		}
 		if ((o.location ?? '') !== (m.location ?? ''))
