@@ -147,9 +147,13 @@ export class MailCompose extends MailElement {
 			if (changed.has('download')) this.pictures.mark();
 			// A body the host changed (a link fills a new message in) shows; the editor's own edit
 			// coming back is left as it is, with its caret.
-			const { html, text } = compose.draft;
+			const { html, text, cc, bcc } = compose.draft;
 			if (changed.has('compose') && (html !== this.body.html || text !== this.body.text))
 				this.show(editor, compose.draft);
+			// So do the Cc and Bcc fields once the host puts addresses there: recipients the
+			// person cannot see would still be sent the message.
+			this.showCc ||= cc.length > 0;
+			this.showBcc ||= bcc.length > 0;
 			return;
 		}
 		this.session = compose.session;

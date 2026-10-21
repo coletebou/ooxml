@@ -9,6 +9,8 @@ describe('mailtoDraft', () => {
 				{ name: '', email: 'ada@example.com' },
 				{ name: '', email: 'bob@example.com' },
 			],
+			cc: [],
+			bcc: [],
 			subject: 'Hi there',
 			text: 'See\nyou',
 		});
@@ -37,6 +39,8 @@ describe('mailtoDraft', () => {
 	it('reads the subject and body fields whatever the case of their names, the first of each', () => {
 		expect(mailtoDraft('mailto:ada@example.com?Subject=Hi&BODY=There&subject=Again')).toEqual({
 			to: [{ name: '', email: 'ada@example.com' }],
+			cc: [],
+			bcc: [],
 			subject: 'Hi',
 			text: 'There',
 		});
@@ -54,6 +58,27 @@ describe('mailtoDraft', () => {
 		expect(mailtoDraft('mailto:x@example.com?subject=%E0%A4%A&body=%')).toMatchObject({
 			subject: '%E0%A4%A',
 			text: '%',
+		});
+	});
+
+	it('adds the addresses of its to, cc and bcc fields, each split at its own commas', () => {
+		// RFC 6068 2: a field may name more recipients; a comma inside one address is escaped.
+		const draft = mailtoDraft(
+			'mailto:ada@example.com?to=eve@example.com&cc=bob@example.com,carol@example.com' +
+				'&CC=dan%40example.com&bcc=%22x%2Cy%22@example.com&subject=Plan',
+		);
+		const emails = (list: readonly { email: string }[] | undefined) => list?.map((a) => a.email);
+		expect(emails(draft?.to)).toEqual(['ada@example.com', 'eve@example.com']);
+		expect(emails(draft?.cc)).toEqual(['bob@example.com', 'carol@example.com', 'dan@example.com']);
+		expect(emails(draft?.bcc)).toEqual(['"x,y"@example.com']);
+		expect(draft?.subject).toBe('Plan');
+	});
+
+	it('takes every address from its fields when the link names none of its own', () => {
+		expect(mailtoDraft('mailto:?to=ada@example.com&cc=bob@example.com')).toMatchObject({
+			to: [{ name: '', email: 'ada@example.com' }],
+			cc: [{ name: '', email: 'bob@example.com' }],
+			bcc: [],
 		});
 	});
 

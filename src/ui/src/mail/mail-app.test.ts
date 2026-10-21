@@ -590,6 +590,20 @@ describe('<mail-app>', () => {
 		await until(() => state(app).open?.id === first!.id);
 	});
 
+	it('starts a message to every address of a mailto: link, its cc and bcc fields included', async () => {
+		const app = await mount();
+		await app.mailto(
+			'mailto:ada@example.com?cc=bob@example.com&bcc=carol%40example.com&subject=Hi',
+		);
+		const draft = state(app).compose?.draft;
+		expect([draft?.to, draft?.cc, draft?.bcc].map((list) => list?.map((a) => a.email))).toEqual([
+			['ada@example.com'],
+			['bob@example.com'],
+			['carol@example.com'],
+		]);
+		expect(draft?.subject).toBe('Hi');
+	});
+
 	it('keeps an address still being typed when Escape closes or Ctrl+Enter sends', async () => {
 		const { transport, saved, sent } = testTransport();
 		const app = await mount({ kind: 'transport', transport });

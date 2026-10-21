@@ -351,6 +351,23 @@ describe('<mail-compose>', () => {
 		expect(seen).toHaveLength(1);
 	});
 
+	it('shows the Cc and Bcc fields once its draft gets addresses there in the same session', async () => {
+		// A mailto: link with cc and bcc fields fills them in once the window is open: hidden,
+		// those recipients would be sent without the person seeing them.
+		const ada = [{ name: '', email: 'ada@example.com' }];
+		const bob = [{ name: '', email: 'bob@example.com' }];
+		const el = await mount(composeState({ to: ada }));
+		expect(fields(el)).toHaveLength(1);
+		el.compose = composeState({ to: ada, cc: bob, bcc: [...ada, ...bob] });
+		await settle(el);
+		const shown = fields(el) as (Updating & { addresses: readonly { email: string }[] })[];
+		expect(shown.map((field) => field.addresses.map((a) => a.email))).toEqual([
+			['ada@example.com'],
+			['bob@example.com'],
+			['ada@example.com', 'bob@example.com'],
+		]);
+	});
+
 	it('leaves an address typed for one draft out of the draft that takes its place', async () => {
 		const el = await mount(composeState());
 		const seen = record(el, 'mail-draft-change', 'mail-draft-send');
