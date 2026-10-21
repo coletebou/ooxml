@@ -9,6 +9,7 @@ import css from './link-dialog.css?raw';
 
 export interface LinkDialogValue {
 	href: string;
+	/** The selected or linked text; empty when a new link is typed in at the cursor. */
 	text: string;
 	/** The selection already has a link (Remove link is offered). */
 	linked: boolean;
@@ -77,7 +78,12 @@ export class NotebookLinkDialog extends NotebookElement {
 			</label>
 			<label
 				>${this.t('link.text')}
-				<input name="text" type="text" .value=${value?.text ?? ''} ?disabled=${!!value?.linked} />
+				<input
+					name="text"
+					type="text"
+					.value=${value?.text ?? ''}
+					?disabled=${!!value?.linked || !!value?.text}
+				/>
 			</label>
 			${this.invalid ? html`<p class="error" role="alert">${this.t('link.invalid')}</p>` : nothing}
 			${value?.linked ? html`<office-ui-button command="link-remove" slot="footer" label=${this.t('link.remove')} @office-command=${() => this.fire('nb-link-remove', {})}></office-ui-button>` : nothing}

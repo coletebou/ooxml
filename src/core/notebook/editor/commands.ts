@@ -2,7 +2,7 @@
 // Lists are prosemirror-schema-list's; a to-do tag is a block attribute that Enter carries to the
 // next line (Enter on an empty tagged line removes the tag, as notebook apps do). DOM-free.
 // New code.
-import { chainCommands, setBlockType, splitBlock, toggleMark } from 'prosemirror-commands';
+import { chainCommands, splitBlock, toggleMark } from 'prosemirror-commands';
 import type { NodeType } from 'prosemirror-model';
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import type { Command, EditorState, Transaction } from 'prosemirror-state';
@@ -38,12 +38,26 @@ export function toggleHighlight(color = 'yellow'): Command {
 }
 
 export function setBlockStyle(style: BlockStyle): Command {
-	return (state, dispatch, view) => {
-		const todo = state.selection.$from.parent.attrs.todo ?? null;
-		if (style === 'paragraph')
-			return setBlockType(nodes.paragraph!, { todo })(state, dispatch, view);
-		const level = Number(style.slice(-1));
-		return setBlockType(nodes.heading!, { level, todo })(state, dispatch, view);
+	return (state, dispatch) => {
+		const type = style === 'paragraph' ? nodes.paragraph! : nodes.heading!;
+		const level = style === 'paragraph' ? undefined : Number(style.slice(-1));
+		let applicable = false;
+		for (const { $from, $to } of state.selection.ranges)
+			state.doc.nodesBetween($from.pos, $to.pos, (node) => {
+				if (node.isTextblock && 'todo' in node.attrs) applicable = true;
+			});
+		if (!applicable) return false;
+		if (dispatch) {
+			const tr = state.tr;
+			// Each block keeps its own to-do tag; only the block type (and level) change.
+			for (const { $from, $to } of state.selection.ranges)
+				tr.setBlockType($from.pos, $to.pos, type, (node) => ({
+					...(level ? { level } : {}),
+					todo: node.attrs.todo ?? null,
+				}));
+			dispatch(tr.scrollIntoView());
+		}
+		return true;
 	};
 }
 
@@ -150,14 +164,47 @@ export const insertHardBreak: Command = (state, dispatch) => {
 	return true;
 };
 
+/** The extent of the link at `pos` (contiguous text with the same address), if there is one. */
+export function linkRangeAt(
+	state: EditorState,
+	pos: number,
+): { from: number; to: number; href: string } | null {
+	const type = marks.link!;
+	const $pos = state.doc.resolve(pos);
+	const runs: { from: number; to: number; href: string | null }[] = [];
+	let offset = $pos.start();
+	$pos.parent.forEach((child) => {
+		const mark = type.isInSet(child.marks);
+		runs.push({
+			from: offset,
+			to: offset + child.nodeSize,
+			href: mark ? String(mark.attrs.href ?? '') : null,
+		});
+		offset += child.nodeSize;
+	});
+	let at = runs.findIndex((r) => r.href !== null && r.from <= pos && pos < r.to);
+	if (at < 0) at = runs.findIndex((r) => r.href !== null && r.from < pos && pos <= r.to);
+	const href = runs[at]?.href;
+	if (at < 0 || href == null) return null;
+	let start = at;
+	let end = at;
+	while (start > 0 && runs[start - 1]?.href === href) start--;
+	while (end < runs.length - 1 && runs[end + 1]?.href === href) end++;
+	return { from: runs[start]!.from, to: runs[end]!.to, href };
+}
+
 /**
- * Link the selection to `href` (http, https or mailto), or with an empty selection insert `text`
- * (default the address) as a link. `null` removes links from the selection.
+ * Link the selection to `href` (http, https or mailto), or with an empty selection change the
+ * link around the cursor, or else insert `text` (default the address) as a link. `null` removes
+ * the link from the selection, or the whole link around the cursor.
  */
 export function setLink(href: string | null, text?: string): Command {
 	return (state, dispatch) => {
 		const type = marks.link!;
-		const { from, to, empty } = state.selection;
+		const { empty } = state.selection;
+		const around = empty ? linkRangeAt(state, state.selection.from) : null;
+		const from = around?.from ?? state.selection.from;
+		const to = around?.to ?? state.selection.to;
 		if (href === null) {
 			if (dispatch) dispatch(state.tr.removeMark(from, to, type));
 			return true;
@@ -166,7 +213,7 @@ export function setLink(href: string | null, text?: string): Command {
 		if (!isOpenableHyperlinkHref(value)) return false;
 		if (!dispatch) return true;
 		const mark = type.create({ href: value, anchor: null, tooltip: null });
-		if (empty) {
+		if (empty && !around) {
 			const label = text?.trim() || value;
 			dispatch(state.tr.insert(from, schema.text(label, [mark])).scrollIntoView());
 		} else dispatch(state.tr.removeMark(from, to, type).addMark(from, to, mark));

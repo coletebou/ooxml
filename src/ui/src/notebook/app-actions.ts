@@ -5,6 +5,7 @@ import type { Command } from 'prosemirror-state';
 import {
 	activeFormats,
 	indentListItem,
+	linkRangeAt,
 	outdentListItem,
 	setBlockStyle,
 	setLink,
@@ -14,6 +15,7 @@ import {
 	toggleTodo,
 } from 'ooxml-core/notebook/editor';
 import type { ExportedFile } from 'ooxml-core/notebook';
+import { isOpenableHyperlinkHref } from 'ooxml-core/opc';
 import type { AppHost } from './app-host';
 import { addPage, addSection } from './app-nav';
 import { formatCreated, notebookI18n } from './i18n/translator';
@@ -208,11 +210,20 @@ export function openLinkDialog(app: AppHost): void {
 	const view = app.editor;
 	if (!view || !view.dom.isConnected) return;
 	const { from, to, empty } = view.state.selection;
-	const link = activeFormats(view.state).link;
+	// With the cursor in a link, the dialog edits that whole link.
+	const around = empty ? linkRangeAt(view.state, from) : null;
+	const active = activeFormats(view.state).link;
+	const href = around?.href ?? active ?? '';
+	const text = around
+		? view.state.doc.textBetween(around.from, around.to, ' ')
+		: empty
+			? ''
+			: view.state.doc.textBetween(from, to, ' ');
+	// Only an address a viewer may open is offered for editing (a peer could have stored another).
 	app.link = {
-		href: link ?? '',
-		text: empty ? '' : view.state.doc.textBetween(from, to, ' '),
-		linked: !!link,
+		href: isOpenableHyperlinkHref(href) ? href : '',
+		text,
+		linked: !!around || !!active,
 	};
 }
 

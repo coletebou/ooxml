@@ -1,7 +1,7 @@
 import { loadDocx } from 'ooxml-core/docx';
 import { getIcon } from '../icons';
 import { TextSelection } from 'prosemirror-state';
-import { runCommand } from './app-actions';
+import { applyLink, openLinkDialog, runCommand } from './app-actions';
 import { type NotebookApp, type NotebookExportDetail, defineNotebookApp } from './notebook-app';
 import type { NotebookText } from './text-container';
 
@@ -26,9 +26,22 @@ async function mount(): Promise<NotebookApp> {
 
 const shadowText = (el: Element | null | undefined): string => el?.shadowRoot?.textContent ?? '';
 
+/**
+ * Let go of focus before unmounting. happy-dom keeps a removed element focused (a browser moves
+ * focus to the body), and the next test's shadow roots then fail to resolve their active element.
+ */
+function releaseFocus(): void {
+	let el: Element | null = document.activeElement;
+	while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+	(el as HTMLElement | null)?.blur();
+}
+
 describe('<notebook-app>', () => {
 	let app: NotebookApp;
-	afterEach(() => app?.remove());
+	afterEach(() => {
+		releaseFocus();
+		app?.remove();
+	});
 
 	it('opens a first notebook with a section and an untitled page', async () => {
 		app = await mount();
@@ -102,6 +115,55 @@ describe('<notebook-app>', () => {
 		expect(runs.some((r) => r.contentControl?.kind === 'checkbox')).toBe(true);
 		// No canvas in this DOM: the ink is reported, not silently lost.
 		expect(shadowText(app)).toContain('1 item could not be exported');
+	});
+
+	it('links the selection, then edits and removes the whole link around the cursor', async () => {
+		app = await mount();
+		const page = app.page()!;
+		app.client!.addText({ x: 40, y: 40 });
+		await until(() => page.shadowRoot!.querySelector<NotebookText>('notebook-text')?.view);
+		const view = page.shadowRoot!.querySelector<NotebookText>('notebook-text')!.view!;
+		app.editor = view;
+		const link = view.state.schema.marks.link!;
+		const hrefAt = (pos: number): unknown =>
+			link.isInSet(view.state.doc.resolve(pos).marks())?.attrs.href ?? null;
+		view.dispatch(view.state.tr.insertText('Read the guide'));
+		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 10, 15)));
+		openLinkDialog(app);
+		expect(app.link).toEqual({ href: '', text: 'guide', linked: false });
+		await app.updateComplete;
+		const dialog = app.shadowRoot!.querySelector('notebook-link-dialog')!;
+		await (dialog as unknown as { updateComplete: Promise<unknown> }).updateComplete;
+		// The text comes from the selection, so it is not typed in.
+		expect(dialog.shadowRoot!.querySelector<HTMLInputElement>('input[name="text"]')!.disabled).toBe(
+			true,
+		);
+		// The dialog focused its address field. happy-dom cannot resolve one shadow tree's active
+		// element while another tree holds focus (its walk runs past the document), so the field
+		// lets go first; the dialogs below are answered before they render.
+		dialog.shadowRoot!.querySelector<HTMLInputElement>('input[name="href"]')!.blur();
+		applyLink(app, 'https://example.com/guide');
+		expect(hrefAt(12)).toBe('https://example.com/guide');
+
+		// With the cursor inside the link, the dialog edits the whole link.
+		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 12)));
+		openLinkDialog(app);
+		expect(app.link).toEqual({ href: 'https://example.com/guide', text: 'guide', linked: true });
+		applyLink(app, 'https://example.com/other');
+		expect([hrefAt(11), hrefAt(14)]).toEqual([
+			'https://example.com/other',
+			'https://example.com/other',
+		]);
+		expect(view.state.doc.textContent).toBe('Read the guide');
+		applyLink(app, null);
+		expect([hrefAt(11), hrefAt(14)]).toEqual([null, null]);
+
+		// An address a viewer may not open (a peer could have stored one) is not offered for editing.
+		view.dispatch(view.state.tr.addMark(10, 15, link.create({ href: 'javascript:alert(1)' })));
+		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 12)));
+		openLinkDialog(app);
+		expect(app.link).toEqual({ href: '', text: 'guide', linked: true });
+		app.link = null;
 	});
 
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {

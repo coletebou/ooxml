@@ -5,6 +5,7 @@ import {
 	activeFormats,
 	enter,
 	indentListItem,
+	linkRangeAt,
 	outdentListItem,
 	setBlockStyle,
 	setLink,
@@ -188,5 +189,44 @@ describe('notebook editor commands', () => {
 			tooltip: null,
 		});
 		expect(attrs('javascript:alert(1)')).toBe(false);
+	});
+
+	it('changes the style of each selected block and keeps each one its own to-do tag', () => {
+		let s = state([p('plain'), p('done', 'done')], 1, 12);
+		s = run(s, setBlockStyle('heading1'));
+		expect(json(s)).toMatchObject([
+			{ type: 'heading', attrs: { level: 1, todo: null } },
+			{ type: 'heading', attrs: { level: 1, todo: 'done' } },
+		]);
+		s = run(s, setBlockStyle('paragraph'));
+		expect(json(s).map((b) => (b as { attrs: { todo: string | null } }).attrs.todo)).toEqual([
+			null,
+			'done',
+		]);
+	});
+
+	it('edits and removes the whole link around a collapsed cursor', () => {
+		const linked = {
+			type: 'link',
+			attrs: { href: 'https://a.example', anchor: null, tooltip: null },
+		};
+		const doc = [
+			{
+				type: 'paragraph',
+				attrs: { todo: null },
+				content: [
+					{ type: 'text', text: 'see ' },
+					{ type: 'text', text: 'docs', marks: [linked] },
+				],
+			},
+		];
+		let s = state(doc, 7);
+		expect(linkRangeAt(s, 7)).toEqual({ from: 5, to: 9, href: 'https://a.example' });
+		s = run(s, setLink('https://b.example'));
+		expect(s.doc.textContent).toBe('see docs');
+		expect(activeFormats(state(json(s), 7)).link).toBe('https://b.example');
+		s = run(state(json(s), 7), setLink(null));
+		expect(JSON.stringify(json(s))).not.toContain('link');
+		expect(linkRangeAt(s, 2)).toBeNull();
 	});
 });
