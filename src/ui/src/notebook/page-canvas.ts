@@ -187,9 +187,13 @@ export class NotebookPage extends NotebookElement {
 	}
 
 	#paste(event: ClipboardEvent): void {
-		const inEditor = event
-			.composedPath()
-			.some((n) => (n as HTMLElement).tagName === 'NOTEBOOK-TEXT');
+		const inEditor = event.composedPath().some((n) => {
+			const el = n as HTMLElement;
+			// Text containers and fields (the page title) paste on their own.
+			return (
+				el.tagName === 'NOTEBOOK-TEXT' || el.tagName === 'INPUT' || el.isContentEditable === true
+			);
+		});
 		if (inEditor || this.tool !== 'type') return;
 		const files = [...(event.clipboardData?.files ?? [])];
 		if (files.length) {
@@ -304,7 +308,7 @@ export class NotebookPage extends NotebookElement {
 			class=${classMap({ frame: true, [c.kind]: true, selected: c.id === this.selectedId, dragging: !!drag, peer: !!peer })}
 			data-id=${c.id}
 			style=${style}
-			tabindex="-1"
+			tabindex=${c.kind === 'text' ? -1 : 0}
 			role="group"
 			aria-label=${label}
 			@keydown=${(e: KeyboardEvent) => this.#frameKey(e, c)}

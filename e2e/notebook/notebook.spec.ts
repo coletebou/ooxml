@@ -155,6 +155,13 @@ test('inserts a picture and a live Word document, then exports the page to .docx
 	await command(page, 'picture');
 	await (await pictures).setFiles({ name: 'dot.png', mimeType: 'image/png', buffer: PNG });
 	await expect(page.locator('notebook-page .frame.image img')).toHaveCount(1);
+	// Pictures and files are reachable from the keyboard (Tab), then move with the arrows.
+	const picture = page.locator('notebook-page .frame.image');
+	await expect(picture).toHaveAttribute('tabindex', '0');
+	const before = (await picture.boundingBox())!;
+	await picture.focus();
+	await page.keyboard.press('Shift+ArrowRight');
+	await expect.poll(async () => (await picture.boundingBox())!.x).toBeCloseTo(before.x + 10, 0);
 	const files = page.waitForEvent('filechooser');
 	await command(page, 'file');
 	await (await files).setFiles(fixture('report.docx'));

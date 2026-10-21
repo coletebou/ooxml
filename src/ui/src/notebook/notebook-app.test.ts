@@ -168,6 +168,34 @@ describe('<notebook-app>', () => {
 		app.link = null;
 	});
 
+	it('pastes text below the content and leaves a paste into the title to the title', async () => {
+		app = await mount();
+		const page = app.page()!;
+		const first = app.client!.addText({ x: 40, y: 100 })!;
+		await until(() => app.state!.containers.length === 1);
+		await page.updateComplete;
+		const paste = (target: Element, text: string): void => {
+			const clipboardData = new DataTransfer();
+			clipboardData.setData('text/plain', text);
+			target.dispatchEvent(
+				new ClipboardEvent('paste', {
+					clipboardData,
+					bubbles: true,
+					composed: true,
+					cancelable: true,
+				}),
+			);
+		};
+		paste(page.shadowRoot!.querySelector('input.title')!, 'A title');
+		await page.updateComplete;
+		expect(app.state!.containers).toHaveLength(1);
+		// Nothing was clicked on this page, so the pasted text goes below what is there.
+		paste(page.shadowRoot!.querySelector('.scroller')!, 'Pasted');
+		await until(() => app.state!.containers.length === 2);
+		const pasted = app.state!.containers.find((c) => c.id !== first)!;
+		expect([pasted.x, pasted.y]).toEqual([48, 100 + 96 + 24]);
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;
