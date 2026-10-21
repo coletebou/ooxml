@@ -153,6 +153,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	#lastNav = '';
 	/** The container of `editor`: only it sets the ribbon's formats. */
 	#editorId = '';
+	/** The storage the current client was made for. */
+	#storageName = '';
 
 	constructor() {
 		super();
@@ -273,9 +275,12 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	#restart(): void {
 		const current = this.#client;
 		if (!current) return this.#start();
+		// Another storage is another profile: its notebooks must not stay on screen, so it switches
+		// even when the last save failed (the save-failed notice said so).
+		const profile = this.storageName !== this.#storageName;
 		void current.flush().then(
 			() => this.#client === current && this.#start(),
-			() => undefined,
+			() => profile && this.#client === current && this.#start(),
 		);
 	}
 
@@ -287,6 +292,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		if (key === this.#clientKey && this.#client) return;
 		this.#stop();
 		this.#clientKey = key;
+		this.#storageName = this.storageName;
 		const client = createNotebook({
 			user: {
 				...(this.userId ? { id: this.userId } : {}),

@@ -1,10 +1,12 @@
 // <notebook-link-dialog>: the Link dialog (Insert > Link, Ctrl+K) on the shared modal. Only
 // addresses a viewer may open (http, https, mailto; the shared hyperlink policy) are accepted.
 import { html, nothing } from 'lit';
+import { live } from 'lit/directives/live.js';
 import { isOpenableHyperlinkHref } from 'ooxml-core/opc';
 import { controlStyles } from '../base';
 import { definer } from '../registry';
 import { NotebookElement } from './base';
+import { composing } from './keys';
 import css from './link-dialog.css?raw';
 
 export interface LinkDialogValue {
@@ -71,9 +73,10 @@ export class NotebookLinkDialog extends NotebookElement {
 				<input
 					name="href"
 					type="url"
-					.value=${value?.href ?? ''}
+					.value=${live(value?.href ?? '')}
 					aria-invalid=${String(this.invalid)}
-					@keydown=${(e: KeyboardEvent) => e.key === 'Enter' && (e.preventDefault(), this.#apply())}
+					@keydown=${(e: KeyboardEvent) =>
+						e.key === 'Enter' && !composing(e) && (e.preventDefault(), this.#apply())}
 				/>
 			</label>
 			<label
@@ -81,7 +84,7 @@ export class NotebookLinkDialog extends NotebookElement {
 				<input
 					name="text"
 					type="text"
-					.value=${value?.text ?? ''}
+					.value=${live(value?.text ?? '')}
 					?disabled=${!!value?.linked || !!value?.text}
 				/>
 			</label>
