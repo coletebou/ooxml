@@ -208,6 +208,30 @@ describe('<notebook-app>', () => {
 		failing.mockRestore();
 	});
 
+	it('reports an Undo that cannot reopen the notebook the delete came from', async () => {
+		app = await mount();
+		const first = app.state!.notebookId;
+		runCommand(app, 'new-page');
+		await until(() => app.state!.pages.length === 2);
+		const doomed = app.state!.pageId;
+		app.nav()!.dispatchEvent(
+			new CustomEvent('nb-delete-item', {
+				detail: { kind: 'page', id: doomed },
+				bubbles: true,
+				composed: true,
+			}),
+		);
+		await until(() => !app.state!.pages.some((p) => p.id === doomed));
+		await app.updateComplete;
+		const undo = app.shadowRoot!.querySelector<HTMLButtonElement>('.notice .undo')!;
+		await app.client!.createNotebook({ name: 'Other' });
+		await until(() => app.state!.notebookId !== first && !app.state!.loading);
+		const failing = vi.spyOn(app.client!, 'openNotebook').mockRejectedValue(new Error('gone'));
+		undo.click();
+		await until(() => shadowText(app).includes('The notebook could not be opened.'));
+		failing.mockRestore();
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;

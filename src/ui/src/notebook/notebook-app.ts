@@ -204,11 +204,15 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		const source = this.state?.notebookId ?? '';
 		const undo =
 			kind === 'notebook'
-				? () => void client.restoreNotebook(id)
+				? () => client.restoreNotebook(id).catch(() => this.notify(this.t('notice.open-failed')))
 				: batch
 					? async () => {
-							if (client.getState().notebookId !== source) await client.openNotebook(source);
-							client.restore(batch);
+							try {
+								if (client.getState().notebookId !== source) await client.openNotebook(source);
+								client.restore(batch);
+							} catch {
+								this.notify(this.t('notice.open-failed'));
+							}
 						}
 					: undefined;
 		const key =
