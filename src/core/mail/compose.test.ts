@@ -4,9 +4,10 @@ import {
 	draftFromMessage,
 	isEmptyDraft,
 	replyRecipients,
+	type DraftHtml,
 	type QuoteFormat,
 } from './compose';
-import type { Identity, MailMessage } from './model';
+import type { DraftAttachment, Identity, MailAttachment, MailMessage } from './model';
 import { summary } from './test-support/emails';
 
 const me = { name: 'Sam', email: 'sam@example.com' };
@@ -236,5 +237,85 @@ describe('draftFromMessage', () => {
 		expect(draft.html).toBe(html);
 		expect(draftFromMessage(message({ text: 'Own text', html }), identity).text).toBe('Own text');
 		expect(draftFromMessage(message({ text: null, html: null }), identity).text).toBe('');
+	});
+});
+
+describe('the HTML a draft starts with', () => {
+	/** A `draftHtml` that answers `result` and records the message and parts it was asked about. */
+	function hook(result: string | null) {
+		const calls: [string, readonly DraftAttachment[]][] = [];
+		const draftHtml: DraftHtml = (source, parts) => {
+			calls.push([source.id, parts]);
+			return result;
+		};
+		return { calls, draftHtml };
+	}
+	const logo: MailAttachment = {
+		partId: '2',
+		blobId: 'b2',
+		name: 'logo.png',
+		type: 'image/png',
+		size: 3,
+		disposition: 'inline',
+		cid: 'logo@example.test',
+	};
+	/** A message whose HTML body came in two parts, the first ending in an open comment. */
+	const htmlParts = ['<p>As sent<!--', '<p>More <img src="cid:logo@example.test"></p>'];
+	const rich = () => message({ html: htmlParts.join(''), htmlParts, attachments: [logo] });
+
+	it('quotes what draftHtml makes of the original, given the parts the draft carries', () => {
+		const { calls, draftHtml } = hook('<p>Cleaned</p>');
+		const options = { identity, me: [me], format, draftHtml };
+		const forward = composeDraft('forward', rich(), options);
+		expect(forward.html).toMatch(/<br><p>Cleaned<\/p>$/);
+		for (const mode of ['reply', 'replyAll'] as const)
+			expect(composeDraft(mode, rich(), options).html).toMatch(
+				/<blockquote type="cite"><p>Cleaned<\/p><\/blockquote>$/,
+			);
+		// A forward's own parts, so the pictures it shows by cid: stay; an answer carries none.
+		expect(forward.attachments).toHaveLength(1);
+		expect(calls).toEqual([
+			['m1', forward.attachments],
+			['m1', []],
+			['m1', []],
+		]);
+	});
+
+	it('quotes the text when draftHtml finds no HTML, and the HTML as sent without draftHtml', () => {
+		const options = { identity, me: [me], format };
+		const empty = composeDraft('reply', rich(), { ...options, draftHtml: hook(null).draftHtml });
+		expect(empty.html).toMatch(/<blockquote type="cite">Line one<br>Line two<\/blockquote>$/);
+		expect(composeDraft('forward', rich(), options).html).toMatch(
+			/<br><p>As sent<!--<p>More <img src="cid:logo@example.test"><\/p>$/,
+		);
+	});
+
+	it('reopens a saved draft with what draftHtml makes of it, given its own parts', () => {
+		const { calls, draftHtml } = hook('<p>Cleaned</p>');
+		const draft = draftFromMessage(rich(), identity, draftHtml);
+		expect(draft.html).toBe('<p>Cleaned</p>');
+		expect(calls).toEqual([['m1', draft.attachments]]);
+		expect(draft.attachments).toEqual([
+			{
+				blobId: 'b2',
+				name: 'logo.png',
+				type: 'image/png',
+				size: 3,
+				cid: 'logo@example.test',
+				inline: true,
+			},
+		]);
+		expect(draftFromMessage(rich(), identity, hook(null).draftHtml)).not.toHaveProperty('html');
+		expect(draftFromMessage(rich(), identity).html).toBe(htmlParts.join(''));
+	});
+
+	it('quotes the text of every part of an HTML body sent in several', () => {
+		// Read as one text, the style the first part leaves open would take in the second.
+		const parts = ['<p>Notes<style>p{color:red}', '<p>Second part</p>'];
+		const original = message({ text: null, html: parts.join(''), htmlParts: parts });
+		const options = { identity, me: [me], format };
+		expect(composeDraft('reply', original, options).text).toContain('\n> Second part\n');
+		expect(composeDraft('forward', original, options).text).toContain('\nSecond part\n');
+		expect(draftFromMessage(original, identity).text).toContain('\nSecond part\n');
 	});
 });

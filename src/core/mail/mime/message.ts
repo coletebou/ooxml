@@ -34,16 +34,16 @@ function isEmbeddedImage(attachment: ParsedAttachment, html: string | null): boo
 /**
  * A `MailMessage` from a parsed message and what the store knows about it. `blobIdOf` names the
  * blob each attachment's bytes are kept under. The preview is the text body, else the HTML without
- * tags, scripts or styles, cut as RFC 8621 `preview` is; `hasAttachment` is true when any
- * attachment is more than an image the HTML body shows; an HTML body sent in several parts keeps
- * them (`htmlPartsOf`).
+ * tags, scripts or styles (read part by part), cut as RFC 8621 `preview` is; `hasAttachment` is
+ * true when any attachment is more than an image the HTML body shows; an HTML body sent in several
+ * parts keeps them (`htmlPartsOf`).
  */
 export function toMailMessage(
 	parsed: ParsedEmail,
 	meta: MailMessageMeta,
 	blobIdOf: (partId: string) => string,
 ): MailMessage {
-	const { text, html } = parsed;
+	const { text, html, htmlParts } = parsed;
 	return {
 		id: meta.id,
 		threadId: meta.threadId,
@@ -62,11 +62,11 @@ export function toMailMessage(
 		bcc: parsed.bcc,
 		replyTo: parsed.replyTo,
 		subject: parsed.subject,
-		preview: previewText(bodyText({ text, html })),
+		preview: previewText(bodyText({ text, html, htmlParts })),
 		hasAttachment: parsed.attachments.some((attachment) => !isEmbeddedImage(attachment, html)),
 		text,
 		html,
-		...htmlPartsOf(parsed.htmlParts),
+		...htmlPartsOf(htmlParts),
 		attachments: parsed.attachments.map((attachment) => ({
 			partId: attachment.partId,
 			blobId: blobIdOf(attachment.partId),

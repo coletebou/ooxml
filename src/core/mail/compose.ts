@@ -2,7 +2,8 @@
 // `In-Reply-To` and `References` that thread it (RFC 5322 section 3.6.4), the quoted original and
 // the parts a forward carries; a saved draft read back to edit; whether a draft holds anything. The
 // words around a quote ("On ... Ada wrote:") are the UI's, passed in through `QuoteFormat`, so they
-// are localised. New code.
+// are localised. The UI passes in the HTML a quote or a reopened draft holds too (`DraftHtml`):
+// cleaning a body part by part takes an HTML parser, which this area has none of. New code.
 import { textToHtml } from './mime/structure';
 import {
 	identityCovers,
@@ -27,6 +28,25 @@ export interface QuoteFormat {
 	/** The header block of a forwarded message, one line each (`From: ...`, `Subject: ...`). */
 	forwardHeader(source: MailMessage): readonly string[];
 }
+
+/**
+ * A message's HTML body as a draft holds it (a reply's or forward's quote, or a saved draft opened
+ * again), or null when it has none. Where HTML can be parsed (a UI), pass one that cleans each part
+ * of `message.htmlParts` on its own and joins them: read as one text, a part that ends in an open
+ * comment or tag takes in the parts after it. `parts` are the message's parts the draft carries,
+ * whose `cid:` pictures stay (the others go). Without one, a draft holds `message.html` as sent.
+ */
+export type DraftHtml = (message: MailMessage, parts: readonly DraftAttachment[]) => string | null;
+
+/**
+ * A message's HTML as a draft carrying `parts` holds it: what `draftHtml` makes of it, else the
+ * HTML as sent.
+ */
+const heldHtml = (
+	message: MailMessage,
+	parts: readonly DraftAttachment[],
+	draftHtml: DraftHtml | undefined,
+): string | null => (draftHtml ? draftHtml(message, parts) : message.html);
 
 const unique = (list: readonly MailAddress[], exclude: readonly MailAddress[]): MailAddress[] => {
 	const out: MailAddress[] = [];
@@ -100,11 +120,13 @@ export interface ComposeOptions {
 	/** Every address of the person, so a reply all never copies them in. */
 	me: readonly MailAddress[];
 	format: QuoteFormat;
+	/** The original's HTML as the quote holds it; without it, the HTML as sent (`DraftHtml`). */
+	draftHtml?: DraftHtml;
 }
 
 /**
- * A draft for `mode`. The quoted HTML holds the original's HTML as sent, so it is as untrusted as
- * the original: the editor must sanitise `draft.html` before it shows it.
+ * A draft for `mode`. Without `draftHtml`, the quoted HTML holds the original's HTML as sent, so
+ * it is as untrusted as the original: the editor must sanitise `draft.html` before it shows it.
  */
 export function composeDraft(
 	mode: ComposeMode,
@@ -124,15 +146,19 @@ export function composeDraft(
 	};
 	if (mode === 'new' || !source) return base;
 	const original = bodyText(source);
+	/** The original as the quote of a draft carrying `parts` holds it: its HTML, else its text. */
+	const quoted = (parts: readonly DraftAttachment[]): string =>
+		heldHtml(source, parts, options.draftHtml) ?? textToHtml(original);
 	if (mode === 'forward') {
 		const header = options.format.forwardHeader(source);
+		// Every part, the pictures the copied HTML shows by `cid:` too, so they still show.
+		const attachments = source.attachments.map(draftAttachment);
 		return {
 			...base,
 			subject: forwardSubject(source.subject),
 			text: `\n\n${header.join('\n')}\n\n${original}`,
-			html: `<p><br></p><div>${header.map(textToHtml).join('<br>')}</div><br>${source.html ?? textToHtml(original)}`,
-			// Every part, the pictures the copied HTML shows by `cid:` too, so they still show.
-			attachments: source.attachments.map(draftAttachment),
+			html: `<p><br></p><div>${header.map(textToHtml).join('<br>')}</div><br>${quoted(attachments)}`,
+			attachments,
 			references: answerReferences(source),
 			forwardOfEmailId: source.id,
 		};
@@ -147,7 +173,8 @@ export function composeDraft(
 		cc,
 		subject: replySubject(source.subject),
 		text: `\n\n${attribution}\n${quoteText(original)}`,
-		html: `<p><br></p><div>${textToHtml(attribution)}</div><blockquote type="cite">${source.html ?? textToHtml(original)}</blockquote>`,
+		// An answer carries none of the original's parts, so its quote shows none of their pictures.
+		html: `<p><br></p><div>${textToHtml(attribution)}</div><blockquote type="cite">${quoted([])}</blockquote>`,
 		...(inReplyTo.length ? { inReplyTo } : {}),
 		references: answerReferences(source),
 		replyToEmailId: source.id,
@@ -155,11 +182,18 @@ export function composeDraft(
 }
 
 /**
- * A saved draft, as the server holds it, to edit again; `identity` is the one it is from. One saved
- * with only HTML gets a plain text made from it, since a draft always sends one.
+ * A saved draft, as the server holds it, to edit again; `identity` is the one it is from, and its
+ * HTML is what `draftHtml` makes of the message's (as saved without it). One saved with only HTML
+ * gets a plain text made from it, since a draft always sends one.
  */
-export function draftFromMessage(message: MailMessage, identity: Identity | undefined): Draft {
+export function draftFromMessage(
+	message: MailMessage,
+	identity: Identity | undefined,
+	draftHtml?: DraftHtml,
+): Draft {
 	const from = message.from[0];
+	const attachments = message.attachments.map(draftAttachment);
+	const html = heldHtml(message, attachments, draftHtml);
 	return {
 		id: message.id,
 		...(identity ? { identityId: identity.id } : {}),
@@ -168,9 +202,9 @@ export function draftFromMessage(message: MailMessage, identity: Identity | unde
 		cc: message.cc,
 		bcc: message.bcc,
 		subject: message.subject,
-		text: bodyText({ text: message.text, html: message.html }),
-		...(message.html ? { html: message.html } : {}),
-		attachments: message.attachments.map(draftAttachment),
+		text: bodyText({ text: message.text, html: message.html, htmlParts: message.htmlParts }),
+		...(html ? { html } : {}),
+		attachments,
 		inReplyTo: message.inReplyTo,
 		references: message.references,
 	};

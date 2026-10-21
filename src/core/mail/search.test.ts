@@ -68,6 +68,14 @@ describe('matchesQuery', () => {
 			matchesQuery({ ...summary('c', { preview: 'Only a preview' }) }, { body: 'preview' }),
 		).toBe(true);
 	});
+	it('searches every part of an HTML body sent in several', () => {
+		// Read as one text, the style the first part leaves open would take in the second.
+		const htmlParts = ['<p>Notes<style>p{color:red}', '<div>Footer words</div>'];
+		const email = { ...summary('d'), html: htmlParts.join(''), htmlParts };
+		expect(matchesQuery(email, { body: 'footer' })).toBe(true);
+		expect(matchesQuery(email, { text: 'notes words' })).toBe(true);
+		expect(matchesQuery(email, { body: 'color' })).toBe(false);
+	});
 	it('matches flags, mailbox and dates', () => {
 		expect(matchesQuery(email, { unread: true, flagged: true, hasAttachment: true })).toBe(true);
 		expect(matchesQuery(email, { mailboxId: 'archive' })).toBe(false);
@@ -97,6 +105,23 @@ describe('body text', () => {
 				.map((line) => line.trim())
 				.filter(Boolean),
 		).toEqual(['Hello', 'there', 'one', 'two', 'End', 'last', 'rule']);
+	});
+	it('reads an HTML body sent in several part by part, a line each at least', () => {
+		const lines = (email: Parameters<typeof bodyText>[0]) =>
+			bodyText(email)
+				.split('\n')
+				.map((line) => line.trim())
+				.filter(Boolean);
+		// A style one part leaves open takes in nothing of the next.
+		const htmlParts = ['<p>Notes<style>p{color:red}', '<div>Footer</div>'];
+		expect(lines({ html: htmlParts.join(''), htmlParts })).toEqual(['Notes', 'Footer']);
+		// The words of two parts never run together, and the parts are the body: `html` is not read.
+		expect(lines({ html: '<p>Other</p>', htmlParts: ['<p>One<!--', 'Two'] })).toEqual([
+			'One',
+			'Two',
+		]);
+		// The plain text still comes first.
+		expect(bodyText({ text: 'Plain', html: htmlParts.join(''), htmlParts })).toBe('Plain');
 	});
 	it('stays linear on hostile markup', () => {
 		const started = performance.now();

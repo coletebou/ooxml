@@ -65,6 +65,8 @@ export function isSearch(query: MailQuery): boolean {
 export interface SearchableEmail extends EmailSummary {
 	text?: string | null;
 	html?: string | null;
+	/** The parts the HTML body was sent in, when there were several (`MailMessage.htmlParts`). */
+	htmlParts?: readonly string[];
 }
 
 const fold = (text: string): string => text.normalize('NFKC').toLowerCase();
@@ -140,14 +142,36 @@ export function htmlText(html: string): string {
 	return decodeEntities(stripHtmlTags(dropScriptsAndStyles(html).replace(LINE_END, '\n')));
 }
 
-/** The text of a message body: the plain text, else the HTML without its tags, else the preview. */
-export function bodyText(email: {
-	text?: string | null;
+/** A message's HTML body: as one text, and the parts it was sent in when there were several. */
+interface HtmlBody {
 	html?: string | null;
-	preview?: string;
-}): string {
+	/** `MailMessage.htmlParts`, `html` being them joined: read instead of `html` when set. */
+	htmlParts?: readonly string[] | null | undefined;
+}
+
+/**
+ * The text of a message's HTML body. One sent in several parts is read part by part, as a reader
+ * shows it: read as one text, a part that ends in an unclosed `<style>` or `<script>` would take in
+ * the parts after it. The parts' texts are joined as the text body's are, on a line break unless
+ * the one before ends in one, so the words of two parts never run together.
+ */
+function htmlBodyText(email: HtmlBody): string {
+	if (!email.htmlParts?.length) return email.html ? htmlText(email.html) : '';
+	let text = '';
+	for (const part of email.htmlParts) {
+		const value = htmlText(part);
+		text = text && !text.endsWith('\n') ? `${text}\n${value}` : text + value;
+	}
+	return text;
+}
+
+/**
+ * The text of a message body: the plain text, else the HTML without its tags (part by part when it
+ * was sent in several), else the preview.
+ */
+export function bodyText(email: HtmlBody & { text?: string | null; preview?: string }): string {
 	if (email.text) return email.text;
-	if (email.html) return htmlText(email.html);
+	if (email.html) return htmlBodyText(email);
 	return email.preview ?? '';
 }
 
@@ -156,7 +180,7 @@ export function bodyText(email: {
  * the other lacks (a short plain alternative, a fuller HTML one); the preview without either.
  */
 function searchableBody(email: SearchableEmail): string {
-	const parts = [email.text ?? '', email.html ? htmlText(email.html) : ''].filter(Boolean);
+	const parts = [email.text ?? '', htmlBodyText(email)].filter(Boolean);
 	return parts.length ? parts.join('\n') : email.preview;
 }
 

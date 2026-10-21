@@ -133,4 +133,25 @@ describe('toMailMessage', () => {
 		expect(single.html).toBe('<p>Hello</p>');
 		expect(single).not.toHaveProperty('htmlParts');
 	});
+
+	it('previews every part of an HTML body sent in several', () => {
+		// Read as one text, the style the first part leaves open would take in the second.
+		const parsed = readEmail(
+			[
+				'Content-Type: multipart/mixed; boundary=b',
+				'',
+				'--b',
+				'Content-Type: text/html',
+				'',
+				'<p>Hello<style>p{color:red}',
+				'--b',
+				'Content-Type: text/html',
+				'',
+				'<p>Bye for now</p>',
+				'--b--',
+				'',
+			].join('\r\n'),
+		);
+		expect(toMailMessage(parsed, meta, (partId) => partId).preview).toBe('Hello Bye for now');
+	});
 });

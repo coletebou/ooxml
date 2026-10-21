@@ -446,6 +446,69 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('starts answers, forwards and reopened drafts with what its draftHtml makes of a message', async () => {
+		const part = (name: string, cid?: string) => ({
+			name,
+			type: cid ? 'image/png' : 'text/plain',
+			bytes: new TextEncoder().encode(name),
+			...(cid ? { cid, inline: true } : {}),
+		});
+		const memory = createMemoryTransport({
+			now: () => T0,
+			messages: [
+				{
+					id: 'welcome',
+					mailboxId: 'inbox',
+					from: ada,
+					to: [me],
+					subject: 'Welcome',
+					html: '<p><img src="cid:logo@example.test"></p>',
+					attachments: [part('logo.png', 'logo@example.test')],
+					receivedAt: T0,
+				},
+				{
+					id: 'saved',
+					mailboxId: 'drafts',
+					from: me,
+					to: [ada],
+					subject: 'Saved',
+					html: '<p>Draft</p>',
+					attachments: [part('notes.txt')],
+					receivedAt: T0,
+					keywords: [DRAFT],
+				},
+			],
+		});
+		const calls: [string, string[]][] = [];
+		const client = createMailClient({
+			transport: memory,
+			now: () => T0,
+			setTimeout: () => 0,
+			clearTimeout: () => undefined,
+			draftHtml: (message, parts) => {
+				calls.push([message.id, parts.map((p) => p.name)]);
+				return `<p>Clean ${message.id}</p>`;
+			},
+		});
+		await until(client, (s) => s.status === 'ready');
+		const html = () => client.getState().compose?.draft.html;
+		expect(await client.compose('forward', 'welcome')).toBe(true);
+		expect(html()).toMatch(/<br><p>Clean welcome<\/p>$/);
+		await client.discardDraft();
+		expect(await client.compose('reply', 'welcome')).toBe(true);
+		expect(html()).toMatch(/<blockquote type="cite"><p>Clean welcome<\/p><\/blockquote>$/);
+		await client.discardDraft();
+		expect(await client.editDraft('saved')).toBe(true);
+		expect(html()).toBe('<p>Clean saved</p>');
+		// A forward and a reopened draft are given their own parts; an answer, none.
+		expect(calls).toEqual([
+			['welcome', ['logo.png']],
+			['welcome', []],
+			['saved', ['notes.txt']],
+		]);
+		client.destroy();
+	});
+
 	it('answers from the address a wildcard identity covers, and reopens the draft as it', async () => {
 		const desk = { name: 'Sales desk', email: 'desk@example.net' };
 		const { client, inMailbox } = plain({

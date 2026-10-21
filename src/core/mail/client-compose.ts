@@ -188,10 +188,12 @@ export function createCompose(core: ClientCore): ComposeActions {
 				const me = identities().map((identity) => ({ name: identity.name, email: identity.email }));
 				// For an answer, the identity the original was sent to; else the first.
 				const recipients = original ? [...original.to, ...original.cc, ...original.bcc] : [];
+				const { draftHtml } = core.options;
 				const draft = composeDraft(mode, original, {
 					identity: identityFor(identities(), recipients) ?? identities()[0] ?? null,
 					me,
 					format: core.options.quoteFormat ?? ENGLISH_QUOTE_FORMAT,
+					...(draftHtml ? { draftHtml } : {}),
 				});
 				if (!(await close())) return false;
 				start(draft, mode);
@@ -207,7 +209,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 				const message = await source(emailId);
 				const identity = identityFor(identities(), message.from.slice(0, 1));
 				if (!(await close())) return false;
-				start(draftFromMessage(message, identity), 'new');
+				start(draftFromMessage(message, identity, core.options.draftHtml), 'new');
 				return true;
 			} catch (error) {
 				core.fail('open', error);

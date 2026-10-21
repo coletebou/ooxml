@@ -75,10 +75,14 @@ instead of destroying mail. Responses for a folder or search the person already 
   the stack; a test threads ten thousand messages into two thousand conversations.
 - **Search** (`search.ts`): `parseSearch` reads `from:`, `to:`, `subject:`, `body:`,
   `has:attachment`, `is:unread`, `is:read`, `is:flagged`, `before:`, `after:` and free text; the
-  memory transport matches with `matchesQuery`, the JMAP client sends an `Email/query` filter.
+  memory transport matches with `matchesQuery`, the JMAP client sends an `Email/query` filter. An
+  HTML body sent in several parts (`htmlParts`) is read part by part, for search as for previews.
 - **Compose** (`compose.ts`): recipients of a reply and reply all (never yourself), `Re:` and `Fwd:`
   subjects, `In-Reply-To` and `References` (RFC 5322 section 3.6.4), quoting with words the UI
-  supplies (`QuoteFormat`), so they are localised.
+  supplies (`QuoteFormat`), so they are localised. The HTML a quote or a reopened draft holds comes
+  from the client's `draftHtml` option: `ooxml-ui/mail` cleans each part of the body on its own, as
+  the reading pane shows it, so a part that ends in an open comment or tag cannot take in the rest;
+  without the option, a draft holds the HTML as sent.
 
 ## Contacts and calendar
 

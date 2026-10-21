@@ -2,7 +2,7 @@
 // every binding's raw hook wraps (React `useMail`, ...). Anything a screen shows is in the state;
 // anything a button does is an action. New code.
 import type { CalendarEvent } from '../calendar/model';
-import type { ComposeMode, QuoteFormat } from './compose';
+import type { ComposeMode, DraftHtml, QuoteFormat } from './compose';
 import type { Contact, ContactStore } from './contacts';
 import type { CalendarStore } from './calendar-store';
 import type {
@@ -163,6 +163,12 @@ export interface MailClientOptions {
 	calendar?: CalendarStore;
 	/** The words around quoted replies and forwards; English when omitted. */
 	quoteFormat?: QuoteFormat;
+	/**
+	 * The HTML a reply's or forward's quote, or a saved draft opened again, holds of a message. A UI
+	 * passes one that cleans each part of the body on its own (`ooxml-ui/mail`'s `createMail` does);
+	 * without it, the HTML as sent (`DraftHtml`).
+	 */
+	draftHtml?: DraftHtml;
 	now?: () => number;
 	/** Quiet time before a draft is saved automatically. Default 2 seconds. */
 	draftSaveMs?: number;
