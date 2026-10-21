@@ -164,6 +164,21 @@ describe('useNotebook', () => {
 		await vi.waitFor(() =>
 			expect(seen.state?.sections.map((section) => section.name)).toContain('Neuer Abschnitt 2'),
 		);
+		// The render that changes the options never hands out the previous client.
+		const renders: { name: string | undefined; client: NotebookClient | null }[] = [];
+		function Recorder(props: { options: CreateNotebookOptions }) {
+			renders.push({ name: props.options.storageName, client: useNotebook(props.options).client });
+			return null;
+		}
+		root.render(createElement(Recorder, { options: second }));
+		await vi.waitFor(() => expect(renders.at(-1)?.client ?? null).not.toBeNull());
+		const old = renders.at(-1)!.client;
+		const other = { ...second, storageName: unique('react-other') };
+		root.render(createElement(Recorder, { options: other }));
+		await vi.waitFor(() => expect(renders.at(-1)?.client ?? null).not.toBeNull());
+		expect(renders.filter((r) => r.name === other.storageName).some((r) => r.client === old)).toBe(
+			false,
+		);
 		root.unmount();
 	});
 });

@@ -89,7 +89,7 @@ function identity(value: object | undefined): number {
  *   const state = useNotebookState(client);
  */
 export function useNotebookClient(options: CreateNotebookOptions | null): NotebookClient | null {
-	const [client, setClient] = useState<NotebookClient | null>(null);
+	const [made, setMade] = useState<{ key: string; client: NotebookClient } | null>(null);
 	const key = options
 		? JSON.stringify([
 				options.user,
@@ -105,12 +105,15 @@ export function useNotebookClient(options: CreateNotebookOptions | null): Notebo
 		const opts = latest.current;
 		if (!opts) return;
 		const created = createNotebook(opts);
-		setClient(created);
+		setMade({ key, client: created });
 		return () => {
 			void created.destroy();
-			setClient(null);
+			setMade(null);
 		};
 	}, [key]);
+	// During the render that changes the options the old client is still in state; it belongs to
+	// the old options (another profile's notebooks, perhaps), so it is not handed out.
+	const client = made?.key === key ? made.client : null;
 	// A language change renames what is created next; the client (and its notebooks) stays.
 	const locale = options?.locale;
 	useEffect(() => {
