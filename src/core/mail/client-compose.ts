@@ -2,13 +2,13 @@
 // attach files; save the draft automatically after a quiet moment (never two saves at once); send;
 // discard. Also the file actions on messages: download an attachment, export and import `.eml`.
 // New code.
-import type { ClientCore } from './client-core';
+import { errorCode, type ClientCore } from './client-core';
 import type { ListLoader } from './client-list';
 import type { ComposeState, FileInput, MailClient } from './client-types';
-import { composeDraft, isEmptyDraft, type QuoteFormat } from './compose';
+import { composeDraft, draftRecipients, isEmptyDraft, type QuoteFormat } from './compose';
 import { emlFileName } from './eml';
 import { formatAddress, sameAddress, type Draft, type Identity, type MailMessage } from './model';
-import { MailTransportError } from './transport';
+import { messageDate } from './threading';
 
 type ComposeActions = Pick<
 	MailClient,
@@ -32,11 +32,11 @@ const ADDRESS = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+$/;
 /** English quote wording, for clients without a localised `quoteFormat`. */
 export const ENGLISH_QUOTE_FORMAT: QuoteFormat = {
 	attribution: (source) =>
-		`On ${new Date(source.sentAt ?? source.receivedAt).toUTCString()}, ${source.from[0] ? formatAddress(source.from[0]) : 'someone'} wrote:`,
+		`On ${new Date(messageDate(source)).toUTCString()}, ${source.from[0] ? formatAddress(source.from[0]) : 'someone'} wrote:`,
 	forwardHeader: (source) => [
 		'---------- Forwarded message ----------',
 		`From: ${source.from.map(formatAddress).join(', ')}`,
-		`Date: ${new Date(source.sentAt ?? source.receivedAt).toUTCString()}`,
+		`Date: ${new Date(messageDate(source)).toUTCString()}`,
 		`Subject: ${source.subject}`,
 		`To: ${source.to.map(formatAddress).join(', ')}`,
 		...(source.cc.length ? [`Cc: ${source.cc.map(formatAddress).join(', ')}`] : []),
@@ -99,10 +99,7 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 					});
 				}
 			} catch (error) {
-				setCompose({
-					status: 'error',
-					error: error instanceof MailTransportError ? error.code : 'server',
-				});
+				setCompose({ status: 'error', error: errorCode(error) });
 			} finally {
 				saving = undefined;
 			}
@@ -240,7 +237,7 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 		async send() {
 			const current = compose();
 			if (!current || current.status === 'sending') return false;
-			const recipients = [...current.draft.to, ...current.draft.cc, ...current.draft.bcc];
+			const recipients = draftRecipients(current.draft);
 			if (!recipients.length || recipients.some((r) => !ADDRESS.test(r.email))) {
 				setCompose({ status: 'error', error: 'invalid' });
 				return false;
@@ -256,10 +253,7 @@ export function createCompose(core: ClientCore, list: ListLoader): ComposeAction
 				core.notice({ kind: 'done', action: 'sent', count: 1 });
 				return true;
 			} catch (error) {
-				setCompose({
-					status: 'error',
-					error: error instanceof MailTransportError ? error.code : 'server',
-				});
+				setCompose({ status: 'error', error: errorCode(error) });
 				core.fail('send', error);
 				return false;
 			}

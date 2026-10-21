@@ -30,23 +30,6 @@ export function createPeople(core: ClientCore): PeopleLoader {
 	const contacts = core.options.contacts;
 	const calendar = core.options.calendar;
 
-	const loadContacts = async (): Promise<void> => {
-		if (!contacts) return;
-		try {
-			core.patch({ contacts: sortContacts(await contacts.list()) });
-		} catch (error) {
-			core.fail('contacts', error);
-		}
-	};
-	const loadEvents = async (): Promise<void> => {
-		if (!calendar) return;
-		try {
-			const events = await calendar.list();
-			core.patch({ events: [...events].sort((a, b) => a.start - b.start) });
-		} catch (error) {
-			core.fail('calendar', error);
-		}
-	};
 	const guard = async (
 		action: 'contacts' | 'calendar',
 		run: () => Promise<void>,
@@ -57,6 +40,16 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			core.fail(action, error);
 		}
 	};
+	const loadContacts = (): Promise<void> =>
+		guard('contacts', async () => {
+			if (contacts) core.patch({ contacts: sortContacts(await contacts.list()) });
+		});
+	const loadEvents = (): Promise<void> =>
+		guard('calendar', async () => {
+			if (!calendar) return;
+			const events = await calendar.list();
+			core.patch({ events: [...events].sort((a, b) => a.start - b.start) });
+		});
 
 	return {
 		load: async () => {

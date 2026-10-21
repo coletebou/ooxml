@@ -1,6 +1,9 @@
 // vCard content lines (RFC 6350 section 3.3): unfolding, the name, parameters and value of each
 // line, structured-value splitting and text unescaping, and the 2.1 quoted-printable values. Used
-// by `vcard.ts`. New code.
+// by `vcard.ts`. The line split and the RFC 6868 decoding are the iCalendar reader's, which shares
+// the line format; the rest stays vCard's own (group prefixes, bare 2.1 types, quoted-printable
+// soft breaks, only the escapes RFC 6350 defines). New code.
+import { caretDecode, splitContentLine } from '../calendar/ics-lines';
 
 export interface Property {
 	name: string;
@@ -24,36 +27,15 @@ export function unfold(text: string): string[] {
 	return out.filter((line) => line.trim() !== '');
 }
 
-/** RFC 6868 parameter value decoding (`^n`, `^^`, `^'`). */
-const caretDecode = (value: string): string =>
-	value.replace(/\^([n^'])/g, (_, c: string) => (c === 'n' ? '\n' : c === "'" ? '"' : '^'));
-
+/** One unfolded line as a property, or null when it has no colon outside quotes or no name. */
 export function parseLine(line: string): Property | null {
-	let index = 0;
-	let inQuotes = false;
-	for (; index < line.length; index++) {
-		const char = line[index];
-		if (char === '"') inQuotes = !inQuotes;
-		else if (char === ':' && !inQuotes) break;
-	}
-	if (index >= line.length) return null;
-	const head = line.slice(0, index);
-	const value = line.slice(index + 1);
-	const parts: string[] = [];
-	let current = '';
-	inQuotes = false;
-	for (const char of head) {
-		if (char === '"') inQuotes = !inQuotes;
-		if (char === ';' && !inQuotes) {
-			parts.push(current);
-			current = '';
-		} else current += char;
-	}
-	parts.push(current);
-	const name = (parts.shift() ?? '').replace(/^[^.]*\./, '').toUpperCase();
+	const parts = splitContentLine(line);
+	if (!parts) return null;
+	// A group prefix (`item1.TEL`) is dropped.
+	const name = parts.name.replace(/^[^.]*\./, '').toUpperCase();
 	if (!name) return null;
 	const params: Record<string, string[]> = {};
-	for (const part of parts) {
+	for (const part of parts.params) {
 		const eq = part.indexOf('=');
 		// vCard 2.1 writes bare types: `TEL;WORK;VOICE:...`.
 		const key = (eq < 0 ? 'TYPE' : part.slice(0, eq)).toUpperCase();
@@ -64,7 +46,7 @@ export function parseLine(line: string): Property | null {
 			...values.map((v) => caretDecode(v.replace(/^"|"$/g, ''))),
 		];
 	}
-	return { name, params, value, raw: line };
+	return { name, params, value: parts.value, raw: line };
 }
 
 /** Split on separators not escaped with a backslash. */
@@ -85,6 +67,10 @@ export function splitUnescaped(value: string, separator: ';' | ','): string[] {
 	return out;
 }
 
+/**
+ * A TEXT value: `\n` (or `\N`) is a line break, `\\`, `\,` and `\;` their character. Unlike
+ * iCalendar's `unescapeText`, any other backslash is kept as written.
+ */
 export const unescapeText = (value: string): string =>
 	value.replace(/\\([\\,;nN])/g, (_, c: string) => (c === 'n' || c === 'N' ? '\n' : c));
 

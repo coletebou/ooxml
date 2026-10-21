@@ -1,14 +1,17 @@
 // `createMemoryTransport`: a whole mail server in memory, for demos, tests and local-first
 // prototypes. Same contract as the JMAP client, so the UI cannot tell them apart; changes are pushed
 // to `watch` listeners like a server's push. Nothing leaves the page. New code.
+import { draftRecipients } from './compose';
 import { writeEmail } from './mime';
 import {
 	ANSWERED,
+	DRAFT,
 	FORWARDED,
 	SEEN,
 	type Draft,
 	type Identity,
 	type MailAccount,
+	type MailAddress,
 	type Mailbox,
 	type MailMessage,
 } from './model';
@@ -106,8 +109,14 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		for (const mailbox of mailboxes.values()) if (mailbox.role === role) return mailbox;
 		throw new MailTransportError('notFound', `No ${role} mailbox.`);
 	};
-	const identityFor = (draft: Draft): Identity =>
-		identities.find((identity) => identity.id === draft.identityId) ?? identities[0]!;
+	/** The address a draft is sent from: its identity's, else the first identity's. */
+	const senderOf = (draft: Draft): MailAddress => {
+		const identity = identities.find((i) => i.id === draft.identityId) ?? identities[0]!;
+		return { name: identity.name, email: identity.email };
+	};
+	/** Removes the saved draft that a save or a send replaces; returns its id for the change feed. */
+	const dropDraft = (draft: Draft): string[] =>
+		draft.id && messages.delete(draft.id) ? [draft.id] : [];
 	const addKeyword = (id: string | undefined, keyword: string): void => {
 		const target = id ? messages.get(id) : undefined;
 		if (target) messages.set(id!, { ...target, keywords: { ...target.keywords, [keyword]: true } });
@@ -135,7 +144,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 				references: target.references,
 				date: target.sentAt ?? target.receivedAt,
 			},
-			{ includeBcc: target.keywords.$draft === true },
+			{ includeBcc: target.keywords[DRAFT] === true },
 		);
 
 	const transport: MemoryTransport = {
@@ -234,9 +243,8 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		},
 		async saveDraft(draft) {
 			await settle();
-			const identity = identityFor(draft);
+			const from = senderOf(draft);
 			const id = nextId('d');
-			const from = { name: identity.name, email: identity.email };
 			messages.set(
 				id,
 				messageFromDraft(draft, id, {
@@ -247,17 +255,15 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 					blobs,
 				}),
 			);
-			const destroyed = draft.id && messages.delete(draft.id) ? [draft.id] : [];
-			emailsChanged([id], [], destroyed);
+			emailsChanged([id], [], dropDraft(draft));
 			return { id };
 		},
 		async send(draft) {
 			await settle();
-			const recipients = [...draft.to, ...draft.cc, ...draft.bcc];
+			const recipients = draftRecipients(draft);
 			if (!recipients.length)
 				throw new MailTransportError('invalid', 'The message has no recipients.');
-			const identity = identityFor(draft);
-			const from = { name: identity.name, email: identity.email };
+			const from = senderOf(draft);
 			const id = nextId('s');
 			const sent = messageFromDraft(draft, id, {
 				mailboxId: byRole('sent').id,
@@ -280,7 +286,7 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 				});
 				created.push(copy);
 			}
-			const destroyed = draft.id && messages.delete(draft.id) ? [draft.id] : [];
+			const destroyed = dropDraft(draft);
 			addKeyword(draft.replyToEmailId, ANSWERED);
 			addKeyword(draft.forwardOfEmailId, FORWARDED);
 			const updated = [draft.replyToEmailId, draft.forwardOfEmailId].filter(

@@ -5,7 +5,7 @@ import type { Mailbox, MailboxRole } from '../model';
 import { MailTransportError, type NewMailbox } from '../transport';
 import type { ChangeTracker } from './changes';
 import type { JmapClient } from './client';
-import { objects, toMailbox, type JmapObject } from './convert';
+import { objects, strings, toMailbox, type JmapObject } from './convert';
 
 const PROPERTIES = ['name', 'parentId', 'role', 'sortOrder', 'totalEmails', 'unreadEmails'];
 
@@ -19,9 +19,6 @@ export interface MailboxMethods {
 	/** Forgets the role map (mailboxes changed). */
 	forgetRoles(): void;
 }
-
-const strings = (value: unknown): string[] =>
-	Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 
 export function createMailboxMethods(
 	client: JmapClient,

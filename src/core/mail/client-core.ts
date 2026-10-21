@@ -113,6 +113,12 @@ export class ClientCore {
 		return this.mailboxes.find((mailbox) => mailbox.role === role);
 	}
 
+	/** The folder the list shows: the open one, or none while a search spans every folder. */
+	listMailboxId(): string | null {
+		const { query, searchScope, mailboxId } = this.state;
+		return query && searchScope === 'all' ? null : mailboxId;
+	}
+
 	setMailboxes(mailboxes: Mailbox[]): void {
 		this.mailboxes = mailboxes;
 		this.patch({ mailboxes: mailboxViews(mailboxes) });

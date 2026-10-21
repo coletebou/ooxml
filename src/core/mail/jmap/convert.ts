@@ -23,6 +23,10 @@ const count = (value: unknown): number =>
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const unbracket = (id: string): string => id.replace(/^<|>$/g, '');
 
+/** The string items of a list (ids, say); a value that is not a list has none. */
+export const strings = (value: unknown): string[] =>
+	list(value).filter((item): item is string => typeof item === 'string');
+
 /** The items of a /get `list` (or any list) that are objects with an id. */
 export function objects(value: unknown): JmapObject[] {
 	return list(value).filter(

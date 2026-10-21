@@ -2,6 +2,7 @@
 // `References` that thread it (RFC 5322 section 3.6.4) and the quoted original. The words around a
 // quote ("On ... Ada wrote:") are the UI's, passed in through `QuoteFormat`, so they are localised.
 // New code.
+import { textToHtml } from './mime/structure';
 import {
 	sameAddress,
 	type Draft,
@@ -33,11 +34,6 @@ const unique = (list: readonly MailAddress[], exclude: readonly MailAddress[]): 
 	return out;
 };
 
-const escapeHtml = (text: string): string =>
-	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
-
-const textToHtml = (text: string): string => escapeHtml(text).replace(/\r?\n/g, '<br>');
-
 function quoteText(text: string): string {
 	return text
 		.replace(/\r\n/g, '\n')
@@ -46,7 +42,7 @@ function quoteText(text: string): string {
 		.join('\n');
 }
 
-/** The address a person writes from: the chosen identity, else the account's first. */
+/** The address a draft is written from: the chosen identity's, if there is one. */
 function sender(identity: Identity | null): MailAddress | undefined {
 	return identity ? { name: identity.name, email: identity.email } : undefined;
 }
@@ -134,7 +130,10 @@ export function composeDraft(
 	};
 }
 
-/** True when a draft has nothing worth keeping (no recipients, subject, text or files). */
+/**
+ * True when a draft has nothing worth keeping: no To or Cc recipients, subject, text or files.
+ * Bcc is not counted, since a new draft starts with the identity's own Bcc addresses.
+ */
 export function isEmptyDraft(draft: Draft): boolean {
 	return (
 		!draft.to.length &&

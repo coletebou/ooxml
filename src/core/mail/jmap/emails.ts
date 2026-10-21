@@ -11,7 +11,7 @@ import {
 } from '../transport';
 import type { ChangeTracker } from './changes';
 import type { JmapClient } from './client';
-import { objects, toMessage, toSummary } from './convert';
+import { objects, strings, toMessage, toSummary } from './convert';
 import { toJmapFilter } from './filter';
 import { patchPath } from './request';
 
@@ -61,9 +61,6 @@ export function emailPatch(patch: EmailPatch): Record<string, true | null> {
 		out[patchPath('mailboxIds', mailboxId)] = on ? true : null;
 	return out;
 }
-
-const strings = (value: unknown): string[] =>
-	Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 
 export interface EmailMethods {
 	query(query: MailQuery, page?: MailQueryPage): Promise<MailQueryResult>;

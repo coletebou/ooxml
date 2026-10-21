@@ -5,6 +5,7 @@
 // New code.
 import type { MailChange } from '../transport';
 import type { JmapClient } from './client';
+import { strings } from './convert';
 import type { JmapCall, JmapResult } from './request';
 
 export type TrackedType = 'Mailbox' | 'Email';
@@ -32,13 +33,10 @@ interface Collected {
 	reset: Set<TrackedType>;
 }
 
-const ids = (value: unknown): string[] =>
-	Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
-
 function collect(into: Collected, type: TrackedType, args: Record<string, unknown>): void {
-	const created = ids(args.created);
-	const updated = ids(args.updated);
-	const destroyed = ids(args.destroyed);
+	const created = strings(args.created);
+	const updated = strings(args.updated);
+	const destroyed = strings(args.destroyed);
 	if (type === 'Mailbox') {
 		into.mailboxes ||= created.length + updated.length + destroyed.length > 0;
 		return;

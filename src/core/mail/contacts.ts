@@ -81,7 +81,10 @@ export function emptyContact(id: string, now: number): Contact {
 	};
 }
 
-/** The name to show: the formatted name, else given and family name, else the first address. */
+/**
+ * The name to show: the formatted name, else given and family name, else the first address, else
+ * the organization.
+ */
 export function contactLabel(contact: Contact): string {
 	return (
 		contact.name.trim() ||
@@ -128,6 +131,15 @@ export function sortContacts(contacts: readonly Contact[], locale?: string): Con
 	);
 }
 
+/** 0 when the name or address starts with `needle`, 1 when one contains it, else -1. */
+function matchScore(address: MailAddress, needle: string): number {
+	const name = fold(address.name);
+	const email = fold(address.email);
+	if (name.startsWith(needle) || email.startsWith(needle)) return 0;
+	if (name.includes(needle) || email.includes(needle)) return 1;
+	return -1;
+}
+
 /** Recipient suggestions for a compose field, best matches (prefix of name or address) first. */
 export function suggestRecipients(
 	contacts: readonly Contact[],
@@ -139,14 +151,7 @@ export function suggestRecipients(
 	const scored: { address: MailAddress; score: number }[] = [];
 	for (const contact of contacts) {
 		for (const address of contactAddresses(contact)) {
-			const name = fold(address.name);
-			const email = fold(address.email);
-			const score =
-				name.startsWith(needle) || email.startsWith(needle)
-					? 0
-					: name.includes(needle) || email.includes(needle)
-						? 1
-						: -1;
+			const score = matchScore(address, needle);
 			if (score >= 0) scored.push({ address, score });
 		}
 	}

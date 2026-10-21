@@ -60,6 +60,8 @@ function containerDate(container: Container): number {
 	return 0;
 }
 
+const byDate = (a: Container, b: Container): number => containerDate(a) - containerDate(b);
+
 /** Steps 1 and 2: containers by message id, linked by references; returns the root set. */
 function linkMessages(emails: readonly EmailSummary[]): Container[] {
 	const byId = new Map<string, Container>();
@@ -113,6 +115,14 @@ function preOrder(roots: readonly Container[]): Container[] {
 		for (let i = container.children.length - 1; i >= 0; i--) stack.push(container.children[i]!);
 	}
 	return out;
+}
+
+/**
+ * Every container's children oldest first. The deepest go first: a placeholder's date is its first
+ * child's, so that child's own children must already be in order.
+ */
+function sortChildren(roots: readonly Container[]): void {
+	for (const container of preOrder(roots).reverse()) container.children.sort(byDate);
 }
 
 /** Step 3: drop empty placeholders, promoting their children (not to the root, unless one). */
@@ -204,13 +214,11 @@ export function threadConversations(
 			.sort((a, b) => b.date - a.date || a.id.localeCompare(b.id));
 	}
 	let roots = prune(linkMessages(emails));
-	for (const container of preOrder(roots).reverse())
-		container.children.sort((a, b) => containerDate(a) - containerDate(b));
+	sortChildren(roots);
 	if (options.bySubject !== false) {
-		roots.sort((a, b) => containerDate(a) - containerDate(b));
+		roots.sort(byDate);
 		roots = groupBySubject(roots);
-		for (const container of preOrder(roots).reverse())
-			container.children.sort((a, b) => containerDate(a) - containerDate(b));
+		sortChildren(roots);
 	}
 	const conversations: Conversation[] = [];
 	for (const root of roots) {

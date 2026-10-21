@@ -18,7 +18,7 @@ import {
 	type MailMessage,
 } from './model';
 import type { MailErrorCode } from './transport';
-import type { Conversation } from './threading';
+import { messageDate, type Conversation } from './threading';
 
 const roleRank = (mailbox: Mailbox): number =>
 	mailbox.role ? MAILBOX_ROLES.indexOf(mailbox.role) : MAILBOX_ROLES.length;
@@ -65,9 +65,7 @@ const participantsOf = (emails: readonly EmailSummary[]): MailAddress[] => {
 /** A message-list row for a conversation. */
 export function conversationView(conversation: Conversation): ConversationView {
 	const emails = conversation.entries.map((entry) => entry.email);
-	const chronological = [...emails].sort(
-		(a, b) => (a.sentAt ?? a.receivedAt) - (b.sentAt ?? b.receivedAt),
-	);
+	const chronological = [...emails].sort((a, b) => messageDate(a) - messageDate(b));
 	return {
 		id: conversation.id,
 		emailIds: emails.map((email) => email.id),

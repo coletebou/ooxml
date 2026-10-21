@@ -131,9 +131,7 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 			if (!items.length) return;
 			const { limits } = await ensure();
 			const chunks = chunk(items, Math.max(1, size(limits)));
-			const perRequest = Math.max(1, limits.maxCallsInRequest);
-			for (let start = 0; start < chunks.length; start += perRequest) {
-				const group = chunks.slice(start, start + perRequest);
+			for (const group of chunk(chunks, Math.max(1, limits.maxCallsInRequest))) {
 				const { result, calls } = await client.request((builder, account) =>
 					group.map((part) => add(builder, account, part)),
 				);

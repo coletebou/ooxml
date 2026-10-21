@@ -30,11 +30,11 @@ export function createListLoader(core: ClientCore): ListLoader {
 	let flushing: unknown;
 
 	const query = (): MailQuery => {
-		const { mailboxId, query: text, searchScope } = core.state;
-		const scoped = !text || searchScope === 'mailbox';
+		const text = core.state.query;
+		const mailboxId = core.listMailboxId();
 		return {
 			...(text ? parseSearch(text) : {}),
-			...(scoped && mailboxId ? { mailboxId } : {}),
+			...(mailboxId ? { mailboxId } : {}),
 		};
 	};
 

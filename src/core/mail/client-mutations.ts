@@ -51,8 +51,7 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		emailIds: readonly string[],
 		mailboxId: string,
 	): Record<string, EmailPatch> => {
-		const viewing =
-			core.state.query && core.state.searchScope === 'all' ? null : core.state.mailboxId;
+		const viewing = core.listMailboxId();
 		const patches: Record<string, EmailPatch> = {};
 		for (const id of emailIds) {
 			const email = core.emails.get(id);
@@ -93,11 +92,11 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		);
 
 	const hideMoved = (patches: Record<string, EmailPatch>): void => {
-		const viewing = core.state.mailboxId;
-		if (core.state.query && core.state.searchScope === 'all') return;
+		const viewing = core.listMailboxId();
+		if (!viewing) return;
 		const gone = new Set(
 			Object.entries(patches)
-				.filter(([, patch]) => viewing && patch.mailboxIds?.[viewing] === false)
+				.filter(([, patch]) => patch.mailboxIds?.[viewing] === false)
 				.map(([id]) => id),
 		);
 		if (!gone.size) return;

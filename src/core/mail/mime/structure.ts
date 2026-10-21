@@ -94,8 +94,9 @@ export function partText(part: MimePart): string {
 	return decodeCharset(part.body, part.params.charset).replace(/\r\n?/g, '\n');
 }
 
-const escapeHtml = (text: string): string =>
-	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`).replace(/\n/g, '<br>');
+/** Plain text as HTML: markup characters escaped, each line break a `<br>`. */
+export const textToHtml = (text: string): string =>
+	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`).replace(/\r?\n/g, '<br>');
 
 function documentOrder(root: MimePart): Map<MimePart, number> {
 	const order = new Map<MimePart, number>();
@@ -125,7 +126,7 @@ export function messageBodies(root: MimePart): MessageBodies {
 		? htmlBody
 				.filter((part) => part.type === 'text/html' || part.type === 'text/plain')
 				.map((part) =>
-					part.type === 'text/html' ? partText(part) : `<div>${escapeHtml(partText(part))}</div>`,
+					part.type === 'text/html' ? partText(part) : `<div>${textToHtml(partText(part))}</div>`,
 				)
 				.join('')
 		: null;

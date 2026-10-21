@@ -16,7 +16,7 @@ import {
 } from './demo-data';
 import { DEFAULT_MAILBOXES, type SeedMessage } from './memory-messages';
 import type { MemoryTransportOptions } from './memory-transport';
-import type { MailAddress } from './model';
+import { DRAFT, type MailAddress } from './model';
 import type { OutgoingAttachment } from './mime';
 import { replySubject } from './subject';
 
@@ -96,9 +96,11 @@ function threads(now: number, files: DemoSeedOptions['files']): SeedMessage[] {
 		const rootId = `demo-${t}-0`;
 		const root = `${rootId}@demo.example.com`;
 		const ids = [root];
+		// Thread 9 is filed in Projects, a folder the person made.
+		const folder = t === 9 ? 'projects' : 'inbox';
 		out.push({
 			id: rootId,
-			mailboxId: t === 9 ? 'projects' : 'inbox',
+			mailboxId: folder,
 			from: person(thread.from),
 			to: [DEMO_ME],
 			subject: thread.subject,
@@ -116,7 +118,7 @@ function threads(now: number, files: DemoSeedOptions['files']): SeedMessage[] {
 			const last = r === thread.replies.length - 1;
 			out.push({
 				id,
-				mailboxId: mine ? 'sent' : t === 9 ? 'projects' : 'inbox',
+				mailboxId: mine ? 'sent' : folder,
 				from: mine ? DEMO_ME : person(reply.from as number),
 				to: mine ? [person(thread.from)] : [DEMO_ME],
 				subject: replySubject(thread.subject),
@@ -172,7 +174,7 @@ function extras(now: number): SeedMessage[] {
 			subject: replySubject('Contract renewal'),
 			text: 'Hi Julia,\n\nI read the terms and have two questions:\n',
 			receivedAt: now - 2 * HOUR,
-			keywords: ['$draft'],
+			keywords: [DRAFT],
 		},
 		{
 			id: 'demo-junk',
