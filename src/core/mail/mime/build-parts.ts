@@ -75,6 +75,32 @@ function isSevenBit(bytes: Uint8Array): boolean {
 	return true;
 }
 
+/** `bytes` with every line break, a lone CR or LF too, made CRLF (RFC 5322 section 2.3). */
+function crlfLines(bytes: Uint8Array): Uint8Array {
+	let added = 0;
+	for (let i = 0; i < bytes.length; i++) {
+		const lone = bytes[i] === LF ? bytes[i - 1] !== CR : bytes[i] === CR && bytes[i + 1] !== LF;
+		if (lone) added++;
+	}
+	if (!added) return bytes;
+	const out = new Uint8Array(bytes.length + added);
+	let at = 0;
+	for (let i = 0; i < bytes.length; i++) {
+		const byte = bytes[i]!;
+		if (byte === LF && bytes[i - 1] !== CR) out[at++] = CR;
+		out[at++] = byte;
+		if (byte === CR && bytes[i + 1] !== LF) out[at++] = LF;
+	}
+	return out;
+}
+
+/** An attached message as `7bit` data: as it is, else with CRLF line breaks; null if neither. */
+function sevenBitMessage(bytes: Uint8Array): Uint8Array | null {
+	if (isSevenBit(bytes)) return bytes;
+	const lines = crlfLines(bytes);
+	return lines !== bytes && isSevenBit(lines) ? lines : null;
+}
+
 /** A UTF-8 text or HTML part: `7bit` when it already is, else quoted-printable. */
 export function textPart(text: string, subtype: 'plain' | 'html'): RenderedPart {
 	const bytes = utf8(text.replace(/\r\n|\r|\n/g, '\r\n'));
@@ -90,9 +116,12 @@ export function textPart(text: string, subtype: 'plain' | 'html'): RenderedPart 
 
 /**
  * An attachment in base64 with its name in `Content-Type` and `Content-Disposition` (RFC 2231 when
- * it is not ASCII). A `message/rfc822` that is 7-bit data is written as it is, since RFC 2046
- * section 5.2.1 allows no other encoding for it; any other attached message falls back to base64,
- * which readers accept.
+ * it is not ASCII). RFC 2046 section 5.2.1 allows a `message/rfc822` no transfer encoding, and
+ * this writer writes only 7-bit data, so any transport takes it: an attached message that is
+ * 7-bit data goes as it is, one that becomes it once its line breaks are CRLF goes with them, and
+ * any other (8-bit text, a NUL, a line over 998 octets) goes as `message/global` in base64. RFC
+ * 6532 section 3.7 gives that the same content and any transfer encoding, and a reader that does
+ * not know it offers it as a file (RFC 2046 section 5.2.4).
  */
 export function attachmentPart(
 	attachment: OutgoingAttachment,
@@ -100,8 +129,10 @@ export function attachmentPart(
 ): RenderedPart {
 	const media = parseContentType(attachment.type, 'application/octet-stream');
 	// A file cannot be a multipart: it has no boundary, and a reader would look for its parts.
-	const type =
+	const given =
 		media.type === 'multipart' ? 'application/octet-stream' : `${media.type}/${media.subtype}`;
+	const verbatim = given === 'message/rfc822' ? sevenBitMessage(attachment.bytes) : null;
+	const type = given === 'message/rfc822' && !verbatim ? 'message/global' : given;
 	const params = Object.fromEntries(Object.entries(media.params).filter(([key]) => key !== 'name'));
 	const named = (key: string): Record<string, string> =>
 		attachment.name ? { [key]: attachment.name } : {};
@@ -110,11 +141,10 @@ export function attachmentPart(
 		foldHeader('Content-Disposition', `${disposition}${formatParameters(named('filename'))}`),
 	];
 	if (attachment.cid) headers.push(foldHeader('Content-ID', formatMessageIds([attachment.cid])));
-	const verbatim = type === 'message/rfc822' && isSevenBit(attachment.bytes);
 	headers.push(`Content-Transfer-Encoding: ${verbatim ? '7bit' : 'base64'}`);
 	return {
 		headers,
-		body: verbatim ? toBinary(attachment.bytes) : encodeBase64Lines(attachment.bytes),
+		body: verbatim ? toBinary(verbatim) : encodeBase64Lines(attachment.bytes),
 	};
 }
 

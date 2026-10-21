@@ -214,30 +214,50 @@ describe('writeEmail', () => {
 		expect(() => writeEmail(email, { boundary: () => 'x'.repeat(71) })).toThrow(RangeError);
 	});
 
-	it('attaches a 7-bit message as it is and any other message in base64', () => {
+	it('attaches a message as message/rfc822 when it can be 7-bit, else as message/global', () => {
 		const inner = writeEmail({ from: grace, to: [ada], subject: 'Inner', text: 'inside' }, fixed);
 		const lf = utf8('Subject: lf\n\nbody\n');
-		const email = readEmail(
-			writeEmail(
-				{
-					from: ada,
-					to: [grace],
-					subject: 'Fwd',
-					text: 'Two messages.',
-					attachments: [
-						{ name: 'inner.eml', type: 'message/rfc822', bytes: inner },
-						{ name: 'lf.eml', type: 'message/rfc822', bytes: lf },
-					],
-				},
-				fixed,
-			),
+		const eightBit = utf8(
+			'Subject: 8bit\r\nContent-Type: text/plain; charset=utf-8\r\n' +
+				'Content-Transfer-Encoding: 8bit\r\n\r\nCafé\r\n',
 		);
-		const [, first, second] = email.root.parts;
-		expect(getHeader(first!.headers, 'Content-Transfer-Encoding')).toBe('7bit');
-		expect(getHeader(second!.headers, 'Content-Transfer-Encoding')).toBe('base64');
-		expect(first!.message?.subject).toBe('Inner');
-		expect(second!.message?.subject).toBe('lf');
-		expect(email.attachments.map((attachment) => attachment.bytes)).toEqual([inner, lf]);
+		const long = utf8(`Subject: long\r\n\r\n${'x'.repeat(1200)}\r\n`);
+		const raw = writeEmail(
+			{
+				from: ada,
+				to: [grace],
+				subject: 'Fwd',
+				text: 'Four messages.',
+				attachments: [
+					{ name: 'inner.eml', type: 'message/rfc822', bytes: inner },
+					{ name: 'lf.eml', type: 'message/rfc822', bytes: lf },
+					{ name: '8bit.eml', type: 'message/rfc822', bytes: eightBit },
+					{ name: 'long.eml', type: 'message/rfc822', bytes: long },
+				],
+			},
+			fixed,
+		);
+		const email = readEmail(raw);
+		const parts = email.root.parts.slice(1);
+		// RFC 2046 section 5.2.1 allows a message/rfc822 no transfer encoding: one that is 7-bit goes
+		// as it is, one with lines not ending in CRLF with CRLF ones; message/global may be base64.
+		expect(
+			parts.map((part) => [part.type, getHeader(part.headers, 'Content-Transfer-Encoding')]),
+		).toEqual([
+			['message/rfc822', '7bit'],
+			['message/rfc822', '7bit'],
+			['message/global', 'base64'],
+			['message/global', 'base64'],
+		]);
+		expect(parts.map((part) => part.message?.subject)).toEqual(['Inner', 'lf', '8bit', 'long']);
+		expect(email.attachments.map((attachment) => attachment.bytes)).toEqual([
+			inner,
+			utf8('Subject: lf\r\n\r\nbody\r\n'),
+			eightBit,
+			long,
+		]);
+		// The message stays 7-bit, so it can go through any transport.
+		expect(raw.every((byte) => byte < 0x80)).toBe(true);
 	});
 });
 
