@@ -1,7 +1,6 @@
 // Content-Transfer-Encoding (RFC 2045 section 6): reading the field, decoding bodies leniently and
 // writing base64 in mail-sized lines. New code.
-import { decodeBase64, encodeBase64 } from '../../digest/base64';
-import { concatBytes, toBinary } from './binary';
+import { encodeBase64 } from '../../digest/base64';
 import { decodeQuotedPrintable } from './quoted-printable';
 import { stripComments } from './syntax';
 
@@ -25,21 +24,39 @@ export function transferEncoding(value: string | undefined): TransferEncoding | 
 	return null;
 }
 
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+/** The value of each byte that is a base64 digit, -1 for any other. */
+const DIGITS = new Int8Array(256).fill(-1);
+for (let value = 0; value < ALPHABET.length; value++) DIGITS[ALPHABET.charCodeAt(value)] = value;
+const PAD = 0x3d;
+
 /**
  * Base64 the way mail programs get it wrong too: a cut-off end, stray characters, and padding in
- * the middle (lines encoded one by one) are decoded as far as they go, never thrown.
+ * the middle (lines encoded one by one) are decoded as far as they go, never thrown. One pass into
+ * one array, so a body padded after every few digits costs no more memory than any other of its
+ * size.
  */
 export function decodeBase64Body(bytes: Uint8Array): Uint8Array {
-	const text = toBinary(bytes);
-	const strict = decodeBase64(text);
-	if (strict) return strict;
-	const chunks: Uint8Array[] = [];
-	for (const piece of text.replace(/[^A-Za-z0-9+/=]+/g, '').split(/=+/)) {
-		const usable = piece.length % 4 === 1 ? piece.length - 1 : piece.length;
-		const decoded = usable ? decodeBase64(piece.slice(0, usable)) : undefined;
-		if (decoded) chunks.push(decoded);
+	const out = new Uint8Array(Math.floor((bytes.length * 3) / 4));
+	let length = 0;
+	let buffer = 0;
+	let bits = 0;
+	for (let i = 0; i < bytes.length; i++) {
+		const byte = bytes[i]!;
+		const value = DIGITS[byte]!;
+		if (value >= 0) {
+			buffer = ((buffer << 6) | value) & 0xffffff;
+			bits += 6;
+			if (bits < 8) continue;
+			bits -= 8;
+			out[length++] = (buffer >> bits) & 0xff;
+		} else if (byte === PAD) {
+			// Padding ends a piece: bits short of a byte are dropped, as at a cut-off end.
+			buffer = 0;
+			bits = 0;
+		}
 	}
-	return concatBytes(chunks);
+	return length === out.length ? out : out.slice(0, length);
 }
 
 /**

@@ -29,6 +29,15 @@ describe('decodeBase64Body', () => {
 		expect(text(decodeBase64Body(ascii('SGVs*bG8')))).toBe('Hello');
 		expect(decodeBase64Body(ascii('!!!'))).toEqual(new Uint8Array(0));
 	});
+
+	it('decodes what it writes, padded or not, whatever the length', () => {
+		for (let length = 0; length < 64; length++) {
+			const bytes = Uint8Array.from({ length }, (_, i) => (i * 37 + length * 11) & 0xff);
+			const lines = encodeBase64Lines(bytes);
+			expect(decodeBase64Body(ascii(lines)), `${length}`).toEqual(bytes);
+			expect(decodeBase64Body(ascii(lines.replace(/=+$/, ''))), `${length}`).toEqual(bytes);
+		}
+	});
 });
 
 describe('decodeTransfer', () => {
