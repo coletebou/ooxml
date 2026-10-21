@@ -239,6 +239,35 @@ describe('eventsToIcs', () => {
 		}
 	});
 
+	it('reads a DURATION no date can end at as one it cannot read, and still exports', () => {
+		for (const duration of ['PT10000000000000S', 'P999999999D', 'P99999999W']) {
+			const file = [
+				'BEGIN:VCALENDAR',
+				'VERSION:2.0',
+				'PRODID:-//Example//Test//EN',
+				'BEGIN:VEVENT',
+				'UID:long@example.com',
+				'DTSTAMP:20260101T000000Z',
+				'DTSTART;TZID=America/New_York:20261015T090000',
+				`DURATION:${duration}`,
+				'SUMMARY:Too long',
+				'END:VEVENT',
+				'END:VCALENDAR',
+				'',
+			].join('\r\n');
+			const read = parseIcs(file);
+			// Its end left out, as for a DURATION that cannot be read at all: a timed event of no length.
+			expect(
+				read.events.map((e) => e.end - e.start),
+				duration,
+			).toEqual([0]);
+			expect(read.unsupported, duration).toEqual([
+				expect.stringMatching(/DURATION that cannot be read/),
+			]);
+			expect(vevent(lines(read.events)), duration).toContain('SUMMARY:Too long');
+		}
+	});
+
 	it('writes an all-day event as dates, its end the day after the last', () => {
 		const tokyo = 'Asia/Tokyo';
 		const out = vevent(

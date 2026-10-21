@@ -20,6 +20,8 @@ export interface ZonedParts {
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 3_600_000;
 export const DAY_MS = 86_400_000;
+/** The furthest instant from 1970, before or after, that a `Date` holds (ECMA-262 21.4.1.1). */
+export const MAX_INSTANT = 8.64e15;
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

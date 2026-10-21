@@ -3,6 +3,7 @@
 // letters may be lower case. Years before 1000 are refused (the platform's date arithmetic reads
 // two-digit years as 19xx). DOM-free. New code.
 import { daysInMonth } from './recurrence-calendar';
+import { DAY_MS, MAX_INSTANT } from './time-zone';
 
 /** A wall-clock time with every field. */
 export interface Wall {
@@ -54,6 +55,11 @@ export interface IcsDuration {
 }
 
 const DURATION = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/iu;
+/**
+ * The longest length read: half the span of the instants a `Date` holds, so that a time of any
+ * four-digit year moved by it is still one of them.
+ */
+const LONGEST_MS = MAX_INSTANT / 2;
 
 export function readDuration(text: string): IcsDuration | null {
 	const value = text.trim();
@@ -61,11 +67,11 @@ export function readDuration(text: string): IcsDuration | null {
 	// `P` and `PT` alone match the pattern but say nothing.
 	if (!m || /^[+-]?PT?$/iu.test(value) || /T$/iu.test(value)) return null;
 	const n = (i: number): number => Number(m[i] ?? 0);
-	return {
-		days: n(2) * 7 + n(3),
-		ms: ((n(4) * 60 + n(5)) * 60 + n(6)) * 1000,
-		sign: m[1] === '-' ? -1 : 1,
-	};
+	const days = n(2) * 7 + n(3);
+	const ms = ((n(4) * 60 + n(5)) * 60 + n(6)) * 1000;
+	// A length no date can end at (PT10000000000000S) is as unreadable as a malformed one.
+	if (!(days * DAY_MS + ms <= LONGEST_MS)) return null;
+	return { days, ms, sign: m[1] === '-' ? -1 : 1 };
 }
 
 /** `+0100`, `-0430` or `+053000` as minutes ahead of UTC. */

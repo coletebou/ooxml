@@ -12,7 +12,7 @@ import {
 	slotStart,
 	slotStarting,
 } from './recurrence-calendar';
-import { DAY_MS, zonedParts, zonedToUtc } from './time-zone';
+import { DAY_MS, MAX_INSTANT, zonedParts, zonedToUtc } from './time-zone';
 
 export const MAX_RECURRENCE_COUNT = 999;
 
@@ -30,8 +30,8 @@ export interface SeriesSlot {
 const stepDays = (meeting: Pick<RecurringSeries, 'repeat'>): number =>
 	meeting.repeat === 'daily' ? 1 : 7;
 
-/** The last instant a `Date` holds (ECMA-262 21.4.1.1), less a day for the offset of any zone. */
-const LAST_INSTANT = 8.64e15 - DAY_MS;
+/** The last instant a `Date` holds, less a day for the offset of any zone. */
+const LAST_INSTANT = MAX_INSTANT - DAY_MS;
 
 /**
  * The start of the `index`-th occurrence, ignoring the end of the series. One past the last date
