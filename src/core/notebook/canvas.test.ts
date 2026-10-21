@@ -180,4 +180,15 @@ describe('reading order', () => {
 			]).map((i) => i.id),
 		).toEqual(['l', 'r']);
 	});
+
+	it('draws a long vertical or horizontal stroke as a stroke, not a dot', () => {
+		const vertical = [10, 0, 0.5, 10, 100, 0.5];
+		const horizontal = [0, 10, 0.5, 100, 10, 0.5];
+		for (const stroke of [vertical, horizontal]) {
+			expect(inkOutline(stroke, 4)).not.toMatch(/a2 2 0 1 0/u);
+			expect(inkOutline(stroke, 4)).toContain('L');
+		}
+		// A tap that reports the same point twice is still a dot.
+		expect(inkOutline([10, 0, 0.5, 10, 0, 0.5], 4)).toMatch(/a2 2 0 1 0/u);
+	});
 });

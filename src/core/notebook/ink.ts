@@ -83,7 +83,9 @@ export function inkOutline(
 	const px = (i: number): number => points[i * 3] ?? 0;
 	const py = (i: number): number => points[i * 3 + 1] ?? 0;
 	const half = (i: number): number => inkWidthAt(width, points[i * 3 + 2] ?? 0.5, tool) / 2;
-	if (n === 1 || inkBounds([points], width, tool).width <= half(0) * 2.01) {
+	const box = inkBounds([points], width, tool);
+	const dot = half(0) * 2.01;
+	if (n === 1 || (box.width <= dot && box.height <= dot)) {
 		const r = Math.max(half(0), 0.5);
 		const x = px(0);
 		const y = py(0);
