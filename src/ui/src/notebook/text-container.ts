@@ -67,6 +67,22 @@ const todoPlugin = (label: (done: boolean) => string): Plugin =>
 		},
 	});
 
+/**
+ * y-prosemirror measures the local selection with `view._root.createRange()` when it applies a
+ * collaborator's change; a ShadowRoot has no `createRange`, so the change threw while being
+ * applied and was lost (y-prosemirror 1.3.7). This view's own root gets the document's (scoped to
+ * that root: no prototype or global is changed).
+ */
+function shadowRootRanges(view: EditorView): void {
+	const root = view.root as Document | (ShadowRoot & { createRange?: unknown });
+	if (typeof root.createRange === 'function') return;
+	const doc = root.ownerDocument;
+	Object.defineProperty(root, 'createRange', {
+		value: () => doc.createRange(),
+		configurable: true,
+	});
+}
+
 export class NotebookText extends NotebookElement {
 	static override styles = controlStyles(css);
 	static override properties = {
@@ -217,6 +233,7 @@ export class NotebookText extends NotebookElement {
 				return true;
 			},
 		});
+		shadowRootRanges(view);
 		this.#view = view;
 		if (this.autofocus) queueMicrotask(() => this.focusEnd());
 	}

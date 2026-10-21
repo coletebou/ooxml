@@ -39,7 +39,9 @@ describe('<notebook-app>', () => {
 		expect(shadowText(app.page())).toContain('Click anywhere to start typing');
 		// Everything the app renders was defined before its first render, so the ribbon sections
 		// picked up their groups (a property set before an upgrade is lost) and the glyphs exist.
-		const home = app.shadowRoot!.querySelector('[data-ribbon-tab="home"] office-ui-ribbon-section')!;
+		const home = app.shadowRoot!.querySelector(
+			'[data-ribbon-tab="home"] office-ui-ribbon-section',
+		)!;
 		expect(home.querySelectorAll('office-ui-ribbon-group')).toHaveLength(3);
 		expect(home.querySelector('[command="bold"]')?.hasAttribute('icon-only')).toBe(true);
 		expect(getIcon('notebook-todo')).toBeDefined();
@@ -64,6 +66,8 @@ describe('<notebook-app>', () => {
 		const text = page.shadowRoot!.querySelector<NotebookText>('notebook-text')!;
 		await until(() => text.view);
 		const view = text.view!;
+		// y-prosemirror applies collaborators' changes through the view root's createRange.
+		expect(typeof (view.root as unknown as { createRange?: unknown }).createRange).toBe('function');
 		view.dispatch(view.state.tr.insertText('Hello notebook'));
 		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 6)));
 		app.editor = view;
