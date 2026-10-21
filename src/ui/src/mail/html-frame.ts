@@ -86,12 +86,14 @@ export class MailHtmlFrame extends MailElement {
 		// The frame is as tall as its message. The content runs no script, so it only changes height
 		// when an image loads or the frame's width changes (the text reflows): the frame element is
 		// observed, not the body inside it, and the height is written on the next frame and only when
-		// it changed, so the observer never sees its own write within one frame (a resize loop).
+		// it changed, so the observer never sees its own write within one frame (a resize loop). The
+		// height is measured apart from the one the frame has (`contentHeight`), so a write of it
+		// never makes the next measurement taller.
 		let pending = 0;
 		const fit = (): void => {
 			cancelAnimationFrame(pending);
 			pending = requestAnimationFrame(() => {
-				const height = `${doc.documentElement?.scrollHeight ?? 0}px`;
+				const height = `${this.contentHeight(frame, doc)}px`;
 				if (height !== '0px' && frame.style.height !== height) frame.style.height = height;
 			});
 		};
@@ -109,6 +111,25 @@ export class MailHtmlFrame extends MailElement {
 			event.preventDefault();
 			this.emit('mail-mailto', { href });
 		});
+	}
+
+	/**
+	 * The height `doc` takes, read with `frame` at its smallest: a document is never shorter than its
+	 * frame, so read at the frame's own height a shorter message that replaces a longer one, or text
+	 * a wider frame puts on fewer lines, would keep the old height, and content as tall as its window
+	 * (`100vh`) would grow with every height written. The element keeps the frame's space meanwhile,
+	 * so nothing around it moves or scrolls. 0 once another message has replaced `doc`.
+	 */
+	private contentHeight(frame: HTMLIFrameElement, doc: Document): number {
+		if (frame.contentDocument !== doc || !doc.documentElement) return 0;
+		const { minHeight } = this.style;
+		const { height } = frame.style;
+		this.style.minHeight = `${this.offsetHeight}px`;
+		frame.style.height = '0px';
+		const content = doc.documentElement.scrollHeight;
+		frame.style.height = height;
+		this.style.minHeight = minHeight;
+		return content;
 	}
 
 	protected override render() {
