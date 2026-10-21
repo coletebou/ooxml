@@ -1,7 +1,7 @@
 import submission from './__fixtures__/rfc8621-submission.json';
 import { createMailClient } from '../client';
 import type { Draft } from '../model';
-import { createFakeServer, rfcSession, until } from './test-support/fake-server';
+import { createFakeServer, json, rfcSession, until } from './test-support/fake-server';
 import { installMailStore } from './test-support/mail-store';
 import { DRAFTS, MAILBOXES, SENT, failure, setup } from './test-support/setup';
 
@@ -20,6 +20,30 @@ const draft: Draft = {
 function mail() {
 	const context = setup();
 	return { ...context, store: installMailStore(context.server) };
+}
+
+/**
+ * A server that takes at most `max` calls in one request, as its session says, and refuses a
+ * request with more with the `limit` problem of RFC 8620 3.6.1.
+ */
+function limited(max: number) {
+	const context = mail();
+	const core = (context.server.session.capabilities as Record<string, Record<string, unknown>>)[
+		'urn:ietf:params:jmap:core'
+	]!;
+	core.maxCallsInRequest = max;
+	context.server.route(
+		(request) =>
+			request.method === 'POST' &&
+			request.body !== null &&
+			((JSON.parse(request.body) as { methodCalls?: unknown[] }).methodCalls?.length ?? 0) > max,
+		() =>
+			json(
+				{ type: 'urn:ietf:params:jmap:error:limit', limit: 'maxCallsInRequest', status: 400 },
+				400,
+			),
+	);
+	return context;
 }
 
 const callNames = (requests: { methodCalls: [string, unknown, string][] }[]) =>
@@ -228,6 +252,32 @@ describe('send', () => {
 		expect(server.argsOf('Email/set').at(-1)).toEqual({ accountId: 'A13824', destroy: ['E1'] });
 	});
 
+	it('keeps the copy it made when the server may have sent it before failing', async () => {
+		const { server, transport, store } = mail();
+		// RFC 8620 3.6.2: some of what the call asked for happened, the submission perhaps.
+		server.on('EmailSubmission/set', (_args, call) => [
+			['error', { type: 'serverPartialFail' }, call.id],
+		]);
+		expect(await failure(transport.send(reply))).toMatchObject({ type: 'serverPartialFail' });
+		// No answer for the submission at all says no more.
+		const silent = mail();
+		silent.server.on('EmailSubmission/set', () => []);
+		expect(await failure(silent.transport.send(reply))).toMatchObject({ code: 'server' });
+		for (const { server: each, store: kept } of [{ server, store }, silent]) {
+			expect(kept.emails.has('E1')).toBe(true);
+			expect(kept.emails.has('old-draft')).toBe(true);
+			expect(each.argsOf('Email/set').filter((args) => 'destroy' in args)).toEqual([]);
+		}
+	});
+
+	it('drops the copy when the submission failed as a whole, which changes nothing', async () => {
+		const { server, transport, store } = mail();
+		server.on('EmailSubmission/set', (_args, call) => [['error', { type: 'forbidden' }, call.id]]);
+		expect(await failure(transport.send(reply))).toMatchObject({ type: 'forbidden' });
+		expect(store.emails.has('E1')).toBe(false);
+		expect(store.emails.has('old-draft')).toBe(true);
+	});
+
 	it.each([
 		['invalidEmail', 'invalid'],
 		['noRecipients', 'invalid'],
@@ -299,6 +349,18 @@ describe('send', () => {
 		});
 	});
 
+	it('keeps the copy when the request that submits it fails as a whole', async () => {
+		const { server, transport, store } = limited(1);
+		server.route(
+			(request) => request.body?.includes('EmailSubmission/set') ?? false,
+			() => Promise.reject(new TypeError('Failed to fetch')),
+		);
+		expect(await failure(transport.send(reply))).toMatchObject({ code: 'network' });
+		// Whether it went out is not known: the copy stays, and nothing else is changed.
+		expect(store.emails.has('E1')).toBe(true);
+		expect(store.emails.has('old-draft')).toBe(true);
+	});
+
 	it('refuses to send without submission or without an identity', async () => {
 		const plain = setup({
 			server: createFakeServer({ session: rfcSession({ submission: false }) }),
@@ -308,5 +370,48 @@ describe('send', () => {
 		const nobody = mail();
 		nobody.server.on('Identity/get', () => ({ state: 'I1', list: [] }));
 		expect(await failure(nobody.transport.send(draft))).toMatchObject({ code: 'forbidden' });
+	});
+});
+
+describe('the calls the server takes in one request', () => {
+	const reply: Draft = { ...draft, id: 'old-draft', replyToEmailId: 'original' };
+	const sizes = (requests: { methodCalls: unknown[] }[]) =>
+		requests.map((request) => request.methodCalls.length);
+
+	it('saves within two, the previous draft destroyed in a request of its own', async () => {
+		const { server, transport, store } = limited(2);
+		expect(await transport.saveDraft({ ...draft, id: 'old-draft' })).toEqual({ id: 'E1' });
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(callNames(server.apiRequests()).slice(-2)).toEqual([['Email/set'], ['Email/set']]);
+		expect(Math.max(...sizes(server.apiRequests()))).toBeLessThanOrEqual(2);
+	});
+
+	it('sends a reply within three, the clean-up in a request of its own', async () => {
+		const { server, transport, store } = limited(3);
+		expect(await transport.send(reply)).toEqual({ id: 'E1' });
+		expect(callNames(server.apiRequests()).slice(-2)).toEqual([
+			['Email/set', 'EmailSubmission/set'],
+			['Email/set'],
+		]);
+		expect(Math.max(...sizes(server.apiRequests()))).toBeLessThanOrEqual(3);
+		expect(store.emails.get('E1')).toMatchObject({ mailboxIds: { [SENT]: true } });
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true, $answered: true });
+	});
+
+	it('saves and sends one call at a time when the server takes one', async () => {
+		const { server, transport, store } = limited(1);
+		expect(await transport.saveDraft({ ...draft, id: 'old-draft' })).toEqual({ id: 'E1' });
+		expect(await transport.send({ ...reply, id: 'E1' })).toEqual({ id: 'E2' });
+		expect(callNames(server.apiRequests()).slice(-3)).toEqual([
+			['Email/set'],
+			['EmailSubmission/set'],
+			['Email/set'],
+		]);
+		expect(Math.max(...sizes(server.apiRequests()))).toBe(1);
+		expect(store.submissions).toEqual([{ identityId: 'XD-3301-222-11_22AAz', emailId: 'E2' }]);
+		expect(store.emails.get('E2')).toMatchObject({ mailboxIds: { [SENT]: true } });
+		expect([store.emails.has('old-draft'), store.emails.has('E1')]).toEqual([false, false]);
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true, $answered: true });
 	});
 });

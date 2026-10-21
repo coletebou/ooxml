@@ -3,13 +3,16 @@
 // one request. The clean-up only runs when the step before it succeeded: a `Core/echo` refers to
 // the created id, so it fails when there is none, and the call reading the echo fails with it
 // (RFC 8620 3.7, 4). A refused message therefore never costs the saved draft. A server that does
-// not resolve references in an echo gets the clean-up as a second request instead. New code.
+// not resolve references in an echo, or takes fewer calls in one request than that needs
+// (`maxCallsInRequest`), gets the clean-up as a second request instead, and with one call per
+// request the submission too. The copy a send made is destroyed only when it certainly did not go
+// out; when that is not known it stays. New code.
 import { ANSWERED, DRAFT, FORWARDED, SEEN, type Draft, type Identity } from '../model';
 import { MailTransportError } from '../transport';
 import type { JmapClient } from './client';
 import type { MailboxMethods } from './mailboxes';
 import { emailToCreate, pickIdentity } from './outgoing';
-import { patchPath, type JmapCall, type JmapResult } from './request';
+import { patchPath, type JmapCall, type JmapRequestBuilder, type JmapResult } from './request';
 import { isRecord } from './types';
 
 type Patch = Record<string, true | null>;
@@ -54,6 +57,18 @@ function filed(result: JmapResult, submission: JmapCall, id: string): boolean {
 	return isRecord(updated) && Object.hasOwn(updated, id);
 }
 
+/**
+ * True when the server certainly did not create `creationId` in `call`: it refused it (a SetError
+ * in `notCreated`), or the method failed, which changes nothing unless the error is
+ * `serverPartialFail` (RFC 8620 3.6.2). That error, or no answer, may mean the message went out.
+ */
+function refused(result: JmapResult, call: JmapCall, creationId: string): boolean {
+	const error = result.error(call);
+	if (error) return error.type !== 'serverPartialFail';
+	const notCreated = result.all(call).find((response) => response[0] === call.name)?.[1].notCreated;
+	return isRecord(notCreated) && Object.hasOwn(notCreated, creationId);
+}
+
 export function createDraftMethods(options: DraftOptions): DraftMethods {
 	const { client, mailboxes, nudge } = options;
 	let gating: Promise<boolean> | null = null;
@@ -89,6 +104,9 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 		result.get(calls);
 	};
 
+	/** The calls one request may hold (`maxCallsInRequest`, RFC 8620 2): 16 is only a suggestion. */
+	const maxCalls = async (): Promise<number> => (await client.session()).limits.maxCallsInRequest;
+
 	const draftsMailbox = async (): Promise<string> => {
 		const id = await mailboxes.roleId('drafts');
 		if (!id) throw new MailTransportError('notFound', 'The account has no Drafts folder.');
@@ -113,7 +131,8 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				pickIdentity(await identitiesOrNone(), draft),
 			);
 			const previous = draft.id;
-			const gated = previous !== undefined && (await canGate());
+			// Saved, and the previous one destroyed, in one request of three calls when it is taken.
+			const gated = previous !== undefined && (await maxCalls()) >= 3 && (await canGate());
 			const { result, calls } = await client.request((builder, accountId) => {
 				const save = builder.call('Email/set', { accountId, create: { draft: create } });
 				if (!gated) return { save, clean: null };
@@ -154,14 +173,19 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const destroy = draft.id === undefined ? [] : [draft.id];
 			const marks = markPatches(draft);
 			const cleanUp = destroy.length > 0 || Object.keys(marks).length > 0;
-			const gated = cleanUp && (await canGate());
-			const { result, calls } = await client.request((builder, accountId) => {
-				const email = builder.call('Email/set', { accountId, create: { draft: create } });
-				const submission = builder.call('EmailSubmission/set', {
+			const limit = await maxCalls();
+			// Created, submitted and cleaned up in one request of four calls when it is taken.
+			const gated = cleanUp && limit >= 4 && (await canGate());
+			const submit = (builder: JmapRequestBuilder, accountId: string, emailId: string) =>
+				builder.call('EmailSubmission/set', {
 					accountId,
-					create: { send: { identityId: identity.id, emailId: '#draft' } },
+					create: { send: { identityId: identity.id, emailId } },
 					onSuccessUpdateEmail: { '#send': onSent },
 				});
+			const first = await client.request((builder, accountId) => {
+				const email = builder.call('Email/set', { accountId, create: { draft: create } });
+				if (limit < 2) return { email, submission: null, clean: null };
+				const submission = submit(builder, accountId, '#draft');
 				if (!gated) return { email, submission, clean: null };
 				const echo = builder.call('Core/echo', {
 					sent: submission.ref('/created/send/id'),
@@ -176,21 +200,33 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				return { email, submission, clean };
 			});
 			// Not created: nothing was sent and the saved draft is untouched.
-			const id = result.created(calls.email, 'draft');
+			const id = first.result.created(first.calls.email, 'draft');
+			// One call per request: the submission names the message the first one created. Should
+			// that request fail as a whole, whether it went out is not known, and the copy stays.
+			const { result, calls: submission } = first.calls.submission
+				? { result: first.result, calls: first.calls.submission }
+				: await client
+						.request((builder, accountId) => submit(builder, accountId, id))
+						.catch((error: unknown) => {
+							nudge();
+							throw error;
+						});
 			try {
-				result.created(calls.submission, 'send');
+				result.created(submission, 'send');
 			} catch (error) {
-				// Not sent: drop the copy just made, so the saved draft is the only one again.
-				await quietly(() => tidy([id], {}));
+				// Not sent for certain: drop the copy just made, so the saved draft is the only one
+				// again. When it may have gone out, the copy may be the only one there is: it stays.
+				if (refused(result, submission, 'send')) await quietly(() => tidy([id], {}));
 				nudge();
 				throw error;
 			}
+			const { clean } = first.calls;
 			const later = { destroy: [] as string[], update: {} as Record<string, Patch> };
-			if (cleanUp && (!calls.clean || result.error(calls.clean))) {
+			if (cleanUp && (!clean || first.result.error(clean))) {
 				later.destroy.push(...destroy);
 				Object.assign(later.update, marks);
 			}
-			if (!filed(result, calls.submission, id)) later.update[id] = onSent;
+			if (!filed(result, submission, id)) later.update[id] = onSent;
 			await quietly(() => tidy(later.destroy, later.update));
 			nudge();
 			return { id };
