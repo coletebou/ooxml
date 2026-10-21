@@ -58,6 +58,9 @@ instead of destroying mail. Responses for a folder or search the person already 
   `EmailSubmission` and `Identity`, back references, batching by the server's limits, state tracking
   with `*/changes`, push through the event source (read with `fetch` so the `Authorization` header
   is sent) or polling. Credentials are never logged, persisted, put in a URL or an error message.
+  They and request bodies go over https only (plain http to a loopback host), redirects included:
+  where the platform hands redirects back, every request checks each hop before following it and
+  refuses one to plain http; a browser, which hides them, blocks that hop itself as mixed content.
 
 ## Messages
 

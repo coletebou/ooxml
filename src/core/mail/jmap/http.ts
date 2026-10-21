@@ -1,9 +1,13 @@
 // HTTP for the JMAP client: the `Authorization` header built for each request from the credentials,
 // `fetch` and status failures as `JmapError`s, JSON bodies, URI templates (RFC 6570 level 1) and
-// the rule that credentials only travel over https (plain http for loopback hosts). New code.
+// the rule that credentials and request bodies only travel over https (plain http for loopback
+// hosts), redirects included (`redirects.ts`). New code.
 import { encodeBase64 } from '../../digest/base64';
 import { MailTransportError } from '../transport';
 import { JmapError, createRedactor, networkError, responseError, type Redact } from './errors';
+import { followRedirects, isSafeUrl, type Hop, type Landed, type RedirectMode } from './redirects';
+
+export { discard, isSafeUrl, type Landed } from './redirects';
 
 /** Credentials for every request. They are never logged, stored or put in a URL or an error. */
 export type JmapAuth =
@@ -45,20 +49,20 @@ export interface JmapHttpInit {
 	signal?: AbortSignal;
 	/** Leave a failure status to `read` instead of throwing it. */
 	anyStatus?: boolean;
-	/** Hand a redirect back, to check where it goes before following it, instead of following it. */
-	redirect?: 'manual';
-	/** Leave the credentials out: a hop to another origin, where fetch drops them too. */
-	anonymous?: boolean;
 }
 
 export interface JmapHttp {
 	readonly redact: Redact;
-	/** One authenticated exchange: `read` consumes the response; failures become `JmapError`s. */
+	/**
+	 * One authenticated exchange, its redirects checked hop by hop: `read` consumes the response
+	 * (`landed`: where it came from, and whether the credentials went there); failures become
+	 * `JmapError`s.
+	 */
 	exchange<T>(
 		url: string,
 		init: JmapHttpInit,
 		what: string,
-		read: (response: Response) => Promise<T>,
+		read: (response: Response, landed: Landed) => Promise<T>,
 	): Promise<T>;
 	/** An authenticated request whose body the caller streams (push); any status resolves. */
 	open(url: string, init: JmapHttpInit, what: string): Promise<Response>;
@@ -94,44 +98,57 @@ function linkSignals(
 	};
 }
 
-/** Lets the connection go when a body will not be read. */
-export async function discard(response: Response): Promise<void> {
-	try {
-		await response.body?.cancel();
-	} catch {
-		// Already consumed or closed.
-	}
-}
-
 export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 	const redact = createRedactor(secretsOf(options.auth));
+	/** Learnt once: a platform that hides redirects hides them from every request. */
+	const redirects: RedirectMode = { hidden: false };
 
-	const request = async (
-		url: string,
-		init: JmapHttpInit,
+	/** One hop of a request, the credentials with it only when `hop` says so. */
+	const send = async (
+		hop: Hop,
+		redirect: 'manual' | 'follow',
 		signal: AbortSignal | undefined,
 		what: string,
-	) => {
+	): Promise<Response> => {
 		const doFetch = options.fetch ?? globalThis.fetch;
 		if (typeof doFetch !== 'function')
 			throw new MailTransportError('unsupported', 'This platform has no fetch.');
-		const headers = init.anonymous
-			? { ...init.headers }
-			: { ...init.headers, Authorization: authorization(options.auth) };
+		const headers = hop.credentials
+			? { ...hop.headers, Authorization: authorization(options.auth) }
+			: { ...hop.headers };
 		try {
-			return await doFetch(url, {
-				method: init.method,
+			return await doFetch(hop.url, {
+				method: hop.method,
 				headers,
-				...(init.body === undefined ? {} : { body: init.body }),
+				...(hop.body === undefined ? {} : { body: hop.body }),
 				...(signal ? { signal } : {}),
 				credentials: 'omit',
-				redirect: init.redirect ?? 'follow',
+				redirect,
 			});
 		} catch (error) {
 			if (signal?.aborted) throw abortReason(signal);
 			throw networkError(what, error, redact);
 		}
 	};
+
+	const request = (
+		url: string,
+		init: JmapHttpInit,
+		signal: AbortSignal | undefined,
+		what: string,
+	): Promise<{ response: Response; landed: Landed }> =>
+		followRedirects(
+			{
+				url,
+				method: init.method,
+				headers: { ...init.headers },
+				...(init.body === undefined ? {} : { body: init.body }),
+				credentials: true,
+			},
+			(hop, redirect) => send(hop, redirect, signal, what),
+			redirects,
+			what,
+		);
 
 	const json = async (response: Response, what: string): Promise<unknown> => {
 		let text: string;
@@ -158,9 +175,9 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 		async exchange(url, init, what, read) {
 			const { signal, release } = linkSignals(init.signal, options.signal);
 			try {
-				const response = await request(url, init, signal, what);
+				const { response, landed } = await request(url, init, signal, what);
 				if (!response.ok && !init.anyStatus) throw await responseError(response, what, redact);
-				return await read(response);
+				return await read(response, landed);
 			} catch (error) {
 				if (signal?.aborted) throw abortReason(signal);
 				throw error;
@@ -168,7 +185,7 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 				release();
 			}
 		},
-		open: (url, init, what) => request(url, init, init.signal, what),
+		open: async (url, init, what) => (await request(url, init, init.signal, what)).response,
 	};
 }
 
@@ -191,20 +208,6 @@ export function resolveTemplate(template: string, base: string): string {
 	return new URL(masked, base).href.replace(/jmapvar(\d+)x/g, (_match, index: string) => {
 		return variables[Number(index)] ?? '';
 	});
-}
-
-const LOOPBACK = /^(?:(?:[\w-]+\.)*localhost|127(?:\.\d{1,3}){3}|\[::1\])$/i;
-
-/** True for a URL credentials may go to: https, or http to a loopback host; never with userinfo. */
-export function isSafeUrl(href: string): boolean {
-	let url: URL;
-	try {
-		url = new URL(href);
-	} catch {
-		return false;
-	}
-	if (url.username || url.password) return false;
-	return url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK.test(url.hostname));
 }
 
 /**

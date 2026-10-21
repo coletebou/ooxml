@@ -94,6 +94,8 @@ export function redirectedTo(url: string, response: Response): Response {
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 /** Fetch's own limit on redirects in a row. */
 const MAX_REDIRECTS = 20;
+/** Fetch's request-body headers, dropped with the body when a redirect turns into a GET. */
+const BODY_HEADERS = ['content-encoding', 'content-language', 'content-location', 'content-type'];
 
 /** What a browser on an https page refuses to fetch: plain http to anything but loopback. */
 function mixedContent(url: string): boolean {
@@ -293,10 +295,12 @@ export function createFakeServer(
 			const url = new URL(location, request.url).href;
 			const headers = { ...request.headers };
 			if (new URL(url).origin !== new URL(request.url).origin) delete headers.authorization;
-			// A 303, or a 301 or 302 answering a POST, goes on as a GET without the body.
+			// A 303, or a 301 or 302 answering a POST, goes on as a GET without the body and the
+			// headers about it.
 			const get =
 				response.status === 303 ||
 				(request.method === 'POST' && (response.status === 301 || response.status === 302));
+			if (get) for (const name of BODY_HEADERS) delete headers[name];
 			request = get
 				? { method: 'GET', url, headers, body: null, bytes: null }
 				: { ...request, url, headers };

@@ -141,41 +141,18 @@ export function parseJmapSession(json: unknown, url: string): JmapSession {
 	};
 }
 
-const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new URL(b).origin;
-
-/** Redirects of the session resource followed before giving up (fetch itself follows 20). */
-const MAX_REDIRECTS = 5;
-/** The statuses fetch follows (Fetch, "redirect status"). */
-const REDIRECTS = new Set([301, 302, 303, 307, 308]);
-
-/** Where a redirect sends the request, resolved against `from` ('' if no URL); null if none. */
-function redirectTarget(response: Response, from: string): string | null {
-	const location = REDIRECTS.has(response.status) ? response.headers.get('location') : null;
-	if (location === null) return null;
-	try {
-		return new URL(location, from).href;
-	} catch {
-		return '';
-	}
-}
-
 /** What one request of discovery came to. */
 type Step =
 	| { kind: 'session'; session: JmapSession }
-	| { kind: 'redirect'; to: string }
-	/** The platform hides where the redirect goes (a browser's `opaqueredirect`). */
-	| { kind: 'hidden' }
 	/** A 401 from where the credentials were left behind: ask there again, with them. */
 	| { kind: 'retry'; at: string };
 
 /**
- * Reads the session resource at `url` through `http`, the credentials going with it. Where the
- * platform hands redirects back (`redirect: 'manual'`), each one is checked before it is followed
- * and refused unless the credentials may go where it points: a chain through plain http that comes
- * back to https would let whoever answers the http hop send discovery to a server of their own,
- * whose session then names the endpoints the credentials go to. Where the platform hides them (a
- * browser), fetch follows them: a browser blocks the http hop itself as mixed content, and the
- * session is checked as read from where fetch ended up.
+ * Reads the session resource at `url` through `http`, the credentials going with it. Its redirects
+ * are checked hop by hop as every request's are (`redirects.ts`): a chain through plain http that
+ * comes back to https would let whoever answers the http hop send discovery to a server of their
+ * own, whose session then names the endpoints the credentials go to. Where a browser follows them
+ * itself, the session is checked as read from where it ended up.
  */
 export async function loadJmapSession(
 	http: JmapHttp,
@@ -201,59 +178,26 @@ export async function loadJmapSession(
 		}
 		return parseJmapSession(json, from);
 	};
+	const init: JmapHttpInit = {
+		method: 'GET',
+		headers: { Accept: 'application/json' },
+		anyStatus: true,
+		...(signal ? { signal } : {}),
+	};
 	let target = url;
-	/** The credentials go along: fetch drops them on a hop to another origin, and so does this. */
-	let credentials = true;
-	/** Redirects come back to be checked; false once the platform turns out to hide them. */
-	let manual = true;
-	let retried = false;
-	let hops = 0;
-	for (;;) {
-		const from = target;
-		const init: JmapHttpInit = {
-			method: 'GET',
-			headers: { Accept: 'application/json' },
-			anyStatus: true,
-			...(manual ? { redirect: 'manual' as const } : {}),
-			...(credentials ? {} : { anonymous: true }),
-			...(signal ? { signal } : {}),
-		};
-		const step = await http.exchange<Step>(from, init, what, async (response) => {
-			if (manual && response.type === 'opaqueredirect') return { kind: 'hidden' };
-			const to = manual ? redirectTarget(response, from) : null;
-			if (to !== null) {
-				await discard(response);
-				return { kind: 'redirect', to };
-			}
-			// Where fetch ended up, when it followed the redirects itself.
-			const at = response.url || from;
-			if (response.ok) return { kind: 'session', session: await read(response, at) };
+	for (let retried = false; ; retried = true) {
+		const step = await http.exchange<Step>(target, init, what, async (response, landed) => {
+			if (response.ok) return { kind: 'session', session: await read(response, landed.url) };
 			// A cross-origin redirect, which `/.well-known/jmap` often is, leaves `Authorization`
-			// behind: ask its target directly.
-			const dropped = !credentials || (response.redirected && !sameOrigin(at, from));
-			if (response.status === 401 && dropped && !retried && isSafeUrl(at)) {
+			// behind: ask its target directly, once.
+			if (response.status === 401 && !landed.credentials && !retried && isSafeUrl(landed.url)) {
 				await discard(response);
-				return { kind: 'retry', at };
+				return { kind: 'retry', at: landed.url };
 			}
 			throw await responseError(response, what, http.redact);
 		});
 		if (step.kind === 'session') return step.session;
-		if (step.kind === 'hidden') manual = false;
-		else if (step.kind === 'retry') {
-			retried = true;
-			credentials = true;
-			target = step.at;
-		} else {
-			if (!isSafeUrl(step.to))
-				throw new MailTransportError(
-					'invalid',
-					'The JMAP session redirects where credentials may not go (https, or http on localhost).',
-				);
-			if (++hops > MAX_REDIRECTS)
-				throw new JmapError('server', `${what} was redirected too many times.`, { level: 'http' });
-			credentials &&= sameOrigin(step.to, from);
-			target = step.to;
-		}
+		target = step.at;
 	}
 }
 
