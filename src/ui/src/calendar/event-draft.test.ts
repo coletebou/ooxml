@@ -206,6 +206,30 @@ describe('event drafts', () => {
 			expect(once, key).not.toHaveProperty(key);
 	});
 
+	it('keeps the seconds of a start and an end the form leaves as they were', () => {
+		// An imported event can start between whole minutes, which the time fields do not show.
+		const stored = event({
+			start: at(BERLIN, 10, 6, 9) + 30_000,
+			end: at(BERLIN, 10, 6, 10) + 45_000,
+			repeat: 'weekly',
+			exceptions: [{ originalStart: at(BERLIN, 10, 13, 9) + 30_000, cancelled: true }],
+		});
+		const draft = draftOf(stored, BERLIN);
+		expect([draft.startTime, draft.endTime]).toEqual(['09:00', '10:00']);
+		expect(built(buildEvent({ ...draft, title: 'Renamed' }, BERLIN, id))).toEqual({
+			...stored,
+			title: 'Renamed',
+		});
+		// A new end leaves the start, and the series, as they were; a new start is the minute it names.
+		const longer = built(buildEvent({ ...draft, endTime: '11:00' }, BERLIN, id));
+		expect([longer.start, longer.end]).toEqual([stored.start, at(BERLIN, 10, 6, 11)]);
+		expect(longer.exceptions).toEqual(stored.exceptions);
+		const moved = built(buildEvent({ ...draft, startTime: '09:15', endTime: '10:15' }, BERLIN, id));
+		expect([moved.start, moved.end]).toEqual([at(BERLIN, 10, 6, 9, 15), at(BERLIN, 10, 6, 10, 15)]);
+		// An end set to the minute the start shows is never before the start.
+		expect(built(buildEvent({ ...draft, endTime: '09:00' }, BERLIN, id)).end).toBe(stored.start);
+	});
+
 	it('keeps a last-weekday series on the last weekday when only its time changes', () => {
 		// 27 November 2026 is both the fourth and the last Friday: only the ordinal says which.
 		const stored = event({

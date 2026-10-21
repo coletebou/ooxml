@@ -141,6 +141,17 @@ function series(
 	};
 }
 
+/** Whether the date and time fields of `draft` still show what they showed for the stored event. */
+const shows = (
+	draft: EventDraft,
+	shown: EventDraft,
+	date: 'startDate' | 'endDate',
+	time: 'startTime' | 'endTime',
+): boolean =>
+	draft.allDay === shown.allDay &&
+	draft[date] === shown[date] &&
+	(draft.allDay || draft[time] === shown[time]);
+
 /** The event a draft describes (`newId` names a new one), or the first issue keeping it unsaved. */
 export function buildEvent(
 	draft: EventDraft,
@@ -151,14 +162,25 @@ export function buildEvent(
 	if (!title) return { issue: 'title' };
 	const original = draft.original;
 	const eventZone = original?.zone ?? zone;
-	const start = draft.allDay
+	const named = draft.allDay
 		? fromInputs(draft.startDate, '', eventZone)
 		: instant(draft.startDate, draft.startTime, zone);
-	const end = draft.allDay
+	const namedEnd = draft.allDay
 		? fromInputs(shiftDate(draft.endDate, 1), '', eventZone)
 		: instant(draft.endDate, draft.endTime, zone);
-	if (start === null || end === null) return { issue: 'when' };
-	if (draft.allDay ? end <= start : end < start) return { issue: 'order' };
+	if (named === null || namedEnd === null) return { issue: 'when' };
+	if (draft.allDay ? namedEnd <= named : namedEnd < named) return { issue: 'order' };
+	// The time fields show whole minutes. A start or an end they still show as they did for the
+	// stored event keeps its own instant, seconds and all, so a new title alone neither moves an
+	// event that starts at 09:00:30 nor drops the changed occurrences of its series. A new end in the
+	// minute the start shows is never before the start.
+	const shown = original ? draftOf(original, zone) : null;
+	const start =
+		original && shown && shows(draft, shown, 'startDate', 'startTime') ? original.start : named;
+	const end =
+		original && shown && shows(draft, shown, 'endDate', 'endTime')
+			? original.end
+			: Math.max(namedEnd, start);
 	const location = draft.location.trim();
 	return {
 		event: {
