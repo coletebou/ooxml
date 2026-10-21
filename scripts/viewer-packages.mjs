@@ -123,6 +123,14 @@ export const VIEWER_PACKAGES = {
 			server: { dir: 'server', npm: 'openteams-server', global: false },
 		},
 	}),
+	// The first cut publishes React only; the other frameworks join `frameworks()` once they exist.
+	...viewer('mail', {
+		bundled: ['packages/web-component'],
+		globals: ['scripts/build-packages.mjs', 'tsconfig.release.json'],
+		packages: {
+			react: { dir: 'packages/react', npm: 'openmail-react-viewer', bundled: true },
+		},
+	}),
 };
 
 /** Directory (under the repository root) of the viewer a table entry belongs to, or null. */

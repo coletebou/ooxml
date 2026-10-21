@@ -1,0 +1,4 @@
+{
+	"extends": "../../viewers/mail/tsconfig.json",
+	"include": ["./**/*.ts"]
+}

@@ -1,0 +1,15 @@
+{
+	"name": "mail-demos",
+	"version": "0.0.0",
+	"private": true,
+	"description": "The files the OpenMail demos share (the vite config). Each demo is its own package beside this one.",
+	"type": "module",
+	"dependencies": {
+		"ooxml-core": "*"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.5",
+		"emf-converter": "4.21.0",
+		"vite": "^8.3.4"
+	}
+}

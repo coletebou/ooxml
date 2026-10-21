@@ -1,0 +1,20 @@
+{
+	"name": "mail-demo-react",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite --host 127.0.0.1",
+		"build": "vite build"
+	},
+	"dependencies": {
+		"ooxml-core": "*",
+		"openmail-react-viewer": "workspace:*",
+		"react": "^19.3.1",
+		"react-dom": "^19.3.1"
+	},
+	"devDependencies": {
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0"
+	}
+}

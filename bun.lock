@@ -45,6 +45,32 @@
         "@types/react-dom": "^19.3.0",
       },
     },
+    "demos/mail": {
+      "name": "mail-demos",
+      "version": "0.0.0",
+      "dependencies": {
+        "ooxml-core": "*",
+      },
+      "devDependencies": {
+        "@types/node": "^26.6.5",
+        "emf-converter": "4.21.0",
+        "vite": "^8.3.4",
+      },
+    },
+    "demos/mail/react": {
+      "name": "mail-demo-react",
+      "version": "0.0.0",
+      "dependencies": {
+        "ooxml-core": "*",
+        "openmail-react-viewer": "workspace:*",
+        "react": "^19.3.1",
+        "react-dom": "^19.3.1",
+      },
+      "devDependencies": {
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+      },
+    },
     "demos/pptx": {
       "name": "pptx-demos",
       "version": "0.0.0",
@@ -336,6 +362,14 @@
         "jszip": "^3.10.2",
         "prosemirror-state": "^1.4.4",
         "prosemirror-view": "^1.42.6",
+      },
+    },
+    "e2e/mail": {
+      "name": "mail-e2e",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@playwright/test": "^1.64.1",
+        "@types/node": "^26.6.5",
       },
     },
     "e2e/pptx": {
@@ -667,6 +701,64 @@
       "version": "0.1.0",
       "dependencies": {
         "docx-core": "workspace:*",
+        "ooxml-core": "*",
+        "ooxml-ui": "*",
+      },
+    },
+    "viewers/mail": {
+      "name": "mail-viewer-workspace",
+      "version": "0.0.0",
+      "dependencies": {
+        "lit": "^3.3.3",
+        "ooxml-core": "*",
+        "ooxml-ui": "*",
+      },
+      "devDependencies": {
+        "@playwright/test": "^1.64.1",
+        "@types/node": "^26.6.5",
+        "@types/react": "^19.3.0",
+        "@typescript/typescript6": "^6.0.2",
+        "jsdom": "^30.1.3",
+        "oxfmt": "^0.73.0",
+        "oxlint": "^1.88.0",
+        "react": "^19.3.1",
+        "react-dom": "^19.3.1",
+        "rollup": "^4.64.7",
+        "rollup-plugin-dts": "^6.5.1",
+        "typescript": "^7.0.2",
+        "vite": "^8.3.4",
+        "vitest": "^5.0.5",
+      },
+    },
+    "viewers/mail/docs": {
+      "name": "openmail-docs",
+      "devDependencies": {
+        "vitepress": "^2.0.0-alpha.20",
+      },
+    },
+    "viewers/mail/packages/react": {
+      "name": "openmail-react-viewer",
+      "version": "0.1.0",
+      "dependencies": {
+        "lit": "^3.3.3",
+        "ooxml-core": "*",
+        "ooxml-ui": "*",
+      },
+      "devDependencies": {
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "react": "^19.3.1",
+        "react-dom": "^19.3.1",
+      },
+      "peerDependencies": {
+        "react": ">=18",
+      },
+    },
+    "viewers/mail/packages/web-component": {
+      "name": "mail-viewer",
+      "version": "0.0.0",
+      "dependencies": {
+        "lit": "^3.3.3",
         "ooxml-core": "*",
         "ooxml-ui": "*",
       },
@@ -3098,6 +3190,16 @@
 
     "magicast": ["magicast@0.5.5", "", { "dependencies": { "@babel/parser": "^7.29.7", "@babel/types": "^7.29.7", "source-map-js": "^1.2.1" } }, "sha512-UicdXN8zQ3JHlxVq+28afMXPr1z7WNY6+7EJnzTdQWkTAlMLF5fNCCKxJHBQwGaNGR11581EiQmQzx73+MvszA=="],
 
+    "mail-demo-react": ["mail-demo-react@workspace:demos/mail/react"],
+
+    "mail-demos": ["mail-demos@workspace:demos/mail"],
+
+    "mail-e2e": ["mail-e2e@workspace:e2e/mail"],
+
+    "mail-viewer": ["mail-viewer@workspace:viewers/mail/packages/web-component"],
+
+    "mail-viewer-workspace": ["mail-viewer-workspace@workspace:viewers/mail"],
+
     "make-dir": ["make-dir@5.1.0", "", {}, "sha512-IfpFq6UM39dUNiphpA6uDezNx/AvWyhwfICWPR3t1VspkgkMZrL+Rk1RbN1bx+aeNYwOrqGJgEgV3yotk+ZUVw=="],
 
     "mark.js": ["mark.js@8.11.1", "", {}, "sha512-1I+1qpDt4idfgLQG+BNWmrqku+7/2bi5nLf4YwF8y8zXvmfiTBY3PV3ZibfrjBueCByROpuBjLLFCajqkgYoLQ=="],
@@ -3211,6 +3313,10 @@
     "ooxml-office": ["ooxml-office@workspace:apps/office-suite"],
 
     "ooxml-ui": ["ooxml-ui@workspace:src/ui"],
+
+    "openmail-docs": ["openmail-docs@workspace:viewers/mail/docs"],
+
+    "openmail-react-viewer": ["openmail-react-viewer@workspace:viewers/mail/packages/react"],
 
     "openteams-angular-viewer": ["openteams-angular-viewer@workspace:viewers/teams/packages/angular"],
 
@@ -4034,6 +4140,14 @@
 
     "local-pkg/quansync": ["quansync@0.2.11", "", {}, "sha512-AifT7QEbW9Nri4tAwR5M/uzpBuqfZf+zwaEM/QkzEjj7NBuFD2rBuy0K3dE+8wltbezDV7JMA0WfnCPYRSYbXA=="],
 
+    "mail-demo-react/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
+
+    "mail-demo-react/react-dom": ["react-dom@19.3.1", "", { "dependencies": { "scheduler": "^0.28.0" }, "peerDependencies": { "react": "^19.3.1" } }, "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ=="],
+
+    "mail-viewer-workspace/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
+
+    "mail-viewer-workspace/react-dom": ["react-dom@19.3.1", "", { "dependencies": { "scheduler": "^0.28.0" }, "peerDependencies": { "react": "^19.3.1" } }, "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ=="],
+
     "micromatch/picomatch": ["picomatch@2.3.2", "", {}, "sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA=="],
 
     "needle/iconv-lite": ["iconv-lite@0.6.3", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw=="],
@@ -4049,6 +4163,10 @@
     "ng-packagr/sass-embedded": ["sass-embedded@1.105.1", "", { "dependencies": { "@bufbuild/protobuf": "^2.5.0", "colorjs.io": "^0.7.0", "immutable": "^5.1.5", "rxjs": "^7.4.0", "supports-color": "^8.1.1", "sync-child-process": "^1.0.2", "varint": "^6.0.0" }, "optionalDependencies": { "sass-embedded-all-unknown": "1.105.1", "sass-embedded-android-arm": "1.105.1", "sass-embedded-android-arm64": "1.105.1", "sass-embedded-android-riscv64": "1.105.1", "sass-embedded-android-x64": "1.105.1", "sass-embedded-darwin-arm64": "1.105.1", "sass-embedded-darwin-x64": "1.105.1", "sass-embedded-linux-arm": "1.105.1", "sass-embedded-linux-arm64": "1.105.1", "sass-embedded-linux-musl-arm": "1.105.1", "sass-embedded-linux-musl-arm64": "1.105.1", "sass-embedded-linux-musl-riscv64": "1.105.1", "sass-embedded-linux-musl-x64": "1.105.1", "sass-embedded-linux-riscv64": "1.105.1", "sass-embedded-linux-x64": "1.105.1", "sass-embedded-unknown-all": "1.105.1", "sass-embedded-win32-arm64": "1.105.1", "sass-embedded-win32-x64": "1.105.1" }, "bin": { "sass": "dist/bin/sass.js" } }, "sha512-9tKxXG4rq+oGTZUlQehWZwHxBTL80EiB8IWk9AEqz8uOqg910t88JIYbN92eMCxokQ5vrYSQxg15bh0o/3hh3w=="],
 
     "ng-packagr/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "openmail-react-viewer/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
+
+    "openmail-react-viewer/react-dom": ["react-dom@19.3.1", "", { "dependencies": { "scheduler": "^0.28.0" }, "peerDependencies": { "react": "^19.3.1" } }, "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ=="],
 
     "openteams-react-viewer/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
 
@@ -4326,6 +4444,10 @@
 
     "local-pkg/pkg-types/confbox": ["confbox@0.3.1", "", {}, "sha512-cKUSoKa8YxFZZSmraVi7onONx3amu77ngK3kGpsYHDH7drPwCRkQE1RYMPlLRrMtnciRj274XNRxcHxnKmDSnA=="],
 
+    "mail-demo-react/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
+
+    "mail-viewer-workspace/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
+
     "ng-packagr/rolldown/@oxc-project/types": ["@oxc-project/types@0.152.0", "", {}, "sha512-oM/5rLBm2tPkg0iBgkH/FOeR3PCDpY19GTgAZjMFM8h9WI9VW7cLgzp6nwtarYKmovavIQZ+Fe/RKX/8C8O/Rw=="],
 
     "ng-packagr/rolldown/@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.12", "", { "os": "android", "cpu": "arm" }, "sha512-dB/a1214qKfHMXCpgqR4OZT+jS4kTyEXbQGJPqzobt5EwH5rX080pxE37alt3RzvR1bf1Yz/yGqRfrYAxuPw0A=="],
@@ -4399,6 +4521,8 @@
     "ng-packagr/sass-embedded/sass-embedded-win32-arm64": ["sass-embedded-win32-arm64@1.105.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-Zpp/RWYL8ZzpLzBrs+/UVMEHOHx7sw4nlq2R52dKQ0qv/0V8oKemAy41PZyLir3c+S2C+YViYyfnFfQLRTAzuA=="],
 
     "ng-packagr/sass-embedded/sass-embedded-win32-x64": ["sass-embedded-win32-x64@1.105.1", "", { "os": "win32", "cpu": "x64" }, "sha512-DM8EkMDzEsxnYoy11nyA5I4jr8lOV1TVQ/drNYvFQA9undiMzZD+7SkRA0OnCrgD1uCT+uRArCHSpNiiYVks+g=="],
+
+    "openmail-react-viewer/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
 
     "pptx-react-demo/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
 

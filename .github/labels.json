@@ -165,6 +165,11 @@
 		"description": "OpenTeams viewer, demos and tests"
 	},
 	{
+		"name": "viewer: mail",
+		"color": "c5def5",
+		"description": "OpenMail viewer, demos and tests"
+	},
+	{
 		"name": "stale",
 		"color": "ededed",
 		"description": "No activity for a while; closes soon unless updated"

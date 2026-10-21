@@ -1,7 +1,7 @@
 {
 	"name": "ooxml",
 	"private": true,
-	"description": "The ooxml-core library, the shared ooxml-ui elements, the MCP servers and the Word, Excel, Visio and OpenTeams viewers, in one workspace",
+	"description": "The ooxml-core library, the shared ooxml-ui elements, the MCP servers and the Word, Excel, Visio, OpenTeams and OpenMail viewers, in one workspace",
 	"license": "Apache-2.0",
 	"author": "ChristopherVR",
 	"repository": {
@@ -29,7 +29,10 @@
 		"demos/teams/*",
 		"demos/pptx",
 		"demos/pptx/demo-*",
-		"e2e/pptx"
+		"e2e/pptx",
+		"demos/mail",
+		"demos/mail/*",
+		"e2e/mail"
 	],
 	"type": "module",
 	"scripts": {
