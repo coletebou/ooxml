@@ -177,4 +177,15 @@ describe('notebook structure', () => {
 		expect(readSections(ctx.types)).toEqual([]);
 		expect(readPages(ctx.types)).toEqual([]);
 	});
+
+	it('keeps subpage levels when reordering inside a section', () => {
+		const ctx = context();
+		const s = addSection(ctx, { name: 'S' });
+		const a = addPage(ctx, { sectionId: s, title: 'A' });
+		const a1 = addPage(ctx, { sectionId: s, title: 'A1', afterId: a, level: 1 });
+		const a2 = addPage(ctx, { sectionId: s, title: 'A2', afterId: a1, level: 1 });
+		expect(titles(ctx, s)).toEqual(['0:A', '1:A1', '1:A2']);
+		movePage(ctx, a2, { sectionId: s, beforeId: a1 });
+		expect(titles(ctx, s)).toEqual(['0:A', '1:A2', '1:A1']);
+	});
 });

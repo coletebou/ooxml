@@ -236,7 +236,9 @@ export function movePage(
 	const block = pageBlock(sectionPages(all, source.sectionId), id);
 	if (block.some((p) => p.id === target.beforeId)) return false;
 	transact(ctx, () => {
-		const shift = -(block[0]?.level ?? 0);
+		// Levels are relative to the page above: a block entering another section starts at the top
+		// level; a reorder inside its section keeps them (reading clamps an impossible spot).
+		const shift = target.sectionId === source.sectionId ? 0 : -(block[0]?.level ?? 0);
 		for (const page of block) {
 			const map = entityMap(ctx.types.pages, page.id)!;
 			map.set('section', target.sectionId);
