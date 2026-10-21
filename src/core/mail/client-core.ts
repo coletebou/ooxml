@@ -125,12 +125,22 @@ export class ClientCore {
 		this.patch({ mailboxes: mailboxViews(mailboxes) });
 	}
 
-	/** Keep a body, evicting the least recently used beyond the cache size. */
+	/**
+	 * Keep a body, evicting the least recently used beyond the cache size. The open conversation
+	 * keeps every body it shows, however long it is: evicting one would leave its message without a
+	 * body until it is opened again, which would evict another.
+	 */
 	keepBody(message: MailMessage): void {
 		this.bodies.delete(message.id);
 		this.bodies.set(message.id, message);
 		this.bodyErrors.delete(message.id);
-		while (this.bodies.size > BODY_CACHE) this.bodies.delete(this.bodies.keys().next().value!);
+		if (this.bodies.size <= BODY_CACHE) return;
+		const open = this.openId ? this.conversationsById.get(this.openId) : undefined;
+		const shown = new Set(open?.entries.map((entry) => entry.email.id));
+		for (const id of this.bodies.keys()) {
+			if (this.bodies.size <= BODY_CACHE) break;
+			if (!shown.has(id)) this.bodies.delete(id);
+		}
 	}
 
 	/** Show the open conversation as the caches hold it now. */
