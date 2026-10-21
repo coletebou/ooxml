@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { unsafeCSS } from 'lit';
+import { html, unsafeCSS } from 'lit';
 import { type CalendarMode, type Occurrence, zonedToUtc } from 'ooxml-core/calendar';
 import type { MessageParams } from 'ooxml-core/i18n';
 import {
@@ -9,6 +9,7 @@ import {
 	type CalendarGridItem,
 	type CalendarLabel,
 } from './calendar-grid';
+import { LocaleLitElement } from '../i18n/locale-element';
 import { MONTH_DAY_EVENTS } from './month-grid';
 
 const WORDS: Record<CalendarLabel, string> = {
@@ -72,9 +73,18 @@ class TestGrid extends CalendarGridView {
 	}
 }
 
+/** A product element around the view, which hands its locale down to it. */
+class GridHost extends LocaleLitElement {
+	override render() {
+		return html`<test-calendar-grid></test-calendar-grid>`;
+	}
+}
+
 beforeAll(() => {
 	if (!customElements.get('test-calendar-grid'))
 		customElements.define('test-calendar-grid', TestGrid);
+	if (!customElements.get('test-calendar-grid-host'))
+		customElements.define('test-calendar-grid-host', GridHost);
 });
 afterEach(() => {
 	document.body.replaceChildren();
@@ -308,5 +318,27 @@ describe('the shared calendar view: time grid', () => {
 		vi.stubGlobal('matchMedia', () => ({ matches: true }));
 		expect((await mount([])).mode).toBe('day');
 		expect((await mount([], 'month')).mode).toBe('month');
+	});
+});
+
+describe('the shared calendar view: locale', () => {
+	it('keeps a locale set on it while its host changes, and follows the host once it is cleared', async () => {
+		const host = document.createElement('test-calendar-grid-host') as GridHost;
+		host.locale = 'de';
+		document.body.append(host);
+		await host.updateComplete;
+		const grid = host.shadowRoot!.querySelector('test-calendar-grid') as TestGrid;
+		await grid.updateComplete;
+		expect(grid.locale).toBe('de');
+		const change = async (el: GridHost | TestGrid, locale: string): Promise<string> => {
+			el.locale = locale;
+			await host.updateComplete;
+			await grid.updateComplete;
+			return grid.locale;
+		};
+		expect(await change(grid, 'de')).toBe('de');
+		expect(await change(host, 'fr')).toBe('de');
+		expect(await change(grid, '')).toBe('fr');
+		expect(await change(host, 'es')).toBe('es');
 	});
 });

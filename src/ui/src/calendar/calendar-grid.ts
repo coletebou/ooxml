@@ -24,7 +24,13 @@ import {
 } from 'ooxml-core/calendar';
 import type { MessageParams } from 'ooxml-core/i18n';
 import { OfficeElement } from '../base';
-import { inheritLocale, LOCALE_HOST, pushLocale, type LocaleHost } from '../i18n/locale-host';
+import {
+	inheritLocale,
+	LOCALE_HOST,
+	localeWritten,
+	pushLocale,
+	type LocaleHost,
+} from '../i18n/locale-host';
 import { rangeText } from './format';
 import { monthGrid } from './month-grid';
 import { SLOT_MINUTES, timeGrid } from './time-grid';
@@ -168,7 +174,15 @@ export abstract class CalendarGridView<
 		if (changed.has('now') && this.now && changed.get('now') === 0) this.anchor = this.now;
 	}
 
+	// Lit's setter calls this for every write, an unchanged value too: a locale set here is its own.
+	override requestUpdate(...args: Parameters<OfficeElement['requestUpdate']>): void {
+		if (args[0] === 'locale') localeWritten(this as unknown as LocaleHost);
+		super.requestUpdate(...args);
+	}
+
 	protected override update(changed: PropertyValues): void {
+		// A locale cleared on the element: the enclosing one again, before this update draws.
+		if (changed.has('locale') && !this.locale) inheritLocale(this as unknown as LocaleHost);
 		super.update(changed);
 		this.setAttribute('aria-label', this.label('title'));
 		if (changed.has('locale')) pushLocale(this as unknown as LocaleHost);
