@@ -1,4 +1,5 @@
 import { utf8 } from './binary';
+import { readEmail } from './parse';
 import { bodyStructure, isInlineMediaType, messageBodies } from './structure';
 import type { MimePart } from './types';
 
@@ -110,6 +111,52 @@ describe('bodyStructure (RFC 8621 section 4.1.4)', () => {
 		expect(second.attachments).toEqual([nested]);
 	});
 
+	it('lists each part of a multipart sent as an attachment, showing none (RFC 2183 2.9)', () => {
+		const body = textPart('text/plain', 'body');
+		const inner = textPart('text/plain', 'inner');
+		const picture = part('image/png');
+		const attached = part('multipart/mixed', {
+			parts: [inner, multi('related', picture)],
+			disposition: 'attachment',
+		});
+		const root = multi('mixed', body, attached);
+		expect(bodyStructure(root)).toEqual({
+			textBody: [body],
+			htmlBody: [body],
+			attachments: [inner, picture],
+		});
+		expect(messageBodies(root)).toMatchObject({ text: 'body', attachments: [inner, picture] });
+		// Sent inline, a multipart is shown as usual.
+		const shown = part('multipart/mixed', { parts: [inner], disposition: 'inline' });
+		expect(bodyStructure(multi('mixed', body, shown)).textBody).toEqual([body, inner]);
+	});
+
+	it('reads a message holding a multipart sent as an attachment with that part as a file', () => {
+		const parsed = readEmail(
+			[
+				'Content-Type: multipart/mixed; boundary=outer',
+				'',
+				'--outer',
+				'Content-Type: text/plain',
+				'',
+				'Hello',
+				'--outer',
+				'Content-Type: multipart/mixed; boundary=inner',
+				'Content-Disposition: attachment',
+				'',
+				'--inner',
+				'Content-Type: text/plain',
+				'',
+				'Not for the body',
+				'--inner--',
+				'--outer--',
+				'',
+			].join('\r\n'),
+		);
+		expect(parsed.text).toBe('Hello');
+		expect(parsed.attachments.map(({ type, size }) => [type, size])).toEqual([['text/plain', 16]]);
+	});
+
 	it('takes only the first part of multipart/related as a body', () => {
 		const html = textPart('text/html', '<p>x</p>');
 		const extra = textPart('text/plain', 'x');
@@ -136,19 +183,33 @@ describe('bodyStructure (RFC 8621 section 4.1.4)', () => {
 });
 
 describe('messageBodies', () => {
-	it('joins plain text parts and escapes plain text into the HTML body', () => {
+	it('escapes plain text into the HTML body, and reads no text from a text body with HTML', () => {
 		const root = multi(
 			'mixed',
 			textPart('text/plain', 'one'),
 			textPart('text/html', '<p>two</p>'),
 			textPart('text/plain', '3 < 4 & "5"\nsix'),
 		);
+		// Its plain parts alone would leave out the HTML between them: the HTML body holds it all.
 		expect(messageBodies(root)).toEqual({
-			text: 'one\n3 < 4 & "5"\nsix',
+			text: null,
 			html: '<div>one</div><p>two</p><div>3 &#60; 4 &#38; &#34;5&#34;<br>six</div>',
 			htmlParts: ['<div>one</div>', '<p>two</p>', '<div>3 &#60; 4 &#38; &#34;5&#34;<br>six</div>'],
 			attachments: [],
 		});
+	});
+
+	it('joins the plain text parts of a text body without HTML', () => {
+		const root = multi(
+			'mixed',
+			textPart('text/plain', 'one'),
+			textPart('text/plain', 'two\n'),
+			textPart('text/plain', 'three'),
+		);
+		expect(messageBodies(root).text).toBe('one\ntwo\nthree');
+		// After an HTML body with a plain footer, the text is not the footer alone.
+		const footer = multi('mixed', textPart('text/html', '<p>Hi</p>'), textPart('text/plain', 'x'));
+		expect(messageBodies(footer).text).toBeNull();
 	});
 
 	it('keeps each part of the HTML body apart, for a reader that renders each on its own', () => {

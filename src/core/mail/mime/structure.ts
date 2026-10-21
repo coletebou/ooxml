@@ -38,9 +38,17 @@ function relatedRoot(related: MimePart): number {
 	return Math.max(0, index);
 }
 
+/** The parts of `part` that are not multiparts, depth-first, the order RFC 8621 lists them in. */
+function leafParts(part: MimePart): MimePart[] {
+	return part.parts.flatMap((child) =>
+		child.type.startsWith('multipart/') ? leafParts(child) : [child],
+	);
+}
+
 /**
- * RFC 8621 section 4.1.4 `parseStructure`, statement for statement but for one fix below and
- * `root`: the part of a multipart/related its `start` names (RFC 2387), where the RFC has 0.
+ * RFC 8621 section 4.1.4 `parseStructure`, statement for statement but for two changes below and
+ * `root`: the part of a multipart/related its `start` names (RFC 2387), where the RFC has 0. The
+ * RFC leaves the algorithm open to such changes ("not mandated").
  */
 function parseStructure(
 	parts: readonly MimePart[],
@@ -59,7 +67,12 @@ function parseStructure(
 			part.disposition !== 'attachment' &&
 			(part.type === 'text/plain' || part.type === 'text/html' || isInlineMediaType(part.type)) &&
 			(i === root || (multipartType !== 'related' && (isInlineMediaType(part.type) || !part.name)));
-		if (isMultipart) {
+		if (isMultipart && part.disposition === 'attachment') {
+			// A change from the RFC, which looks into every multipart and so shows the text of one
+			// sent as an attachment: that disposition applies to the multipart as a whole, shown only
+			// when the person asks (RFC 2183 section 2.9), so each of its parts is an attachment.
+			attachments.push(...leafParts(part));
+		} else if (isMultipart) {
 			const subMultiType = part.type.slice('multipart/'.length);
 			parseStructure(
 				part.parts,
@@ -139,16 +152,18 @@ function documentOrder(root: MimePart): Map<MimePart, number> {
 }
 
 /**
- * What a reader shows: the plain text parts of the text body joined, the HTML body (its plain
- * text parts, if any, escaped into it) part by part and joined when it has an HTML part, and every
- * part to list as an attachment in message order. Those are RFC 8621's attachments plus images,
- * audio and video shown between the bodies, which string bodies could not carry and would
- * otherwise lose.
+ * What a reader shows: the plain text parts of the text body joined (none when it holds HTML, as
+ * RFC 8621 lists the HTML of a message with no plain alternative there: its plain parts alone, a
+ * mailing list footer say, are not the message then), the HTML body (its plain text parts, if
+ * any, escaped into it) part by part and joined when it has an HTML part, and every part to list
+ * as an attachment in message order. Those are RFC 8621's attachments plus images, audio and
+ * video shown between the bodies, which string bodies could not carry and would otherwise lose.
  */
 export function messageBodies(root: MimePart): MessageBodies {
 	const { textBody, htmlBody, attachments } = bodyStructure(root);
 	let text: string | null = null;
-	for (const part of textBody) {
+	const plain = textBody.some((part) => part.type === 'text/html') ? [] : textBody;
+	for (const part of plain) {
 		if (part.type !== 'text/plain') continue;
 		const value = partText(part);
 		text = text === null ? value : `${text}${text.endsWith('\n') ? '' : '\n'}${value}`;

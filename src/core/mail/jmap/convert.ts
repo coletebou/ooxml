@@ -134,8 +134,13 @@ function valueOf(part: Part, values: Record<string, unknown>): string | null {
 	return isRecord(value) && typeof value.value === 'string' ? value.value : null;
 }
 
-/** The `text/plain` values of `textBody`, joined; `null` when there are none. */
+/**
+ * The `text/plain` values of `textBody`, joined; `null` when there are none, or when `textBody`
+ * holds HTML too (RFC 8621 lists the HTML of a message with no plain alternative there): its plain
+ * parts alone, a mailing list footer say, are not the message then, and its HTML body is.
+ */
 function textOf(body: readonly Part[], values: Record<string, unknown>): string | null {
+	if (body.some((part) => typeOf(part) === 'text/html')) return null;
 	const found = body.flatMap((part) => {
 		const value = typeOf(part) === 'text/plain' ? valueOf(part, values) : null;
 		return value === null ? [] : [value];
@@ -199,9 +204,10 @@ function attachmentsOf(email: JmapObject): MailAttachment[] {
 
 /**
  * A message with its bodies, read as the MIME reader reads the same message: `text` is the
- * `text/plain` values of `textBody`, `html` the parts of `htmlBody` joined (`htmlBodyParts`, `null`
- * without an HTML value) and `htmlParts` those parts when there are several (`htmlPartsOf`),
- * `attachments` the downloadable parts of `attachments` and the media the bodies show.
+ * `text/plain` values of `textBody` (none when it holds HTML), `html` the parts of `htmlBody`
+ * joined (`htmlBodyParts`, `null` without an HTML value) and `htmlParts` those parts when there
+ * are several (`htmlPartsOf`), `attachments` the downloadable parts of `attachments` and the
+ * media the bodies show.
  */
 export function toMessage(email: JmapObject): MailMessage {
 	const parts = htmlBodyParts(email);

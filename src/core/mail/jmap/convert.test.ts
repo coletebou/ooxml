@@ -1,6 +1,7 @@
 import email from './__fixtures__/rfc8621-email.json';
 import mailbox from './__fixtures__/rfc8621-mailbox.json';
 import submission from './__fixtures__/rfc8621-submission.json';
+import { draftFromMessage } from '../compose';
 import { readEmail, toMailMessage, type ParsedAttachment } from '../mime';
 import { messageBodies } from '../mime/structure';
 import type { MailAttachment } from '../model';
@@ -154,10 +155,12 @@ describe('toMessage', () => {
 	});
 
 	it('keeps the plain text of htmlBody in place, escaped, as the MIME reader does', () => {
+		// The lists RFC 8621 gives a multipart/mixed of these three parts: each is in both.
 		const message = toMessage({
 			id: 'E',
 			textBody: [
 				{ partId: '1', type: 'text/plain' },
+				{ partId: '2', type: 'text/html' },
 				{ partId: '3', type: 'text/plain' },
 			],
 			htmlBody: [
@@ -183,6 +186,32 @@ describe('toMessage', () => {
 		);
 		expect(message.html).toBe(parsed.html);
 		expect(message.text).toBe(parsed.text);
+	});
+
+	it('reads no text from a text body holding HTML, as the MIME reader does', () => {
+		// A message with no plain alternative and a mailing list footer: RFC 8621 lists both parts
+		// in both bodies, so the plain part alone is the footer, not the message.
+		const parts = [
+			{ partId: '1', type: 'text/html' },
+			{ partId: '2', type: 'text/plain' },
+		];
+		const message = toMessage({
+			id: 'E',
+			textBody: parts,
+			htmlBody: parts,
+			bodyValues: { '1': { value: '<p>Dinner on Thursday?</p>' }, '2': { value: 'The list' } },
+		});
+		expect(message.text).toBeNull();
+		expect(message.html).toBe('<p>Dinner on Thursday?</p><div>The list</div>');
+		// What prefers the text to the HTML, a reopened draft, reads the whole message so.
+		expect(draftFromMessage(message, undefined).text).toBe('Dinner on Thursday?\nThe list\n');
+		const parsed = readEmail(
+			mixed(
+				'Content-Type: text/html\r\n\r\n<p>Dinner on Thursday?</p>',
+				'Content-Type: text/plain\r\n\r\nThe list',
+			),
+		);
+		expect([parsed.text, parsed.html]).toEqual([message.text, message.html]);
 	});
 
 	it('keeps each part of the HTML body apart, as the MIME reader does', () => {
