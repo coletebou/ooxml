@@ -14,30 +14,33 @@ test('archive moves a conversation and Undo brings it back', async ({ page }) =>
 
 test('delete moves to Trash, flag and unread toggle from the keyboard', async ({ page }) => {
 	await openDemo(page);
-	await row(page, 'Office closed on Monday').click();
+	const notice = row(page, 'Office closed on Monday');
+	await notice.click();
 	await page.keyboard.press('s');
-	await expect(row(page, 'Office closed on Monday').locator('.flag')).toHaveClass(/on/);
+	await expect(notice.locator('.flag')).toHaveClass(/on/);
 	await page.keyboard.press('Shift+U');
-	await expect(row(page, 'Office closed on Monday')).toHaveClass(/unread/);
+	await expect(notice).toHaveClass(/unread/);
 	await page.keyboard.press('#');
-	await expect(row(page, 'Office closed on Monday')).toHaveCount(0);
+	await expect(notice).toHaveCount(0);
 	await selectFolder(page, 'Trash');
-	await expect(row(page, 'Office closed on Monday')).toHaveCount(1);
+	await expect(notice).toHaveCount(1);
 });
 
 test('multi-select with the checkboxes and move to a folder', async ({ page }) => {
 	await openDemo(page);
-	await row(page, 'Interview notes').locator('input[type="checkbox"]').check();
-	await row(page, 'New logo concepts').locator('input[type="checkbox"]').check();
+	const notes = row(page, 'Interview notes');
+	const logos = row(page, 'New logo concepts');
+	await notes.locator('input[type="checkbox"]').check();
+	await logos.locator('input[type="checkbox"]').check();
 	await expect(page.locator('mail-app .selected-count')).toContainText('2 selected');
 	await page
 		.locator('mail-app .list-toolbar')
 		.getByRole('button', { name: 'Mark as unread' })
 		.click();
-	await expect(row(page, 'Interview notes')).toHaveClass(/unread/);
+	await expect(notes).toHaveClass(/unread/);
 	await page.keyboard.press('e');
-	await expect(row(page, 'Interview notes')).toHaveCount(0);
-	await expect(row(page, 'New logo concepts')).toHaveCount(0);
+	await expect(notes).toHaveCount(0);
+	await expect(logos).toHaveCount(0);
 	await selectFolder(page, 'Archive');
-	await expect(row(page, 'Interview notes')).toHaveCount(1);
+	await expect(notes).toHaveCount(1);
 });

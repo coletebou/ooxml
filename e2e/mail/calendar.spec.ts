@@ -2,34 +2,37 @@ import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { openConversation, openDemo, row } from './helpers';
 
-async function openCalendar(page: Page): Promise<void> {
-	await page
-		.locator('mail-app .rail')
-		.getByRole('button', { name: 'Calendar', exact: true })
-		.click();
-	await expect(page.locator('mail-calendar-grid')).toBeVisible();
-}
-
 const grid = (page: Page) => page.locator('mail-calendar-grid');
+
+/** A button of the app rail: Mail, Calendar or Contacts. */
+const railButton = (page: Page, name: string) =>
+	page.locator('mail-app .rail').getByRole('button', { name, exact: true });
+
+/** The calendar's Day, Week or Month button. */
+const viewButton = (page: Page, name: 'Day' | 'Week' | 'Month') =>
+	grid(page).getByRole('button', { name, exact: true });
+
+async function openCalendar(page: Page): Promise<void> {
+	await railButton(page, 'Calendar').click();
+	await expect(grid(page)).toBeVisible();
+}
 
 /** Today's date in the browser's zone as an iCalendar date (`20261021`). */
 const today = (page: Page): Promise<string> =>
 	page.evaluate(() => {
 		const d = new Date();
-		return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+		const pad = (n: number): string => String(n).padStart(2, '0');
+		return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 	});
 
 test('the calendar shows the demo events by week, day and month', async ({ page }) => {
 	await openDemo(page);
 	await openCalendar(page);
-	await expect(grid(page).getByRole('button', { name: 'Week', exact: true })).toHaveAttribute(
-		'aria-pressed',
-		'true',
-	);
+	await expect(viewButton(page, 'Week')).toHaveAttribute('aria-pressed', 'true');
 	await expect(grid(page).getByText('Roadmap review')).toBeVisible();
-	await grid(page).getByRole('button', { name: 'Day', exact: true }).click();
+	await viewButton(page, 'Day').click();
 	await expect(grid(page).getByText('Stand-up')).toBeVisible();
-	await grid(page).getByRole('button', { name: 'Month', exact: true }).click();
+	await viewButton(page, 'Month').click();
 	await expect(grid(page).getByText('Lisbon trip').first()).toBeVisible();
 });
 
@@ -46,12 +49,12 @@ test('a new event is saved from the dialog, and mail shortcuts stay with the mai
 	await dialog.getByLabel('Title').fill('Design review');
 	await dialog.getByRole('button', { name: 'Save' }).click();
 	await expect(dialog).toHaveCount(0);
-	await grid(page).getByRole('button', { name: 'Month', exact: true }).click();
+	await viewButton(page, 'Month').click();
 	await expect(grid(page).getByText('Design review')).toBeVisible();
 	// Archive and delete keys pressed in the calendar must not touch the mail list.
 	await page.keyboard.press('e');
 	await page.keyboard.press('#');
-	await page.locator('mail-app .rail').getByRole('button', { name: 'Mail', exact: true }).click();
+	await railButton(page, 'Mail').click();
 	await expect(row(page, 'Q3 roadmap review')).toHaveCount(1);
 });
 
@@ -87,6 +90,6 @@ test('the calendar exports and imports iCalendar files', async ({ page }) => {
 		mimeType: 'text/calendar',
 		buffer: Buffer.from(ics),
 	});
-	await grid(page).getByRole('button', { name: 'Month', exact: true }).click();
+	await viewButton(page, 'Month').click();
 	await expect(grid(page).getByText('Board meeting')).toBeVisible();
 });

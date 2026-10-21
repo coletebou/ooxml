@@ -13,7 +13,7 @@ hero:
       link: /demo-react/
 features:
   - title: Standard servers
-    details: JMAP (RFC 8620 and RFC 8621) straight from the browser, so servers such as Stalwart, Fastmail or Cyrus work without a proxy. The transport is pluggable.
+    details: JMAP (RFC 8620 and RFC 8621) straight from the browser, with no proxy in between. The transport is pluggable.
   - title: Safe reading
     details: HTML mail is sanitised and shown in a sandboxed frame with no scripts and a Content-Security-Policy; remote images stay blocked until you allow them.
   - title: Office attachments

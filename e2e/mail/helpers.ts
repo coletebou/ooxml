@@ -20,7 +20,11 @@ export async function openConversation(page: Page, subject: string | RegExp): Pr
 	await expect(page.locator('mail-reading-pane h2')).toContainText(subject);
 }
 
+/** The selected folder in the folder pane. */
+export const currentFolder = (page: Page) =>
+	page.locator('mail-folder-pane .folder[aria-current="page"]');
+
 export async function selectFolder(page: Page, name: string): Promise<void> {
 	await page.locator('mail-folder-pane .folder', { hasText: name }).click();
-	await expect(page.locator('mail-folder-pane .folder[aria-current="page"]')).toContainText(name);
+	await expect(currentFolder(page)).toContainText(name);
 }

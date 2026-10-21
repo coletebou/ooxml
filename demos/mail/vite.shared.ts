@@ -17,7 +17,8 @@ export function sharedConfig(port: number): UserConfig {
 		// Discover the lazy presentation engine before first open, avoiding a dev-server reload.
 		optimizeDeps: { include: ['ooxml-core/pptx', 'ooxml-ui/pptx/dom', 'emf-converter'] },
 		resolve: {
-			// Lit breaks (double registration) if two copies load: force one.
+			// Yjs (used by the docx editor an attachment preview loads) and Lit break (instanceof,
+			// double registration) if two copies load: force one.
 			dedupe: ['yjs', 'lib0', 'y-protocols', 'lit', 'react', 'react-dom'],
 			alias: [
 				...(ooxmlSource

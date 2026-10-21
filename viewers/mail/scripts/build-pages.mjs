@@ -1,5 +1,6 @@
-// Builds the GitHub Pages site of OpenMail: the VitePress documentation in docs/, then the React
-// demo into its own route under docs/.vitepress/dist. Adapted from viewers/teams/scripts/build-pages.mjs.
+// Builds the GitHub Pages site of OpenMail (adapted from viewers/teams/scripts/build-pages.mjs):
+// the VitePress documentation in docs/, then the React demo into its own route under
+// docs/.vitepress/dist.
 //
 // Pages is static, so there is no mail server behind the demo: it runs the in-memory demo mailbox
 // and says so on screen. Nothing pretends to be a hosted backend.
@@ -17,8 +18,8 @@ const viteCli = resolve(root, 'node_modules', 'vite', 'bin', 'vite.js');
 const base = '/ooxml/mail/';
 const demos = [{ dir: 'react', route: 'demo-react' }];
 
-function run(script, args, cwd, env = process.env) {
-	const result = spawnSync(node, [script, ...args], { cwd, env, stdio: 'inherit' });
+function run(script, args, cwd) {
+	const result = spawnSync(node, [script, ...args], { cwd, stdio: 'inherit' });
 	if (result.error) throw result.error;
 	if (result.status !== 0)
 		throw new Error(`Command failed (${result.status}): ${script} ${args.join(' ')}`);
@@ -37,13 +38,12 @@ run(vitepressCli, ['build', '.'], docs);
 
 for (const { dir, route } of demos) {
 	const outDir = resolve(dist, route);
-	if (existsSync(outDir)) rmSync(outDir, { recursive: true, force: true });
+	rmSync(outDir, { recursive: true, force: true });
 	mkdirSync(outDir, { recursive: true });
 	run(
 		viteCli,
 		['build', '--base', `${base}${route}/`, '--outDir', outDir, '--emptyOutDir'],
 		resolve(root, '..', '..', 'demos', 'mail', dir),
-		{ ...process.env, VITE_MAIL_STATIC: '1' },
 	);
 	const index = resolve(outDir, 'index.html');
 	if (!existsSync(index) || statSync(index).size === 0) {

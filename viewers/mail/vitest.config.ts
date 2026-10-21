@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 // Tests run against this checkout's ooxml source when it is there, like the demos (no build
 // needed). With MAIL_USE_DIST=1 they run against the published ooxml-core and ooxml-ui instead.
 const ooxml = fileURLToPath(new URL(process.env.OOXML_DIR ?? '../../', import.meta.url)).replaceAll(
-	String.fromCharCode(92),
+	'\\',
 	'/',
 );
 const useSource = process.env.MAIL_USE_DIST !== '1' && existsSync(`${ooxml}src/core/mail/index.ts`);
