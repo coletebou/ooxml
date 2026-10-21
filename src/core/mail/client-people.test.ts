@@ -120,4 +120,32 @@ describe('the calendar actions', () => {
 		]);
 		client.destroy();
 	});
+
+	it('never replaces a stored event with one from another program whose UID is its id', async () => {
+		const client = createMailClient({
+			transport: createMemoryTransport(),
+			calendar: createMemoryCalendarStore({ seed: [STAND_UP] }),
+		});
+		await until(client, (s) => s.events.length === 1);
+		const file = [
+			'BEGIN:VCALENDAR',
+			'VERSION:2.0',
+			'BEGIN:VEVENT',
+			'UID:stand-up',
+			'SUMMARY:Another program',
+			'DTSTART:20261020T090000Z',
+			'END:VEVENT',
+			'END:VCALENDAR',
+		].join('\r\n');
+		expect(await client.importIcs(file)).toBe(1);
+		// The calendar's own event stays as it was; the other one stands beside it, its UID kept.
+		const others = () => client.getState().events.filter((event) => event.id !== 'stand-up');
+		expect(client.getState().events.find((event) => event.id === 'stand-up')).toEqual(STAND_UP);
+		expect(others()).toMatchObject([{ title: 'Another program', uid: 'stand-up' }]);
+		// Imported again, it is that same event, not a copy.
+		expect(await client.importIcs(file)).toBe(1);
+		expect(others()).toHaveLength(1);
+		expect(client.getState().events).toHaveLength(2);
+		client.destroy();
+	});
 });
