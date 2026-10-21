@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>OpenNotebook: React demo</title>
+		<link rel="icon" href="data:," />
+		<style>
+			html,
+			body,
+			#root {
+				margin: 0;
+				height: 100%;
+				font-family: system-ui, sans-serif;
+			}
+			body {
+				background: var(--office-background, Canvas);
+				color: var(--office-foreground, CanvasText);
+			}
+			.demo {
+				display: flex;
+				flex-direction: column;
+				height: 100%;
+			}
+			/* The binding sets height: 100%; in the column the app takes what the bar leaves. */
+			.demo > notebook-app {
+				flex: 1;
+				min-height: 0;
+			}
+			.raw-hook {
+				flex: none;
+				font-size: 0.8125rem;
+				line-height: 1.5;
+				border-top: 1px solid var(--office-border, GrayText);
+				background: var(--office-surface, Canvas);
+				color: var(--office-muted-foreground, GrayText);
+			}
+			.raw-hook summary {
+				cursor: pointer;
+				padding: 0.2em 1em;
+			}
+			.raw-hook summary code,
+			.raw-hook dl {
+				color: var(--office-foreground, CanvasText);
+			}
+			.raw-hook dl {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.25em 1.5em;
+				margin: 0;
+				padding: 0.2em 1em 0.6em;
+			}
+			.raw-hook dl div {
+				display: flex;
+				gap: 0.4em;
+			}
+			.raw-hook dt {
+				color: var(--office-muted-foreground, GrayText);
+			}
+			.raw-hook dd {
+				margin: 0;
+				font-variant-numeric: tabular-nums;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="./src/main.tsx"></script>
+	</body>
+</html>

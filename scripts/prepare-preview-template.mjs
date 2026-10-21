@@ -78,7 +78,7 @@ export async function preparePreviewTemplate(root, source) {
 	await writeFile(
 		docsPath,
 		docs.replace(
-			/href="\.\.\/(docx|xlsx|pptx|visio|teams)([\/#][^"]*|)"/g,
+			/href="\.\.\/(docx|xlsx|pptx|visio|teams|notebook)([\/#][^"]*|)"/g,
 			'href="https://christophervr.github.io/ooxml/$1$2"',
 		),
 	);

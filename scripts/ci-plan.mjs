@@ -134,6 +134,21 @@ export const VIEWERS = {
 		before: { types: ['bun run build:packages'], browser: ['bun run build:packages'] },
 		specFilter: true,
 	},
+	notebook: {
+		name: 'notebook',
+		dir: 'viewers/notebook',
+		// The typecheck and the demo resolve the binding from source, so nothing is built first. The
+		// package smoke installs the workspace's own ooxml-core and ooxml-ui with the binding: the
+		// release publishes it against them, and the registry has no `notebook` subpath before then.
+		groups: {
+			types: ['bun run typecheck'],
+			unit: ['bun run test'],
+			scripts: ['bun run test:scripts'],
+			browser: [PLAYWRIGHT_INSTALL, 'bun run test:browser'],
+			packages: ['bun run build:packages', 'bun run check:published', 'bun run pack:smoke:local'],
+		},
+		specFilter: true,
+	},
 };
 /** The order a viewer's check groups run in. */
 const GROUP_ORDER = ['format', 'types', 'unit', 'scripts', 'docs', 'mcp', 'browser', 'packages'];
@@ -162,12 +177,13 @@ const VIEWER_INERT = /^viewers\/[^/]+\/([^/]+\.md|LICENSE|NOTICE|\.gitignore|\.g
 const viewerOfFile = (file) => /^(?:viewers|demos|e2e)\/([^/]+)\//.exec(file)?.[1];
 
 /** The area a format owns: only its own viewer can break. */
-const AREA_CONSUMERS = { docx: [], xlsx: [], visio: [], teams: [], pptx: [] };
+const AREA_CONSUMERS = { docx: [], xlsx: [], visio: [], teams: [], notebook: [], pptx: [] };
 const AREA_VIEWERS = {
 	docx: ['docx'],
 	xlsx: ['xlsx'],
 	visio: ['visio'],
 	teams: ['teams'],
+	notebook: ['notebook'],
 	pptx: ['pptx'],
 };
 
@@ -328,7 +344,7 @@ export function pptxPlan(files, { everything, reaches }) {
 }
 
 /** The product editors in `src/ui/src/<product>/`; each belongs to one viewer only. */
-const UI_PRODUCT = /^src\/ui\/src\/(docx|xlsx|visio|teams|pptx)\//;
+const UI_PRODUCT = /^src\/ui\/src\/(docx|xlsx|visio|teams|notebook|pptx)\//;
 /** The groups a change to a viewer's (or its engine's) source reaches. */
 const SOURCE_GROUPS = ['types', 'unit', 'browser', 'packages'];
 
