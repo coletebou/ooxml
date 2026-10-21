@@ -54,7 +54,16 @@ export function createIndexedDbStorage(
 	): Promise<T | undefined> => {
 		const opened = await open();
 		if (!opened) return undefined;
-		return wrap(fn(opened.transaction(STORE, mode).objectStore(STORE)));
+		const tx = opened.transaction(STORE, mode);
+		const result = wrap(fn(tx.objectStore(STORE)));
+		if (mode === 'readonly') return result;
+		// A write can still fail at commit (quota, disk): it only counts once the transaction is done.
+		const committed = new Promise<void>((resolve, reject) => {
+			tx.oncomplete = () => resolve();
+			tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
+		});
+		const [value] = await Promise.all([result, committed]);
+		return value;
 	};
 	return {
 		async load(key) {

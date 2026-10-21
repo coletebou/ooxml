@@ -44,13 +44,25 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 	let dirty = false;
 	let destroyed = false;
 
+	let failed: unknown = null;
 	const save = (): Promise<void> => {
 		clearTimeout(timer);
 		timer = undefined;
 		if (!storage || !dirty) return saving;
 		dirty = false;
 		const bytes = Y.encodeStateAsUpdate(doc);
-		saving = saving.then(() => storage.save(REGISTRY_KEY, bytes)).catch(options.onError);
+		saving = saving
+			.then(() => storage.save(REGISTRY_KEY, bytes))
+			.then(
+				() => {
+					failed = null;
+				},
+				(error: unknown) => {
+					dirty = true;
+					failed = error;
+					options.onError(error);
+				},
+			);
 		return saving;
 	};
 	doc.on('update', (_u: Uint8Array, origin: unknown) => {
@@ -102,7 +114,10 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 					const off = session!.on('ready', () => (off(), resolve()));
 				});
 		},
-		flush: save,
+		async flush() {
+			await save();
+			if (failed) throw failed;
+		},
 		async destroy() {
 			if (destroyed) return;
 			destroyed = true;

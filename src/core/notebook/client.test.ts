@@ -193,6 +193,37 @@ describe('notebook client', () => {
 		expect(state.todos.map((t) => t.done)).toEqual([true]);
 		await expect(client.importNotebook(new Uint8Array([1, 2]))).rejects.toThrow();
 	});
+
+	it('keeps a failed save unsaved and retries it on the next flush', async () => {
+		const inner = createMemoryStorage();
+		let fail = false;
+		const storage: NotebookStorage = {
+			load: inner.load,
+			remove: inner.remove,
+			save: async (key, bytes) => {
+				if (fail) throw new Error('quota exceeded');
+				return inner.save(key, bytes);
+			},
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await client.flush();
+		const notices: string[] = [];
+		client.on('notice', (n) => notices.push(n.code));
+		fail = true;
+		client.renamePage(client.getState().pageId, 'Unsaved title');
+		await expect(client.flush()).rejects.toThrow('quota exceeded');
+		expect(notices).toContain('save-failed');
+		expect(notices).not.toContain('sync-error');
+		fail = false;
+		await client.flush();
+		const id = client.getState().notebookId;
+		const reopened = start(storage, createChannelHub());
+		await reopened.whenReady();
+		await settle();
+		expect(reopened.getState().notebookId).toBe(id);
+		expect(reopened.getState().page?.title).toBe('Unsaved title');
+	});
 });
 
 function client_addContent(client: NotebookClient): void {

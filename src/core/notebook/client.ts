@@ -202,7 +202,11 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 				saveDelayMs: options.saveDelayMs ?? 400,
 				...(seed ? { seed } : {}),
 				onChange: () => refresh(),
-				onError: (error) => notice('sync-error', error),
+				onError: (error, kind) =>
+					notice(
+						kind === 'save' ? 'save-failed' : kind === 'load' ? 'open-failed' : 'sync-error',
+						error,
+					),
 			});
 			if (destroyed) return void (await next.close());
 			if (entry.pending) {

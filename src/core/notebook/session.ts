@@ -32,7 +32,7 @@ export interface OpenNotebook {
 	readonly edit: NotebookEditContext;
 	/** Seeding and imports (not undoable). */
 	readonly seed: NotebookEditContext;
-	/** Save now (and wait for it). */
+	/** Save now and wait for it; rejects when the save failed (the state stays unsaved, to retry). */
 	flush: () => Promise<void>;
 	/** Save, leave the room and release everything. */
 	close: () => Promise<void>;
@@ -50,7 +50,8 @@ export interface OpenNotebookOptions {
 	/** Writes the first content of a brand-new notebook before it joins its room. */
 	seed?: (ctx: NotebookEditContext) => void;
 	onChange: () => void;
-	onError: (error: unknown) => void;
+	/** `load` and `save` are this device's copy failing; `sync` is the room. */
+	onError: (error: unknown, kind: 'load' | 'save' | 'sync') => void;
 }
 
 export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNotebook> {
@@ -63,7 +64,7 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 		if (bytes?.length) Y.applyUpdate(doc, bytes, NOTEBOOK_STORAGE_ORIGIN);
 	} catch (error) {
 		// A corrupt or unreadable copy is ignored: the room (or a peer) supplies the state again.
-		options.onError(error);
+		options.onError(error, 'load');
 	}
 	const context = (origin: unknown): NotebookEditContext => ({
 		types,
@@ -79,13 +80,26 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	let saving: Promise<void> = Promise.resolve();
 	let dirty = !!options.seed;
 	let closed = false;
+	let failed: unknown = null;
 	const save = (): Promise<void> => {
 		clearTimeout(timer);
 		timer = undefined;
 		if (!storage || !dirty) return saving;
 		dirty = false;
 		const bytes = Y.encodeStateAsUpdate(doc);
-		saving = saving.then(() => storage.save(key, bytes)).catch(options.onError);
+		saving = saving
+			.then(() => storage.save(key, bytes))
+			.then(
+				() => {
+					failed = null;
+				},
+				(error: unknown) => {
+					// Still unsaved: the next change, flush or close tries again.
+					dirty = true;
+					failed = error;
+					options.onError(error, 'save');
+				},
+			);
 		return saving;
 	};
 	const onUpdate = (_update: Uint8Array, origin: unknown): void => {
@@ -112,7 +126,7 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	});
 	const offStatus = session.on('status', options.onChange);
 	const offPeers = session.on('peers', options.onChange);
-	const offError = session.on('error', options.onError);
+	const offError = session.on('error', (error) => options.onError(error, 'sync'));
 
 	const undo = new Y.UndoManager(
 		[types.meta, types.sections, types.pages, types.containers, types.ink],
@@ -131,7 +145,10 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 		index,
 		edit,
 		seed,
-		flush: save,
+		async flush() {
+			await save();
+			if (failed) throw failed;
+		},
 		async close() {
 			if (closed) return;
 			closed = true;

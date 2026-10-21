@@ -238,7 +238,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		this.#stop();
 	}
 
-	#flush = (): void => void this.#client?.flush();
+	// Leaving the page: save what is pending; a failure was already announced as a notice.
+	#flush = (): void => void this.#client?.flush().catch(() => undefined);
 
 	#config(): NotebookSyncConfig {
 		if (this.config) return this.config;
