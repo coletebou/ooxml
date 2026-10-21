@@ -13,7 +13,8 @@ import type {
 import { THEME_CSS, installOfficeUiTheme } from '../theme';
 import { committingClient, release } from './app-client';
 import { runCommand } from './app-commands';
-import { downloadBytes, mailView } from './app-mail-view';
+import { composeView } from './app-compose-view';
+import { mailView } from './app-mail-view';
 import { calendarView, contactsView } from './app-people-view';
 import { errorText, noticeText, quoteFormat } from './app-text';
 import { defineMailAttachmentPreview } from './attachment-preview';
@@ -23,9 +24,11 @@ import { defineMailContacts } from './contacts-pane';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { defineMailFolderPane } from './folder-pane';
 import { icon } from './icons';
+import { InlineImages } from './inline-images';
 import { commandFor, controlOwnsKey, isTyping } from './keyboard';
 import { defineMailMessageList } from './message-list';
 import { FocusReturn, focusFirst } from './modal';
+import { downloadBytes } from './object-urls';
 import { defineMailReadingPane, type MailReadingPane } from './reading-pane';
 import { shortcutsDialog } from './shortcuts-dialog';
 import { createMail, sameMailConnection, type MailConnection } from './store';
@@ -87,9 +90,8 @@ export class MailApp extends MailElement {
 	private startedWith: MailConnection | null = null;
 	private stops: (() => void)[] = [];
 	private toastId = 0;
-	/** Each message's inline image URLs, by message id, and the object URLs to revoke on stop. */
-	private inline = new Map<string, Promise<ReadonlyMap<string, string>>>();
-	private objectUrls: string[] = [];
+	/** The pictures message bodies show in place, made for the running client. */
+	private images: InlineImages | null = null;
 	/** What had the focus before the shortcuts dialog opened. */
 	private readonly dialogFocus = new FocusReturn();
 	private readonly onKey = (event: KeyboardEvent): void => this.keydown(event);
@@ -168,6 +170,10 @@ export class MailApp extends MailElement {
 				this.renderRoot.querySelector<MailCompose>('mail-compose')?.commitRecipients();
 		});
 		this.mail = mail;
+		this.images = new InlineImages(
+			(part) => mail.download(part).catch(() => null),
+			() => new Set(client.getState().open?.messages.map((view) => view.summary.id)),
+		);
 		this.state = client.getState();
 		let ready = false;
 		this.stops = [
@@ -190,9 +196,12 @@ export class MailApp extends MailElement {
 		// never waits for them.
 		if (this.mail) void release(this.mail);
 		this.mail = null;
-		for (const url of this.objectUrls) URL.revokeObjectURL(url);
-		this.objectUrls = [];
-		this.inline.clear();
+		// What the client showed goes with it: its pictures, the attachment opened from it, and its
+		// notices (their Undo would act on the mailbox just left).
+		this.images?.clear();
+		this.images = null;
+		this.preview = null;
+		this.toasts = [];
 	}
 
 	/** Show a notice as a toast (and as a `mail-notice` event for the host). */
@@ -249,12 +258,19 @@ export class MailApp extends MailElement {
 		const state = this.mail?.getState();
 		if (this.dialog) this.dialog = '';
 		else if (this.preview) this.preview = null;
-		else if (state?.compose) void this.mail?.closeCompose();
+		else if (state?.compose) this.closeCompose();
 		else if (this.foldersOpen) this.foldersOpen = false;
 		else if (state?.open) this.mail?.close();
 		else if (state?.selection.length) this.mail?.clearSelection();
 		else return false;
 		return true;
+	}
+
+	/** Close the compose window as its own Close does, so the files it is still reading go in. */
+	private closeCompose(): void {
+		const compose = this.renderRoot.querySelector<MailCompose>('mail-compose');
+		if (compose) compose.close();
+		else void this.mail?.closeCompose();
 	}
 
 	/** A toolbar action of the reading pane on conversation `id`. */
@@ -296,32 +312,17 @@ export class MailApp extends MailElement {
 		});
 	}
 
-	/** Object URLs of a message's inline (`cid:`) images, made once per message. */
+	/** The URLs of the pictures a message's HTML body shows in place, by `cid` (lower case). */
 	inlineUrls(message: MailMessage): Promise<ReadonlyMap<string, string>> {
-		const known = this.inline.get(message.id);
-		if (known) return known;
-		const made = (async () => {
-			const urls = new Map<string, string>();
-			for (const attachment of message.attachments) {
-				if (!attachment.cid || !attachment.type.startsWith('image/')) continue;
-				const bytes = await this.mail?.download(attachment).catch(() => null);
-				if (!bytes) continue;
-				const url = URL.createObjectURL(
-					new Blob([new Uint8Array(bytes)], { type: attachment.type }),
-				);
-				this.objectUrls.push(url);
-				urls.set(attachment.cid.toLowerCase(), url);
-			}
-			return urls;
-		})();
-		this.inline.set(message.id, made);
-		return made;
+		return this.images?.urls(message) ?? Promise.resolve(new Map());
 	}
 
 	/** Open an attachment: the host may take over (cancel `mail-open-attachment`), else preview it. */
 	async openAttachment(emailId: string, attachment: MailAttachment): Promise<void> {
-		const bytes = await this.mail?.download(attachment).catch(() => null);
-		if (!bytes) return;
+		const mail = this.mail;
+		const bytes = await mail?.download(attachment).catch(() => null);
+		// A file of a mailbox the app has left since is not opened over the next one.
+		if (!bytes || this.mail !== mail) return;
 		const detail: OpenAttachmentDetail = { emailId, attachment, bytes };
 		if (this.emit('mail-open-attachment', detail, true)) this.preview = detail;
 	}
@@ -383,23 +384,6 @@ export class MailApp extends MailElement {
 		</div>`;
 	}
 
-	private composeView(mail: MailClient, state: MailState) {
-		if (!state.compose) return nothing;
-		return html`<div class="compose-layer">
-			<mail-compose
-				.compose=${state.compose}
-				.identities=${state.identities}
-				.contacts=${state.contacts}
-				@mail-draft-change=${(e: CustomEvent<{ patch: Parameters<MailClient['updateDraft']>[0] }>) => mail.updateDraft(e.detail.patch)}
-				@mail-draft-attach=${(e: CustomEvent<{ files: Parameters<MailClient['attach']>[0] }>) => void mail.attach(e.detail.files)}
-				@mail-draft-detach=${(e: CustomEvent<{ blobId: string }>) => mail.detach(e.detail.blobId)}
-				@mail-draft-send=${() => void mail.send()}
-				@mail-draft-discard=${() => void mail.discardDraft()}
-				@mail-draft-close=${() => void mail.closeCompose()}
-			></mail-compose>
-		</div>`;
-	}
-
 	protected override render() {
 		const state = this.state;
 		const mail = this.mail;
@@ -409,7 +393,7 @@ export class MailApp extends MailElement {
 				${state?.status === 'error' && state.error ? html`<p class="banner error" role="alert">${this.t('app.connectFailed', { reason: errorText(state.error, this.i18n) })}</p>` : nothing}
 				${mail && state ? this.page(mail, state) : nothing}
 			</main>
-			${mail && state ? this.composeView(mail, state) : nothing}
+			${mail && state ? composeView(mail, state) : nothing}
 			${
 				this.preview
 					? html`<mail-attachment-preview

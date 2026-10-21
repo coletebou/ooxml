@@ -51,6 +51,29 @@ async function type(el: MailCompose, field: Element, text: string): Promise<void
 	await settle(el);
 }
 
+/** A file whose bytes are read only once `finish` is called. */
+function slowFile() {
+	let finish: () => void = () => {};
+	const file = {
+		name: 'big.bin',
+		type: 'application/octet-stream',
+		arrayBuffer: () =>
+			new Promise<ArrayBuffer>((resolve) => (finish = () => resolve(new ArrayBuffer(2)))),
+	};
+	return { file, finish: () => finish() };
+}
+
+/** Drop `files` on the compose window. */
+function dropFiles(el: MailCompose, ...files: unknown[]): void {
+	const drop = new Event('drop', { bubbles: true, cancelable: true, composed: true });
+	Object.defineProperty(drop, 'dataTransfer', { value: { files, types: ['Files'] } });
+	el.shadowRoot!.querySelector('section')!.dispatchEvent(drop);
+}
+
+/** Each event as its type and the compose session it names. */
+const sessions = (seen: [string, unknown][]) =>
+	seen.map(([type, detail]) => [type, (detail as { session?: number }).session]);
+
 /** Remote loads written the ways a sender can hide them from a plain url() filter. */
 const TRACKED = [
 	"background:image-set('https://t.example/a.png' 1x)",
@@ -69,6 +92,21 @@ describe('<mail-compose>', () => {
 		);
 		expect(editor(el).innerHTML).not.toContain('t.example');
 		expect(editor(el).textContent).toContain('line 4');
+	});
+
+	it('keeps what quoted HTML positions inside the editor, over nothing else', async () => {
+		// The sanitiser keeps layout styles, so a box the quoted message fixes over the page would
+		// cover the window (Send, Discard) and the app, but for the editor's containment.
+		const cover = '<div style="position:fixed;inset:0;z-index:2147483647">Covered</div>';
+		const el = await mount(
+			composeState({ to: [{ name: '', email: 'ada@example.com' }], html: cover }),
+		);
+		expect(editor(el).querySelector('div')!.getAttribute('style')).toContain('position:fixed');
+		const style = getComputedStyle(editor(el));
+		expect([style.getPropertyValue('contain'), style.getPropertyValue('isolation')]).toEqual([
+			'paint',
+			'isolate',
+		]);
 	});
 
 	it('pastes HTML without what its CSS would load', async () => {
@@ -207,6 +245,48 @@ describe('<mail-compose>', () => {
 		expect(el.readingFiles).toBe(false);
 	});
 
+	it('never hands the files read for one draft to the next one', async () => {
+		const el = await mount(composeState());
+		const seen = record(el, 'mail-draft-attach');
+		const big = slowFile();
+		dropFiles(el, big.file);
+		await settle(el);
+		el.compose = { ...composeState(), session: 2 };
+		await settle(el);
+		big.finish();
+		await vi.waitFor(() => expect(el.readingFiles).toBe(false));
+		expect(seen).toEqual([]);
+	});
+
+	it('closes once the files still being read are in the draft', async () => {
+		const el = await mount(composeState({ to: [{ name: '', email: 'ada@example.com' }] }));
+		const seen = record(el, 'mail-draft-attach', 'mail-draft-close');
+		const big = slowFile();
+		dropFiles(el, big.file);
+		await settle(el);
+		el.shadowRoot!.querySelector<HTMLButtonElement>('header button')!.click();
+		expect(seen).toEqual([]);
+		big.finish();
+		await vi.waitFor(() => expect(seen).toHaveLength(2));
+		expect(sessions(seen)).toEqual([
+			['mail-draft-attach', 1],
+			['mail-draft-close', 1],
+		]);
+	});
+
+	it('discards at once, and the files still being read go nowhere', async () => {
+		const el = await mount(composeState({ to: [{ name: '', email: 'ada@example.com' }] }));
+		const seen = record(el, 'mail-draft-attach', 'mail-draft-discard');
+		const big = slowFile();
+		dropFiles(el, big.file);
+		await settle(el);
+		el.shadowRoot!.querySelector<HTMLButtonElement>('footer button:last-child')!.click();
+		expect(sessions(seen)).toEqual([['mail-draft-discard', 1]]);
+		big.finish();
+		await vi.waitFor(() => expect(el.readingFiles).toBe(false));
+		expect(sessions(seen)).toEqual([['mail-draft-discard', 1]]);
+	});
+
 	it('puts the focus in the To field of a new message', async () => {
 		const el = await mount(composeState());
 		const to = fields(el)[0]!;
@@ -220,15 +300,16 @@ describe('<mail-compose>', () => {
 		const ada = [{ name: '', email: 'ada@example.com' }];
 		await type(el, fields(el)[0]!, 'ada@example.com');
 		el.shadowRoot!.querySelector<HTMLButtonElement>('header button')!.click();
+		// Each hand-over names the compose session of the draft it is for.
 		expect(seen.splice(0)).toEqual([
 			['mail-draft-change', { patch: { to: ada } }],
-			['mail-draft-close', {}],
+			['mail-draft-close', { session: 1 }],
 		]);
 		await type(el, fields(el)[0]!, 'ada@example.com');
 		el.shadowRoot!.querySelector<HTMLButtonElement>('.send')!.click();
 		expect(seen).toEqual([
 			['mail-draft-change', { patch: { to: ada } }],
-			['mail-draft-send', {}],
+			['mail-draft-send', { session: 1 }],
 		]);
 	});
 });

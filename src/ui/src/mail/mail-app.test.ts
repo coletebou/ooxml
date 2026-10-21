@@ -4,16 +4,23 @@ import {
 	createMemoryTransport,
 	MailTransportError,
 	type Draft,
+	type MailAttachment,
+	type MailMessage,
 	type MailState,
 	type MailTransport,
 } from 'ooxml-core/mail';
+import type { MailHtmlFrame } from './html-frame';
 import { defineMailApp, type MailApp } from './mail-app';
 import type { MailConnection } from './store';
 
 type Updating = HTMLElement & { updateComplete: Promise<unknown> };
 
 beforeAll(() => defineMailApp());
-afterEach(() => document.body.replaceChildren());
+// The apps go first: letting their clients go revokes the object URLs a test may have stubbed.
+afterEach(() => {
+	document.body.replaceChildren();
+	vi.unstubAllGlobals();
+});
 
 async function until(test: () => boolean): Promise<void> {
 	for (let i = 0; i < 400; i++) {
@@ -78,6 +85,47 @@ function testTransport(options: { failSaves?: number } = {}) {
 	};
 	return { transport, saved, sent, closed: () => closed };
 }
+
+/**
+ * Object URLs (jsdom has none) for the rest of the test, recording the blobs made and the URLs
+ * revoked.
+ */
+function objectUrls() {
+	const made: Blob[] = [];
+	const revoked: string[] = [];
+	vi.stubGlobal(
+		'URL',
+		Object.assign(class extends URL {}, {
+			createObjectURL: (blob: Blob) => `blob:test/${made.push(blob)}`,
+			revokeObjectURL: (url: string) => void revoked.push(url),
+		}),
+	);
+	return { made, revoked };
+}
+
+/** Open the demo message whose HTML shows an inline picture (an SVG logo); its message. */
+async function openWelcome(app: MailApp): Promise<MailMessage> {
+	const id = state(app).conversations.find((c) => c.subject === 'Welcome to the team space')!.id;
+	await app.client!.open(id);
+	await until(() => !!state(app).open?.messages.at(-1)?.message);
+	return state(app).open!.messages.at(-1)!.message!;
+}
+
+/** `message` as another message, `id`, with `html` and an inline PNG part for each of `cids`. */
+const withPictures = (message: MailMessage, id: string, html: string, ...cids: string[]) => ({
+	...message,
+	id,
+	html,
+	attachments: cids.map((cid, i): MailAttachment => ({
+		partId: String(i + 2),
+		blobId: `${id}-${cid}`,
+		name: `${cid}.png`,
+		type: 'image/png',
+		size: 3,
+		disposition: 'inline',
+		cid,
+	})),
+});
 
 /** Open a new message and type `address` into its To field without finishing it. */
 async function typeAddress(app: MailApp, address: string): Promise<Updating> {
@@ -323,6 +371,65 @@ describe('<mail-app>', () => {
 		expect(sent[0]!.to).toEqual([{ name: '', email: 'bob@example.com' }]);
 	});
 
+	it('sends with Ctrl+Enter pressed in an address field, with the address typed there', async () => {
+		const { transport, sent } = testTransport();
+		const app = await mount({ kind: 'transport', transport });
+		const compose = await typeAddress(app, 'bob@example.com');
+		const send = key('Enter', { ctrlKey: true });
+		inner(inner(compose, 'mail-recipients'), 'input')!.dispatchEvent(send);
+		expect(send.defaultPrevented).toBe(true);
+		await until(() => sent.length === 1);
+		expect(sent[0]!.to).toEqual([{ name: '', email: 'bob@example.com' }]);
+	});
+
+	it('waits for the files the compose window is still reading when Escape closes it', async () => {
+		const { transport } = testTransport();
+		const app = await mount({ kind: 'transport', transport });
+		await app.client!.compose('new');
+		await app.updateComplete;
+		const compose = inner<Updating>(app, 'mail-compose')!;
+		await compose.updateComplete;
+		let finish: () => void = () => {};
+		const file = {
+			name: 'notes.txt',
+			type: 'text/plain',
+			arrayBuffer: () =>
+				new Promise<ArrayBuffer>((resolve) => (finish = () => resolve(new ArrayBuffer(2)))),
+		};
+		const drop = new Event('drop', { bubbles: true, cancelable: true, composed: true });
+		Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+		inner(compose, 'section')!.dispatchEvent(drop);
+		app.dispatchEvent(key('Escape'));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(state(app).compose).not.toBeNull();
+		finish();
+		// The file is in the draft; the window stays open while it uploads, as it does for a file
+		// added before Escape.
+		await until(() => state(app).compose?.draft.attachments.length === 1);
+	});
+
+	it('ignores what a compose window hands over for a draft that gave way to another', async () => {
+		const app = await mount();
+		await app.client!.compose('new');
+		const gone = state(app).compose!.session;
+		await app.client!.compose('new');
+		await app.updateComplete;
+		const client = app.client!;
+		const spies = (['attach', 'closeCompose', 'send', 'discardDraft'] as const).map((name) =>
+			vi.spyOn(client, name),
+		);
+		for (const type of ['attach', 'close', 'send', 'discard'])
+			inner(app, 'mail-compose')!.dispatchEvent(
+				new CustomEvent(`mail-draft-${type}`, {
+					detail: { files: [], session: gone },
+					bubbles: true,
+					composed: true,
+				}),
+			);
+		for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+		expect(state(app).compose?.session).toBeGreaterThan(gone);
+	});
+
 	it('keeps a draft it could not save when a link or a contact starts a new one', async () => {
 		const { transport } = testTransport({ failSaves: Infinity });
 		const app = await mount({ kind: 'transport', transport });
@@ -384,5 +491,88 @@ describe('<mail-app>', () => {
 		expect(inner(app, '[role="dialog"]')).toBeNull();
 		expect(inner(app, 'mail-message-list')!.shadowRoot!.activeElement).toBe(list);
 		expect(state(app).conversations.some((c) => c.id === id)).toBe(true);
+	});
+
+	it('shows an inline SVG picture from a data: URL, never from a blob: URL of its own', async () => {
+		const urls = objectUrls();
+		const app = await mount();
+		await openWelcome(app);
+		await app.updateComplete;
+		const reading = inner<Updating>(app, 'mail-reading-pane')!;
+		await reading.updateComplete;
+		const frame = () => inner<MailHtmlFrame>(reading, 'mail-html-frame');
+		await until(() => (frame()?.cidUrls.size ?? 0) > 0);
+		// Opened in a tab of its own, an SVG of the app's origin would run its scripts as the app.
+		expect(frame()!.cidUrls.get('logo@northwind')).toMatch(/^data:image\/svg\+xml;base64,/);
+		expect(urls.made).toEqual([]);
+	});
+
+	it('downloads only the pictures a message body shows', async () => {
+		const urls = objectUrls();
+		const app = await mount();
+		const welcome = await openWelcome(app);
+		const download = vi.spyOn(app.client!, 'download').mockResolvedValue(new Uint8Array([1, 2]));
+		const message = withPictures(
+			welcome,
+			'pictures',
+			'<img src="cid:shown@x"><a href="cid:linked@x">the file</a>',
+			'shown@x',
+			'linked@x',
+			'unused@x',
+		);
+		expect([...(await app.inlineUrls(message)).keys()]).toEqual(['shown@x']);
+		expect(download.mock.calls.map(([part]) => part.cid)).toEqual(['shown@x']);
+		expect(urls.made.map((blob) => blob.type)).toEqual(['image/png']);
+	});
+
+	it('lets the pictures of older messages go, never those of the open conversation', async () => {
+		const urls = objectUrls();
+		const app = await mount();
+		const welcome = await openWelcome(app);
+		await app.inlineUrls(welcome);
+		const download = vi.spyOn(app.client!, 'download').mockResolvedValue(new Uint8Array([1, 2]));
+		const others = Array.from({ length: 64 }, (_, i) =>
+			withPictures(welcome, `other-${i}`, `<img src="cid:p${i}@x">`, `p${i}@x`),
+		);
+		const first = (await app.inlineUrls(others[0]!)).get('p0@x')!;
+		for (const message of others.slice(1)) await app.inlineUrls(message);
+		expect(urls.revoked).toContain(first);
+		// The open conversation keeps its pictures; a message let go is downloaded again.
+		download.mockClear();
+		await app.inlineUrls(welcome);
+		expect(download).not.toHaveBeenCalled();
+		await app.inlineUrls(others[0]!);
+		expect(download).toHaveBeenCalledTimes(1);
+	});
+
+	it('lets go of what the last mailbox showed when it connects to another', async () => {
+		const app = await mount();
+		const notes: MailAttachment = {
+			partId: '2',
+			blobId: 'notes',
+			name: 'notes.txt',
+			type: 'text/plain',
+			size: 5,
+			disposition: 'attachment',
+			cid: null,
+		};
+		const download = vi
+			.spyOn(app.client!, 'download')
+			.mockResolvedValue(new TextEncoder().encode('hello'));
+		await app.openAttachment('m1', notes);
+		app.notify({ kind: 'done', action: 'archived', count: 1, undo: async () => {} });
+		await app.updateComplete;
+		expect(inner(app, 'mail-attachment-preview')).not.toBeNull();
+		// A download that finishes once the next mailbox is up opens nothing either.
+		let finish: (bytes: Uint8Array) => void = () => {};
+		download.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+		const late = app.openAttachment('m1', notes);
+		app.config = { kind: 'demo', seed: { now: Date.UTC(2026, 9, 21) } };
+		await app.updateComplete;
+		expect([app.preview, app.toasts]).toEqual([null, []]);
+		expect(inner(app, 'mail-attachment-preview')).toBeNull();
+		finish(new TextEncoder().encode('late'));
+		await late;
+		expect(app.preview).toBeNull();
 	});
 });

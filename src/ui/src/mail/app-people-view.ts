@@ -3,8 +3,8 @@
 import { html } from 'lit';
 import { localZone, type CalendarEvent } from 'ooxml-core/calendar';
 import type { Contact, MailAddress, MailClient, MailState } from 'ooxml-core/mail';
-import { downloadBytes } from './app-mail-view';
 import type { MailApp } from './mail-app';
+import { downloadBytes } from './object-urls';
 
 const downloadText = (app: MailApp, value: string, name: string, type: string): void =>
 	downloadBytes(app.ownerDocument, new TextEncoder().encode(value), name, type);

@@ -79,6 +79,17 @@ function shownCids(message: StripMessage): ReadonlySet<string> {
 }
 
 /**
+ * The image parts a message's HTML body shows in place (through `cid:`), whatever their
+ * disposition. A part the body only links to, or one that is not an image, is not one of them.
+ */
+export function bodyImages(message: StripMessage): MailAttachment[] {
+	const shown = shownCids(message);
+	return message.attachments.filter(
+		(a) => !!a.cid && a.type.startsWith('image/') && shown.has(a.cid.toLowerCase()),
+	);
+}
+
+/**
  * The files of a message: every part but the images its HTML body shows in place. A part the body
  * only links to, or one that is not an image, can only be opened from here, and one the sender
  * attached as a file stays a file.
@@ -88,13 +99,9 @@ export function attachmentStrip(
 	i18n: MailI18n,
 	handlers: AttachmentHandlers,
 ) {
-	const shown = shownCids(message);
+	const inPlace = new Set(bodyImages(message));
 	const listed = message.attachments.filter(
-		(a) =>
-			!a.cid ||
-			a.disposition === 'attachment' ||
-			!a.type.startsWith('image/') ||
-			!shown.has(a.cid.toLowerCase()),
+		(a) => a.disposition === 'attachment' || !inPlace.has(a),
 	);
 	if (!listed.length) return nothing;
 	return html`<ul class="attachments" aria-label=${i18n.tn('reading.attachments', listed.length)}>

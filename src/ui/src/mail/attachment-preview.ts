@@ -9,6 +9,7 @@ import { defineOnce, MailElement, mailStyles } from './base';
 import { icon } from './icons';
 import type { OpenAttachmentDetail } from './mail-app';
 import { FocusReturn, focusFirst, trapKeys } from './modal';
+import { imageUrl } from './object-urls';
 import css from './attachment-preview.css?raw';
 
 type Viewer = HTMLElement & { load(bytes: Uint8Array, name?: string): Promise<void> };
@@ -80,9 +81,8 @@ export class MailAttachmentPreview extends MailElement {
 		}
 		try {
 			if (kind === 'image') {
-				this.url = URL.createObjectURL(
-					new Blob([new Uint8Array(detail.bytes)], { type: detail.attachment.type }),
-				);
+				// Through the same rule as a message's pictures: never an SVG as a blob of the app.
+				this.url = imageUrl(detail.bytes, detail.attachment.type);
 			} else if (kind === 'text') {
 				this.text = new TextDecoder().decode(detail.bytes.subarray(0, 2_097_152));
 			} else {

@@ -2,8 +2,9 @@
 // commands; quoted, pasted and dropped HTML go through the message sanitiser first (see
 // compose-editor.ts: remote images are dropped, so composing never loads a tracker). Every edit is
 // an event; the client saves the draft after a quiet moment, and Ctrl/Cmd+Enter sends. An address
-// still being typed is part of the draft before the window closes or sends (`commitRecipients()`),
-// and Send waits while picked files are still being read, before they reach the draft.
+// still being typed is part of the draft before the window closes or sends (`commitRecipients()`).
+// Picked files are read for the draft they were added to (`compose-files.ts`): Send stays off while
+// they are read, Close waits for them, and Discard drops them. Each hand-over names its session.
 import { html, nothing, type PropertyValues } from 'lit';
 import { live } from 'lit/directives/live.js';
 import type {
@@ -15,10 +16,9 @@ import type {
 	MailAddress,
 } from 'ooxml-core/mail';
 import { composeStatus } from './app-text';
-import { readFiles } from './attachments';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { caretToStart, dropClean, editorHtml, pasteClean } from './compose-editor';
-import { fileSize } from './format';
+import { FileReads, fileList } from './compose-files';
 import type { MailKey } from './i18n/translator';
 import { icon } from './icons';
 import { defineMailRecipients, type MailRecipients } from './recipients';
@@ -71,6 +71,11 @@ export class MailCompose extends MailElement {
 	private session = 0;
 	/** A drag started in the editor: a move of its own content, which the browser does. */
 	private moving = false;
+	private readonly files = new FileReads(
+		() => this.compose?.session,
+		(files, session) => this.emit('mail-draft-attach', { files, session }),
+		(running) => (this.reading = running),
+	);
 
 	constructor() {
 		super();
@@ -124,10 +129,33 @@ export class MailCompose extends MailElement {
 			field.commit();
 	}
 
-	/** Close or send the draft, with what its address fields hold. */
+	/**
+	 * Close or send the draft with what its address fields hold, once the files still being read are
+	 * in it. A window that gave way to another draft meanwhile hands nothing over.
+	 */
 	private handOver(type: 'mail-draft-close' | 'mail-draft-send'): void {
-		this.commitRecipients();
-		this.emit(type, {});
+		const session = this.compose?.session;
+		if (session === undefined) return;
+		const finish = (): void => {
+			if (this.compose?.session !== session) return;
+			this.commitRecipients();
+			this.emit(type, { session });
+		};
+		if (this.readingFiles) void this.files.settled().then(finish);
+		else finish();
+	}
+
+	/** Close the window as its Close button does, once the files still being read are in. */
+	close(): void {
+		this.handOver('mail-draft-close');
+	}
+
+	/** Throw the draft away at once; the files still being read for it go nowhere. */
+	private discard(): void {
+		const session = this.compose?.session;
+		if (session === undefined) return;
+		this.files.discard(session);
+		this.emit('mail-draft-discard', { session });
 	}
 
 	/** The editor's content as the draft's HTML and plain text. */
@@ -154,19 +182,8 @@ export class MailCompose extends MailElement {
 		if (files?.length) {
 			event.preventDefault();
 			this.dragging = false;
-			void this.attachFiles(files);
+			void this.files.read(files);
 		} else if (this.editor && dropClean(event, this.editor, this.moving)) this.edited();
-	}
-
-	private async attachFiles(list: FileList | null | undefined): Promise<void> {
-		if (!list?.length) return;
-		this.reading++;
-		try {
-			const files = await readFiles(list);
-			if (files.length) this.emit('mail-draft-attach', { files });
-		} finally {
-			this.reading--;
-		}
 	}
 
 	private field(label: string, key: 'to' | 'cc' | 'bcc', addresses: readonly MailAddress[]) {
@@ -272,26 +289,7 @@ export class MailCompose extends MailElement {
 				@dragstart=${() => (this.moving = true)}
 				@dragend=${() => (this.moving = false)}
 			></div>
-			${
-				draft.attachments.length
-					? html`<ul class="files"
-							>${draft.attachments.map(
-								(a) =>
-									html`<li
-										>${icon('mail-attach')}<span>${a.name}</span
-										><small>${fileSize(a.size, this.i18n)}</small>
-										<button
-											type="button"
-											class="icon-button"
-											aria-label=${this.t('compose.removeFile', { name: a.name })}
-											@click=${() => this.emit('mail-draft-detach', { blobId: a.blobId })}
-											>${icon('close')}</button
-										></li
-									>`,
-							)}</ul
-						>`
-					: nothing
-			}
+			${fileList(draft.attachments, this.i18n, (blobId) => this.emit('mail-draft-detach', { blobId }))}
 			<footer>
 				<button
 					type="button"
@@ -309,7 +307,7 @@ export class MailCompose extends MailElement {
 						hidden
 						@change=${async (e: Event) => {
 							const input = e.currentTarget as HTMLInputElement;
-							await this.attachFiles(input.files);
+							await this.files.read(input.files);
 							input.value = '';
 						}}
 					/>
@@ -322,7 +320,7 @@ export class MailCompose extends MailElement {
 					class="icon-button"
 					aria-label=${this.t('compose.discard')}
 					title=${this.t('compose.discard')}
-					@click=${() => this.emit('mail-draft-discard', {})}
+					@click=${() => this.discard()}
 					>${icon('trash')}</button
 				>
 			</footer>

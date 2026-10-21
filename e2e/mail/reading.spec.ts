@@ -39,6 +39,10 @@ test('an inline cid image shows from the message itself', async ({ page }) => {
 	await openDemo(page);
 	await openConversation(page, 'Welcome to the team space');
 	const frame = page.frameLocator('mail-html-frame iframe');
-	await expect(frame.locator('img[alt="Northwind logo"]')).toHaveAttribute('src', /^blob:/);
+	// The logo is an SVG: it shows from a data: URL, never from a blob: URL of the app's own origin.
+	await expect(frame.locator('img[alt="Northwind logo"]')).toHaveAttribute(
+		'src',
+		/^data:image\/svg\+xml;base64,/,
+	);
 	await expect(page.locator('mail-reading-pane .remote')).toHaveCount(0);
 });

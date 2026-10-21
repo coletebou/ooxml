@@ -109,10 +109,15 @@ h2 {
 	width: var(--office-control-height-md);
 	height: var(--office-control-height-md);
 }
+/* Quoted, pasted and dropped HTML keeps its layout styles, so the editor contains them: paint
+   containment makes it the containing block of fixed and absolute boxes and clips them to it, and
+   its own stacking context keeps their z-index inside, off the window's buttons and the app. */
 .editor {
 	flex: 1;
 	min-height: 8em;
 	overflow: auto;
+	contain: paint;
+	isolation: isolate;
 	padding: var(--office-space-3);
 	outline: 0;
 	font-size: var(--office-font-size-md);

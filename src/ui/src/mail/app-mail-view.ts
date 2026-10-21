@@ -7,17 +7,7 @@ import { readFiles } from './attachments';
 import { icon } from './icons';
 import { folderLabel } from './labels';
 import type { MailApp } from './mail-app';
-
-/** Save bytes as a download in the browser. */
-export function downloadBytes(doc: Document, bytes: Uint8Array, name: string, type: string): void {
-	const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type }));
-	const link = doc.createElement('a');
-	link.href = url;
-	link.download = name;
-	link.rel = 'noopener';
-	link.click();
-	setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
+import { downloadBytes } from './object-urls';
 
 function topbar(app: MailApp, mail: MailClient, state: MailState) {
 	const i18n = app.i18nFor();
