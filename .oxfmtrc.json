@@ -13,7 +13,7 @@
 	"overrides": [
 		{
 			"files": ["src/ui/src/*.ts", "src/ui/src/**/*.ts"],
-			"excludeFiles": ["src/ui/src/teams/**"],
+			"excludeFiles": ["src/ui/src/teams/**", "src/ui/src/notebook/**"],
 			"options": {
 				"htmlWhitespaceSensitivity": "strict"
 			}

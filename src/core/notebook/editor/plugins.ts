@@ -6,9 +6,15 @@
 import { baseKeymap } from 'prosemirror-commands';
 import { inputRules } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
-import { EditorState, type Plugin } from 'prosemirror-state';
+import { EditorState, type Plugin, type Transaction } from 'prosemirror-state';
 import type { DecorationAttrs } from 'prosemirror-view';
-import { initProseMirrorDoc, yCursorPlugin, ySyncPlugin, ySyncPluginKey } from 'y-prosemirror';
+import {
+	initProseMirrorDoc,
+	yCursorPlugin,
+	yCursorPluginKey,
+	ySyncPlugin,
+	ySyncPluginKey,
+} from 'y-prosemirror';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
 import { notebookInputRules } from './input-rules';
@@ -60,4 +66,9 @@ export function createNotebookEditorState(options: NotebookEditorOptions): Edito
 		doc,
 		plugins: notebookEditorPlugins(options, mapping),
 	});
+}
+
+/** Redraw collaborators' carets (after their names or colours changed). */
+export function refreshRemoteCursors(state: EditorState): Transaction {
+	return state.tr.setMeta(yCursorPluginKey, { awarenessUpdated: true });
 }

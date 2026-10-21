@@ -1,0 +1,157 @@
+:host {
+	display: block;
+	min-width: 0;
+	color: var(--office-foreground);
+	font: inherit;
+}
+
+.editor {
+	min-height: 1.5em;
+}
+
+/* ProseMirror's own base rules, inside this shadow root. */
+.ProseMirror {
+	position: relative;
+	outline: none;
+	word-wrap: break-word;
+	white-space: pre-wrap;
+	white-space: break-spaces;
+	font-variant-ligatures: none;
+	font-feature-settings: 'liga' 0;
+	line-height: var(--office-line-height);
+	min-height: 1.5em;
+	padding: var(--office-space-1) var(--office-space-2);
+	caret-color: var(--office-foreground);
+}
+
+.ProseMirror-hideselection *::selection {
+	background: transparent;
+}
+
+.ProseMirror-hideselection {
+	caret-color: transparent;
+}
+
+.ProseMirror-selectednode {
+	outline: var(--office-focus-width) solid var(--office-ring);
+}
+
+.ProseMirror-separator {
+	display: inline !important;
+	border: none !important;
+	margin: 0 !important;
+}
+
+.ProseMirror p {
+	margin: 0 0 0.2em;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+	margin: 0.3em 0 0.2em;
+	line-height: var(--office-line-height-tight);
+	font-weight: var(--office-font-weight-bold);
+}
+
+.ProseMirror h1 {
+	font-size: 1.6em;
+}
+
+.ProseMirror h2 {
+	font-size: 1.3em;
+}
+
+.ProseMirror h3 {
+	font-size: 1.1em;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+	margin: 0 0 0.2em;
+	padding-inline-start: 1.6em;
+}
+
+.ProseMirror li {
+	position: relative;
+}
+
+.ProseMirror li > p {
+	margin: 0;
+}
+
+.ProseMirror a {
+	color: var(--office-accent);
+	text-decoration: underline;
+	cursor: text;
+}
+
+/* To-do tags: a checkbox widget before the line. */
+.ProseMirror [data-todo] {
+	position: relative;
+	padding-inline-start: 1.6em;
+}
+
+.ProseMirror [data-todo='done'] {
+	color: var(--office-muted-foreground);
+}
+
+.todo-box {
+	position: absolute;
+	inset-inline-start: 0.1em;
+	top: 0.2em;
+	box-sizing: border-box;
+	width: 1em;
+	height: 1em;
+	border: var(--office-border-width-thick) solid var(--office-muted-foreground);
+	border-radius: var(--office-radius-xs);
+	background: var(--office-paper);
+	cursor: pointer;
+	user-select: none;
+}
+
+.todo-box[data-todo='done'] {
+	border-color: var(--office-accent);
+	background: var(--office-accent);
+}
+
+.todo-box[data-todo='done']::after {
+	content: '';
+	position: absolute;
+	inset-inline-start: 0.28em;
+	top: 0.08em;
+	width: 0.25em;
+	height: 0.5em;
+	border: solid var(--office-accent-foreground);
+	border-width: 0 0.12em 0.12em 0;
+	transform: rotate(45deg);
+}
+
+/* Collaborators' carets and selections (colours come from the sanitised peer list). */
+.remote-caret {
+	position: relative;
+	margin-inline: -0.06em;
+	border-inline-start: 0.12em solid;
+	pointer-events: none;
+	word-break: normal;
+}
+
+.remote-label {
+	position: absolute;
+	inset-inline-start: -0.12em;
+	bottom: 100%;
+	padding: 0 var(--office-space-1);
+	border-radius: var(--office-radius-xs);
+	color: var(--office-accent-foreground);
+	font-size: var(--office-font-size-2xs);
+	line-height: var(--office-line-height-tight);
+	white-space: nowrap;
+	user-select: none;
+}
+
+@media (forced-colors: active) {
+	.todo-box[data-todo='done'] {
+		background: Highlight;
+		border-color: Highlight;
+	}
+}

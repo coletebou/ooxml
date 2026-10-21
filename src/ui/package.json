@@ -72,6 +72,11 @@
 			"import": "./dist/teams.js",
 			"default": "./dist/teams.js"
 		},
+		"./notebook": {
+			"types": "./dist/notebook/index.d.ts",
+			"import": "./dist/notebook.js",
+			"default": "./dist/notebook.js"
+		},
 		"./suite": {
 			"types": "./dist/suite/index.d.ts",
 			"import": "./dist/suite.js",

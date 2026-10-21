@@ -160,7 +160,7 @@ export interface NotebookClient {
 
 	exportPage: (
 		pageId?: string,
-		options?: PageExportOptions & { subtitle?: string },
+		options?: PageExportOptions & { subtitle?: string; untitled?: string },
 	) => Promise<ExportedFile & { report: PageExportReport }>;
 	exportNotebook: () => Promise<ExportedFile>;
 	importNotebook: (bytes: Uint8Array) => Promise<string>;

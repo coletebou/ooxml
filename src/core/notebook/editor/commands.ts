@@ -103,6 +103,21 @@ export function setTodoAt(pos: number, state: 'open' | 'done'): Command {
 	};
 }
 
+/** Tick or untick the to-do tag of the line with the cursor (the keyboard way to tick a box). */
+export const toggleTodoDone: Command = (state, dispatch) => {
+	const { $from } = state.selection;
+	const todo = $from.parent.attrs.todo;
+	if (!todo) return false;
+	if (dispatch)
+		dispatch(
+			state.tr.setNodeMarkup($from.before(), undefined, {
+				...$from.parent.attrs,
+				todo: todo === 'done' ? 'open' : 'done',
+			}),
+		);
+	return true;
+};
+
 function continueTodo(split: Command): Command {
 	return (state, dispatch, view) => {
 		const { $from, empty } = state.selection;

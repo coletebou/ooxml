@@ -1,0 +1,37 @@
+:host {
+	display: contents;
+}
+
+label {
+	display: grid;
+	gap: var(--office-space-1);
+	margin-bottom: var(--office-space-3);
+	font-size: var(--office-font-size-sm);
+}
+
+input {
+	box-sizing: border-box;
+	width: min(28em, 100%);
+	height: var(--office-field-height);
+	padding: 0 var(--office-space-2);
+	border: var(--office-border-width) solid var(--office-field-border);
+	border-radius: var(--office-field-radius);
+	background: var(--office-field-background);
+	color: var(--office-field-foreground);
+	font: inherit;
+}
+
+input:focus-visible {
+	outline: none;
+	border-color: var(--office-field-border-focus);
+}
+
+input[aria-invalid='true'] {
+	border-color: var(--office-danger);
+}
+
+.error {
+	margin: 0 0 var(--office-space-2);
+	color: var(--office-danger);
+	font-size: var(--office-font-size-sm);
+}
