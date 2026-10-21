@@ -222,4 +222,40 @@ describe('page export to .docx', () => {
 		const instance = loaded.model.numberingCatalog?.nums[String(item.numbering!.numId)];
 		expect(instance?.levelOverrides?.[0]?.startOverride).toBe(3);
 	});
+
+	it('starts a nested numbered list at its number, on the level its items use', async () => {
+		const para = (t: string): RichNode => ({
+			type: 'paragraph',
+			attrs: { todo: null },
+			content: [text(t)],
+		});
+		const list = (type: string, order: number | null, ...items: RichNode[][]): RichNode => ({
+			type,
+			...(order === null ? {} : { attrs: { order } }),
+			content: items.map((content) => ({ type: 'list_item', content })),
+		});
+		const { bytes } = await exportPageToDocx({
+			title: 'Nested',
+			items: [
+				{
+					kind: 'text',
+					x: 0,
+					y: 0,
+					blocks: [
+						list('bullet_list', null, [para('bullet'), list('ordered_list', 5, [para('fifth')])]),
+						list('ordered_list', 1, [para('one'), list('ordered_list', 2, [para('second')])]),
+					],
+				},
+			],
+		});
+		const loaded = await loadDocx(bytes);
+		const start = (name: string): [number, number | null] => {
+			const { numId, level } = paragraphs(loaded.model).find((p) => textOf(p) === name)!.numbering!;
+			const instance = loaded.model.numberingCatalog?.nums[String(numId)];
+			return [level, instance?.levelOverrides?.[level]?.startOverride ?? null];
+		};
+		expect(start('fifth')).toEqual([1, 5]);
+		expect(start('second')).toEqual([1, 2]);
+		expect(start('one')).toEqual([0, null]);
+	});
 });

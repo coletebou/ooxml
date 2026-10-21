@@ -157,20 +157,23 @@ class Writer {
 				this.paragraph(runs, { ...(style ? { style } : {}), ...(numbering ? { numbering } : {}) });
 			} else if (node.type === 'bullet_list' || node.type === 'ordered_list') {
 				const kind = node.type === 'bullet_list' ? 'bullet' : 'decimal';
-				// A nested list of the same kind continues its parent one level deeper; anything else
-				// is a Word list of its own, so numbering restarts as it does on the page.
-				let numId = list?.kind === kind ? list.numId : undefined;
+				const level = list ? Math.min(8, list.level + 1) : 0;
+				// A numbered list typed as `3. ` starts at 3.
+				const order = Number(node.attrs?.order ?? 1);
+				const start = kind === 'decimal' && Number.isInteger(order) && order > 1 ? order : 1;
+				// A nested list of the same kind continues its parent one level deeper; anything else,
+				// or a list with a start of its own, is a Word list of its own, so numbering restarts as
+				// it does on the page.
+				let numId = list?.kind === kind && start === 1 ? list.numId : undefined;
 				if (numId === undefined) {
 					const created = ensureListDefinition(this.model.numberingCatalog, kind);
 					numId = created.numId;
-					// A numbered list typed as `3. ` starts at 3; the new instance overrides its first level.
-					const order = Number(node.attrs?.order ?? 1);
+					// The new instance starts the level its items are written at.
 					const instance = created.catalog.nums[String(numId)];
-					if (kind === 'decimal' && Number.isInteger(order) && order > 1 && instance)
-						instance.levelOverrides = { 0: { startOverride: order } };
+					if (start > 1 && instance)
+						instance.levelOverrides = { [level]: { startOverride: start } };
 					this.model.numberingCatalog = created.catalog;
 				}
-				const level = list ? Math.min(8, list.level + 1) : 0;
 				for (const item of node.content ?? [])
 					this.text(item.content ?? [], { numId, level, kind });
 			}
