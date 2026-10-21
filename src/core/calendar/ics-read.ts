@@ -60,7 +60,7 @@ const CALENDAR = new Set(['VERSION', 'PRODID', 'CALSCALE', 'METHOD']);
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-/** The zone of each TZID, resolved once. */
+/** The zone of each TZID, resolved once; an IANA name by the platform's rules, never the file's. */
 function zoneResolver(
 	files: ReadonlyMap<string, FileZone>,
 	floating: string,
@@ -77,8 +77,14 @@ function zoneResolver(
 		// A parameter value is not TEXT, so it is looked up as written; a file that escaped it as the
 		// TZID property is escaped still finds its zone.
 		const file = files.get(name) ?? files.get(unescapeText(name));
+		/** The platform's instant; a file's own rules for the zone, often old or partial, check it. */
+		const checked = (ms: number, w: Wall): number => {
+			if (file && fileZoneToUtc(file, w) !== ms)
+				note(`Time zone "${name}" has other rules in the file: this browser's were used`);
+			return ms;
+		};
 		let resolved: ReadZone;
-		if (iana) resolved = { zone: iana, toUtc: (w) => zonedToUtc(w, iana) };
+		if (iana) resolved = { zone: iana, toUtc: (w) => checked(zonedToUtc(w, iana), w) };
 		else if (file) {
 			const matched = matchZone(file, year);
 			if (!matched) note(`Time zone "${name}" matches no known zone: repeats in it keep UTC time`);

@@ -460,6 +460,67 @@ describe('zones and times', () => {
 		expect(text).not.toContain('DTEND');
 		expect(parseIcs(text).events).toEqual(days.events);
 	});
+
+	it("reads an IANA zone by the platform's rules, and says when the file's own differ", () => {
+		// New York's rules before 2007: daylight time from the first Sunday of April to the last of
+		// October. It now runs from the second Sunday of March to the first of November.
+		const older = [
+			'BEGIN:VTIMEZONE',
+			'TZID:America/New_York',
+			'BEGIN:DAYLIGHT',
+			'DTSTART:19870405T020000',
+			'TZOFFSETFROM:-0500',
+			'TZOFFSETTO:-0400',
+			'RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=1SU',
+			'END:DAYLIGHT',
+			'BEGIN:STANDARD',
+			'DTSTART:19671029T020000',
+			'TZOFFSETFROM:-0400',
+			'TZOFFSETTO:-0500',
+			'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+			'END:STANDARD',
+			'END:VTIMEZONE',
+		];
+		const read = (...walls: string[]) =>
+			parseIcs(
+				calendar(
+					...older,
+					...walls.flatMap((wall, i) => vevent(`UID:e${i}`, `DTSTART;TZID=${NY}:${wall}`)),
+				),
+			);
+		// 16 March and 26 October 2026 are in daylight time now, in standard time by the older rules.
+		const moved = read('20260316T090000', '20261026T090000');
+		expect(moved.events.map((e) => [e.zone, e.start])).toEqual([
+			[NY, Date.UTC(2026, 2, 16, 13)],
+			[NY, Date.UTC(2026, 9, 26, 13)],
+		]);
+		expect(moved.unsupported).toEqual([
+			`Time zone "${NY}" has other rules in the file: this browser's were used`,
+		]);
+		// In July both rules give daylight time: nothing to say.
+		expect(read('20260715T090000').unsupported).toEqual([]);
+	});
+
+	it('says nothing of a zone the file describes as the platform does', () => {
+		const at = (day: number, hour = 9): number =>
+			zonedToUtc({ year: 2026, month: 3, day, hour }, NY);
+		// Weekly across the change to daylight time, one occurrence cancelled after it.
+		const review: CalendarEvent = {
+			id: 'review',
+			title: 'Review',
+			description: '',
+			zone: NY,
+			start: at(2),
+			end: at(2, 10),
+			repeat: 'weekly',
+			count: 6,
+			exceptions: [{ originalStart: at(16), cancelled: true }],
+		};
+		const text = eventsToIcs([review], { prodId: '-//Example//Test//EN', uidDomain: 'x', now: 0 });
+		expect(text).toContain(`\r\nTZID:${NY}\r\n`);
+		expect(text).toContain(`\r\nEXDATE;TZID=${NY}:20260316T090000\r\n`);
+		expect(parseIcs(text, { uidDomain: 'x' })).toEqual({ events: [review], unsupported: [] });
+	});
 });
 
 describe('repeat rules', () => {
