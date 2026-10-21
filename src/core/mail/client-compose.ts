@@ -1,20 +1,13 @@
 // The compose window's actions: open a new message, a reply, a reply all or a forward; edit it;
-// attach files; save the draft automatically after a quiet moment (never two saves at once); send;
-// discard. Only edits the server has saved count as saved, and a window whose draft cannot be
-// saved, or that has a file still uploading, stays open rather than losing it. A window whose
-// message is on its way gives way to nothing until it is sent. New code.
+// attach files; send; discard. The draft is saved after a quiet moment (`client-autosave.ts`), and
+// a window whose draft cannot be saved, or that has a file still uploading, stays open rather than
+// losing it. A window whose message is on its way gives way to nothing until it is sent. New code.
+import { createAutosave, patchCompose } from './client-autosave';
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
-import {
-	composeDraft,
-	draftFromMessage,
-	draftRecipients,
-	isEmptyDraft,
-	type QuoteFormat,
-} from './compose';
+import { composeDraft, draftFromMessage, draftRecipients, type QuoteFormat } from './compose';
 import { formatAddress, identityFor, type Draft, type Identity, type MailMessage } from './model';
 import { messageDate } from './threading';
-import type { MailErrorCode } from './transport';
 
 type ComposeActions = Pick<
 	MailClient,
@@ -29,7 +22,6 @@ type ComposeActions = Pick<
 	| 'closeCompose'
 >;
 
-const DEFAULT_SAVE_MS = 2000;
 const ADDRESS = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+$/;
 
 /** English quote wording, for clients without a localised `quoteFormat`. */
@@ -47,30 +39,13 @@ export const ENGLISH_QUOTE_FORMAT: QuoteFormat = {
 };
 
 export function createCompose(core: ClientCore): ComposeActions {
-	let timer: unknown;
-	let saving: Promise<MailErrorCode | null> | undefined;
-	let again = false;
 	/** The send under way, resolving to whether the message went. */
 	let sending: Promise<boolean> | undefined;
 	let session = 0;
-	/** Edits made in the open window, and how many of them the server's copy holds (-1: none). */
-	let edits = 0;
-	let saved = -1;
+	const autosave = createAutosave(core, () => !!sending);
 
 	const compose = (): ComposeState | null => core.state.compose;
-	const setCompose = (next: Partial<ComposeState>): void => {
-		const current = compose();
-		if (current) core.patch({ compose: { ...current, ...next } });
-	};
-	/**
-	 * The open draft has edits the server does not hold yet. A draft never saved is not saved while
-	 * it is empty; one the server holds is, emptied or not, or reopening it would bring back what
-	 * the person took out.
-	 */
-	const unsaved = (): boolean => {
-		const current = compose();
-		return !!current && saved !== edits && (!!current.draft.id || !isEmptyDraft(current.draft));
-	};
+	const setCompose = (next: Partial<ComposeState>): void => patchCompose(core, next);
 	const identities = (): readonly Identity[] => core.state.identities;
 	/**
 	 * True when the person sent `message`: it is filed in Sent, as the list knows it now (a body
@@ -90,79 +65,19 @@ export function createCompose(core: ClientCore): ComposeActions {
 		return message;
 	};
 
-	/** Saves the open draft once if it has unsaved edits; resolves to the error, if it failed. */
-	const saveOnce = async (): Promise<MailErrorCode | null> => {
-		const current = compose();
-		// Nothing is saved over a message on its way: what was edited meanwhile saves if it fails.
-		if (!current || !unsaved() || sending) return null;
-		const revision = edits;
-		setCompose({ status: 'saving' });
-		try {
-			const { id } = await core.transport.saveDraft(current.draft);
-			// A transport that kept the id saved over the copy read before: reopening must not show it.
-			if (core.bodies.delete(id) && core.openId) void core.loadBodies(core.openId, false);
-			const latest = compose();
-			if (!latest || latest.session !== current.session) return null;
-			saved = revision;
-			// Edits made meanwhile stay, unsaved; the draft adopts the saved id.
-			core.patch({
-				compose: {
-					...latest,
-					draft: { ...latest.draft, id },
-					status: saved === edits ? 'saved' : 'editing',
-					savedAt: core.now(),
-					error: null,
-				},
-			});
-			return null;
-		} catch (error) {
-			const code = errorCode(error);
-			if (compose()?.session === current.session) setCompose({ status: 'error', error: code });
-			return code;
-		}
-	};
-
-	/** Saves the open draft, again when asked to meanwhile, never two saves at once. */
-	const save = (): Promise<MailErrorCode | null> => {
-		core.cancel(timer);
-		timer = undefined;
-		if (saving) {
-			again = true;
-			return saving;
-		}
-		saving = (async () => {
-			try {
-				let error: MailErrorCode | null;
-				do {
-					again = false;
-					error = await saveOnce();
-				} while (again);
-				return error;
-			} finally {
-				saving = undefined;
-			}
-		})();
-		return saving;
-	};
-
-	const schedule = (): void => {
-		core.cancel(timer);
-		timer = core.later(() => void save(), core.options.draftSaveMs ?? DEFAULT_SAVE_MS);
-	};
-
 	/**
 	 * Shows an edit of the open draft and saves it after a quiet moment. An edit made while the
 	 * message is on its way is not in it: the window stays sending (Send off, nothing saved over
 	 * the message), closes once it is sent, and keeps the edit, to save, if the send fails.
 	 */
 	const edit = (draft: Draft): void => {
-		edits++;
+		autosave.edited();
 		if (sending) {
 			setCompose({ draft });
 			return;
 		}
 		setCompose({ draft, status: 'editing' });
-		schedule();
+		autosave.schedule();
 	};
 
 	/**
@@ -171,9 +86,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 	 * waits), so the window is still this one; that is checked all the same before it is changed.
 	 */
 	const deliver = async (open: ComposeState): Promise<boolean> => {
-		const revision = edits;
-		core.cancel(timer);
-		timer = undefined;
+		const revision = autosave.revision();
+		autosave.cancel();
 		setCompose({ status: 'sending', error: null });
 		const own = (): boolean => compose()?.session === open.session;
 		try {
@@ -181,7 +95,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 		} catch (error) {
 			if (own()) {
 				setCompose({ status: 'error', error: errorCode(error) });
-				if (edits !== revision) schedule();
+				if (autosave.revision() !== revision) autosave.schedule();
 			}
 			core.fail('send', error);
 			return false;
@@ -192,8 +106,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 	};
 
 	const start = (draft: Draft, mode: ComposeState['mode']): void => {
-		edits = 0;
-		saved = draft.id ? 0 : -1;
+		autosave.opened(draft);
 		core.patch({
 			compose: {
 				session: ++session,
@@ -219,8 +132,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 				if (!(await sending)) return false;
 				continue;
 			}
-			if (!unsaved()) break;
-			const error = await save();
+			if (!autosave.unsaved()) break;
+			const error = await autosave.save();
 			if (error) {
 				core.notice({ kind: 'error', action: 'save', code: error });
 				return false;
@@ -228,8 +141,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 		}
 		// Closing now would leave the file out: `attach` finds no window to add it to.
 		if (compose()?.uploading) return false;
-		core.cancel(timer);
-		timer = undefined;
+		autosave.cancel();
 		core.patch({ compose: null });
 		return true;
 	};
@@ -319,7 +231,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 			});
 		},
 		async saveDraft() {
-			await save();
+			await autosave.save();
 		},
 		async send() {
 			const current = compose();
@@ -330,7 +242,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 				setCompose({ status: 'error', error: 'invalid' });
 				return false;
 			}
-			core.cancel(timer);
+			autosave.cancel();
+			const saving = autosave.pending();
 			if (saving) await saving;
 			const latest = compose();
 			// Given way to another window meanwhile, which was not asked to send, or sent already by a
@@ -338,7 +251,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (!latest || latest.session !== current.session || sending) return false;
 			if (latest.uploading) {
 				// A file added while the last save finished: not yet either, and the edits keep saving.
-				if (unsaved()) schedule();
+				if (autosave.unsaved()) autosave.schedule();
 				return false;
 			}
 			sending = deliver(latest);
@@ -350,7 +263,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 		},
 		async discardDraft() {
 			const current = compose();
-			core.cancel(timer);
+			autosave.cancel();
+			const saving = autosave.pending();
 			if (saving) await saving;
 			// A message on its way is no draft any more; one whose send fails stays open to decide on.
 			if (sending) return;
