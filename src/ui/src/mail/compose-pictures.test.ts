@@ -10,6 +10,7 @@ import {
 	type MailMessage,
 } from 'ooxml-core/mail';
 import { defineMailCompose, type MailCompose } from './compose';
+import { cidUrlsOf } from './compose-pictures';
 
 type Updating = HTMLElement & { updateComplete: Promise<boolean> };
 type Download = (part: DraftAttachment) => Promise<Uint8Array | null>;
@@ -157,6 +158,28 @@ function edit(
 	el.removeEventListener('mail-draft-change', listen);
 	return html!;
 }
+
+describe('cidUrlsOf', () => {
+	it("names each part's cid: URL by its Content-ID in lower case, the first of each", () => {
+		const draftPart = (blobId: string, cid?: string): DraftAttachment => ({
+			blobId,
+			name: blobId,
+			type: 'image/png',
+			size: 4,
+			...(cid ? { cid } : {}),
+		});
+		const parts = [
+			draftPart('a', 'Logo@example.test'),
+			draftPart('b', 'logo@EXAMPLE.test'),
+			draftPart('c'),
+			draftPart('d', 'line art@example.test'),
+		];
+		expect([...cidUrlsOf(parts)]).toEqual([
+			['logo@example.test', 'cid:Logo@example.test'],
+			['line art@example.test', 'cid:line%20art@example.test'],
+		]);
+	});
+});
 
 describe('<mail-compose> pictures', () => {
 	it('keeps the cid: of a forwarded picture in the draft after an edit, before and once it shows', async () => {

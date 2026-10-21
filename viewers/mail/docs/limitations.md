@@ -20,7 +20,8 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   parts) are left out of a reply's quote. Forwards and reopened drafts keep them.
 - **Threads are per folder**: a reply you sent shows in Sent, not inside the Inbox conversation.
 - **Rich text** uses the browser's editing commands; it is tested in Chromium. Quoted, pasted and
-  dropped HTML loses remote images, so composing never loads a tracker.
+  dropped HTML, and a saved draft opened again, lose remote images (so composing never loads a
+  tracker) and style sheets (inline styles stay): what is sent is what the editor shows.
 - **Unsaved drafts when the app goes away**: if the app is removed, or connects to another mailbox,
   while a draft cannot be saved (offline, over quota), it keeps trying in the background (after 5,
   15 and 40 seconds, then once a minute) until the draft is saved; closing the page before then

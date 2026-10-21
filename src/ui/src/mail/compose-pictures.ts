@@ -42,6 +42,13 @@ function byCid(parts: readonly DraftAttachment[]): Map<string, DraftAttachment> 
 	return out;
 }
 
+/** For the sanitiser: each part's `cid:` URL by its Content-ID in lower case, so references stay. */
+export function cidUrlsOf(parts: readonly DraftAttachment[]): ReadonlyMap<string, string> {
+	return new Map(
+		[...byCid(parts)].map(([key, part]): [string, string] => [key, cidUrl(part.cid!)]),
+	);
+}
+
 const isImage = (part: DraftAttachment): boolean => part.type.toLowerCase().startsWith('image/');
 
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
@@ -88,9 +95,7 @@ export class DraftPictures {
 
 	/** For the sanitiser: each part's `cid:` URL by its Content-ID, so the references stay. */
 	get cidUrls(): ReadonlyMap<string, string> {
-		return new Map(
-			[...byCid(this.parts)].map(([key, part]): [string, string] => [key, cidUrl(part.cid!)]),
-		);
+		return cidUrlsOf(this.parts);
 	}
 
 	/** Whether there is anything to keep: a part to refer to, or a URL a picture showed from. */

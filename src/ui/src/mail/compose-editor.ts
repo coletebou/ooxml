@@ -1,11 +1,12 @@
 // The rich-text editor of <mail-compose>: what it starts with (the draft's HTML, else its text as
-// lines) and what arrives in it from elsewhere. A quoted message, a paste and a drop of HTML (from
-// another page or from this one) all go through the message sanitiser first, so remote images are
-// dropped and composing never loads a tracker, while a `cid:` picture of the draft's own parts
-// stays one (compose-pictures.ts). Plain text the browser inserts itself: it cannot load anything.
-// New code.
-import type { Draft } from 'ooxml-core/mail';
-import { sanitizeEmailHtml } from './sanitize';
+// lines; the HTML a quoted message or a reopened draft holds, `draftHtml`) and what arrives in it
+// from elsewhere. A quoted message, a paste and a drop of HTML (from another page or from this one)
+// all go through the message sanitiser first, so remote images are dropped and composing never
+// loads a tracker, while a `cid:` picture of the draft's own parts stays one (compose-pictures.ts).
+// Plain text the browser inserts itself: it cannot load anything. New code.
+import type { Draft, DraftHtml } from 'ooxml-core/mail';
+import { cidUrlsOf } from './compose-pictures';
+import { sanitizeEmailHtml, sanitizeMessageHtml } from './sanitize';
 
 /** What the editor keeps of the draft's own pictures in the HTML it takes (compose-pictures.ts). */
 export interface EditorPictures {
@@ -24,6 +25,19 @@ export function editorHtml(draft: Pick<Draft, 'html' | 'text'>, pictures: Editor
 		? sanitizeEmailHtml(draft.html, { allowRemote: false, cidUrls: pictures.cidUrls }).body
 		: escapeHtml(draft.text).replace(/\r?\n/g, '<br>');
 }
+
+/**
+ * A message's HTML body as a draft holds it (`DraftHtml`): the quote of a reply or forward, or a
+ * saved draft opened again. A body sent in several parts is cleaned part by part, as the reading
+ * pane shows it, so the editor, which parses the draft's HTML as one text, gets every part. Remote
+ * images and styles go, as the editor shows neither, and a `cid:` picture stays one only for a part
+ * in `parts`. Null without HTML; where there is no DOM to clean it in, the HTML as sent.
+ */
+export const draftHtml: DraftHtml = (message, parts) => {
+	if (!message.html) return null;
+	if (typeof DOMParser === 'undefined' || typeof document === 'undefined') return message.html;
+	return sanitizeMessageHtml(message, { allowRemote: false, cidUrls: cidUrlsOf(parts) }).body;
+};
 
 export function caretToStart(doc: Document, editor: HTMLElement): void {
 	const selection = doc.getSelection();

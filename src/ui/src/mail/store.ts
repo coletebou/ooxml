@@ -20,6 +20,7 @@ import {
 	type MailTransport,
 	type QuoteFormat,
 } from 'ooxml-core/mail';
+import { draftHtml } from './compose-editor';
 
 export type {
 	ComposeMode,
@@ -137,6 +138,8 @@ export function createMail(options: MailOptions = {}): MailClient {
 		transport,
 		contacts,
 		calendar,
+		// Answers, forwards and reopened drafts start with every part of an HTML body, cleaned.
+		draftHtml,
 		...(options.quoteFormat ? { quoteFormat: options.quoteFormat } : {}),
 	});
 }
