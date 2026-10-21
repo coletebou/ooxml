@@ -33,6 +33,7 @@ import {
 	classifyVersion,
 	freezeDeep,
 	IdempotencyCache,
+	reorderFractional,
 	SequenceTracker,
 } from './ordering';
 import { createSyncGate, shouldAutoFollowBroadcaster, shouldRoomReplaceLoad } from './policy';
@@ -236,6 +237,19 @@ describe('ordering', () => {
 		expect(map.size).toBe(2);
 		const frozen = freezeDeep({ a: { b: [1] } });
 		expect(Object.isFrozen(frozen.a.b)).toBe(true);
+	});
+	it('moves as few entries as possible to reorder a list', () => {
+		expect([...reorderFractional([3, 1, 2])]).toEqual([[0, 0.5]]);
+		expect([...reorderFractional([1, 2, undefined])]).toEqual([[2, 3]]);
+		expect([...reorderFractional([1, undefined, 2])]).toEqual([[1, 1.5]]);
+		expect(reorderFractional([1, 2, 3]).size).toBe(0);
+	});
+	it('renumbers when neighbours run out of precision', () => {
+		expect([...reorderFractional([1, undefined, 1 + Number.EPSILON])]).toEqual([
+			[0, 1],
+			[1, 2],
+			[2, 3],
+		]);
 	});
 });
 

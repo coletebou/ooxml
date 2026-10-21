@@ -6,6 +6,9 @@ import type * as Y from 'yjs';
 import type { Color, SheetState, Worksheet } from '../model';
 import { childMap, isRecord } from './schema';
 
+/** Fractional order values for a move; shared with every product in `collab/ordering`. */
+export { reorderFractional as reorder } from '../../collab/ordering';
+
 export interface SheetEntry {
 	key: string;
 	map: Y.Map<unknown>;
@@ -97,54 +100,4 @@ export class SheetKeys {
 		this.byObject.set(sheet, key);
 		return key;
 	}
-}
-
-/**
- * New `order` values that make `current` (orders in the wanted sequence, undefined for new
- * sheets) increasing while moving as few sheets as possible: the longest increasing run stays.
- */
-export function reorder(current: readonly (number | undefined)[]): Map<number, number> {
-	const n = current.length;
-	const len = new Array<number>(n).fill(0);
-	const prev = new Array<number>(n).fill(-1);
-	let best = -1;
-	for (let i = 0; i < n; i++) {
-		const v = current[i];
-		if (v === undefined) continue;
-		len[i] = 1;
-		for (let j = 0; j < i; j++) {
-			const u = current[j];
-			if (u !== undefined && u < v && (len[j] ?? 0) + 1 > (len[i] ?? 0)) {
-				len[i] = (len[j] ?? 0) + 1;
-				prev[i] = j;
-			}
-		}
-		if (best < 0 || (len[i] ?? 0) > (len[best] ?? 0)) best = i;
-	}
-	const keep = new Set<number>();
-	for (let i = best; i >= 0; i = prev[i] ?? -1) keep.add(i);
-	const out = new Map<number, number>();
-	let low = 0;
-	for (let i = 0; i < n; i++) {
-		if (keep.has(i)) {
-			low = current[i] ?? low;
-			continue;
-		}
-		let high: number | undefined;
-		for (let j = i + 1; j < n; j++)
-			if (keep.has(j)) {
-				high = current[j];
-				break;
-			}
-		const value = high === undefined ? low + 1 : (low + high) / 2;
-		if (high !== undefined && !(value > low && value < high)) {
-			// Out of precision between neighbours: renumber everything.
-			out.clear();
-			current.forEach((_v, k) => out.set(k, k + 1));
-			return out;
-		}
-		out.set(i, value);
-		low = value;
-	}
-	return out;
 }

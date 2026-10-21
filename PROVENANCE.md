@@ -1,5 +1,9 @@
 # Provenance
 
+## Shared fractional reorder
+
+Source: ChristopherVR/ooxml at `a9bb07957`, `reorder` in `src/core/xlsx/collab/sheets.ts`. It moved unchanged (apart from its name and comment) to `src/core/collab/ordering.ts` as `reorderFractional`, with its tests from `xlsx/collab/parts.test.ts` now in `collab/helpers.test.ts`. `sheets.ts` re-exports it as `reorder`, so the xlsx binding is unchanged; the notebook orders sections, pages and notebooks with it.
+
 ## Shared move, resize and touch interaction
 
 Source: ChristopherVR/ooxml, commit `3874d8d63`, `src/ui/src/pptx/render/element-interaction.ts` and its tests. Move/resize transforms, local-axis projection, handle metadata and box centres move to `src/core/geometry/element-transform.ts`, with their behavior tests. The PowerPoint path remains a compatibility export; the 12-unit default remains unchanged and Excel passes its existing 8-unit minimum explicitly. Core no longer imports a PowerPoint constant for these calculations.

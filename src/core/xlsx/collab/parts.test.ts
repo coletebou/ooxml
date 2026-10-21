@@ -3,25 +3,8 @@ import * as Y from 'yjs';
 import { createWorkbook } from '../workbook';
 import { applyColumns } from './lines';
 import { resolveSelections, sanitizeXlsxPresence } from './presence';
-import { reorder, sheetEntries } from './sheets';
+import { sheetEntries } from './sheets';
 import { newSheetMap } from './schema';
-
-describe('reorder', () => {
-	it('moves as few sheets as possible', () => {
-		expect([...reorder([3, 1, 2])]).toEqual([[0, 0.5]]);
-		expect([...reorder([1, 2, undefined])]).toEqual([[2, 3]]);
-		expect([...reorder([1, undefined, 2])]).toEqual([[1, 1.5]]);
-		expect(reorder([1, 2, 3]).size).toBe(0);
-	});
-
-	it('renumbers when neighbours run out of precision', () => {
-		expect([...reorder([1, undefined, 1 + Number.EPSILON])]).toEqual([
-			[0, 1],
-			[1, 2],
-			[2, 3],
-		]);
-	});
-});
 
 describe('sheetEntries', () => {
 	it('orders sheets and makes colliding names and ids unique by key', () => {
