@@ -16,6 +16,7 @@ import type {
 	NotebookState,
 } from './client-types';
 import { isEntityId } from './model';
+import { createMemoryStorage } from './storage';
 import { paletteColor } from './palette';
 import { readContainers, readMeta, readPages, readSections, readStrokes } from './read';
 import { containerFragment, entityMap } from './schema';
@@ -63,14 +64,16 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 	let query = '';
 	let queued = false;
 
+	// Without a storage the notebooks still live for the session: closing one must not lose it.
+	const storage = options.storage ?? createMemoryStorage();
 	const registry = createRegistryStore({
-		storage: options.storage,
+		storage,
 		scope: sanitizeScope(options.scope),
 		userName: user.name,
 		BroadcastChannel: options.BroadcastChannel,
 		now,
 		onChange: () => refresh(),
-		onError: () => notice('save-failed'),
+		onError: (error, kind) => notice(kind === 'load' ? 'open-failed' : 'save-failed', error),
 	});
 	const reg = registry.doc;
 
@@ -188,18 +191,29 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 	async function switchTo(
 		id: string,
 		seed?: (ctx: structure.NotebookEditContext) => void,
+		{ force = false } = {},
 	): Promise<void> {
 		const entry = readRegistry(reg).find((e) => e.id === id && !e.deleted);
 		if (!entry || destroyed) return;
+		const previous = open;
+		// The open notebook closes only once its last changes are saved. When the device refuses them
+		// (storage full), it stays open, so nothing typed since is lost (save-failed says why); only
+		// deleting it switches anyway.
+		if (previous && !force) {
+			try {
+				await previous.flush();
+			} catch {
+				return;
+			}
+		}
 		loading = true;
 		refresh();
-		const previous = open;
 		open = null;
 		await previous?.close();
 		try {
 			const next = await openNotebook({
 				id,
-				storage: options.storage,
+				storage,
 				config,
 				classes,
 				user: { ...user, ...(options.user.color ? { color: options.user.color } : {}) },
@@ -252,11 +266,11 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 				}),
 		);
 		if (open?.id !== id && !destroyed) {
-			// It could not be opened or seeded (switchTo said why): leave no empty notebook in the
-			// list, and go back to one that opens.
+			// It could not be opened or seeded, or the open notebook could not be saved first
+			// (switchTo said why): leave no empty notebook in the list, and keep or reopen one.
 			unregisterNotebook(reg, id);
 			await registry.flush().catch(() => undefined);
-			const fallback = readRegistry(reg).find((e) => !e.deleted);
+			const fallback = open ? null : readRegistry(reg).find((e) => !e.deleted);
 			if (fallback) await switchTo(fallback.id);
 			throw new Error('The notebook could not be created.');
 		}
@@ -270,7 +284,9 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		const first = readRegistry(reg).find((e) => !e.deleted);
 		if (first) await switchTo(first.id);
 		// A first notebook that cannot be made was announced (open-failed); the client still starts.
-		else if (options.createDefault !== false) await create({}).catch(() => undefined);
+		// A list that could not be read gets no new default notebook (it would hide the stored ones).
+		else if (options.createDefault !== false && !registry.readFailed())
+			await create({}).catch(() => undefined);
 		refresh();
 	})();
 
@@ -302,7 +318,7 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 			updateRegistry(reg, id, { deleted: now() });
 			if (open?.id !== id) return;
 			const next = readRegistry(reg).find((e) => !e.deleted);
-			if (next) await switchTo(next.id);
+			if (next) await switchTo(next.id, undefined, { force: true });
 			else {
 				const previous = open;
 				open = null;

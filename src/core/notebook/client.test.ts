@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadDocx } from '../docx/parse';
 import { createNotebookClient } from './client';
 import type { NotebookClient, NotebookClientOptions } from './client-types';
-import { type NotebookStorage, createMemoryStorage } from './storage';
+import { type NotebookStorage, REGISTRY_KEY, createMemoryStorage } from './storage';
 import { createChannelHub, settle } from './test-support/channel';
 
 const clients: NotebookClient[] = [];
@@ -35,6 +35,24 @@ async function until(check: () => boolean, ms = 3000): Promise<void> {
 		await settle(5);
 	}
 }
+
+/** A storage whose saves fail while `control.fail` is set. */
+function flaky() {
+	const inner = createMemoryStorage();
+	const control = { fail: false };
+	const storage: NotebookStorage = {
+		load: inner.load,
+		remove: inner.remove,
+		save: async (key, bytes) => {
+			if (control.fail) throw new Error('quota exceeded');
+			return inner.save(key, bytes);
+		},
+	};
+	return { inner, storage, control };
+}
+
+const opened = (client: NotebookClient, id: string) =>
+	until(() => client.getState().notebookId === id && !client.getState().loading);
 
 const para = (text: string, todo: 'open' | 'done' | null = null) => ({
 	type: 'paragraph',
@@ -224,6 +242,80 @@ describe('notebook client', () => {
 		await settle();
 		expect(reopened.getState().notebookId).toBe(id);
 		expect(reopened.getState().page?.title).toBe('Unsaved title');
+	});
+});
+
+describe('notebook client when storage fails or is missing', () => {
+	it('keeps the open notebook when its last changes cannot be saved, instead of switching', async () => {
+		const { storage, control } = flaky();
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		const first = client.getState().notebookId;
+		const second = await client.createNotebook({ name: 'Second' });
+		await opened(client, second);
+		await client.openNotebook(first);
+		await opened(client, first);
+		control.fail = true;
+		client.renamePage(client.getState().pageId, 'Unsaved title');
+		await client.openNotebook(second);
+		await settle();
+		expect(client.getState().notebookId).toBe(first);
+		expect(client.getState().page?.title).toBe('Unsaved title');
+		// Once saving works again the switch goes through and the change was kept.
+		control.fail = false;
+		await client.openNotebook(second);
+		await opened(client, second);
+		await client.openNotebook(first);
+		await opened(client, first);
+		expect(client.getState().page?.title).toBe('Unsaved title');
+	});
+
+	it('keeps closed notebooks for the session when no storage is given', async () => {
+		const client = createNotebookClient({
+			user: { name: 'Ada' },
+			BroadcastChannel: createChannelHub(),
+			saveDelayMs: 5,
+		});
+		clients.push(client);
+		await client.whenReady();
+		await settle();
+		const first = client.getState().notebookId;
+		client.renamePage(client.getState().pageId, 'Kept');
+		const second = await client.createNotebook({ name: 'Second' });
+		await opened(client, second);
+		await client.openNotebook(first);
+		await opened(client, first);
+		expect(client.getState().page?.title).toBe('Kept');
+		expect(client.getState().sections).toHaveLength(1);
+	});
+
+	it('neither replaces nor adds to a notebook list it could not read', async () => {
+		const inner = createMemoryStorage();
+		const before = start(inner, createChannelHub());
+		await before.whenReady();
+		await settle();
+		await before.flush();
+		await before.destroy();
+		const stored = await inner.load(REGISTRY_KEY);
+		expect(stored?.length).toBeGreaterThan(0);
+		const storage: NotebookStorage = {
+			...inner,
+			load: async (key) => {
+				if (key === REGISTRY_KEY) throw new Error('read failed');
+				return inner.load(key);
+			},
+		};
+		const notices: string[] = [];
+		const client = start(storage, createChannelHub());
+		client.on('notice', (n) => notices.push(n.code));
+		await client.whenReady();
+		await settle();
+		expect(client.getState().notebooks).toEqual([]);
+		expect(notices).toContain('open-failed');
+		await client.createNotebook({ name: 'Made while unreadable' }).catch(() => undefined);
+		await client.flush().catch(() => undefined);
+		expect(await inner.load(REGISTRY_KEY)).toEqual(stored);
 	});
 });
 

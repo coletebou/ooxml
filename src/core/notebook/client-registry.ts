@@ -18,6 +18,8 @@ const PURGE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 export interface RegistryStore {
 	readonly doc: Y.Doc;
 	entries: () => RegistryEntry[];
+	/** True when the stored list could not be read: it is then never written over this session. */
+	readFailed: () => boolean;
 	start: () => Promise<void>;
 	flush: () => Promise<void>;
 	destroy: () => Promise<void>;
@@ -32,7 +34,7 @@ export interface RegistryStoreOptions {
 	/** How long a first run waits for another tab's list, in ms. */
 	firstRunWaitMs?: number;
 	onChange: () => void;
-	onError: (error: unknown) => void;
+	onError: (error: unknown, kind: 'load' | 'save') => void;
 }
 
 export function createRegistryStore(options: RegistryStoreOptions): RegistryStore {
@@ -43,12 +45,15 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 	let saving: Promise<void> = Promise.resolve();
 	let dirty = false;
 	let destroyed = false;
+	let readFailed = false;
 
 	let failed: unknown = null;
 	const save = (): Promise<void> => {
 		clearTimeout(timer);
 		timer = undefined;
-		if (!storage || !dirty) return saving;
+		// A list that could not be read is not replaced by this session's (it would orphan the
+		// notebooks it lists); the changes stay unsaved and flush() says so.
+		if (!storage || !dirty || readFailed) return saving;
 		dirty = false;
 		const bytes = Y.encodeStateAsUpdate(doc);
 		saving = saving
@@ -60,7 +65,7 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 				(error: unknown) => {
 					dirty = true;
 					failed = error;
-					options.onError(error);
+					options.onError(error, 'save');
 				},
 			);
 		return saving;
@@ -78,7 +83,7 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 		for (const entry of readRegistry(doc)) {
 			if (!entry.deleted || entry.deleted > cutoff) continue;
 			unregisterNotebook(doc, entry.id);
-			await storage?.remove(notebookKey(entry.id)).catch(options.onError);
+			await storage?.remove(notebookKey(entry.id)).catch((error) => options.onError(error, 'save'));
 		}
 	};
 
@@ -87,15 +92,18 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 	return {
 		doc,
 		entries: () => readRegistry(doc),
+		readFailed: () => readFailed,
 		async start() {
 			try {
 				const bytes = await storage?.load(REGISTRY_KEY);
 				if (bytes?.length) Y.applyUpdate(doc, bytes, REGISTRY_STORAGE_ORIGIN);
 			} catch (error) {
-				options.onError(error);
+				readFailed = true;
+				failed = error;
+				options.onError(error, 'load');
 			}
 			if (destroyed) return;
-			await purge();
+			if (!readFailed) await purge();
 			if (!shared) return;
 			const roomId = registryRoomId(options.scope);
 			session = createCollabSession({
