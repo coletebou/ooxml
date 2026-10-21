@@ -79,6 +79,16 @@ describe('<Mail>', () => {
 		expect(el.client).toBeNull();
 	});
 
+	it('shows the mail view again once the view prop is taken away', async () => {
+		const { root: tree, container } = root();
+		await act(async () => tree.render(createElement(Mail, { view: 'calendar' })));
+		const el = container.querySelector('mail-app') as MailApp;
+		expect(el.view).toBe('calendar');
+		await act(async () => tree.render(createElement(Mail, {})));
+		expect(el.view).toBe('mail');
+		await act(async () => tree.unmount());
+	});
+
 	it('gives the element its connection before it starts, so no demo mailbox shows first', async () => {
 		// Outside act(), React runs the effects in their real order: the passive ones come after the
 		// element's first update (and, in a browser, after a paint).

@@ -116,3 +116,19 @@ describe('locale', () => {
 		binding.destroy();
 	});
 });
+
+describe('view', () => {
+	it('is the mail view again once the framework no longer passes one', () => {
+		const el = element();
+		const binding = bindMail(el, () => ({}));
+		binding.update(pickMailProps({ view: 'calendar' }));
+		expect(el.view).toBe('calendar');
+		// Contacts, picked on the rail, outlasts renders that pass the same view.
+		el.view = 'contacts';
+		binding.update(pickMailProps({ view: 'calendar', locale: 'de' }));
+		expect(el.view).toBe('contacts');
+		binding.update(pickMailProps({ view: undefined, locale: 'de' }));
+		expect(el.view).toBe('mail');
+		binding.destroy();
+	});
+});
