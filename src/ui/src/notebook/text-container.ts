@@ -165,6 +165,8 @@ export class NotebookText extends NotebookElement {
 				const { name, color } = this.#peer(clientId);
 				const caret = document.createElement('span');
 				caret.className = 'remote-caret';
+				// A name inside the text would be read as text; the caret is decoration.
+				caret.setAttribute('aria-hidden', 'true');
 				caret.style.borderColor = color;
 				const label = document.createElement('span');
 				label.className = 'remote-label';
@@ -187,6 +189,9 @@ export class NotebookText extends NotebookElement {
 				role: 'textbox',
 			},
 			dispatchTransaction: (tr) => {
+				// y-prosemirror can deliver a queued caret update after the view was destroyed (its
+				// binding never marks itself destroyed); there is nothing left to update then.
+				if (view.isDestroyed) return;
 				view.updateState(view.state.apply(tr));
 				fire('nb-format', {
 					id: this.containerId,
