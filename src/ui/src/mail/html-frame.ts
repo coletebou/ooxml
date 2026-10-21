@@ -110,7 +110,9 @@ export class MailHtmlFrame extends MailElement {
 	private loaded(): void {
 		const frame = this.frame;
 		const doc = frame?.contentDocument;
-		if (!frame || !doc) return;
+		// The empty document a frame loads as it is put in the page is not the message: measured
+		// before the message's own replaces it, it would have the frame take its height for a moment.
+		if (!frame || !doc || !frame.srcdoc) return;
 		// The frame is as tall as its message. The content runs no script, so its height changes when
 		// an image or a web font loads, when a `<details>` is opened or closed, and when the frame's
 		// width changes (the text reflows); a style that changes it by itself (an animation, `:hover`)

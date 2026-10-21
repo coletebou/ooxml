@@ -25,7 +25,7 @@ async function show(html: string, htmlParts: readonly string[] | null = null) {
  * leaves empty (it does not load `srcdoc`). The load is caught on its way to the iframe, so
  * `prepare` sees the document before the frame's own load handler does.
  */
-async function loaded(prepare: (doc: Document) => void = () => {}) {
+async function loaded(prepare: (doc: Document, frame: HTMLIFrameElement) => void = () => {}) {
 	const element = document.createElement('mail-html-frame') as MailHtmlFrame;
 	document.body.append(element);
 	const frame = await new Promise<HTMLIFrameElement>((resolve) =>
@@ -33,7 +33,7 @@ async function loaded(prepare: (doc: Document) => void = () => {}) {
 			'load',
 			(event) => {
 				const target = event.target as HTMLIFrameElement;
-				prepare(target.contentDocument!);
+				prepare(target.contentDocument!, target);
 				resolve(target);
 			},
 			{ capture: true, once: true },
@@ -172,5 +172,21 @@ describe('<mail-html-frame>', () => {
 		height = 100;
 		details.open = false;
 		await vi.waitFor(() => expect(frame.style.height).toBe('100px'));
+	});
+
+	it('takes no height from the empty document a frame loads before its message', async () => {
+		// A browser loads an empty document into a frame as it enters the page, before `srcdoc` is
+		// written, and the message's own after it: measured in between, the frame would take the
+		// empty one's height for a moment. The load here is that first one: no `srcdoc` yet.
+		const { frame } = await loaded((doc, frame) => {
+			Object.defineProperty(doc.documentElement, 'scrollHeight', {
+				configurable: true,
+				get: () => 52,
+			});
+			Object.defineProperty(frame, 'srcdoc', { configurable: true, get: () => '' });
+		});
+		await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		expect(frame.style.height).toBe('');
+		delete (frame as { srcdoc?: string }).srcdoc;
 	});
 });
