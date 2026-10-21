@@ -2,6 +2,7 @@ import {
 	bodyText,
 	decodeEntities,
 	dropScriptsAndStyles,
+	htmlText,
 	isSearch,
 	matchesQuery,
 	parseSearch,
@@ -54,6 +55,19 @@ describe('matchesQuery', () => {
 		expect(matchesQuery(email, { body: 'roadmap' })).toBe(true);
 		expect(matchesQuery(email, { text: 'ada roadmap' })).toBe(true);
 	});
+	it('searches the HTML body too, when the plain text alternative says less', () => {
+		const short = {
+			...summary('b'),
+			text: 'Open the HTML version to read this message.',
+			html: '<p>The <b>quarterly</b> figures are&nbsp;in.</p>',
+		};
+		expect(matchesQuery(short, { body: 'quarterly figures' })).toBe(true);
+		expect(matchesQuery(short, { text: 'figures version' })).toBe(true);
+		expect(matchesQuery(short, { body: 'budget' })).toBe(false);
+		expect(
+			matchesQuery({ ...summary('c', { preview: 'Only a preview' }) }, { body: 'preview' }),
+		).toBe(true);
+	});
 	it('matches flags, mailbox and dates', () => {
 		expect(matchesQuery(email, { unread: true, flagged: true, hasAttachment: true })).toBe(true);
 		expect(matchesQuery(email, { mailboxId: 'archive' })).toBe(false);
@@ -74,9 +88,21 @@ describe('body text', () => {
 			'Hello you',
 		);
 	});
+	it('ends a line at each block, so the words of two lines never run together', () => {
+		const html =
+			'<div>Hello</div><div>there</div><ul><li>one</li><li>two</li></ul><h2>End</h2>last<hr>rule';
+		expect(
+			bodyText({ html })
+				.split('\n')
+				.map((line) => line.trim())
+				.filter(Boolean),
+		).toEqual(['Hello', 'there', 'one', 'two', 'End', 'last', 'rule']);
+	});
 	it('stays linear on hostile markup', () => {
 		const started = performance.now();
 		dropScriptsAndStyles('<script'.repeat(50_000));
+		// Line breaks that never close: each one's attributes end at the next tag, not the end.
+		expect(htmlText('<br class="x"'.repeat(50_000))).toBe('');
 		expect(performance.now() - started).toBeLessThan(2000);
 	});
 	it('stays linear on many closed blocks of one kind and none of the other', () => {

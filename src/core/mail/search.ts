@@ -129,6 +129,17 @@ export function decodeEntities(text: string): string {
 	});
 }
 
+/**
+ * Where a line ends in HTML: a line break or rule, or the end of a paragraph, block or row. A tag's
+ * attributes stop at the next `<` too, so many unclosed tags cannot make the scan quadratic.
+ */
+const LINE_END = /<(?:br|hr)\b[^<>]*>|<\/(?:p|div|li|h[1-6]|blockquote|pre|tr)\s*>/gi;
+
+/** The text of HTML: no scripts, styles or tags, a line per paragraph or block, entities decoded. */
+export function htmlText(html: string): string {
+	return decodeEntities(stripHtmlTags(dropScriptsAndStyles(html).replace(LINE_END, '\n')));
+}
+
 /** The text of a message body: the plain text, else the HTML without its tags, else the preview. */
 export function bodyText(email: {
 	text?: string | null;
@@ -136,11 +147,17 @@ export function bodyText(email: {
 	preview?: string;
 }): string {
 	if (email.text) return email.text;
-	if (email.html)
-		return decodeEntities(
-			stripHtmlTags(dropScriptsAndStyles(email.html).replace(/<br\s*\/?>|<\/p>/gi, '\n')),
-		);
+	if (email.html) return htmlText(email.html);
 	return email.preview ?? '';
+}
+
+/**
+ * What a body search reads: the plain text and the HTML's text both, since either may hold words
+ * the other lacks (a short plain alternative, a fuller HTML one); the preview without either.
+ */
+function searchableBody(email: SearchableEmail): string {
+	const parts = [email.text ?? '', email.html ? htmlText(email.html) : ''].filter(Boolean);
+	return parts.length ? parts.join('\n') : email.preview;
 }
 
 /** The memory transport's matcher: all of `query`'s conditions must hold. */
@@ -158,7 +175,7 @@ export function matchesQuery(email: SearchableEmail, query: MailQuery): boolean 
 	if (!containsAll(from, query.from) || !containsAll(to, query.to)) return false;
 	if (!containsAll(email.subject, query.subject)) return false;
 	if (query.body === undefined && query.text === undefined) return true;
-	const body = bodyText(email);
+	const body = searchableBody(email);
 	if (!containsAll(body, query.body)) return false;
 	return containsAll(`${email.subject} ${from} ${to} ${body}`, query.text);
 }
