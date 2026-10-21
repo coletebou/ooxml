@@ -185,7 +185,8 @@ clients credentials. TURN entries without credentials are rejected by `parseServ
 or `zh-CN`; the bindings pass it as the `locale` prop or input, the demos read `?locale=de`).
 English, German, Spanish, French and Simplified Chinese ship; an empty or unknown tag means
 English. A Teams element without its own `locale` takes the nearest enclosing Teams element's, and
-a change on `<teams-app>` reaches everything it rendered.
+a change on `<teams-app>` reaches everything it rendered that has no locale of its own; clearing an
+element's own locale (`''`) has it follow again.
 
 - Wording lives in `src/ui/src/teams/i18n/locales/<locale>/*.ts`, one flat dictionary per locale
   keyed by dotted ids, looked up through the shared `ooxml-core/i18n` translator. English is the
