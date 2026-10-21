@@ -1,7 +1,8 @@
 // What each keyboard shortcut and toolbar command does in <mail-app>. Actions apply to the selected
 // conversations, else the open one, else the one under the list cursor; after a conversation that
 // was open is archived, deleted or moved to junk, the next one opens (auto-advance).
-import type { MailClient } from 'ooxml-core/mail';
+import { messageDate, type EmailSummary, type MailClient } from 'ooxml-core/mail';
+import type { MailCompose } from './compose';
 import type { MailCommand } from './keyboard';
 import type { MailApp } from './mail-app';
 
@@ -23,12 +24,23 @@ function neighbour(mail: MailClient, ids: readonly string[]): string | null {
 	return after ?? rest.at(-1) ?? null;
 }
 
-/** The newest message of the open (else focused) conversation, for reply and forward. */
+/** The newest of `emails` by date, the later one in reading order on a tie (as threading picks). */
+function newest(emails: readonly EmailSummary[]): EmailSummary | undefined {
+	return emails.reduce<EmailSummary | undefined>(
+		(best, email) => (!best || messageDate(email) >= messageDate(best) ? email : best),
+		undefined,
+	);
+}
+
+/**
+ * The newest message of the open (else focused) conversation, for reply and forward. Reading order
+ * is the thread's, depth first, so the last message in it is not always the newest.
+ */
 function latestMessage(mail: MailClient): string | null {
 	const { open, focusedId, conversations } = mail.getState();
-	if (open?.messages.length) return open.messages.at(-1)!.summary.id;
+	if (open?.messages.length) return newest(open.messages.map((m) => m.summary))?.id ?? null;
 	const id = open?.id ?? focusedId;
-	return conversations.find((c) => c.id === id)?.emailIds.at(-1) ?? null;
+	return conversations.find((c) => c.id === id)?.latestId ?? null;
 }
 
 async function moveAway(mail: MailClient, run: (ids: string[]) => Promise<void>): Promise<void> {
@@ -114,7 +126,9 @@ export function runCommand(app: MailApp, mail: MailClient, command: MailCommand)
 		}
 		case 'send':
 			if (!state.compose) return false;
-			void mail.send();
+			// Files the window is still reading are not in the draft yet: Send waits, as its button does.
+			if (!app.renderRoot.querySelector<MailCompose>('mail-compose')?.readingFiles)
+				void mail.send();
 			return true;
 		case 'help':
 			app.dialog = 'shortcuts';
