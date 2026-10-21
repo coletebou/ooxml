@@ -219,16 +219,20 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 				return;
 			}
 			const boxesOf = (id: string): readonly string[] => core.emails.get(id)?.mailboxIds ?? [];
-			const inTrash = targets.filter((id) => {
-				const boxes = boxesOf(id);
-				return boxes.length === 1 && boxes[0] === trash.id;
-			});
+			// Only Delete in the Trash view takes mail out of Trash. Anywhere else, a search of every
+			// folder included, it moves mail to Trash, where what is there already stays.
+			const viewingTrash = core.listMailboxId() === trash.id;
+			const inTrash = viewingTrash
+				? targets.filter((id) => {
+						const boxes = boxesOf(id);
+						return boxes.length === 1 && boxes[0] === trash.id;
+					})
+				: [];
 			// Deleted in Trash, a message filed in another folder too only leaves Trash: it stays in
 			// the folders it was never deleted from. Only what is in Trash alone goes for good.
-			const leaving =
-				core.listMailboxId() === trash.id
-					? targets.filter((id) => !inTrash.includes(id) && boxesOf(id).includes(trash.id))
-					: [];
+			const leaving = viewingTrash
+				? targets.filter((id) => !inTrash.includes(id) && boxesOf(id).includes(trash.id))
+				: [];
 			const toTrash = targets.filter((id) => !inTrash.includes(id) && !leaving.includes(id));
 			const patches = movePatches(toTrash, trash.id);
 			for (const id of leaving) patches[id] = { mailboxIds: { [trash.id]: false } };

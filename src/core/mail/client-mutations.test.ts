@@ -90,4 +90,28 @@ describe('moving and deleting', () => {
 		expect(client.getState().conversations.map((c) => c.id)).toEqual(['a']);
 		client.destroy();
 	});
+
+	it('moves what a search of every folder finds to Trash, never destroying what is there', async () => {
+		const transport = server(DEFAULT_MAILBOXES);
+		const { client, notices } = await connect(transport);
+		await client.remove(['a']);
+		await client.setSearchScope('all');
+		await client.search('Subject');
+		await until(client, (s) => s.conversations.length === 2);
+		notices.length = 0;
+		await client.remove(['a', 'b']);
+		// Only Delete in Trash deletes for good: here the one in Trash already stays there.
+		expect((await transport.message('a')).mailboxIds).toEqual(['trash']);
+		expect((await transport.message('b')).mailboxIds).toEqual(['trash']);
+		expect(notices).toMatchObject([{ kind: 'done', action: 'deleted', count: 1 }]);
+		// A search of Trash alone is the Trash view: there it does delete for good.
+		await client.setSearchScope('mailbox');
+		await client.selectMailbox('trash');
+		await client.search('Subject');
+		await until(client, (s) => s.conversations.length === 2);
+		await client.remove(['a']);
+		await expect(transport.message('a')).rejects.toMatchObject({ code: 'notFound' });
+		expect((await transport.message('b')).mailboxIds).toEqual(['trash']);
+		client.destroy();
+	});
 });
