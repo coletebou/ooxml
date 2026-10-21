@@ -24,7 +24,7 @@ describe('notebook IndexedDB storage', () => {
 	});
 
 	it('keeps working in memory without IndexedDB', async () => {
-		const storage = createIndexedDbStorage('none', undefined);
+		const storage = createIndexedDbStorage('none', null);
 		await storage.save('k', new Uint8Array([4]));
 		expect(await storage.load('k')).toEqual(new Uint8Array([4]));
 		expect(storage.persistent()).toBe(false);

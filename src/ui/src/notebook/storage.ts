@@ -22,8 +22,10 @@ const wrap = <T>(request: IDBRequest<T>): Promise<T> =>
 
 export function createIndexedDbStorage(
 	name: string = DEFAULT_NOTEBOOK_DATABASE,
-	factory: IDBFactory | undefined = globalThis.indexedDB,
+	/** The IndexedDB to use; omitted means the browser's, `null` means none (memory only). */
+	idb?: IDBFactory | null,
 ): IndexedDbStorage {
+	const factory = idb === undefined ? globalThis.indexedDB : (idb ?? undefined);
 	const memory = createMemoryStorage();
 	let persistent = !!factory;
 	let db: Promise<IDBDatabase | null> | null = null;
