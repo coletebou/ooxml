@@ -9,7 +9,7 @@
 import * as Y from 'yjs';
 import { isWordHighlightToken } from '../docx/highlight';
 import { isOpenableHyperlinkHref } from '../opc/safe-href';
-import { MAX_TEXT_LENGTH } from './model';
+import { MAX_LIST_LEVELS, MAX_TEXT_LENGTH } from './model';
 
 export const RICH_BLOCK_TYPES = ['paragraph', 'heading', 'bullet_list', 'ordered_list'] as const;
 export const RICH_MARK_TYPES = ['bold', 'italic', 'underline', 'strike', 'highlight', 'link'];
@@ -29,7 +29,9 @@ export interface RichNode {
 }
 
 const MAX_TEXT = MAX_TEXT_LENGTH;
-const MAX_DEPTH = 12;
+// Elements deep: a list level is a list and its item, plus the blocks inside the deepest one. A
+// deeper document (only a hostile one, as the editor stops at MAX_LIST_LEVELS) is cut there.
+const MAX_DEPTH = MAX_LIST_LEVELS * 2 + 4;
 const LEAVES = new Set(['hard_break']);
 const CONTAINERS = new Set(['bullet_list', 'ordered_list', 'list_item']);
 

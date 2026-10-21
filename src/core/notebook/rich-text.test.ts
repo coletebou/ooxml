@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import * as Y from 'yjs';
 import { notebookSchema } from './editor/schema';
-import { MAX_TEXT_LENGTH } from './model';
+import { MAX_LIST_LEVELS, MAX_TEXT_LENGTH } from './model';
 import {
 	type RichNode,
 	plainText,
@@ -163,6 +163,20 @@ describe('rich text in the y-prosemirror encoding', () => {
 		expect(JSON.stringify(read)).not.toContain('too deep');
 		const runs = read.flatMap((b) => b.content ?? []);
 		expect(runs.find((r) => r.text === 'bold')?.marks).toEqual([{ type: 'bold' }]);
+	});
+
+	it('keeps the text of a list nested as deep as the editor allows', () => {
+		let deep: RichNode = {
+			type: 'paragraph',
+			attrs: { todo: null },
+			content: [{ type: 'text', text: 'deepest' }],
+		};
+		for (let i = 0; i < MAX_LIST_LEVELS; i++)
+			deep = { type: 'bullet_list', content: [{ type: 'list_item', content: [deep] }] };
+		const f = fragment();
+		writeRichText(f, [deep]);
+		const blocks = textBlocks(readRichText(f));
+		expect(blocks.map((b) => [b.text, b.listDepth])).toEqual([['deepest', MAX_LIST_LEVELS]]);
 	});
 
 	it('keeps at most the text a container holds, on write as on read', () => {

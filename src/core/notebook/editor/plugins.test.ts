@@ -1,6 +1,8 @@
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { ySyncPluginKey } from 'y-prosemirror';
 import { describe, expect, it } from 'vitest';
+import { MAX_LIST_LEVELS } from '../model';
+import { indentListItem } from './commands';
 import { textLimitPlugin } from './plugins';
 import { notebookSchema as schema } from './schema';
 
@@ -41,5 +43,27 @@ describe('text limit', () => {
 		const full = state('0123456789');
 		const remote = full.tr.insertText('more').setMeta(ySyncPluginKey, { isChangeOrigin: true });
 		expect(full.apply(remote).doc.textContent).toBe('0123456789more');
+	});
+});
+
+describe('list nesting limit', () => {
+	it('stops indenting at the deepest level the notebook keeps', () => {
+		const item = (content: object) => ({ type: 'list_item', content: [content] });
+		const p = { type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'x' }] };
+		const nest = (levels: number): object => {
+			let node: object = { type: 'bullet_list', content: [item(p), item(p)] };
+			for (let i = 1; i < levels; i++) node = { type: 'bullet_list', content: [item(node)] };
+			return node;
+		};
+		const at = (levels: number) => {
+			const doc = schema.nodeFromJSON({ type: 'doc', content: [nest(levels)] });
+			let end = 0;
+			doc.descendants((node, pos) => {
+				if (node.isText) end = pos + node.nodeSize;
+			});
+			return EditorState.create({ schema, doc, selection: TextSelection.create(doc, end) });
+		};
+		expect(indentListItem(at(MAX_LIST_LEVELS - 1), () => undefined)).toBe(true);
+		expect(indentListItem(at(MAX_LIST_LEVELS), () => undefined)).toBe(false);
 	});
 });

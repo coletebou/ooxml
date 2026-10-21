@@ -19,6 +19,8 @@ export const MAX_CONTAINER_WIDTH = 4000;
 export const MAX_FILE_BYTES = 32 * 1024 * 1024;
 /** The most text one container holds: input stops there, and every read and write keeps it. */
 export const MAX_TEXT_LENGTH = 200_000;
+/** The deepest list nesting a text box holds: indenting stops there, and every read keeps it. */
+export const MAX_LIST_LEVELS = 32;
 
 export type SectionKind = 'section' | 'group';
 

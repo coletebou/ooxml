@@ -7,6 +7,7 @@ import type { NodeType } from 'prosemirror-model';
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import type { Command, EditorState, Transaction } from 'prosemirror-state';
 import { isOpenableHyperlinkHref } from '../../opc/safe-href';
+import { MAX_LIST_LEVELS } from '../model';
 import { notebookSchema as schema } from './schema';
 
 const { nodes, marks } = schema;
@@ -83,7 +84,17 @@ export function toggleList(kind: ListKind): Command {
 	};
 }
 
-export const indentListItem: Command = sinkListItem(nodes.list_item!);
+/** Indent the list item a level, up to `MAX_LIST_LEVELS` (what the notebook keeps). */
+export const indentListItem: Command = (state, dispatch, view) => {
+	const { $from } = state.selection;
+	let levels = 0;
+	for (let depth = $from.depth; depth > 0; depth--) {
+		const type = $from.node(depth).type;
+		if (type === nodes.bullet_list || type === nodes.ordered_list) levels++;
+	}
+	if (levels >= MAX_LIST_LEVELS) return false;
+	return sinkListItem(nodes.list_item!)(state, dispatch, view);
+};
 export const outdentListItem: Command = liftListItem(nodes.list_item!);
 
 /** Tag the selected lines as to-dos, or remove the tag when every one already has it. */
