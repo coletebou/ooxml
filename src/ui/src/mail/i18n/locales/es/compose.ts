@@ -7,6 +7,8 @@ export const esCompose: Record<keyof typeof enCompose, string> = {
 	'compose.titleForward': 'Reenvío',
 	'compose.close': 'Cerrar y conservar el borrador',
 	'compose.from': 'De',
+	'compose.fromAnyAddress': 'Cualquier dirección del dominio {domain}',
+	'compose.fromNamedAnyAddress': '{name} (cualquier dirección del dominio {domain})',
 	'compose.to': 'Para',
 	'compose.cc': 'CC',
 	'compose.bcc': 'CCO',

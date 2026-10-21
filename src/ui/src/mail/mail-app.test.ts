@@ -575,4 +575,34 @@ describe('<mail-app>', () => {
 		await late;
 		expect(app.preview).toBeNull();
 	});
+
+	it('forwards the picture a message shows: in the editor, and by cid: in what it sends', async () => {
+		const { transport, sent } = testTransport();
+		const app = await mount({ kind: 'transport', transport });
+		const welcome = await openWelcome(app);
+		await app.client!.compose('forward', welcome.id);
+		await app.updateComplete;
+		const compose = inner<Updating>(app, 'mail-compose')!;
+		await compose.updateComplete;
+		const editor = inner<HTMLElement>(compose, '.editor')!;
+		const logo = () => editor.querySelector('img[alt="Northwind logo"]');
+		await until(() => /^data:image\/svg\+xml;base64,/.test(logo()?.getAttribute('src') ?? ''));
+		// It shows in the text, so it is not listed with the files as well.
+		await compose.updateComplete;
+		expect(inner(compose, '.files')).toBeNull();
+		// jsdom has no innerText.
+		Object.defineProperty(editor, 'innerText', { get: () => editor.textContent });
+		editor.prepend('Have a look. ');
+		editor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+		const html = state(app).compose!.draft.html!;
+		expect(html).toContain('Have a look.');
+		expect(html).toMatch(/<img [^>]*src="cid:logo@northwind"/);
+		expect(html).not.toMatch(/data:|blob:/);
+		app.client!.updateDraft({ to: [{ name: '', email: 'hana@example.com' }] });
+		expect(await app.client!.send()).toBe(true);
+		expect(sent[0]!.html).toMatch(/<img [^>]*src="cid:logo@northwind"/);
+		expect(sent[0]!.attachments).toEqual([
+			expect.objectContaining({ cid: 'logo@northwind', inline: true }),
+		]);
+	});
 });

@@ -7,6 +7,8 @@ export const zhCNCompose: Record<keyof typeof enCompose, string> = {
 	'compose.titleForward': '转发',
 	'compose.close': '关闭并保留草稿',
 	'compose.from': '发件人',
+	'compose.fromAnyAddress': '{domain} 域中的任意地址',
+	'compose.fromNamedAnyAddress': '{name}（{domain} 域中的任意地址）',
 	'compose.to': '收件人',
 	'compose.cc': '抄送',
 	'compose.bcc': '密送',

@@ -7,6 +7,8 @@ export const frCompose: Record<keyof typeof enCompose, string> = {
 	'compose.titleForward': 'Transfert',
 	'compose.close': 'Fermer et garder le brouillon',
 	'compose.from': 'De',
+	'compose.fromAnyAddress': 'Toute adresse du domaine {domain}',
+	'compose.fromNamedAnyAddress': '{name} (toute adresse du domaine {domain})',
 	'compose.to': 'À',
 	'compose.cc': 'Cc',
 	'compose.bcc': 'Cci',

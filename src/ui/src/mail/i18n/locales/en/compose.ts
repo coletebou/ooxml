@@ -5,6 +5,8 @@ export const enCompose = {
 	'compose.titleForward': 'Forward',
 	'compose.close': 'Close and keep the draft',
 	'compose.from': 'From',
+	'compose.fromAnyAddress': 'Any address at {domain}',
+	'compose.fromNamedAnyAddress': '{name} (any address at {domain})',
 	'compose.to': 'To',
 	'compose.cc': 'Cc',
 	'compose.bcc': 'Bcc',

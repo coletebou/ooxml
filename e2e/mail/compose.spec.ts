@@ -44,3 +44,48 @@ test('a draft is saved automatically and reopens', async ({ page }) => {
 		'Unfinished thought',
 	);
 });
+
+test('a forward shows the picture its message shows and sends it as the same part', async ({
+	page,
+}) => {
+	await openDemo(page);
+	await openConversation(page, 'Welcome to the team space');
+	await page.locator('mail-reading-pane').getByRole('button', { name: 'Forward' }).last().click();
+	const compose = page.locator('mail-compose');
+	const logo = compose.locator('.editor img[alt="Northwind logo"]');
+	// The logo is an SVG part: it shows from a data: URL, and it really draws.
+	await expect(logo).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
+	await expect
+		.poll(() => logo.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+		.toBeGreaterThan(0);
+	// It shows in the text, so it is not listed with the files as well.
+	await expect(compose.locator('.files')).toHaveCount(0);
+	await compose.locator('mail-recipients input').first().fill('hana@example.com');
+	// The top of the editor, its empty first line: away from the picture, which a click selects.
+	await compose.locator('.editor').click({ position: { x: 8, y: 8 } });
+	await page.keyboard.type('Have a look at the logo.');
+	await expect(logo).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
+	await compose.getByRole('button', { name: 'Send' }).click();
+	await expect(page.locator('mail-app .toast')).toContainText('Message sent');
+	await selectFolder(page, 'Sent');
+	await openConversation(page, 'Fwd: Welcome to the team space');
+	// The sent copy refers to the picture by cid: and shows it from its own part, so the part is
+	// not listed as a file either.
+	const frame = page.frameLocator('mail-html-frame iframe');
+	await expect(frame.locator('body')).toContainText('Have a look at the logo.');
+	await expect(frame.locator('img[alt="Northwind logo"]')).toHaveAttribute(
+		'src',
+		/^data:image\/svg\+xml;base64,/,
+	);
+	await expect(page.locator('mail-reading-pane .attachments')).toHaveCount(0);
+	type Open = { open: { messages: { message: { html: string | null } | null }[] } | null };
+	const sent = await page
+		.locator('mail-app')
+		.evaluate(
+			(app) =>
+				(app as unknown as { client: { getState(): Open } }).client.getState().open?.messages.at(-1)
+					?.message?.html ?? '',
+		);
+	expect(sent).toMatch(/<img [^>]*src="cid:logo@northwind"/);
+	expect(sent).not.toMatch(/data:|blob:/);
+});

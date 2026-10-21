@@ -7,6 +7,8 @@ export const deCompose: Record<keyof typeof enCompose, string> = {
 	'compose.titleForward': 'Weiterleitung',
 	'compose.close': 'Schließen und Entwurf behalten',
 	'compose.from': 'Von',
+	'compose.fromAnyAddress': 'Jede Adresse der Domain {domain}',
+	'compose.fromNamedAnyAddress': '{name} (jede Adresse der Domain {domain})',
 	'compose.to': 'An',
 	'compose.cc': 'Cc',
 	'compose.bcc': 'Bcc',

@@ -1,18 +1,27 @@
 // The rich-text editor of <mail-compose>: what it starts with (the draft's HTML, else its text as
 // lines) and what arrives in it from elsewhere. A quoted message, a paste and a drop of HTML (from
 // another page or from this one) all go through the message sanitiser first, so remote images are
-// dropped and composing never loads a tracker. Plain text the browser inserts itself: it cannot
-// load anything. New code.
+// dropped and composing never loads a tracker, while a `cid:` picture of the draft's own parts
+// stays one (compose-pictures.ts). Plain text the browser inserts itself: it cannot load anything.
+// New code.
 import type { Draft } from 'ooxml-core/mail';
 import { sanitizeEmailHtml } from './sanitize';
+
+/** What the editor keeps of the draft's own pictures in the HTML it takes (compose-pictures.ts). */
+export interface EditorPictures {
+	/** For the sanitiser: each part's `cid:` URL by its Content-ID (lower case), kept as it is. */
+	readonly cidUrls: ReadonlyMap<string, string>;
+	/** `markup` with the draft's pictures in it as their `cid:` URLs. */
+	refer(markup: string): string;
+}
 
 const escapeHtml = (text: string): string =>
 	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
 /** What the editor shows for a draft: its HTML through the sanitiser, else its text as lines. */
-export function editorHtml(draft: Pick<Draft, 'html' | 'text'>): string {
+export function editorHtml(draft: Pick<Draft, 'html' | 'text'>, pictures: EditorPictures): string {
 	return draft.html
-		? sanitizeEmailHtml(draft.html, { allowRemote: false }).body
+		? sanitizeEmailHtml(draft.html, { allowRemote: false, cidUrls: pictures.cidUrls }).body
 		: escapeHtml(draft.text).replace(/\r?\n/g, '<br>');
 }
 
@@ -26,16 +35,24 @@ export function caretToStart(doc: Document, editor: HTMLElement): void {
 	selection.addRange(range);
 }
 
-const insertClean = (doc: Document, markup: string): void => {
-	doc.execCommand('insertHTML', false, sanitizeEmailHtml(markup, { allowRemote: false }).body);
+const insertClean = (doc: Document, markup: string, pictures: EditorPictures): void => {
+	const clean = sanitizeEmailHtml(pictures.refer(markup), {
+		allowRemote: false,
+		cidUrls: pictures.cidUrls,
+	});
+	doc.execCommand('insertHTML', false, clean.body);
 };
 
 /** A paste of HTML, inserted clean instead of as the browser would; true when it was. */
-export function pasteClean(event: ClipboardEvent, doc: Document): boolean {
+export function pasteClean(
+	event: ClipboardEvent,
+	doc: Document,
+	pictures: EditorPictures,
+): boolean {
 	const markup = event.clipboardData?.getData('text/html');
 	if (!markup) return false;
 	event.preventDefault();
-	insertClean(doc, markup);
+	insertClean(doc, markup, pictures);
 	return true;
 }
 
@@ -81,12 +98,17 @@ function caretAtDrop(editor: HTMLElement, x: number, y: number): void {
  * inside the editor (`moving`) stays the browser's: it moves the editor's own, already clean,
  * content, and it takes the text out of where it was.
  */
-export function dropClean(event: DragEvent, editor: HTMLElement, moving: boolean): boolean {
+export function dropClean(
+	event: DragEvent,
+	editor: HTMLElement,
+	moving: boolean,
+	pictures: EditorPictures,
+): boolean {
 	const markup = event.dataTransfer?.getData('text/html');
 	const target = event.composedPath()[0];
 	if (moving || !markup || !(target instanceof Node) || !editor.contains(target)) return false;
 	event.preventDefault();
 	caretAtDrop(editor, event.clientX, event.clientY);
-	insertClean(editor.ownerDocument, markup);
+	insertClean(editor.ownerDocument, markup, pictures);
 	return true;
 }
