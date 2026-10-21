@@ -119,4 +119,13 @@ describe('composeDraft', () => {
 		expect(isEmptyDraft(draft)).toBe(true);
 		expect(isEmptyDraft({ ...draft, subject: 'x' })).toBe(false);
 	});
+	it('counts formatted text and pictures as content, not an empty editor', () => {
+		const draft = composeDraft('new', null, { identity, me: [me], format });
+		expect(isEmptyDraft({ ...draft, html: '<p>Notes</p>' })).toBe(false);
+		expect(isEmptyDraft({ ...draft, html: '<p><img src="data:image/png;base64,AAAA"></p>' })).toBe(
+			false,
+		);
+		for (const html of ['<p><br></p>', '<div>&nbsp; </div>', ' <br> ', '<p></p><p>&#160;</p>'])
+			expect(isEmptyDraft({ ...draft, html })).toBe(true);
+	});
 });

@@ -226,7 +226,10 @@ export interface MailClient {
 	attach(files: readonly FileInput[]): Promise<void>;
 	detach(blobId: string): void;
 	saveDraft(): Promise<void>;
-	/** True when the message was handed to the server. */
+	/**
+	 * True when the message was handed to the server. False, the window left as it is, while a file
+	 * is still uploading: sent then, the message would go without it.
+	 */
 	send(): Promise<boolean>;
 	discardDraft(): Promise<void>;
 	/**

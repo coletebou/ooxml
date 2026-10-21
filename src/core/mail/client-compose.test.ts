@@ -1,7 +1,7 @@
 import { createMailClient } from './client';
 import type { FileInput, MailNotice } from './client-types';
 import { createMemoryTransport } from './memory-transport';
-import { DRAFT } from './model';
+import { DRAFT, type MailMessage } from './model';
 import { createGate, until } from './test-support/client';
 import { MailTransportError, type MailTransport } from './transport';
 
@@ -71,7 +71,11 @@ function setup() {
 		const { ids } = await memory.query({ mailboxId: 'drafts' });
 		return Promise.all(ids.filter((id) => id !== 'old').map((id) => memory.message(id)));
 	};
-	return { client, control, notices, drafts };
+	const sent = async () => {
+		const { ids } = await memory.query({ mailboxId: 'sent' });
+		return Promise.all(ids.map((id) => memory.message(id)));
+	};
+	return { client, control, notices, drafts, sent };
 }
 
 describe('the compose window', () => {
@@ -237,6 +241,105 @@ describe('the compose window', () => {
 		expect(await client.closeCompose()).toBe(true);
 		const [saved] = await drafts();
 		expect(saved).toMatchObject({ subject: 'No file', attachments: [] });
+		client.destroy();
+	});
+
+	it('does not send while a file uploads, then sends the file with the message', async () => {
+		const { client, control, sent } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'With a file' });
+		control.uploads.holding = true;
+		const attaching = client.attach([file('late.txt')]);
+		// Sending now would send the message without the file, which then has nowhere to go.
+		expect(await client.send()).toBe(false);
+		expect(client.getState().compose).toMatchObject({
+			status: 'editing',
+			error: null,
+			uploading: 1,
+			draft: { subject: 'With a file', attachments: [] },
+		});
+		expect(await sent()).toEqual([]);
+		control.uploads.release();
+		await attaching;
+		expect(await client.send()).toBe(true);
+		const [message, ...others] = await sent();
+		expect(others).toEqual([]);
+		expect(message?.attachments.map((attachment) => attachment.name)).toEqual(['late.txt']);
+		client.destroy();
+	});
+
+	it('does not send a file added while the last save finished without it', async () => {
+		const { client, control, sent } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Racing' });
+		control.saves.holding = true;
+		const saving = client.saveDraft();
+		const sending = client.send();
+		control.uploads.holding = true;
+		const attaching = client.attach([file('late.txt')]);
+		control.saves.release();
+		await saving;
+		expect(await sending).toBe(false);
+		expect(await sent()).toEqual([]);
+		control.uploads.release();
+		await attaching;
+		expect(await client.send()).toBe(true);
+		const [message] = await sent();
+		expect(message?.attachments.map((attachment) => attachment.name)).toEqual(['late.txt']);
+		client.destroy();
+	});
+
+	it('saves a draft that holds only formatted text', async () => {
+		const { client, drafts } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ html: '<p>Notes</p>' });
+		expect(await client.closeCompose()).toBe(true);
+		expect((await drafts()).map((draft) => draft.html)).toEqual(['<p>Notes</p>']);
+		client.destroy();
+	});
+
+	it('reopens a draft the server saved under the same id with what it saved', async () => {
+		const memory = createMemoryTransport({
+			now: () => T0,
+			messages: [
+				{
+					id: 'old',
+					mailboxId: 'drafts',
+					from: me,
+					subject: 'Older draft',
+					text: 'Saved before',
+					receivedAt: T0,
+					keywords: [DRAFT],
+				},
+			],
+		});
+		const saved = new Map<string, MailMessage>();
+		const transport: MailTransport = {
+			...memory,
+			// Saved in place, the id kept, as the transport contract allows.
+			async saveDraft(draft) {
+				if (!draft.id) return memory.saveDraft(draft);
+				const before = await transport.message(draft.id);
+				saved.set(draft.id, { ...before, subject: draft.subject, text: draft.text });
+				return { id: draft.id };
+			},
+			message: async (id) => saved.get(id) ?? memory.message(id),
+		};
+		const client = createMailClient({
+			transport,
+			now: () => T0,
+			setTimeout: () => 0,
+			clearTimeout: () => undefined,
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.editDraft('old')).toBe(true);
+		client.updateDraft({ text: 'Newer' });
+		expect(await client.closeCompose()).toBe(true);
+		expect(await client.editDraft('old')).toBe(true);
+		expect(client.getState().compose?.draft).toMatchObject({ id: 'old', text: 'Newer' });
 		client.destroy();
 	});
 

@@ -1,7 +1,7 @@
 // New, reply, reply all and forward: who a draft goes to, its subject, the `In-Reply-To` and
-// `References` that thread it (RFC 5322 section 3.6.4) and the quoted original. The words around a
-// quote ("On ... Ada wrote:") are the UI's, passed in through `QuoteFormat`, so they are localised.
-// New code.
+// `References` that thread it (RFC 5322 section 3.6.4) and the quoted original; a saved draft read
+// back to edit; whether a draft holds anything. The words around a quote ("On ... Ada wrote:") are
+// the UI's, passed in through `QuoteFormat`, so they are localised. New code.
 import { textToHtml } from './mime/structure';
 import {
 	sameAddress,
@@ -10,7 +10,7 @@ import {
 	type MailAddress,
 	type MailMessage,
 } from './model';
-import { bodyText } from './search';
+import { bodyText, dropScriptsAndStyles } from './search';
 import { forwardSubject, replySubject } from './subject';
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
@@ -130,9 +130,40 @@ export function composeDraft(
 	};
 }
 
+/** A saved draft, as the server holds it, to edit again; `identity` is the one it is from. */
+export function draftFromMessage(message: MailMessage, identity: Identity | undefined): Draft {
+	const from = message.from[0];
+	return {
+		id: message.id,
+		...(identity ? { identityId: identity.id } : {}),
+		...(from ? { from } : {}),
+		to: message.to,
+		cc: message.cc,
+		bcc: message.bcc,
+		subject: message.subject,
+		text: message.text ?? '',
+		...(message.html ? { html: message.html } : {}),
+		attachments: message.attachments.map(({ blobId, name, type, size }) => ({
+			blobId,
+			name,
+			type,
+			size,
+		})),
+		inReplyTo: message.inReplyTo,
+		references: message.references,
+	};
+}
+
+/** Markup that shows something without any text: a picture or other media. */
+const MEDIA = /<(?:img|picture|svg|video|audio|canvas|object|embed)\b/i;
+
+/** True when `html` shows anything: text or media, not just an empty editor's `<p><br></p>`. */
+const hasContent = (html: string | undefined): boolean =>
+	!!html && (MEDIA.test(dropScriptsAndStyles(html)) || !!bodyText({ html }).trim());
+
 /**
- * True when a draft has nothing worth keeping: no To or Cc recipients, subject, text or files.
- * Bcc is not counted, since a new draft starts with the identity's own Bcc addresses.
+ * True when a draft has nothing worth keeping: no To or Cc recipients, subject, text, formatted
+ * text or files. Bcc is not counted, since a new draft starts with the identity's own Bcc addresses.
  */
 export function isEmptyDraft(draft: Draft): boolean {
 	return (
@@ -140,7 +171,8 @@ export function isEmptyDraft(draft: Draft): boolean {
 		!draft.cc.length &&
 		!draft.subject.trim() &&
 		!draft.text.trim() &&
-		!draft.attachments.length
+		!draft.attachments.length &&
+		!hasContent(draft.html)
 	);
 }
 

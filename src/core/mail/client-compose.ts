@@ -4,7 +4,13 @@
 // saved, or that has a file still uploading, stays open rather than losing it. New code.
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
-import { composeDraft, draftRecipients, isEmptyDraft, type QuoteFormat } from './compose';
+import {
+	composeDraft,
+	draftFromMessage,
+	draftRecipients,
+	isEmptyDraft,
+	type QuoteFormat,
+} from './compose';
 import { formatAddress, sameAddress, type Draft, type Identity, type MailMessage } from './model';
 import { messageDate } from './threading';
 import type { MailErrorCode } from './transport';
@@ -84,6 +90,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 		setCompose({ status: 'saving' });
 		try {
 			const { id } = await core.transport.saveDraft(current.draft);
+			// A transport that kept the id saved over the copy read before: reopening must not show it.
+			if (core.bodies.delete(id) && core.openId) void core.loadBodies(core.openId, false);
 			const latest = compose();
 			if (!latest || latest.session !== current.session) return null;
 			saved = revision;
@@ -202,28 +210,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 				const from = message.from[0];
 				const identity = identities().find((i) => from && sameAddress(i.email, from));
 				if (!(await close())) return false;
-				start(
-					{
-						id: message.id,
-						...(identity ? { identityId: identity.id } : {}),
-						...(from ? { from } : {}),
-						to: message.to,
-						cc: message.cc,
-						bcc: message.bcc,
-						subject: message.subject,
-						text: message.text ?? '',
-						...(message.html ? { html: message.html } : {}),
-						attachments: message.attachments.map(({ blobId, name, type, size }) => ({
-							blobId,
-							name,
-							type,
-							size,
-						})),
-						inReplyTo: message.inReplyTo,
-						references: message.references,
-					},
-					'new',
-				);
+				start(draftFromMessage(message, identity), 'new');
 				return true;
 			} catch (error) {
 				core.fail('open', error);
@@ -279,7 +266,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 		},
 		async send() {
 			const current = compose();
-			if (!current || current.status === 'sending') return false;
+			// Not while a file uploads: it would be left out, with no window left to add it to.
+			if (!current || current.status === 'sending' || current.uploading) return false;
 			const recipients = draftRecipients(current.draft);
 			if (!recipients.length || recipients.some((r) => !ADDRESS.test(r.email))) {
 				setCompose({ status: 'error', error: 'invalid' });
@@ -289,6 +277,11 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (saving) await saving;
 			const latest = compose();
 			if (!latest) return false;
+			if (latest.uploading) {
+				// A file added while the last save finished: not yet either, and the edits keep saving.
+				if (unsaved()) schedule();
+				return false;
+			}
 			setCompose({ status: 'sending', error: null });
 			try {
 				await core.transport.send(latest.draft);
