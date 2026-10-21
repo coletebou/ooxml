@@ -96,6 +96,11 @@ describe('body text', () => {
 			'Hello you',
 		);
 	});
+	it('keeps every character around a script or style, whatever lower case makes of it', () => {
+		// `İ` lower-cases to two code units (Unicode SpecialCasing), which must not shift the cut.
+		expect(dropScriptsAndStyles('İ<style>x</style>AB')).toBe('İ AB');
+		expect(dropScriptsAndStyles('İİ<SCRIPT>x</SCRIPT>tail<Style>y</STYLE>')).toBe('İİ tail ');
+	});
 	it('ends a line at each block, so the words of two lines never run together', () => {
 		const html =
 			'<div>Hello</div><div>there</div><ul><li>one</li><li>two</li></ul><h2>End</h2>last<hr>rule';

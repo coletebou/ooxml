@@ -85,10 +85,12 @@ function containsAll(haystack: string, needle: string | undefined): boolean {
  * Remove `<script>` and `<style>` elements with their contents in one linear pass (a lazy regex
  * with a back reference goes quadratic on many unclosed tags). An unclosed one runs to the end.
  * The next opener of each kind is looked for again only once the scan has passed it, so a kind
- * that is not there is searched for once, not once per element of the other kind.
+ * that is not there is searched for once, not once per element of the other kind. Tag names are
+ * matched in ASCII case only, as HTML does, so every offset in the lower-cased copy is one in
+ * `html`: full lower casing lengthens some characters (`İ` becomes two code units).
  */
 export function dropScriptsAndStyles(html: string): string {
-	const lower = html.toLowerCase();
+	const lower = html.replace(/[A-Z]+/g, (run) => run.toLowerCase());
 	let out = '';
 	let at = 0;
 	let script = lower.indexOf('<script');
