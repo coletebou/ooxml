@@ -71,6 +71,24 @@ describe('moving and deleting', () => {
 		client.destroy();
 	});
 
+	it('keeps the moves the server made when it refuses some, and undoes those', async () => {
+		const transport = server(DEFAULT_MAILBOXES);
+		const { client, notices } = await connect(transport);
+		// Deleted elsewhere meanwhile: the server archives `b` and refuses `a`.
+		await transport.destroy(['a']);
+		await client.archive(['a', 'b']);
+		expect((await transport.message('b')).mailboxIds).toEqual(['archive']);
+		expect(client.getState().conversations.map((c) => c.id)).toEqual(['a']);
+		expect(notices).toMatchObject([
+			{ kind: 'error', action: 'move', code: 'notFound' },
+			{ kind: 'done', action: 'archived', count: 1 },
+		]);
+		await undoOf(notices)();
+		expect((await transport.message('b')).mailboxIds).toEqual(['inbox']);
+		expect(client.getState().conversations.map((c) => c.id)).toEqual(['b']);
+		client.destroy();
+	});
+
 	it('takes a message out of Trash that is filed elsewhere too, without destroying it', async () => {
 		const transport = server([...DEFAULT_MAILBOXES, { id: 'projects', name: 'Projects' }]);
 		await transport.update({ a: { mailboxIds: { projects: true } } });

@@ -1,7 +1,7 @@
 import { createDemoSeed } from './demo-seed';
 import { DEFAULT_MAILBOXES } from './memory-messages';
 import { createMemoryTransport } from './memory-transport';
-import type { MailChange } from './transport';
+import { PartialUpdateError, type MailChange } from './transport';
 
 const me = { name: 'You', email: 'you@example.com' };
 
@@ -99,6 +99,44 @@ describe('createMemoryTransport', () => {
 		await expect(
 			transport.send({ to: [], cc: [], bcc: [], subject: 'x', text: '', attachments: [] }),
 		).rejects.toMatchObject({ code: 'invalid' });
+	});
+
+	it('changes every message it can, and names those it changed when not all', async () => {
+		const transport = createMemoryTransport({
+			messages: ['a', 'b', 'c'].map((id) => ({
+				id,
+				mailboxId: 'inbox',
+				from: me,
+				subject: id,
+				receivedAt: 0,
+			})),
+		});
+		const changes: MailChange[] = [];
+		transport.watch((change) => changes.push(change));
+		const archive = { mailboxIds: { inbox: false, archive: true } };
+		// `gone` is no message, and `b` would be left in no folder: each is refused on its own.
+		const error = await transport
+			.update({ a: archive, gone: archive, b: { mailboxIds: { inbox: false } }, c: archive })
+			.catch((caught: unknown) => caught);
+		expect(error).toBeInstanceOf(PartialUpdateError);
+		expect(error).toMatchObject({ code: 'notFound', updated: ['a', 'c'] });
+		const folders = async (id: string) => (await transport.message(id)).mailboxIds;
+		expect([await folders('a'), await folders('b'), await folders('c')]).toEqual([
+			['archive'],
+			['inbox'],
+			['archive'],
+		]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(changes).toContainEqual({
+			type: 'emails',
+			created: [],
+			updated: ['a', 'c'],
+			destroyed: [],
+		});
+		// When it changed nothing, the failure is what it was.
+		const none = await transport.update({ gone: archive }).catch((caught: unknown) => caught);
+		expect(none).not.toBeInstanceOf(PartialUpdateError);
+		expect(none).toMatchObject({ code: 'notFound' });
 	});
 
 	it('never hands out an id that a seed already uses', async () => {

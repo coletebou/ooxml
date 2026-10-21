@@ -30,6 +30,7 @@ import {
 import { matchesQuery } from './search';
 import {
 	MailTransportError,
+	PartialUpdateError,
 	type EmailPatch,
 	type MailChange,
 	type MailTransport,
@@ -114,6 +115,21 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		const found = messages.get(id);
 		if (!found) throw new MailTransportError('notFound', `No message ${id}.`);
 		return found;
+	};
+	/** `target` as `patch` changes it; throws for a folder that is missing or one left with none. */
+	const patched = (target: MailMessage, patch: EmailPatch): MailMessage => {
+		const keywords: Record<string, true> = { ...target.keywords };
+		for (const [keyword, on] of Object.entries(patch.keywords ?? {}))
+			if (on) keywords[keyword] = true;
+			else delete keywords[keyword];
+		const boxes = new Set(target.mailboxIds);
+		for (const [box, on] of Object.entries(patch.mailboxIds ?? {})) {
+			if (on && !mailboxes.has(box)) throw new MailTransportError('notFound', `No mailbox ${box}.`);
+			if (on) boxes.add(box);
+			else boxes.delete(box);
+		}
+		if (!boxes.size) throw new MailTransportError('invalid', 'A message must stay in a mailbox.');
+		return { ...target, keywords, mailboxIds: [...boxes] };
 	};
 	const byRole = (role: Mailbox['role']): Mailbox => {
 		for (const mailbox of mailboxes.values()) if (mailbox.role === role) return mailbox;
@@ -241,25 +257,19 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		async update(patches) {
 			await settle();
 			const updated: string[] = [];
+			let failure: unknown;
+			// Each message is changed on its own, as a JMAP server does: one refused, the rest still are.
 			for (const [id, patch] of Object.entries(patches) as [string, EmailPatch][]) {
-				const target = message(id);
-				const keywords: Record<string, true> = { ...target.keywords };
-				for (const [keyword, on] of Object.entries(patch.keywords ?? {}))
-					if (on) keywords[keyword] = true;
-					else delete keywords[keyword];
-				const boxes = new Set(target.mailboxIds);
-				for (const [box, on] of Object.entries(patch.mailboxIds ?? {})) {
-					if (on && !mailboxes.has(box))
-						throw new MailTransportError('notFound', `No mailbox ${box}.`);
-					if (on) boxes.add(box);
-					else boxes.delete(box);
+				try {
+					messages.set(id, patched(message(id), patch));
+					updated.push(id);
+				} catch (error) {
+					failure ??= error;
 				}
-				if (!boxes.size)
-					throw new MailTransportError('invalid', 'A message must stay in a mailbox.');
-				messages.set(id, { ...target, keywords, mailboxIds: [...boxes] });
-				updated.push(id);
 			}
 			if (updated.length) emailsChanged([], updated, []);
+			if (failure !== undefined)
+				throw updated.length ? new PartialUpdateError(updated, failure) : failure;
 		},
 		async destroy(ids) {
 			await settle();
