@@ -5,10 +5,12 @@
 // becomes `none`: the URL of `url()` and `src()`, and the strings of the image functions
 // (`image-set()`, `image()`, `cross-fade()` and their prefixed forms). An image function holding
 // something that can still turn into a URL (`var()`, `attr()`, `if()`, ...) becomes `none` too, and
-// `@import` is always dropped. Strings anywhere else are text (`content: "url(x)"`) and stay. What
-// is dropped or replaced never lets the text on its two sides join into a token this scan did not
-// see (`u@import;rl(x)` must not become `url(x)`): a comment goes between them wherever they could
-// run together. New code.
+// `@import` is always dropped. What an image function holds counts at any depth, inside the
+// functions it allows (`calc()`, a gradient) or a block as much as directly: only the string of
+// `type()`, a MIME type, is not a URL there. Strings anywhere else are text (`content: "url(x)"`)
+// and stay. What is dropped or replaced never lets the text on its two sides join into a token
+// this scan did not see (`u@import;rl(x)` must not become `url(x)`): a comment goes between them
+// wherever they could run together. New code.
 
 /** The URL to load for `url`, or '' to block it. */
 export type ResolveUrl = (url: string) => string;
@@ -37,8 +39,11 @@ const CLOSERS: Readonly<Record<string, string>> = { '(': ')', '[': ']', '{': '}'
 interface Frame {
 	/** The character that closes it. */
 	close: string;
-	/** `url()` or `src()` with a string (its first string is the URL), an image function, other. */
-	kind: 'url' | 'image' | 'other';
+	/**
+	 * `url()` or `src()` with a string (its first string is the URL), an image function, `type()`
+	 * (its string is a MIME type), other.
+	 */
+	kind: 'url' | 'image' | 'type' | 'other';
 	/** Where its text starts in the output. */
 	start: number;
 	/** `url` frames: the value of the first string, null before one. */
@@ -185,9 +190,15 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 	let drop: { start: number; depth: number } | null = null;
 	/** Open `url` frames: text inside one is replaced as a whole, so nothing in it is resolved. */
 	let urlFrames = 0;
+	/**
+	 * The open `url` and image frames, innermost last. Whatever is inside an image function, at any
+	 * depth, belongs to it, unless a `url` frame (replaced as a whole) is nearer.
+	 */
+	const owners: Frame[] = [];
+	/** The image function the scan is in, at any depth. */
 	const image = (): Frame | undefined => {
-		const top = stack.at(-1);
-		return top?.kind === 'image' ? top : undefined;
+		const owner = owners.at(-1);
+		return owner?.kind === 'image' ? owner : undefined;
 	};
 	const block = (): void => {
 		const frame = image();
@@ -210,10 +221,15 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		out.push(CUT);
 		drop = null;
 	};
-	/** Close a frame: a url frame becomes its URL, a blocked image frame `none`. */
+	/**
+	 * Close a frame: a url frame becomes its URL, a blocked image frame `none` (which blocks the
+	 * image function around it in turn).
+	 */
 	const finish = (frame: Frame): void => {
 		if (frame.kind === 'url') urlFrames--;
-		if (frame.kind === 'other' || (frame.kind === 'image' && !frame.blocked)) return;
+		if (frame.kind !== 'url' && frame.kind !== 'image') return;
+		owners.pop();
+		if (frame.kind === 'image' && !frame.blocked) return;
 		out.length = frame.start;
 		if (frame.kind === 'url') writeUrl(frame.url);
 		else none();
@@ -232,11 +248,12 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 			const [value, stringEnd] = readString(css, at);
 			end = stringEnd;
 			const top = stack.at(-1);
+			const owner = image();
 			if (top?.kind === 'url') top.url ??= value ?? '';
-			else if (top?.kind === 'image') {
+			else if (owner && top?.kind !== 'type') {
 				const target = resolved(value);
 				if (target) text = quote(target);
-				else top.blocked = true;
+				else owner.blocked = true;
 			}
 		} else if (char === '@') {
 			const [name, nameEnd] = readName(css, at + 1);
@@ -264,14 +281,18 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 							? 'url'
 							: IMAGE_FUNCTIONS.has(name)
 								? 'image'
-								: 'other';
+								: name === 'type'
+									? 'type'
+									: 'other';
+					const frame: Frame = { close: ')', kind, start: out.length, url: null, blocked: false };
 					if (kind === 'url') urlFrames++;
-					stack.push({ close: ')', kind, start: out.length, url: null, blocked: false });
+					if (kind === 'url' || kind === 'image') owners.push(frame);
+					stack.push(frame);
 					end++;
 				}
 			}
 		} else if (closer) {
-			// A block is never part of an image function.
+			// A block is never part of an image function, at any depth.
 			block();
 			stack.push({ close: closer, kind: 'other', start: out.length, url: null, blocked: false });
 		} else if (char === stack.at(-1)?.close) {

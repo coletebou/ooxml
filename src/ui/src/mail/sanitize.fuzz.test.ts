@@ -247,6 +247,8 @@ const REMOVED = [
 	'url(https://t.example/a"b)',
 	'image-set("https://t.example/i" 1x)',
 	'image-set(var(--u) 1x)',
+	'image-set(calc(var(--u)) 1x)',
+	'image-set(min(1px, {"https://t.example/m"}) 1x)',
 ];
 const CONTEXTS = [
 	(css: string) => css,
@@ -271,6 +273,7 @@ const FRAGMENTS = [
 	...[',', '/', '*', '/*', '*/', '"', "'", '#', '@', '+', '.', '0', '1', '%', '<!--', '-->', '!'],
 	...['<', '@import', '@import;', '@\\69mport', 'url(', 'src(', 'image-set(', 'image('],
 	...['cross-fade(', 'type("image/png")', 'var(--u)', 'attr(title)', 'if(', 'expression('],
+	...['calc(', 'min(', 'rgb('],
 	...['linear-gradient(red, blue)', 'javascript:', 'https://t.example/p', '//t.example/p'],
 	...['"https://t.example/p"', "'//t.example/p'", 'cid:x', 'data:image/png,x'],
 	...['"data:image/png,x"'],
@@ -294,6 +297,7 @@ describe('cleanCss output, read as a browser reads it', () => {
 			['background:URL( "https://t.example/p" 1x)', ['https://t.example/p']],
 			['b:image-set(image("https://t.example/p") 1x)', ['https://t.example/p']],
 			['b:image-set(var(--u) 1x)', ['var()']],
+			['b:image-set(calc(var(--u)) 1x)', ['var()']],
 			['@\\69mport "a.css";', ['@import']],
 			['/*"*/url(x)/*"*/', ['x']],
 			// None of these loads.

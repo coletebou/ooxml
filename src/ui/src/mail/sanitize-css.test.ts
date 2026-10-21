@@ -60,6 +60,37 @@ describe('rewriteCss', () => {
 		);
 	});
 
+	it('looks inside every function and block an image function holds, at any depth', () => {
+		for (const value of [
+			'image-set(calc(var(--u)) 1x)',
+			'image-set(calc({"https://t.example/p"}) 1x)',
+			'image-set(min(1px, calc(max(2px, var(--u)))) 1x)',
+			'image-set(linear-gradient(red, rgb(var(--c) 0 0)) 1x)',
+			'image-set(type(var(--u)) 1x)',
+			'image-set(calc(url(https://t.example/p)) 1x)',
+			'cross-fade(image-set(calc([attr(title)]) 1x) 50%, red)',
+			'cross-fade(red, calc(image-set(var(--u))))',
+			`image-set(${'calc('.repeat(40)}var(--u)${')'.repeat(40)} 1x)`,
+		])
+			expect(loads(`a{background:${value}}`).out, value).toBe('a{background:none}');
+		// A string anywhere in an image function is a URL, and resolve sees it.
+		expect(loads('a{background:image-set(calc({"https://t.example/p"}) 1x)}').urls).toEqual([
+			'https://t.example/p',
+		]);
+		expect(loads('a{background:image-set(min(calc("https://t.example/q")) 1x)}')).toEqual({
+			urls: ['https://t.example/q'],
+			out: 'a{background:none}',
+		});
+		const cid = (url: string): string => url.replace('cid:', 'blob:');
+		expect(rewriteCss('a{b:image-set(calc("cid:a") 1x)}', cid)).toBe(
+			'a{b:image-set(calc("blob:a") 1x)}',
+		);
+		// Only the string of `type()` is a MIME type, and stays as it is.
+		expect(rewriteCss('a{b:image-set(linear-gradient(red, blue) 1x type("image/png"))}', cid)).toBe(
+			'a{b:image-set(linear-gradient(red, blue) 1x type("image/png"))}',
+		);
+	});
+
 	it('resolves nothing it drops anyway', () => {
 		expect(loads('@import url(https://t.example/a.css) screen;a{b:c}')).toEqual({
 			urls: [],
