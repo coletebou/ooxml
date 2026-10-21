@@ -1,0 +1,123 @@
+// @vitest-environment jsdom
+import { cleanCss, emailDocument, linkify, sanitizeEmailHtml } from './sanitize';
+
+const STYLE = {
+	font: 'system-ui',
+	fontSize: '14px',
+	color: '#222',
+	background: '#fff',
+	link: '#06c',
+	quote: '#ccc',
+};
+
+const clean = (html: string, allowRemote = false, cidUrls?: Map<string, string>) =>
+	sanitizeEmailHtml(html, { allowRemote, ...(cidUrls ? { cidUrls } : {}) });
+
+describe('sanitizeEmailHtml', () => {
+	it('removes scripts, event handlers and javascript: links', () => {
+		const { body } = clean(
+			'<p onclick="steal()">Hi<script>steal()</script></p><img src="x" onerror="steal()"><a href="javascript:steal()">x</a><svg onload="steal()"></svg>',
+		);
+		expect(body).not.toMatch(/script|onclick|onerror|onload|javascript:|<svg/i);
+		expect(body).toContain('Hi');
+	});
+
+	it('removes forms, controls, frames and plugins but keeps their text', () => {
+		const { body } = clean(
+			'<form action="https://evil.example"><input name="pw"><button>Log in</button>Text</form><iframe src="https://evil.example"></iframe><object data="x"></object><embed src="x"><meta http-equiv="refresh" content="0;url=https://evil.example"><base href="https://evil.example">',
+		);
+		expect(body).not.toMatch(/<form|<input|<button|<iframe|<object|<embed|<meta|<base/i);
+		expect(body).toContain('Text');
+		expect(body).toContain('Log in');
+	});
+
+	it('blocks remote images, backgrounds and CSS and counts them', () => {
+		const result = clean(
+			'<html><head><style>@import url(https://evil.example/a.css); body{background:url("https://t.example/b.png")}</style></head><body><img src="https://t.example/pixel.gif" alt="logo"><table background="http://t.example/bg.png"><tr><td style="background-image:url(https://t.example/c.png)">x</td></tr></table></body></html>',
+		);
+		expect(result.blocked).toBe(4);
+		expect(result.body).not.toContain('t.example');
+		expect(result.body).toContain('alt="logo"');
+		expect(result.css).not.toMatch(/@import|evil\.example|t\.example/);
+		expect(result.css).toContain('background:none');
+	});
+
+	it('loads remote resources once the person allows them', () => {
+		const result = clean('<img src="https://t.example/pixel.gif">', true);
+		expect(result.blocked).toBe(0);
+		expect(result.body).toContain('src="https://t.example/pixel.gif"');
+	});
+
+	it('points cid: images at the attachments and drops unknown ones', () => {
+		const cids = new Map([['logo@x', 'blob:http://localhost/1']]);
+		const { body } = clean('<img src="cid:logo@x"><img src="cid:missing@x">', false, cids);
+		expect(body).toContain('src="blob:http://localhost/1"');
+		expect(body.match(/src=/g)).toHaveLength(1);
+	});
+
+	it('keeps data: images and drops other data and relative sources', () => {
+		const { body } = clean(
+			'<img src="data:image/png;base64,iVBORw0KGgo="><img src="data:text/html;base64,PHNjcmlwdD4="><img src="local.png">',
+		);
+		expect(body).toContain('data:image/png');
+		expect(body).not.toContain('data:text/html');
+		expect(body).not.toContain('local.png');
+	});
+
+	it('opens links in a new tab without an opener', () => {
+		const { body } = clean(
+			'<a href="https://example.com/x">x</a><a href="mailto:ada@example.com">m</a>',
+		);
+		expect(body).toContain('target="_blank"');
+		expect(body).toContain('rel="noopener noreferrer"');
+		expect(body).toContain('mailto:ada@example.com');
+	});
+
+	it('cannot be broken out of the style element', () => {
+		const result = clean('<style>p{color:red}</style><p>x</p>');
+		const doc = emailDocument(
+			{ ...result, css: '</style><script>alert(1)</script>' },
+			false,
+			STYLE,
+		);
+		expect(doc).not.toContain('</style><script>');
+	});
+
+	it('stays fast on hostile CSS and long words', () => {
+		const started = performance.now();
+		cleanCss('url('.repeat(50_000));
+		cleanCss('@import '.repeat(50_000));
+		linkify('a.'.repeat(100_000));
+		linkify(`${'x'.repeat(200_000)}@`);
+		expect(performance.now() - started).toBeLessThan(3000);
+	});
+});
+
+describe('emailDocument', () => {
+	it('allows only inline styles and local images until remote content is allowed', () => {
+		const content = clean('<p>x</p>');
+		const blocked = emailDocument(content, false, STYLE);
+		expect(blocked).toContain("default-src 'none'");
+		expect(blocked).toContain('img-src data: blob:;');
+		expect(blocked).not.toContain('https:');
+		expect(blocked).toContain('<base target="_blank">');
+		expect(emailDocument(content, true, STYLE)).toContain('img-src data: blob: https: http:;');
+	});
+});
+
+describe('linkify', () => {
+	it('splits plain text into text and links, never markup', () => {
+		expect(
+			linkify('See https://example.com/a?b=1. Or www.example.org, or mail ada@example.com!'),
+		).toEqual([
+			{ text: 'See ' },
+			{ text: 'https://example.com/a?b=1', href: 'https://example.com/a?b=1' },
+			{ text: '. Or ' },
+			{ text: 'www.example.org', href: 'https://www.example.org' },
+			{ text: ', or mail ' },
+			{ text: 'ada@example.com', href: 'mailto:ada@example.com' },
+			{ text: '!' },
+		]);
+		expect(linkify('<b>not markup</b>')).toEqual([{ text: '<b>not markup</b>' }]);
+	});
+});

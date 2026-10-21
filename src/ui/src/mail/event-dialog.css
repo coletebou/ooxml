@@ -1,0 +1,136 @@
+/* The event dialog of <mail-calendar> (event-dialog.ts): a layer over the calendar with the form. */
+.overlay {
+	position: absolute;
+	inset: 0;
+	z-index: var(--office-z-dialog);
+	display: grid;
+	place-items: center;
+	padding: var(--office-space-4);
+	overflow: auto;
+	background: var(--office-overlay);
+}
+.event-dialog {
+	width: min(36em, 100%);
+	max-height: 100%;
+	overflow: auto;
+	border-radius: var(--office-radius-lg);
+	background: var(--office-background);
+	box-shadow: var(--office-shadow-lg);
+}
+form {
+	display: grid;
+	gap: var(--office-space-3);
+	padding: var(--office-space-4);
+}
+header {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+}
+h2 {
+	flex: 1;
+	margin: 0;
+	font-size: var(--office-font-size-xl);
+}
+label {
+	display: grid;
+	gap: var(--office-space-1);
+}
+label > span {
+	color: var(--office-muted-foreground);
+	font-size: var(--office-font-size-sm);
+}
+.check {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+}
+.check > span {
+	color: inherit;
+	font-size: inherit;
+}
+.when {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--office-space-2) var(--office-space-3);
+}
+input:not([type='checkbox']),
+select,
+textarea {
+	min-height: var(--office-control-height-lg);
+	padding: var(--office-space-1) var(--office-space-2);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-field-background);
+}
+textarea {
+	resize: vertical;
+}
+[aria-invalid='true'] {
+	border-color: var(--office-danger);
+}
+.note {
+	margin: 0;
+	color: var(--office-muted-foreground);
+	font-size: var(--office-font-size-sm);
+}
+.issue {
+	margin: 0;
+	color: var(--office-danger);
+	font-weight: 600;
+}
+footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--office-space-2);
+}
+footer button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-3);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-background);
+}
+footer button:hover {
+	background: var(--office-surface);
+}
+footer .primary {
+	border-color: transparent;
+	background: var(--office-accent);
+	color: var(--office-accent-foreground);
+	font-weight: 600;
+}
+footer .primary:hover {
+	background: var(--office-accent-hover);
+}
+footer .danger {
+	color: var(--office-danger);
+}
+.spacer {
+	flex: 1;
+}
+.icon-button {
+	display: inline-grid;
+	place-items: center;
+	width: var(--office-control-height-lg);
+	height: var(--office-control-height-lg);
+	padding: 0;
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: transparent;
+}
+.icon-button:hover {
+	background: var(--office-surface);
+}
+@media (max-width: 40em) {
+	.overlay {
+		padding: var(--office-space-2);
+	}
+	.when {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

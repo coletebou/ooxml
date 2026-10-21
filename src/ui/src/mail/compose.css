@@ -1,0 +1,187 @@
+/* <mail-compose>: a window docked at the bottom of the app (full size when the app is narrow): a
+   title, address fields, the subject, a formatting bar, the editor, attachments and the footer. */
+:host {
+	display: block;
+}
+.compose {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-lg) var(--office-radius-lg) 0 0;
+	background: var(--office-background);
+	box-shadow: var(--office-shadow-lg);
+	overflow: hidden;
+}
+.compose.dragging {
+	outline: var(--office-focus-width) dashed var(--office-accent);
+	outline-offset: calc(-1 * var(--office-focus-width));
+}
+header {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	padding: var(--office-space-1) var(--office-space-1) var(--office-space-1) var(--office-space-3);
+	background: var(--office-surface);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+h2 {
+	flex: 1;
+	margin: 0;
+	font-size: var(--office-font-size-md);
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.icon-button {
+	display: inline-grid;
+	place-items: center;
+	width: var(--office-control-height-lg);
+	height: var(--office-control-height-lg);
+	padding: 0;
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: transparent;
+	cursor: pointer;
+}
+.icon-button:hover {
+	background: var(--office-selected);
+}
+.from {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	padding: var(--office-space-1) var(--office-space-3);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+.from span {
+	min-width: 3.5em;
+	color: var(--office-muted-foreground);
+}
+.from select {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	background: transparent;
+}
+.row {
+	display: flex;
+	align-items: flex-start;
+}
+.row mail-recipients {
+	flex: 1;
+	min-width: 0;
+}
+.cc-toggles {
+	display: flex;
+	gap: var(--office-space-1);
+	padding: var(--office-space-1) var(--office-space-2);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+.cc-toggles button {
+	padding: var(--office-space-1);
+	border: 0;
+	background: transparent;
+	color: var(--office-muted-foreground);
+}
+.cc-toggles button:hover {
+	color: var(--office-foreground);
+	text-decoration: underline;
+}
+.subject {
+	padding: var(--office-space-2) var(--office-space-3);
+	border: 0;
+	border-bottom: var(--office-border-width) solid var(--office-border);
+	outline: 0;
+	background: transparent;
+	font-weight: 600;
+}
+.format {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--office-space-px);
+	padding: var(--office-space-1) var(--office-space-2);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+.format .icon-button {
+	width: var(--office-control-height-md);
+	height: var(--office-control-height-md);
+}
+.editor {
+	flex: 1;
+	min-height: 8em;
+	overflow: auto;
+	padding: var(--office-space-3);
+	outline: 0;
+	font-size: var(--office-font-size-md);
+	line-height: var(--office-line-height);
+	overflow-wrap: anywhere;
+}
+.editor blockquote {
+	margin: 0 0 0 var(--office-space-2);
+	padding-inline-start: var(--office-space-3);
+	border-inline-start: var(--office-border-width-thick) solid var(--office-border);
+	color: var(--office-muted-foreground);
+}
+.editor img {
+	max-width: 100%;
+}
+.files {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--office-space-2);
+	margin: 0;
+	padding: var(--office-space-2) var(--office-space-3);
+	list-style: none;
+	border-top: var(--office-border-width) solid var(--office-border);
+}
+.files li {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	max-width: 18em;
+	padding-inline-start: var(--office-space-2);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-surface);
+}
+.files span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.files small {
+	color: var(--office-muted-foreground);
+}
+footer {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	padding: var(--office-space-2) var(--office-space-3);
+	border-top: var(--office-border-width) solid var(--office-border);
+}
+.send {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-4);
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: var(--office-accent);
+	color: var(--office-accent-foreground);
+	font-weight: 600;
+}
+.send:hover:not(:disabled) {
+	background: var(--office-accent-hover);
+}
+.status {
+	flex: 1;
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.status.error {
+	color: var(--office-danger);
+}

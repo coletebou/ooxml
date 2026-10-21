@@ -286,6 +286,13 @@ export const OFFICE_TOKENS = {
 	'--office-call-live': '#6bb700',
 	'--office-call-scrim': 'rgb(0 0 0 / 60%)',
 	'--office-shadow-teams': '0 2px 4px rgb(0 0 0 / 14%), 0 0 2px rgb(0 0 0 / 12%)',
+	// Component: mail. Message bodies are written for a light page, so they stay on paper in every
+	// theme, with these colours for text, links and quote bars.
+	'--office-mail-paper-foreground': '#1f2328',
+	'--office-mail-paper-link': '#0b57d0',
+	'--office-mail-paper-quote': '#c8ccd1',
+	'--office-mail-pane-width': '16em',
+	'--office-mail-list-width': '26em',
 } as const;
 
 export type OfficeToken = keyof typeof OFFICE_TOKENS;

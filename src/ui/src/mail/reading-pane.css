@@ -1,0 +1,243 @@
+/* <mail-reading-pane>: a toolbar, the subject, then the messages of the conversation as cards. */
+:host {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: auto;
+	background: var(--office-background);
+}
+.placeholder {
+	flex: 1;
+	display: grid;
+	place-content: center;
+	justify-items: center;
+	gap: var(--office-space-2);
+	color: var(--office-muted-foreground);
+}
+.placeholder .icon {
+	width: calc(var(--office-icon-size-lg) * 2);
+	height: calc(var(--office-icon-size-lg) * 2);
+}
+.toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	padding: var(--office-space-1) var(--office-space-3);
+	background: var(--office-background);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+.toolbar button,
+.tools button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	min-width: var(--office-control-height-lg);
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-2);
+	justify-content: center;
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: transparent;
+}
+.toolbar button:hover,
+.tools button:hover {
+	background: var(--office-surface);
+}
+.toolbar select {
+	margin-inline-start: auto;
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-2);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-background);
+}
+h2 {
+	margin: var(--office-space-4) var(--office-space-4) var(--office-space-2);
+	font-size: var(--office-font-size-xl);
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+.thread {
+	display: grid;
+	gap: var(--office-space-2);
+	padding: 0 var(--office-space-4) var(--office-space-6);
+}
+.message {
+	margin-inline-start: calc(var(--depth, 0) * var(--office-space-1));
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-lg);
+	background: var(--office-background);
+}
+.message.unread {
+	border-inline-start: var(--office-border-width-thick) solid var(--office-accent);
+}
+header {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	padding: var(--office-space-2) var(--office-space-3);
+}
+.summary {
+	flex: 1;
+	min-width: 0;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: var(--office-space-3);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	text-align: start;
+}
+.avatar {
+	display: grid;
+	place-items: center;
+	width: var(--office-avatar-size);
+	height: var(--office-avatar-size);
+	border-radius: var(--office-radius-full);
+	background: hsl(var(--hue, 210) 45% 42%);
+	color: var(--office-accent-foreground);
+	font-size: var(--office-font-size-sm);
+	font-weight: 600;
+}
+.who {
+	display: grid;
+	min-width: 0;
+}
+.who > * {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.to,
+time,
+.details {
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.flagged {
+	color: var(--office-danger);
+}
+.flagged .icon {
+	fill: currentColor;
+}
+.tools {
+	display: flex;
+	gap: var(--office-space-px);
+}
+.details {
+	display: grid;
+	gap: var(--office-space-0);
+	padding: 0 var(--office-space-3) var(--office-space-2)
+		calc(var(--office-avatar-size) + var(--office-space-6));
+	overflow-wrap: anywhere;
+}
+.snippet {
+	margin: 0;
+	padding: 0 var(--office-space-3) var(--office-space-2)
+		calc(var(--office-avatar-size) + var(--office-space-6));
+	color: var(--office-muted-foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+}
+.body {
+	padding: 0 var(--office-space-3) var(--office-space-3);
+}
+.text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: var(--office-line-height);
+	font-size: var(--office-font-size-md);
+}
+.text a {
+	color: var(--office-accent);
+}
+.remote {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	margin: 0 0 var(--office-space-2);
+	padding: var(--office-space-2) var(--office-space-3);
+	border: var(--office-border-width) solid var(--office-notice-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-notice-background);
+	color: var(--office-notice-foreground);
+	font-size: var(--office-font-size-sm);
+}
+.remote span {
+	flex: 1;
+}
+.remote button {
+	padding: var(--office-space-1) var(--office-space-2);
+	border: var(--office-border-width) solid var(--office-notice-border);
+	border-radius: var(--office-radius);
+	background: var(--office-background);
+	color: var(--office-foreground);
+}
+.attachments {
+	list-style: none;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--office-space-2);
+	margin: var(--office-space-3) 0 0;
+	padding: 0;
+}
+.attachment {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	max-width: 100%;
+	padding: var(--office-space-1) var(--office-space-1) var(--office-space-1) var(--office-space-1);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-surface);
+}
+.attachment button {
+	display: grid;
+	place-items: center;
+	width: var(--office-control-height-md);
+	height: var(--office-control-height-md);
+	border: 0;
+	border-radius: var(--office-radius);
+	background: transparent;
+}
+.attachment button:hover {
+	background: var(--office-selected);
+}
+.kind {
+	display: grid;
+	place-items: center;
+	min-width: var(--office-control-height-lg);
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-1);
+	border-radius: var(--office-radius);
+	color: var(--office-accent-foreground);
+	font-size: var(--office-font-size-2xs);
+	font-weight: 700;
+}
+.file {
+	display: grid;
+	min-width: 0;
+}
+.file-name {
+	max-width: 16em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.file-size {
+	font-size: var(--office-font-size-xs);
+	color: var(--office-muted-foreground);
+}
+.loading,
+.error {
+	color: var(--office-muted-foreground);
+}
+.error {
+	color: var(--office-danger);
+}

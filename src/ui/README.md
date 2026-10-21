@@ -8,7 +8,7 @@
 
 [Try the apps](https://christophervr.github.io/ooxml/) | [npm](https://www.npmjs.com/package/ooxml-ui) | [Full docs](https://christophervr.github.io/ooxml/) | [Source](https://github.com/ChristopherVR/ooxml)
 
-Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): **[Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app)** &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
+Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): **[Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app)** &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; [OpenMail](https://github.com/ChristopherVR/ooxml/tree/main/viewers/mail#readme) &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
 
 Shared, format-neutral web components and styles for the Office viewers (Word, PowerPoint and
 Excel). Custom elements with shadow-root controls and typed events, no framework. The runtime
@@ -37,7 +37,9 @@ search, zoom), `ribbon/` (button, group, stack, toolbar, tabs, section, toggle),
 and item, separator, context menu, command search), `dialog/` (dialog, options dialog, dialog footer),
 `notices/` (toasts, read-only banner, paste options), `chrome/` (title bar, status bar and item, tab
 strip, task pane, backstage, account, find bar, print preview, ruler), `comments/` (the comments pane), `presence/`,
-`smartart/` and `teams/`.
+`smartart/`, `calendar/` (the day, week and month grid Teams and Mail share), `preview/` (the
+presentation reading surface the product apps share), `teams/` and `mail/`. `i18n/` holds the
+translator factory and locale inheritance those product apps share.
 
 - **`OfficeElement`** (`base.ts`) is the base class, exported for products that build their own
   elements. Bare `var(--office-x)` in a `.css` file gets the token's default when the sheet loads
@@ -55,7 +57,7 @@ strip, task pane, backstage, account, find bar, print preview, ruler), `comments
   private field behind a hand-written accessor.
 - **Text is exact.** Text-bearing elements are written without whitespace between nodes, because
   consumers compare `textContent`. `oxfmt` is set to `htmlWhitespaceSensitivity: "strict"` for
-  `src/ui/src` (not `teams/`) so it never adds whitespace to a template; `glyph.ts` opts out of
+  `src/ui/src` (not `teams/` or `mail/`) so it never adds whitespace to a template; `glyph.ts` opts out of
   the formatter with `// prettier-ignore` because it reflows `<svg>` regardless.
 - **`ribbon-section` and `keytips`** keep imperative DOM on purpose: the section patches light-DOM
   children keyed by id (so focus and a product's tags survive), and keytips attaches a badge layer to
@@ -80,6 +82,15 @@ reconnect.
 import { registerOfficeUi } from 'ooxml-ui';
 registerOfficeUi(); // defines every element, idempotent
 ```
+
+## Mail elements (`ooxml-ui/mail`)
+
+OpenMail, a mail, calendar and contacts app (logic in `ooxml-core/mail`, bindings in
+`viewers/mail`): `<mail-app>` and its parts, `mail-folder-pane`, `-message-list` (virtualised),
+`-reading-pane`, `-html-frame`, `-compose`, `-recipients`, `-attachment-preview`, `-calendar` and
+`-contacts`, each usable on its own. `registerMail()` defines them; `createMail(options)` is the raw
+client for a UI of your own. Message HTML is sanitised and shown in a sandboxed frame with remote
+content blocked until the reader allows it; text a sender wrote is always rendered as text.
 
 ## Install
 
@@ -302,7 +313,7 @@ bun run --cwd src/ui build
 bun run --cwd src/ui test:package
 ```
 
-The Teams PowerPoint preview consumes `src/core/dist/pptx` declarations during
+The shared PowerPoint preview (`preview/`, used by Teams and Mail) consumes `src/core/dist/pptx` declarations during
 UI typechecking. The core PPTX area still uses relaxed compiler settings;
 importing its source into the strict UI project would bypass that boundary.
 The UI build first stages PowerPoint declarations in the ignored `.types-pptx`

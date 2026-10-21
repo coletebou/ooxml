@@ -1,0 +1,150 @@
+/* <mail-message-list>: a scrolling viewport over absolutely placed rows of one fixed height (the
+   virtualisation measures the first row, so the height may change with the font size). */
+:host {
+	display: block;
+	min-height: 0;
+	position: relative;
+}
+.viewport {
+	position: absolute;
+	inset: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.viewport:focus-visible {
+	outline-offset: calc(-1 * var(--office-focus-width));
+}
+.spacer {
+	position: relative;
+}
+.row {
+	position: absolute;
+	inset-inline: 0;
+	top: 0;
+	height: 4.75em;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	grid-template-rows: repeat(3, auto);
+	align-content: center;
+	column-gap: var(--office-space-2);
+	padding: var(--office-space-1) var(--office-space-3);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+	cursor: default;
+	user-select: none;
+}
+.row:hover {
+	background: var(--office-surface);
+}
+.row.selected,
+.row.open {
+	background: var(--office-selected);
+}
+.row.focused {
+	box-shadow: inset var(--office-border-width-thick) 0 0 var(--office-accent);
+}
+.row input {
+	grid-row: 1 / span 3;
+	align-self: center;
+	margin: 0;
+}
+.who,
+.subject,
+.preview {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.who {
+	grid-column: 2;
+}
+.to {
+	color: var(--office-muted-foreground);
+}
+.count {
+	grid-column: 3;
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.meta {
+	grid-column: 4;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--office-space-1);
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.meta .icon {
+	width: var(--office-icon-size);
+	height: var(--office-icon-size);
+}
+.draft {
+	color: var(--office-danger);
+}
+.subject {
+	grid-column: 2 / span 2;
+}
+.flag {
+	grid-column: 4;
+	justify-self: end;
+	display: grid;
+	place-items: center;
+	width: var(--office-control-height);
+	height: var(--office-control-height);
+	padding: 0;
+	border: 0;
+	border-radius: var(--office-radius);
+	background: transparent;
+	color: var(--office-muted-foreground);
+	opacity: 0;
+}
+.row:hover .flag,
+.flag:focus-visible,
+.flag.on {
+	opacity: 1;
+}
+.flag.on {
+	color: var(--office-danger);
+}
+.flag.on .icon {
+	fill: currentColor;
+}
+.preview {
+	grid-column: 2 / span 3;
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.unread .who,
+.unread .subject {
+	font-weight: var(--office-font-weight-bold);
+}
+.unread {
+	box-shadow: inset var(--office-border-width-thick) 0 0 var(--office-accent);
+}
+.empty {
+	margin: 0;
+	padding: var(--office-space-6) var(--office-space-4);
+	text-align: center;
+	color: var(--office-muted-foreground);
+}
+.more {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--office-space-3);
+	padding: var(--office-space-3);
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.more button {
+	padding: var(--office-space-1) var(--office-space-3);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-background);
+}
+@media (forced-colors: active) {
+	.row.selected,
+	.row.open {
+		outline: var(--office-border-width) solid Highlight;
+	}
+}

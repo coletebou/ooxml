@@ -1,0 +1,299 @@
+/* <mail-app>: the shell. Colours, spacing and radii come from the ooxml-ui tokens, so a host
+   retheme or dark mode reaches the whole app. The layout follows the element's own width (container
+   queries), because the app is often embedded in a pane rather than the whole window. */
+:host {
+	display: block;
+	height: 100%;
+	min-height: 28em;
+	container-type: inline-size;
+	font-size: var(--office-font-size);
+	color: var(--office-foreground);
+	background: var(--office-background);
+}
+.shell {
+	position: relative;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	height: 100%;
+}
+
+/* ---- rail -------------------------------------------------------------------------------- */
+.rail {
+	display: flex;
+	flex-direction: column;
+	gap: var(--office-space-1);
+	padding: var(--office-space-2) var(--office-space-1);
+	background: var(--office-surface);
+	border-inline-end: var(--office-border-width) solid var(--office-border);
+}
+.rail-item {
+	position: relative;
+	display: grid;
+	justify-items: center;
+	gap: var(--office-space-0);
+	min-width: 4.5em;
+	padding: var(--office-space-2) var(--office-space-1);
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: transparent;
+	font-size: var(--office-font-size-xs);
+	color: var(--office-muted-foreground);
+}
+.rail-item:hover {
+	background: var(--office-selected);
+}
+.rail-item[aria-current='page'] {
+	background: var(--office-selected);
+	color: var(--office-accent);
+	font-weight: 600;
+}
+.rail-item .icon {
+	width: var(--office-icon-size-lg);
+	height: var(--office-icon-size-lg);
+}
+.badge {
+	position: absolute;
+	top: var(--office-space-1);
+	inset-inline-end: var(--office-space-2);
+	min-width: 1.6em;
+	padding: 0 var(--office-space-1);
+	border-radius: var(--office-radius-full);
+	background: var(--office-accent);
+	color: var(--office-accent-foreground);
+	font-size: var(--office-font-size-2xs);
+	line-height: 1.6;
+}
+.rail-spacer {
+	flex: 1;
+}
+
+/* ---- main -------------------------------------------------------------------------------- */
+.main {
+	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr);
+	min-width: 0;
+	min-height: 0;
+}
+.main > :only-child {
+	grid-row: 1 / -1;
+}
+.banner {
+	margin: 0;
+	padding: var(--office-space-2) var(--office-space-4);
+}
+.banner.error {
+	background: var(--office-danger);
+	color: var(--office-danger-foreground);
+}
+.placeholder {
+	margin: auto;
+	color: var(--office-muted-foreground);
+}
+.topbar {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-3);
+	padding: var(--office-space-2) var(--office-space-3);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+.primary {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-3);
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: var(--office-accent);
+	color: var(--office-accent-foreground);
+	font-weight: 600;
+	white-space: nowrap;
+}
+.primary:hover:not(:disabled) {
+	background: var(--office-accent-hover);
+}
+.search {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	max-width: 44em;
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-1) 0 var(--office-space-3);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-field-background);
+}
+.search:focus-within {
+	border-color: var(--office-ring);
+}
+.search input {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+}
+.search select {
+	height: calc(var(--office-control-height-lg) - var(--office-space-2));
+	border: 0;
+	border-radius: var(--office-radius);
+	background: var(--office-surface);
+}
+.account {
+	max-width: 16em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--office-muted-foreground);
+	font-size: var(--office-font-size-sm);
+}
+.icon-button {
+	display: inline-grid;
+	place-items: center;
+	width: var(--office-control-height-lg);
+	height: var(--office-control-height-lg);
+	padding: 0;
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: transparent;
+	cursor: pointer;
+}
+.icon-button:hover:not(:disabled) {
+	background: var(--office-surface);
+}
+.folders-toggle {
+	display: none;
+}
+
+/* ---- panes ------------------------------------------------------------------------------- */
+.panes {
+	position: relative;
+	display: grid;
+	grid-template-columns: var(--office-mail-pane-width) var(--office-mail-list-width) minmax(0, 1fr);
+	min-height: 0;
+}
+mail-folder-pane,
+.list-pane {
+	border-inline-end: var(--office-border-width) solid var(--office-border);
+}
+.list-pane {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	min-height: 0;
+	min-width: 0;
+}
+.list-toolbar {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-px);
+	padding: var(--office-space-1) var(--office-space-2);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+.list-toolbar > input[type='checkbox'] {
+	margin: 0 var(--office-space-2);
+}
+.toolbar-spacer {
+	flex: 1;
+}
+.selected-count {
+	margin-inline-end: var(--office-space-2);
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	margin-inline-end: var(--office-space-2);
+	font-size: var(--office-font-size-sm);
+	white-space: nowrap;
+}
+mail-message-list,
+mail-reading-pane,
+mail-folder-pane {
+	min-height: 0;
+}
+
+/* ---- toasts ------------------------------------------------------------------------------ */
+.toasts {
+	position: absolute;
+	inset-inline-start: 50%;
+	bottom: var(--office-space-4);
+	z-index: var(--office-z-popover);
+	display: grid;
+	gap: var(--office-space-2);
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+.toast {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-3);
+	padding: var(--office-space-2) var(--office-space-2) var(--office-space-2) var(--office-space-4);
+	border-radius: var(--office-radius-md);
+	background: var(--office-foreground);
+	color: var(--office-background);
+	box-shadow: var(--office-shadow);
+	pointer-events: auto;
+}
+.toast.error {
+	background: var(--office-danger);
+	color: var(--office-danger-foreground);
+}
+.toast button {
+	padding: var(--office-space-1) var(--office-space-2);
+	border: 0;
+	border-radius: var(--office-radius);
+	background: transparent;
+	color: inherit;
+	font-weight: 600;
+}
+.toast .dismiss {
+	display: grid;
+	place-items: center;
+}
+
+/* ---- narrow ------------------------------------------------------------------------------ */
+@container (max-width: 72em) {
+	.panes {
+		grid-template-columns: var(--office-mail-list-width) minmax(0, 1fr);
+	}
+	.folders-toggle {
+		display: inline-grid;
+	}
+	mail-folder-pane {
+		position: absolute;
+		inset-block: 0;
+		inset-inline-start: 0;
+		z-index: 2;
+		width: var(--office-mail-pane-width);
+		background: var(--office-background);
+		box-shadow: var(--office-shadow);
+		display: none;
+	}
+	.folders-open mail-folder-pane {
+		display: block;
+	}
+}
+@container (max-width: 48em) {
+	.rail-item span:not(.badge) {
+		display: none;
+	}
+	.rail-item {
+		min-width: 0;
+	}
+	.panes {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.panes:not(.reading) mail-reading-pane,
+	.panes.reading .list-pane {
+		display: none;
+	}
+	.account {
+		display: none;
+	}
+	.primary span {
+		display: none;
+	}
+}

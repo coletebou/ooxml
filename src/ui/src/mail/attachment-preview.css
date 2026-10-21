@@ -1,0 +1,79 @@
+/* <mail-attachment-preview>: a full-size layer over the app with the file's viewer. */
+:host {
+	position: absolute;
+	inset: 0;
+	z-index: var(--office-z-dialog);
+	display: block;
+	background: var(--office-overlay);
+}
+.preview {
+	position: absolute;
+	inset: var(--office-space-4);
+	display: flex;
+	flex-direction: column;
+	border-radius: var(--office-radius-lg);
+	background: var(--office-background);
+	box-shadow: var(--office-shadow-lg);
+	overflow: hidden;
+}
+header {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	padding: var(--office-space-2) var(--office-space-3);
+	border-bottom: var(--office-border-width) solid var(--office-border);
+}
+h2 {
+	flex: 1;
+	margin: 0;
+	font-size: var(--office-font-size-md);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+header button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	height: var(--office-control-height-lg);
+	padding: 0 var(--office-space-2);
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-md);
+	background: var(--office-background);
+}
+header .close {
+	border: 0;
+}
+.hint,
+.error {
+	margin: 0;
+	padding: var(--office-space-1) var(--office-space-3);
+	font-size: var(--office-font-size-sm);
+	color: var(--office-muted-foreground);
+}
+.error {
+	color: var(--office-danger);
+}
+.stage {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	overflow: auto;
+}
+.stage > * {
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+img {
+	max-width: 100%;
+	max-height: 100%;
+	margin: auto;
+	object-fit: contain;
+}
+pre {
+	margin: 0;
+	padding: var(--office-space-3);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
