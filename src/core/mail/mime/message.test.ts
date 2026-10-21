@@ -104,6 +104,47 @@ describe('toMailMessage', () => {
 		expect(shown('<p>no reference</p>')).toBe(true);
 	});
 
+	it('counts an image as shown only where the reading pane shows it as a picture', () => {
+		const withHtml = (html: string) =>
+			toMailMessage(
+				readEmail(
+					writeEmail({
+						from: ada,
+						to: [ada],
+						subject: 'Photo',
+						text: 'photo',
+						html,
+						attachments: [
+							{
+								name: 'photo.png',
+								type: 'image/png',
+								bytes: png,
+								cid: 'photo@example.com',
+								inline: true,
+							},
+						],
+					}),
+				),
+				meta,
+				(partId) => partId,
+			).hasAttachment;
+		// A link to it, its name in the text or a picture in a comment shows nothing: a file to list.
+		expect(withHtml('<a href="cid:photo@example.com">Download</a>')).toBe(true);
+		expect(withHtml('<p>Saved as cid:photo@example.com</p>')).toBe(true);
+		expect(withHtml('<!-- <img src="cid:photo@example.com"> --><p>Hi</p>')).toBe(true);
+		expect(withHtml('<img data-src="cid:photo@example.com">')).toBe(true);
+		// Shown in place: a picture, a background, or a style's url(), its escapes decoded.
+		expect(withHtml('<p><img alt="" src="cid:photo@example.com"></p>')).toBe(false);
+		expect(withHtml("<table><tr><td background='cid:Photo@Example.com'>x</td></tr></table>")).toBe(
+			false,
+		);
+		expect(withHtml('<div style="background: url(cid:photo%40example.com)">x</div>')).toBe(false);
+		expect(withHtml('<div style="background:url(&quot;cid:photo@example.com&quot;)">x</div>')).toBe(
+			false,
+		);
+		expect(withHtml('<style>p { background: url("cid:photo@example.com") }</style>')).toBe(false);
+	});
+
 	it('keeps the parts of an HTML body sent in several, and only then', () => {
 		const parsed = readEmail(
 			[
