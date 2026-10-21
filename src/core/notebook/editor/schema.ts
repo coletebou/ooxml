@@ -14,6 +14,8 @@ const todoOf = (el: HTMLElement): string | null => {
 const todoDom = (todo: unknown): Record<string, string> =>
 	todo === 'open' || todo === 'done' ? { 'data-todo': todo } : {};
 
+const HEADING_TAGS: Record<number, string> = { 1: 'h1', 2: 'h2', 3: 'h3' };
+
 const nodes: Record<string, NodeSpec> = {
 	doc: { content: 'block+' },
 	paragraph: {
@@ -32,7 +34,9 @@ const nodes: Record<string, NodeSpec> = {
 			tag: `h${n}`,
 			getAttrs: (el: HTMLElement) => ({ level: Math.min(n, 3), todo: todoOf(el) }),
 		})),
-		toDOM: (node) => [`h${node.attrs.level}`, todoDom(node.attrs.todo), 0],
+		// The tag comes from a fixed list: a collaborator's document reaches the editor without
+		// passing the readers' checks, and a level spliced into a tag name could name any element.
+		toDOM: (node) => [HEADING_TAGS[Number(node.attrs.level)] ?? 'h1', todoDom(node.attrs.todo), 0],
 	},
 	bullet_list: {
 		content: 'list_item+',

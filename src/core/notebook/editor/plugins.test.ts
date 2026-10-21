@@ -17,6 +17,16 @@ function state(text: string): EditorState {
 	});
 }
 
+describe('schema output', () => {
+	it('renders headings with a fixed tag, whatever level a collaborator wrote', () => {
+		const heading = (level: unknown) =>
+			schema.nodes.heading!.spec.toDOM!(schema.nodes.heading!.create({ level }));
+		expect((heading(2) as readonly unknown[])[0]).toBe('h2');
+		expect((heading('ttp://www.w3.org/1999/xhtml script') as readonly unknown[])[0]).toBe('h1');
+		expect((heading(7) as readonly unknown[])[0]).toBe('h1');
+	});
+});
+
 describe('text limit', () => {
 	it('stops local typing at the limit and always lets text shrink', () => {
 		const full = state('0123456789');
