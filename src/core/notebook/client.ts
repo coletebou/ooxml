@@ -42,12 +42,14 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		id: isEntityId(options.user.id) ? options.user.id : `u${randomToken()}${randomToken()}`,
 		name: options.user.name.trim().slice(0, 80) || 'Anonymous',
 	};
-	const names = {
-		notebook: 'My Notebook',
-		section: 'New Section',
-		group: 'Section Group',
-		...options.names,
+	const names = { notebook: 'My Notebook', section: 'New Section', group: 'Section Group' };
+	const setNames = (input: NotebookClientOptions['names'] = {}): void => {
+		for (const key of ['notebook', 'section', 'group'] as const) {
+			const value = input[key];
+			if (typeof value === 'string' && value.trim()) names[key] = value.trim().slice(0, 80);
+		}
 	};
+	setNames(options.names);
 	const newId = createIdGenerator(randomToken(), 'nb');
 	const notices = new Emitter<NotebookEvents>();
 	const notice = (code: NotebookNoticeCode, error?: unknown): void =>
@@ -304,6 +306,7 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		whenReady: () => started,
 
 		createNotebook: (input = {}) => create(input),
+		setNames,
 		openNotebook: (id) => (open?.id === id ? Promise.resolve() : switchTo(id)),
 		renameNotebook(id, name) {
 			if (open?.id === id) discrete((o) => structure.writeMeta(o.edit, { name }), undefined);

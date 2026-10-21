@@ -380,3 +380,19 @@ function client_addContent(client: NotebookClient): void {
 	});
 	client.addStroke({ tool: 'pen', color: '#000000', width: 2, points: [0, 0, 0.5, 30, 30, 0.5] });
 }
+
+describe('notebook client names', () => {
+	it('names new notebooks and sections in the language set later', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		client.setNames({ notebook: 'Notizbuch', section: 'Abschnitt', group: ' ' });
+		client.createSection();
+		await settle();
+		expect(client.getState().sections.map((s) => s.name)).toEqual(['Section 1', 'Abschnitt 2']);
+		const id = await client.createNotebook();
+		await opened(client, id);
+		expect(client.getState().notebook?.name).toBe('Notizbuch 2');
+		expect(client.getState().sections.map((s) => s.name)).toEqual(['Abschnitt 1']);
+	});
+});

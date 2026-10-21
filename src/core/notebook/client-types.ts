@@ -99,6 +99,8 @@ export interface NotebookClient {
 	whenReady: () => Promise<void>;
 
 	createNotebook: (input?: { name?: string; color?: string }) => Promise<string>;
+	/** The default names of new notebooks, sections and groups (for example after a language change). */
+	setNames: (names: NonNullable<NotebookClientOptions['names']>) => void;
 	openNotebook: (id: string) => Promise<void>;
 	renameNotebook: (id: string, name: string) => void;
 	setNotebookColor: (id: string, color: string) => void;
