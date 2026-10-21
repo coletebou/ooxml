@@ -193,4 +193,33 @@ describe('page export to .docx', () => {
 		// Only the title: the empty text container adds nothing.
 		expect(ps.map(textOf)).toEqual(['Untitled page']);
 	});
+
+	it('keeps the start number of a numbered list', async () => {
+		const { bytes } = await exportPageToDocx({
+			title: 'Steps',
+			items: [
+				{
+					kind: 'text',
+					x: 0,
+					y: 0,
+					blocks: [
+						{
+							type: 'ordered_list',
+							attrs: { order: 3 },
+							content: [
+								{
+									type: 'list_item',
+									content: [{ type: 'paragraph', attrs: { todo: null }, content: [text('third')] }],
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		const loaded = await loadDocx(bytes);
+		const item = paragraphs(loaded.model).find((p) => textOf(p) === 'third')!;
+		const instance = loaded.model.numberingCatalog?.nums[String(item.numbering!.numId)];
+		expect(instance?.levelOverrides?.[0]?.startOverride).toBe(3);
+	});
 });

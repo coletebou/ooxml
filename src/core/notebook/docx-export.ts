@@ -162,8 +162,13 @@ class Writer {
 				let numId = list?.kind === kind ? list.numId : undefined;
 				if (numId === undefined) {
 					const created = ensureListDefinition(this.model.numberingCatalog, kind);
-					this.model.numberingCatalog = created.catalog;
 					numId = created.numId;
+					// A numbered list typed as `3. ` starts at 3; the new instance overrides its first level.
+					const order = Number(node.attrs?.order ?? 1);
+					const instance = created.catalog.nums[String(numId)];
+					if (kind === 'decimal' && Number.isInteger(order) && order > 1 && instance)
+						instance.levelOverrides = { 0: { startOverride: order } };
+					this.model.numberingCatalog = created.catalog;
 				}
 				const level = list ? Math.min(8, list.level + 1) : 0;
 				for (const item of node.content ?? [])
