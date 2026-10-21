@@ -16,7 +16,10 @@ export interface Property {
 /** Join folded lines (CRLF or LF followed by a space or tab), and 2.1 quoted-printable soft breaks. */
 export function unfold(text: string): string[] {
 	// A byte order mark (files saved by some editors) would otherwise hide the first BEGIN line.
-	const lines = text.replace(/^\uFEFF/u, '').replace(/\r\n?/g, '\n').split('\n');
+	const lines = text
+		.replace(/^\uFEFF/u, '')
+		.replace(/\r\n?/g, '\n')
+		.split('\n');
 	const out: string[] = [];
 	for (const line of lines) {
 		const last = out.length - 1;
