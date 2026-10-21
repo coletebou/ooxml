@@ -29,6 +29,19 @@ describe('mail shortcuts', () => {
 		expect(isTyping([div])).toBe(true);
 		expect(isTyping([document.createElement('button')])).toBe(false);
 	});
+	it('counts only the fields text is typed in, so a checkbox keeps the shortcuts', () => {
+		const input = (type: string): HTMLInputElement =>
+			Object.assign(document.createElement('input'), { type });
+		for (const type of ['text', 'search', 'email', 'number', 'date', 'password', 'unknown'])
+			expect(isTyping([input(type)]), type).toBe(true);
+		for (const type of ['checkbox', 'radio', 'button', 'submit', 'range', 'color', 'file'])
+			expect(isTyping([input(type)]), type).toBe(false);
+		// A selection checkbox: a letter is the app's, Space and Enter stay the checkbox's.
+		const box = input('checkbox');
+		expect(commandFor({ key: 'e' }, isTyping([box]))).toBe('archive');
+		expect(controlOwnsKey({ key: ' ' }, [box])).toBe(true);
+		expect(controlOwnsKey({ key: 'Enter' }, [box])).toBe(true);
+	});
 	it('leaves the keys a focused control acts on to it', () => {
 		const el = (tag: string, role?: string): HTMLElement => {
 			const made = document.createElement(tag);

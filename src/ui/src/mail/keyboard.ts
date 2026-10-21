@@ -92,13 +92,30 @@ export function commandFor(event: KeyLike, typing: boolean): MailCommand | null 
 	return PLAIN[event.key] ?? null;
 }
 
+/**
+ * The inputs nobody types text in: a checkbox (a message's selection), a button, a slider. The keys
+ * they act on (Space, Enter, the arrows) stay theirs through `controlOwnsKey`.
+ */
+const NOT_TYPED = new Set([
+	'button',
+	'checkbox',
+	'color',
+	'file',
+	'hidden',
+	'image',
+	'radio',
+	'range',
+	'reset',
+	'submit',
+]);
+
 /** True when an event comes from a place a person types in. */
 export function isTyping(path: readonly EventTarget[]): boolean {
 	const target = path[0] as HTMLElement | undefined;
 	if (!target || !('tagName' in target)) return false;
 	const tag = target.tagName;
 	return (
-		tag === 'INPUT' ||
+		(tag === 'INPUT' && !NOT_TYPED.has((target as HTMLInputElement).type)) ||
 		tag === 'TEXTAREA' ||
 		tag === 'SELECT' ||
 		target.isContentEditable === true ||
