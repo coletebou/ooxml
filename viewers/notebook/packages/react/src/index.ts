@@ -11,6 +11,7 @@ import {
 import {
 	bindNotebook,
 	createNotebook,
+	notebookNames,
 	defineNotebookApp,
 	pickNotebookProps,
 	type CreateNotebookOptions,
@@ -94,6 +95,11 @@ export function useNotebookClient(options: CreateNotebookOptions | null): Notebo
 			setClient(null);
 		};
 	}, [key]);
+	// A language change renames what is created next; the client (and its notebooks) stays.
+	const locale = options?.locale;
+	useEffect(() => {
+		client?.setNames(notebookNames(locale));
+	}, [client, locale]);
 	return client;
 }
 

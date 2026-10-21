@@ -53,7 +53,7 @@ import {
 	TAB_KEYTIPS,
 	ribbonGroups,
 } from './ribbon';
-import { createNotebook } from './store';
+import { createNotebook, notebookNames } from './store';
 import { defineNotebookTodos } from './todo-pane';
 import css from './notebook-app.css?raw';
 import { registerNotebookIcons } from './icons';
@@ -338,6 +338,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			changed.has(k),
 		);
 		if ((restart || !this.#client) && this.isConnected) this.#start();
+		else if (changed.has('locale')) this.#client?.setNames(notebookNames(this.locale));
 		if (changed.has('theme')) {
 			if (this.theme === 'light' || this.theme === 'dark')
 				this.setAttribute('data-office-theme', this.theme);

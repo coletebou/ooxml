@@ -36,6 +36,14 @@ export interface CreateNotebookOptions extends Omit<NotebookClientOptions, 'user
 	locale?: string;
 }
 
+/** The names new notebooks, sections and groups get in `locale` (for `client.setNames`). */
+export function notebookNames(
+	locale?: string,
+): Required<NonNullable<NotebookClientOptions['names']>> {
+	const t = notebookI18n(locale).t;
+	return { notebook: t('name.notebook'), section: t('name.section'), group: t('name.group') };
+}
+
 /**
  * The scope the tabs of one database share their notebook list in. It is a digest of the whole
  * name, so two databases never share a scope (a cleaned-up or shortened name could: `notes.ada`
@@ -51,11 +59,10 @@ export function notebookScope(storageName: string): string {
 /** `createNotebookClient` with this browser's IndexedDB storage, user id and localized names. */
 export function createNotebook(options: CreateNotebookOptions = {}): NotebookClient {
 	const { storageName = DEFAULT_NOTEBOOK_DATABASE, locale, user, ...rest } = options;
-	const t = notebookI18n(locale).t;
 	return createNotebookClient({
 		storage: createIndexedDbStorage(storageName),
 		scope: notebookScope(storageName),
-		names: { notebook: t('name.notebook'), section: t('name.section'), group: t('name.group') },
+		names: notebookNames(locale),
 		...rest,
 		user: {
 			id: user?.id ?? notebookUserId(),

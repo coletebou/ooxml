@@ -271,6 +271,15 @@ describe('<notebook-app>', () => {
 		expect(app.state!.notebookId).not.toBe(before);
 	});
 
+	it('names new sections in the language set later', async () => {
+		app = await mount();
+		app.locale = 'de';
+		await app.updateComplete;
+		runCommand(app, 'new-section');
+		await until(() => app.state!.sections.length === 2);
+		expect(app.state!.sections.map((s) => s.name)).toContain('Neuer Abschnitt 2');
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;
