@@ -1,7 +1,8 @@
 // The pictures a message's HTML body shows in place (its `cid:` parts), as URLs its frame can load
 // (`object-urls.ts`). Only the parts the body shows are downloaded. The pictures of the last few
 // messages are kept, so going back to one shows them at once; those of older messages are let go,
-// their object URLs revoked, except for the messages still on screen. New code.
+// their object URLs revoked, except for the messages still on screen. A picture that could not be
+// downloaded (offline) is asked for again the next time its message shows. New code.
 import type { MailAttachment, MailMessage } from 'ooxml-core/mail';
 import { bodyImages } from './attachments';
 import { imageUrl } from './object-urls';
@@ -22,6 +23,8 @@ interface Entry {
 	made: string[];
 	/** Let go: what is still downloading for it is dropped. */
 	gone: boolean;
+	/** A picture could not be downloaded: the next look asks for the missing ones again. */
+	missing: boolean;
 }
 
 export class InlineImages {
@@ -46,12 +49,23 @@ export class InlineImages {
 		this.entries.delete(message.id);
 		if (known && known.parts === key) {
 			this.entries.set(message.id, known);
+			if (known.missing) {
+				// Asked again once the look under way has ended, keeping the pictures it got.
+				known.missing = false;
+				known.urls = known.urls.then((got) => this.make(known, parts, got));
+			}
 			return known.urls;
 		}
 		if (known) this.revoke(known);
 		if (!parts.length) return Promise.resolve(NONE);
-		const entry: Entry = { parts: key, urls: Promise.resolve(NONE), made: [], gone: false };
-		entry.urls = this.make(entry, parts);
+		const entry: Entry = {
+			parts: key,
+			urls: Promise.resolve(NONE),
+			made: [],
+			gone: false,
+			missing: false,
+		};
+		entry.urls = this.make(entry, parts, NONE);
 		this.entries.set(message.id, entry);
 		this.trim();
 		return entry.urls;
@@ -63,18 +77,25 @@ export class InlineImages {
 		this.entries.clear();
 	}
 
+	/** The URLs of `parts`: those in `got` already, and the others downloaded now. */
 	private async make(
 		entry: Entry,
 		parts: readonly MailAttachment[],
+		got: ReadonlyMap<string, string>,
 	): Promise<ReadonlyMap<string, string>> {
-		const urls = new Map<string, string>();
+		const urls = new Map(got);
 		for (const part of parts) {
+			const cid = part.cid!.toLowerCase();
+			if (urls.has(cid)) continue;
 			const bytes = await this.download(part);
 			if (entry.gone) break;
-			if (!bytes) continue;
+			if (!bytes) {
+				entry.missing = true;
+				continue;
+			}
 			const url = imageUrl(bytes, part.type);
 			if (url.startsWith('blob:')) entry.made.push(url);
-			urls.set(part.cid!.toLowerCase(), url);
+			urls.set(cid, url);
 		}
 		return urls;
 	}

@@ -88,6 +88,33 @@ describe('InlineImages', () => {
 		expect(download).toHaveBeenCalledTimes(1);
 	});
 
+	it('downloads a picture that could not be read again when its message shows again', async () => {
+		const urls = objectUrls();
+		const [a, b] = [picture('a'), picture('b')];
+		const message: PictureMessage = {
+			id: 'm',
+			html: `${a.html}${b.html}`,
+			attachments: [...a.attachments, ...b.attachments],
+		};
+		let offline = true;
+		const download = vi.fn(async (part: MailAttachment) =>
+			offline && part.cid === 'b@x' ? null : new Uint8Array([1, 2]),
+		);
+		const images = new InlineImages(download, () => new Set());
+		const first = await images.urls(message);
+		expect([...first.keys()]).toEqual(['a@x']);
+		// Back online: shown again, it asks only for the picture that did not come.
+		offline = false;
+		const again = await images.urls(message);
+		expect([...again.keys()]).toEqual(['a@x', 'b@x']);
+		expect(again.get('a@x')).toBe(first.get('a@x'));
+		expect(download.mock.calls.map(([part]) => part.cid)).toEqual(['a@x', 'b@x', 'b@x']);
+		expect(await images.urls(message)).toBe(again);
+		expect(download).toHaveBeenCalledTimes(3);
+		images.clear();
+		expect(urls.revoked).toEqual(['blob:test/1', 'blob:test/2']);
+	});
+
 	it('keeps every message on screen, however many, and nothing for a body without pictures', async () => {
 		const urls = objectUrls();
 		const download = vi.fn(bytes);
