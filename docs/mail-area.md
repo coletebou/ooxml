@@ -41,8 +41,9 @@ Changes are applied to the list at once and put back if the server refuses them.
 a quiet moment after the last edit, never two saves at once, and a draft counts as saved only once
 the server has its latest edit. A draft that cannot be saved, or whose attachments are still uploading, keeps its window open with its edits:
 closing it, or opening another message, waits for a save that succeeds (`compose`, `editDraft` and
-`closeCompose` resolve `false` otherwise, and while a file is still uploading a warning notice says
-so). Without a Trash folder, Delete reports `unsupported`
+`closeCompose` resolve `false` otherwise). While a file is still uploading into it, the window does
+not give way and its message is not sent either (`send` resolves `false`), and a warning notice
+says so each time. Without a Trash folder, Delete reports `unsupported`
 instead of destroying mail. Responses for a folder or search the person already left are dropped.
 
 ## Transports
@@ -66,7 +67,14 @@ and sending the same draft again first asks the server whether it did.
   logged, persisted, put in a URL or an error message. They and request bodies go over https only
   (plain http to a loopback host), redirects included: where the platform hands redirects back,
   every request checks each hop before following it and refuses one to plain http; a browser,
-  which hides them, blocks that hop itself as mixed content.
+  which hides them, blocks that hop itself as mixed content. After an `uncertain` send it keeps
+  the copy it made, in memory: the same draft sent again first asks the server whether that copy
+  went out (RFC 8621 7.3), sends nothing while the server cannot be asked, and sends it again only
+  when the server says it did not, or has neither the copy nor a submission of it any more. A
+  reload forgets the copy, and a changed draft is a new message. A request the server refused as
+  a whole (HTTP 4xx, RFC 8620 3.6) sent nothing and fails with its own error; one that creates
+  and submits the message at once and gets no answer at all fails as that failure, with no copy
+  known to ask about.
 
 ## Messages
 

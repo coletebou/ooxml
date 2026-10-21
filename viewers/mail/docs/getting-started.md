@@ -60,8 +60,19 @@ Without React, use the element directly after `registerMail()` from `ooxml-ui/ma
 | Prop               | Event                  | When                                                          |
 | ------------------ | ---------------------- | ------------------------------------------------------------- |
 | `onReady`          | `mail-ready`           | The account is connected and the first folder has loaded.     |
-| `onNotice`         | `mail-notice`          | Something happened: sent, moved, deleted, imported, an error. |
+| `onNotice`         | `mail-notice`          | Something happened: a done, error or warning notice (below).  |
 | `onOpenAttachment` | `mail-open-attachment` | An attachment is opened; cancel it to show the file yourself. |
+
+A notice (`MailNotice` from `ooxml-core/mail`) is one of three kinds, and the app shows each as a
+toast in the reader's language:
+
+- `done`: sent, moved, archived, moved to Junk, deleted, a draft discarded, messages, contacts or
+  events imported, an action undone; a move (to a folder, Archive, Junk or Trash) carries an
+  `undo`.
+- `error`: the action that failed and an error code (`network`, `unauthorized`, ...); `uncertain`
+  is a send the server did not confirm, which may have gone out.
+- `warning`: contact cards an import could not read, what a calendar import could not represent,
+  or files still uploading, which keep the compose window open and its message unsent.
 
 ## Keyboard
 
