@@ -19,6 +19,24 @@ function decoded(text: string): string {
 	}
 }
 
+/**
+ * The `name=value` fields of a link's query, split at `&` as written and then decoded, names in
+ * ASCII lower case (header field names ignore case); the first of a repeated field counts. Read as
+ * RFC 6068 writes them, not as a form: a plus sign is itself, never a space.
+ */
+function fields(query: string): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const field of query.split('&')) {
+		if (!field) continue;
+		const at = field.indexOf('=');
+		const name = decoded(at < 0 ? field : field.slice(0, at)).replace(/[A-Z]+/g, (run) =>
+			run.toLowerCase(),
+		);
+		if (!out.has(name)) out.set(name, at < 0 ? '' : decoded(field.slice(at + 1)));
+	}
+	return out;
+}
+
 /** The message a `mailto:` link starts, or null for anything else. */
 export function mailtoDraft(href: string): MailtoDraft | null {
 	let url: URL;
@@ -34,9 +52,6 @@ export function mailtoDraft(href: string): MailtoDraft | null {
 		.map((part) => decoded(part).trim())
 		.filter(Boolean)
 		.map((email) => ({ name: '', email }));
-	return {
-		to,
-		subject: url.searchParams.get('subject') ?? '',
-		text: url.searchParams.get('body') ?? '',
-	};
+	const query = fields(url.search.slice(1));
+	return { to, subject: query.get('subject') ?? '', text: query.get('body') ?? '' };
 }
