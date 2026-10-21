@@ -559,7 +559,7 @@ describe('<mail-app>', () => {
 		const compose = inner<Updating>(app, 'mail-compose')!;
 		await compose.updateComplete;
 		const said =
-			'The server did not say whether this message was sent. Look in Sent before you change it; sent again unchanged, it goes out only once.';
+			'The server did not say whether this message was sent. Look in Sent before you change it or send it again.';
 		expect(inner(compose, '.status')!.textContent).toBe(said);
 		const toasts = [...app.shadowRoot!.querySelectorAll('.toast > span')];
 		expect(toasts.map((toast) => toast.textContent)).toEqual([said]);

@@ -66,7 +66,7 @@ export const frShell: Record<keyof typeof enShell, string> = {
 	'error.unsupported': 'Le serveur ne prend pas cela en charge.',
 	'error.server': 'Une erreur est survenue sur le serveur.',
 	'error.uncertain':
-		"Le serveur n'a pas indiqué si ce message a été envoyé. Regardez dans Envoyés avant de le modifier. Renvoyé sans modification, il ne partira qu'une seule fois.",
+		"Le serveur n'a pas indiqué si ce message a été envoyé. Regardez dans Envoyés avant de le modifier ou de le renvoyer.",
 
 	'size.bytes': '{size} octets',
 	'size.kb': '{size} Ko',

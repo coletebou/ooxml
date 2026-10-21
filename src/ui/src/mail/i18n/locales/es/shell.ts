@@ -66,7 +66,7 @@ export const esShell: Record<keyof typeof enShell, string> = {
 	'error.unsupported': 'El servidor no admite esa operación.',
 	'error.server': 'Se produjo un error en el servidor.',
 	'error.uncertain':
-		'El servidor no indicó si este mensaje se envió. Mira en Enviados antes de cambiarlo; si lo vuelves a enviar sin cambios, solo saldrá una vez.',
+		'El servidor no indicó si este mensaje se envió. Mira en Enviados antes de cambiarlo o volver a enviarlo.',
 
 	'size.bytes': '{size} bytes',
 	'size.kb': '{size} KB',

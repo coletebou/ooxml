@@ -66,7 +66,7 @@ export const deShell: Record<keyof typeof enShell, string> = {
 	'error.unsupported': 'Der Server unterstützt das nicht.',
 	'error.server': 'Auf dem Server ist ein Fehler aufgetreten.',
 	'error.uncertain':
-		'Der Server hat nicht mitgeteilt, ob diese Nachricht gesendet wurde. Sehen Sie im Ordner Gesendet nach, bevor Sie sie ändern. Wenn Sie sie unverändert erneut senden, wird sie nur einmal verschickt.',
+		'Der Server hat nicht mitgeteilt, ob diese Nachricht gesendet wurde. Sehen Sie im Ordner Gesendet nach, bevor Sie sie ändern oder erneut senden.',
 
 	'size.bytes': '{size} Byte',
 	'size.kb': '{size} KB',

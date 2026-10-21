@@ -371,7 +371,7 @@ describe('<mail-compose>', () => {
 		const el = await mount({ ...composeState(), status: 'error', error: 'uncertain' });
 		const status = el.shadowRoot!.querySelector('.status')!;
 		expect(status.textContent).toBe(
-			'The server did not say whether this message was sent. Look in Sent before you change it; sent again unchanged, it goes out only once.',
+			'The server did not say whether this message was sent. Look in Sent before you change it or send it again.',
 		);
 		expect(status.classList.contains('error')).toBe(true);
 	});
