@@ -7,6 +7,7 @@ import {
 	DRAFT,
 	FLAGGED,
 	formatAddress,
+	newestEmail,
 	sameAddress,
 	type MailAddress,
 	type MailAttachment,
@@ -80,11 +81,14 @@ export class MailReadingPane extends MailElement {
 	protected override willUpdate(changed: PropertyValues<this>): void {
 		const previous = changed.get('conversation') as OpenConversationView | null | undefined;
 		if (changed.has('conversation') && previous?.id !== this.conversation?.id) {
-			const messages = this.conversation?.messages ?? [];
+			// The newest by date, the one a reply answers: the thread's reading order may end on an
+			// earlier reply.
+			const summaries = this.conversation?.messages.map((m) => m.summary) ?? [];
+			const newest = newestEmail(summaries)?.id;
 			this.expanded = new Set(
-				messages
-					.filter((m, i) => i === messages.length - 1 || !m.summary.keywords.$seen)
-					.map((m) => m.summary.id),
+				summaries
+					.filter((summary) => summary.id === newest || !summary.keywords.$seen)
+					.map((summary) => summary.id),
 			);
 			this.allowed = new Set();
 			this.blocked = new Map();

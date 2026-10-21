@@ -32,6 +32,18 @@ interface Container {
 /** When a message was written: its `Date` header, else when the server received it. */
 export const messageDate = (email: EmailSummary): number => email.sentAt ?? email.receivedAt;
 
+/**
+ * The newest of `emails` by `messageDate`, the later one on a tie: of a conversation's messages in
+ * reading order, its `latest`, the one a reply answers. Reading order is the thread's, depth first,
+ * so the last message in it is not always the newest.
+ */
+export function newestEmail(emails: readonly EmailSummary[]): EmailSummary | undefined {
+	let newest: EmailSummary | undefined;
+	for (const email of emails)
+		if (!newest || messageDate(email) >= messageDate(newest)) newest = email;
+	return newest;
+}
+
 /** A quoted left part: `"a.b"@example.com`, with backslash escapes inside the quotes. */
 const QUOTED_LEFT = /^"((?:[^"\\]|\\.)*)"(@.*)$/s;
 
@@ -264,12 +276,10 @@ export function threadConversations(
 				stack.push([container.children[i]!, childDepth]);
 		}
 		if (!entries.length) continue;
-		let latest = entries[0]!.email;
-		let first = entries[0]!.email;
-		for (const { email } of entries) {
-			if (messageDate(email) >= messageDate(latest)) latest = email;
-			if (messageDate(email) < messageDate(first)) first = email;
-		}
+		const messages = entries.map((entry) => entry.email);
+		const latest = newestEmail(messages)!;
+		let first = messages[0]!;
+		for (const email of messages) if (messageDate(email) < messageDate(first)) first = email;
 		conversations.push({ id: first.id, entries, latest, date: messageDate(latest) });
 	}
 	return conversations.sort((a, b) => b.date - a.date || a.id.localeCompare(b.id));

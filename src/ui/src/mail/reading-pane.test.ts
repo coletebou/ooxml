@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import { createJmapTransport, createMemoryTransport, type MailMessage } from 'ooxml-core/mail';
+import {
+	createJmapTransport,
+	createMemoryTransport,
+	type MailMessage,
+	type OpenMessageView,
+} from 'ooxml-core/mail';
 import type { MailHtmlFrame } from './html-frame';
 import { defineMailReadingPane, type InlineUrls, type MailReadingPane } from './reading-pane';
 
@@ -283,6 +288,63 @@ describe('<mail-reading-pane>', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await pane.updateComplete;
 		expect([...pane.inline.keys()]).toEqual([]);
+	});
+
+	it('opens with the newest message and the unread ones expanded, wherever the thread puts them', async () => {
+		const HOUR = 3_600_000;
+		const view = (id: string, sentAt: number, depth: number, read = true): OpenMessageView => ({
+			summary: {
+				id,
+				threadId: 't',
+				blobId: `${id}-raw`,
+				mailboxIds: ['inbox'],
+				keywords: read ? { $seen: true } : {},
+				receivedAt: sentAt,
+				sentAt,
+				size: 1,
+				messageId: [],
+				inReplyTo: [],
+				references: [],
+				from: [{ name: 'Ada', email: 'ada@example.com' }],
+				to: [],
+				cc: [],
+				bcc: [],
+				replyTo: [],
+				subject: 'Plans',
+				preview: `Message ${id}`,
+				hasAttachment: false,
+			},
+			depth,
+			message: null,
+			error: null,
+		});
+		const pane = document.createElement('mail-reading-pane') as MailReadingPane;
+		document.body.append(pane);
+		const expanded = async (messages: OpenMessageView[]): Promise<string[]> => {
+			pane.conversation = { id: messages[0]!.summary.id, subject: 'Plans', messages };
+			await pane.updateComplete;
+			return [...pane.shadowRoot!.querySelectorAll('article.message')].flatMap((article, i) =>
+				article.classList.contains('open') ? [messages[i]!.summary.id] : [],
+			);
+		};
+		// Thread order is depth first: a, its reply b with b's reply d, then a's later reply c,
+		// written before d. Every message read: only the newest, d, opens.
+		expect(
+			await expanded([
+				view('a', 0, 0),
+				view('b', HOUR, 1),
+				view('d', 4 * HOUR, 2),
+				view('c', 2 * HOUR, 1),
+			]),
+		).toEqual(['d']);
+		// Another conversation, with an unread message: that one opens too.
+		expect(
+			await expanded([view('e', 0, 0, false), view('f', HOUR, 1), view('g', 2 * HOUR, 1)]),
+		).toEqual(['e', 'g']);
+		// Two written at the same time: the later one in reading order counts as the newest.
+		expect(await expanded([view('h', 0, 0), view('i', HOUR, 1), view('j', HOUR, 1)])).toEqual([
+			'j',
+		]);
 	});
 
 	it('sends what its toolbar does with the open conversation', async () => {

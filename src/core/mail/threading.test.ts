@@ -1,5 +1,5 @@
 import { summary } from './test-support/emails';
-import { threadConversations } from './threading';
+import { newestEmail, threadConversations } from './threading';
 
 const ids = (conversation: { entries: readonly { email: { id: string }; depth: number }[] }) =>
 	conversation.entries.map((entry) => `${entry.email.id}@${entry.depth}`);
@@ -204,5 +204,20 @@ describe('threadConversations (RFC 5256 REFERENCES)', () => {
 		expect(list[0]!.entries).toHaveLength(5);
 		// Generous: a loaded CI runner must not flake; the point is "not quadratic".
 		expect(elapsed).toBeLessThan(3000);
+	});
+});
+
+describe('newestEmail', () => {
+	it('takes the newest by its Date header, else by when it arrived, the later one on a tie', () => {
+		const a = summary('a', { minute: 1 });
+		const b = summary('b', { minute: 3 });
+		const c = summary('c', { minute: 2 });
+		expect(newestEmail([a, b, c])?.id).toBe('b');
+		expect(newestEmail([a, b, summary('tie', { minute: 3 }), c])?.id).toBe('tie');
+		const received = summary('received', { minute: 0 });
+		delete received.sentAt;
+		received.receivedAt = b.receivedAt + 60_000;
+		expect(newestEmail([b, received, c])?.id).toBe('received');
+		expect(newestEmail([])).toBeUndefined();
 	});
 });
