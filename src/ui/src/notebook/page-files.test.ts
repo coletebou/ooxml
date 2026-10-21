@@ -29,11 +29,12 @@ describe('placing files on a page', () => {
 		expect(mimeOf({ name: 'a.JPG', type: '' })).toBe('image/jpeg');
 		expect(mimeOf({ name: 'a.bin', type: 'text/plain' })).toBe('text/plain');
 		expect(belowContent([])).toEqual({ x: 48, y: 24 });
-		expect(
-			belowContent([
-				{ y: 100, height: 0 },
-				{ y: 20, height: 300 },
-			]),
-		).toEqual({ x: 48, y: 344 });
+		const containers = [
+			{ id: 'text', y: 100, height: 0 },
+			{ id: 'picture', y: 20, height: 300 },
+		];
+		expect(belowContent(containers)).toEqual({ x: 48, y: 344 });
+		// A text box drawn taller than its stored height pushes new items below what it shows.
+		expect(belowContent(containers, new Map([['text', 400]]))).toEqual({ x: 48, y: 524 });
 	});
 });

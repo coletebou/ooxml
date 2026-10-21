@@ -93,9 +93,17 @@ export class NotebookPage extends NotebookElement {
 			.map((el) => el.containerId);
 	}
 
+	/** Where something new goes on this page: below its content as drawn (text grows as it fills). */
+	nextSpot(): { x: number; y: number } {
+		const drawn = new Map<string, number>();
+		for (const frame of this.renderRoot.querySelectorAll<HTMLElement>('.frame[data-id]'))
+			drawn.set(frame.dataset['id'] ?? '', frame.offsetHeight);
+		return belowContent(this.state?.containers ?? [], drawn);
+	}
+
 	/** Add picked files below what is on the page (a drop lands where it was dropped). */
 	insertFiles(files: readonly File[]): Promise<void> {
-		return this.#addFiles(files, belowContent(this.state?.containers ?? []));
+		return this.#addFiles(files, this.nextSpot());
 	}
 
 	focusTitle(): void {
@@ -209,7 +217,7 @@ export class NotebookPage extends NotebookElement {
 	}
 
 	#pastePoint(): { x: number; y: number } {
-		return this.#lastPoint ?? belowContent(this.state?.containers ?? []);
+		return this.#lastPoint ?? this.nextSpot();
 	}
 
 	#drop(event: DragEvent): void {

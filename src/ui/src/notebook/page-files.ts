@@ -46,13 +46,17 @@ export function mimeOf(file: { name: string; type: string }): string {
 	return images[ext] ?? 'application/octet-stream';
 }
 
-/** Where something new goes when no point was given: below what is already on the page. */
-export function belowContent(containers: readonly { y: number; height: number }[]): {
-	x: number;
-	y: number;
-} {
+/**
+ * Where something new goes when no point was given: below what is already on the page. A text box
+ * grows with its content, so `drawn` (heights measured on screen, by container id) wins over the
+ * stored height.
+ */
+export function belowContent(
+	containers: readonly { id: string; y: number; height: number }[],
+	drawn: ReadonlyMap<string, number> = new Map(),
+): { x: number; y: number } {
 	if (!containers.length) return { x: 48, y: 24 };
-	const bottom = Math.max(...containers.map((c) => c.y + (c.height || 96)));
+	const bottom = Math.max(...containers.map((c) => c.y + (drawn.get(c.id) || c.height || 96)));
 	return { x: 48, y: Math.round(bottom + 24) };
 }
 

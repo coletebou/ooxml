@@ -64,7 +64,9 @@ export function runCommand(app: AppHost, command: string): void {
 		case 'todo':
 			return onText(app, toggleTodo);
 		case 'text': {
-			const id = client?.addText(belowContent(app.state?.containers ?? []));
+			const id = client?.addText(
+				app.page()?.nextSpot() ?? belowContent(app.state?.containers ?? []),
+			);
 			if (id) app.focusId = id;
 			return;
 		}

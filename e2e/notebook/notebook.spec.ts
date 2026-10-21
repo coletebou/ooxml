@@ -143,6 +143,24 @@ test('draws with the pen, erases the stroke and undoes the erase', async ({ page
 	await expect(page.locator('notebook-ink path[data-stroke]')).toHaveCount(1);
 });
 
+test('places an inserted picture below a note that grew past its first height', async ({
+	page,
+}) => {
+	await open(page);
+	await typeOnCanvas(page, 'line 1', { x: 60, y: 40 });
+	for (let i = 2; i <= 12; i++) {
+		await page.keyboard.press('Enter');
+		await page.keyboard.type(`line ${i}`);
+	}
+	const note = (await page.locator('notebook-page .frame.text').first().boundingBox())!;
+	await ribbonTab(page, 'Insert');
+	const pictures = page.waitForEvent('filechooser');
+	await command(page, 'picture');
+	await (await pictures).setFiles({ name: 'dot.png', mimeType: 'image/png', buffer: PNG });
+	const picture = (await page.locator('notebook-page .frame.image').boundingBox())!;
+	expect(picture.y).toBeGreaterThanOrEqual(note.y + note.height);
+});
+
 test('inserts a picture and a live Word document, then exports the page to .docx', async ({
 	page,
 }) => {
