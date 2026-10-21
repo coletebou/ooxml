@@ -296,7 +296,7 @@ export class MailCompose extends MailElement {
 				<button
 					type="button"
 					class="send"
-					?disabled=${compose.status === 'sending' || compose.uploading > 0 || this.reading > 0}
+					?disabled=${compose.status === 'sending' || compose.uploading > 0 || this.readingFiles}
 					@click=${() => this.handOver('mail-draft-send')}
 				>
 					${icon('mail-sent')}<span>${this.t('compose.send')}</span>
