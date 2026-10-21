@@ -290,7 +290,12 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		// the next client on that storage; the notice says it was not saved.
 		void current.flush().then(
 			() => this.#client === current && this.#start(),
-			() => {
+			async () => {
+				if (this.#client !== current) return;
+				// The old client keeps a copy of what it could not save once it is closed; the new one
+				// starts after that, so it opens the notebook with those changes.
+				for (const off of this.#off.splice(0)) off();
+				await current.destroy();
 				if (this.#client !== current) return;
 				this.#start();
 				this.notify(this.t('notice.save-failed'));
@@ -571,10 +576,10 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			? 'closed'
 			: !s.persistent
 				? 'memory'
-				: s.mode !== 'local'
-					? s.status
-					: s.unsaved
-						? 'unsaved'
+				: s.unsaved
+					? 'unsaved'
+					: s.mode !== 'local'
+						? s.status
 						: 'local';
 		const peers = s?.peers ?? [];
 		return html`<div
