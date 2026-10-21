@@ -5,8 +5,10 @@
 // keeps it from being saved. A repeating event is edited as a whole series, which keeps the day it
 // ends on. DOM-free. New code.
 import {
+	DAY_MS,
 	dayMatchesOrdinal,
 	MINUTE_MS,
+	offsetMinutes,
 	zonedParts,
 	zonedToUtc,
 	type CalendarEvent,
@@ -182,6 +184,29 @@ function series(
 	};
 }
 
+/** The other instant at which the zone's clocks show the minute they show at `ms`, or null. */
+function shownAgain(ms: number, zone: string): number | null {
+	const shown = (t: number): string => `${dateValue(t, zone)} ${timeValue(t, zone)}`;
+	const offset = offsetMinutes(ms, zone);
+	for (const near of [ms - DAY_MS / 2, ms + DAY_MS / 2]) {
+		const other = ms + (offset - offsetMinutes(near, zone)) * MINUTE_MS;
+		if (other !== ms && shown(other) === shown(ms)) return other;
+	}
+	return null;
+}
+
+/**
+ * The end the time fields name for a timed draft: of the instants the clocks show it at (two in
+ * the hour a clock change repeats), the first in or after the minute the start shows, and never
+ * before the start itself (the fields show no seconds). An end the clocks show only before that
+ * minute stays before the start.
+ */
+function endAfter(end: number, start: number, zone: string): number {
+	const minute = start - (((start % MINUTE_MS) + MINUTE_MS) % MINUTE_MS);
+	const after = [end, shownAgain(end, zone)].filter((t): t is number => t !== null && t >= minute);
+	return after.length ? Math.max(Math.min(...after), start) : end;
+}
+
 /** Whether the date and time fields of `draft` still show what they showed for the stored event. */
 const shows = (
 	draft: EventDraft,
@@ -210,18 +235,21 @@ export function buildEvent(
 		? fromInputs(shiftDate(draft.endDate, 1), '', eventZone)
 		: instant(draft.endDate, draft.endTime, zone);
 	if (named === null || namedEnd === null) return { issue: 'when' };
-	if (draft.allDay ? namedEnd <= named : namedEnd < named) return { issue: 'order' };
 	// The time fields show whole minutes. A start or an end they still show as they did for the
 	// stored event keeps its own instant, seconds and all, so a new title alone neither moves an
-	// event that starts at 09:00:30 nor drops the changed occurrences of its series. A new end in the
-	// minute the start shows is never before the start.
+	// event that starts at 09:00:30 nor drops the changed occurrences of its series. The order is
+	// checked on those instants: an event can end in the hour a clock change repeats, after its
+	// start, at a time the fields show before it.
 	const shown = original ? draftOf(original, zone) : null;
 	const start =
 		original && shown && shows(draft, shown, 'startDate', 'startTime') ? original.start : named;
 	const end =
 		original && shown && shows(draft, shown, 'endDate', 'endTime')
 			? original.end
-			: Math.max(namedEnd, start);
+			: draft.allDay
+				? namedEnd
+				: endAfter(namedEnd, start, zone);
+	if (draft.allDay ? end <= start : end < start) return { issue: 'order' };
 	const repeating = original ? series(original, draft.repeat, start, draft.allDay, eventZone) : {};
 	// Starting after the day it ends, the series would have no occurrence to show at all.
 	if (repeating.until !== undefined && repeating.until < start) return { issue: 'series' };

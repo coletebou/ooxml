@@ -230,6 +230,44 @@ describe('event drafts', () => {
 		expect(built(buildEvent({ ...draft, endTime: '09:00' }, BERLIN, id)).end).toBe(stored.start);
 	});
 
+	it('keeps an event that ends in the hour the clocks repeat, after its start', () => {
+		// 1 November 2026, New York: 01:00 to 02:00 happens twice. From the first 01:30 to the second
+		// 01:15 is 45 minutes, though the fields show an end before the start.
+		const firstHalfPast = Date.UTC(2026, 10, 1, 5, 30);
+		const secondQuarterPast = Date.UTC(2026, 10, 1, 6, 15);
+		const stored = event({ zone: NEW_YORK, start: firstHalfPast, end: secondQuarterPast });
+		const draft = draftOf(stored, NEW_YORK);
+		expect([draft.startTime, draft.endTime]).toEqual(['01:30', '01:15']);
+		expect(built(buildEvent({ ...draft, title: 'Renamed' }, NEW_YORK, id))).toEqual({
+			...stored,
+			title: 'Renamed',
+		});
+		// A new end in that hour is the first instant of it that is not before the start.
+		const end = (stored: CalendarEvent, endTime: string): number =>
+			built(buildEvent({ ...draftOf(stored, NEW_YORK), endTime }, NEW_YORK, id)).end;
+		expect(end(stored, '01:45')).toBe(Date.UTC(2026, 10, 1, 5, 45));
+		expect(end(stored, '01:00')).toBe(Date.UTC(2026, 10, 1, 6));
+		const second = event({
+			zone: NEW_YORK,
+			start: Date.UTC(2026, 10, 1, 6, 30),
+			end: Date.UTC(2026, 10, 1, 7, 30),
+		});
+		expect(end(second, '01:45')).toBe(Date.UTC(2026, 10, 1, 6, 45));
+		// An end the clock shows once, before the start, is still refused.
+		expect(buildEvent({ ...draft, endTime: '00:45' }, NEW_YORK, id)).toEqual({ issue: 'order' });
+		// Berlin, ahead of UTC, repeats 02:00 to 03:00 on 25 October.
+		const berlin = event({
+			start: Date.UTC(2026, 9, 25, 0, 30),
+			end: Date.UTC(2026, 9, 25, 1, 15),
+		});
+		expect(built(buildEvent({ ...draftOf(berlin, BERLIN), title: 'Renamed' }, BERLIN, id))).toEqual(
+			{
+				...berlin,
+				title: 'Renamed',
+			},
+		);
+	});
+
 	it('keeps a last-weekday series on the last weekday when only its time changes', () => {
 		// 27 November 2026 is both the fourth and the last Friday: only the ordinal says which.
 		const stored = event({
