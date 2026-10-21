@@ -23,6 +23,11 @@ export interface SanitizedHtml {
 	body: string;
 	/** Remote resources that were blocked. */
 	blocked: number;
+	/**
+	 * The `cid`s (lower case, without angle brackets) of the parts the body and its styles load as
+	 * images or backgrounds, whether or not they were found.
+	 */
+	cids: string[];
 }
 
 const FORBID_TAGS = [
@@ -62,16 +67,38 @@ const CID = /^\s*cid:(.+)$/i;
 interface Pass {
 	options: SanitizeOptions;
 	blocked: number;
+	cids: Set<string>;
 }
 let pass: Pass | null = null;
 let purifier: ReturnType<typeof DOMPurify> | null = null;
+
+/**
+ * The Content-ID a `cid:` URL names, lower case: its escapes decoded (RFC 2392), then as written,
+ * for a malformed escape or a sender that did not encode it.
+ */
+function cidKeys(url: string): string[] {
+	const key = (text: string): string => text.trim().replace(/^<|>$/g, '').toLowerCase();
+	const written = key(url);
+	let decoded = written;
+	try {
+		decoded = key(decodeURIComponent(url));
+	} catch {
+		// A malformed escape: the text as written is all there is.
+	}
+	return decoded === written ? [written] : [decoded, written];
+}
 
 /** Resolve one URL of a resource the message loads: allowed, rewritten (cid) or blocked (''). */
 function resourceUrl(url: string): string {
 	const cid = CID.exec(url);
 	if (cid) {
-		const target = pass?.options.cidUrls?.get(cid[1]!.trim().replace(/^<|>$/g, '').toLowerCase());
-		return target ?? '';
+		const keys = cidKeys(cid[1]!);
+		for (const key of keys) pass?.cids.add(key);
+		for (const key of keys) {
+			const target = pass?.options.cidUrls?.get(key);
+			if (target) return target;
+		}
+		return '';
 	}
 	if (/^\s*data:image\//i.test(url)) return url;
 	if (REMOTE.test(url)) {
@@ -82,10 +109,16 @@ function resourceUrl(url: string): string {
 	return '';
 }
 
-/** Clean CSS text: no `@import`, no script-like constructs, every URL through `resourceUrl`. */
+/**
+ * Clean CSS text: no `@import`, no script-like constructs, every URL through `resourceUrl`. What
+ * replaces a script-like construct keeps the brackets balanced (a function left open would take
+ * every rule after it), and `behavior` only counts as the old property, not `scroll-behavior`.
+ */
 export function cleanCss(css: string): string {
 	return rewriteCss(
-		css.replace(/expression\s*\(|behavior\s*:|-moz-binding\s*:|javascript:/gi, 'x-blocked('),
+		css
+			.replace(/expression\s*\(/gi, 'x-blocked(')
+			.replace(/(?<![\w-])behavior\s*:|-moz-binding\s*:|javascript:/gi, 'x-blocked:'),
 		resourceUrl,
 	);
 }
@@ -117,8 +150,8 @@ function instance(): ReturnType<typeof DOMPurify> {
 export function sanitizeEmailHtml(html: string, options: SanitizeOptions): SanitizedHtml {
 	const purify = instance();
 	if (typeof purify.sanitize !== 'function' || typeof DOMParser === 'undefined')
-		return { css: '', body: '', blocked: 0 };
-	pass = { options, blocked: 0 };
+		return { css: '', body: '', blocked: 0, cids: [] };
+	pass = { options, blocked: 0, cids: new Set() };
 	try {
 		const parsed = new DOMParser().parseFromString(html, 'text/html');
 		const css = [...parsed.querySelectorAll('style')].map((style) =>
@@ -132,7 +165,7 @@ export function sanitizeEmailHtml(html: string, options: SanitizeOptions): Sanit
 			ADD_ATTR: ['target'],
 			ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
 		});
-		return { css: css.join('\n'), body, blocked: pass.blocked };
+		return { css: css.join('\n'), body, blocked: pass.blocked, cids: [...pass.cids] };
 	} finally {
 		pass = null;
 	}
@@ -151,10 +184,12 @@ export interface FrameStyle {
 /**
  * The frame's whole document: a CSP that allows inline styles and, only when `allowRemote`, remote
  * images and fonts; links open in a new tab. Message HTML is written for a light page, so it is
- * shown on paper colours in every theme.
+ * shown on paper colours in every theme. The message's styles cannot end their element early: an
+ * end tag starts `</s`, and each one there becomes `<\/s`, the same `/` to CSS. Nothing else is
+ * touched, so a comment opened right after a `<` stays a comment.
  */
 export function emailDocument(
-	content: SanitizedHtml,
+	content: Pick<SanitizedHtml, 'css' | 'body'>,
 	allowRemote: boolean,
 	style: FrameStyle,
 ): string {
@@ -170,7 +205,7 @@ export function emailDocument(
 		"base-uri 'none'",
 	].join('; ');
 	const base = `html{color-scheme:light}body{margin:0;padding:.75em;font-family:${style.font};font-size:${style.fontSize};color:${style.color};background:${style.background};overflow-wrap:anywhere}a{color:${style.link}}img{max-width:100%;height:auto}blockquote{margin:0 0 0 .5em;padding-left:.75em;border-left:.2em solid ${style.quote}}pre{white-space:pre-wrap}`;
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${base}</style><style>${content.css.replace(/<\/style/gi, '')}</style></head><body>${content.body}</body></html>`;
+	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${base}</style><style>${content.css.replace(/<\/(?=s)/gi, '<\\/')}</style></head><body>${content.body}</body></html>`;
 }
 
 export interface TextSegment {

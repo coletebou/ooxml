@@ -83,6 +83,64 @@ describe('sanitizeEmailHtml', () => {
 		expect(doc).not.toContain('</style><script>');
 	});
 
+	it('cannot be broken out of the style element by an end tag a removal would join', () => {
+		const payloads = [
+			'</sty</stylele><meta http-equiv="refresh" content="0;url=https://evil.example"><b>x</b>',
+			'<</style><b>x</b>',
+			'</STYLE ><b>x</b>',
+			'</sTyLe/><b>x</b>',
+		];
+		for (const css of payloads) {
+			const doc = new DOMParser().parseFromString(
+				emailDocument({ css, body: '<p>x</p>' }, false, STYLE),
+				'text/html',
+			);
+			expect(doc.querySelector('meta[http-equiv="refresh"]'), css).toBeNull();
+			expect(doc.querySelectorAll('b'), css).toHaveLength(0);
+			expect(doc.querySelectorAll('style'), css).toHaveLength(2);
+			expect(doc.body.innerHTML, css).toBe('<p>x</p>');
+		}
+	});
+
+	it('keeps what the styles say while keeping them in their element', () => {
+		// `\/` is `/` to CSS, so the string still reads `</style></p>`; a comment opened right after
+		// `<` stays a comment, so nothing it holds turns into CSS.
+		const css = 'p::after{content:"</style></p>"}a{color:red}</*url(https://t.example/p)*/';
+		const doc = new DOMParser().parseFromString(
+			emailDocument({ css, body: '' }, false, STYLE),
+			'text/html',
+		);
+		expect(doc.querySelectorAll('style')[1]!.textContent).toBe(
+			'p::after{content:"<\\/style></p>"}a{color:red}</*url(https://t.example/p)*/',
+		);
+	});
+
+	it('finds cid images whose URL escapes characters of the Content-ID', () => {
+		const cids = new Map([
+			['foo4%foo1@bar.net', 'blob:http://localhost/1'],
+			['50%off@x', 'blob:http://localhost/2'],
+			['a%41@x', 'blob:http://localhost/3'],
+		]);
+		// RFC 2392: the URL is percent-encoded; a malformed escape, or a sender that did not encode
+		// at all, is read as written.
+		const { body, cids: shown } = clean(
+			'<img src="cid:foo4%25foo1@bar.net"><img src="cid:50%off@x"><img src="cid:a%41@x">',
+			false,
+			cids,
+		);
+		expect(body).toContain('src="blob:http://localhost/1"');
+		expect(body).toContain('src="blob:http://localhost/2"');
+		expect(body).toContain('src="blob:http://localhost/3"');
+		expect(shown).toEqual(expect.arrayContaining(['foo4%foo1@bar.net', '50%off@x', 'a%41@x']));
+	});
+
+	it('names the cid parts the body and its styles load, found or not', () => {
+		const { cids } = clean(
+			'<style>p{background:url(cid:Back@X)}</style><p>x</p><img src="cid:logo@x"><a href="cid:file@x">file</a>',
+		);
+		expect([...cids].sort()).toEqual(['back@x', 'logo@x']);
+	});
+
 	it('counts and drops the remote images CSS loads however it is written', () => {
 		const result = clean(
 			`<p style="background:image-set('https://t.example/a.png' 1x, 'https://t.example/b.png' 2x)">a</p><p style="background:\\75 rl(https://t.example/c.png)">b</p><p style="background:url('https://t.example/d(1).png')">c</p>`,
@@ -147,6 +205,22 @@ describe('cleanCss', () => {
 			],
 		];
 		for (const [css, cleaned] of cases) expect(cleanCss(css), css.slice(0, 80)).toBe(cleaned);
+	});
+
+	it('blocks the old script-like properties without swallowing the rules after them', () => {
+		// An unclosed function would take every rule after it (CSS Syntax: up to its `)` or the end).
+		const cases: [css: string, cleaned: string][] = [
+			['a{behavior:url(x.htc)}b{color:red}', 'a{x-blocked:none}b{color:red}'],
+			['a{-moz-binding:url(x.xml#b)}b{color:red}', 'a{x-blocked:none}b{color:red}'],
+			[
+				'a{background:javascript:alert(1)}b{color:red}',
+				'a{background:x-blocked:alert(1)}b{color:red}',
+			],
+			['a{width:expression(alert(1))}b{color:red}', 'a{width:x-blocked(alert(1))}b{color:red}'],
+			// Only the old property itself: `scroll-behavior` is a property of its own.
+			['a{scroll-behavior:smooth}b{color:red}', 'a{scroll-behavior:smooth}b{color:red}'],
+		];
+		for (const [css, cleaned] of cases) expect(cleanCss(css), css).toBe(cleaned);
 	});
 
 	it('drops @import however it is written', () => {
