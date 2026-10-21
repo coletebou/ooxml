@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { keepFilled } from './session';
+import { undoKeeper } from './session';
 
 describe('notebook undo', () => {
 	it('keeps the text a collaborator typed into a paragraph when its creation is undone', () => {
+		const keeper = undoKeeper();
 		const doc = new Y.Doc();
 		const fragment = doc.getXmlFragment('text');
 		const undo = new Y.UndoManager(fragment, {
 			trackedOrigins: new Set(['local']),
-			deleteFilter: keepFilled,
+			deleteFilter: keeper.filter,
 		});
+		keeper.attach(undo);
 		const paragraph = new Y.XmlElement('paragraph');
 		doc.transact(() => fragment.insert(0, [paragraph]), 'local');
 		doc.transact(() => paragraph.insert(0, [new Y.XmlText('from a collaborator')]), 'remote');
@@ -24,12 +26,14 @@ describe('notebook undo', () => {
 	});
 
 	it('keeps a text box a collaborator wrote in when its creation is undone', () => {
+		const keeper = undoKeeper();
 		const doc = new Y.Doc();
 		const boxes = doc.getMap('containers');
 		const undo = new Y.UndoManager(boxes, {
 			trackedOrigins: new Set(['local']),
-			deleteFilter: keepFilled,
+			deleteFilter: keeper.filter,
 		});
+		keeper.attach(undo);
 		const box = new Y.Map();
 		const content = new Y.XmlFragment();
 		doc.transact(() => {
@@ -46,12 +50,14 @@ describe('notebook undo', () => {
 	});
 
 	it('keeps a list and a text box with all its fields when a collaborator wrote in them', () => {
+		const keeper = undoKeeper();
 		const doc = new Y.Doc();
 		const boxes = doc.getMap('containers');
 		const undo = new Y.UndoManager(boxes, {
 			trackedOrigins: new Set(['local']),
-			deleteFilter: keepFilled,
+			deleteFilter: keeper.filter,
 		});
+		keeper.attach(undo);
 		const box = new Y.Map();
 		const content = new Y.XmlFragment();
 		const item = new Y.XmlElement('list_item');
@@ -76,14 +82,16 @@ describe('notebook undo', () => {
 	});
 
 	it("still undoes moving a box with text, and keeps a page with a collaborator's box on it", () => {
+		const keeper = undoKeeper();
 		const doc = new Y.Doc();
 		const boxes = doc.getMap('notebook:containers');
 		const pages = doc.getMap('notebook:pages');
 		const undo = new Y.UndoManager([boxes, pages], {
 			trackedOrigins: new Set(['local']),
-			deleteFilter: keepFilled,
+			deleteFilter: keeper.filter,
 			captureTimeout: 0,
 		});
+		keeper.attach(undo);
 		const box = new Y.Map();
 		const content = new Y.XmlFragment();
 		doc.transact(() => {

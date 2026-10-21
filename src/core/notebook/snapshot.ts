@@ -6,6 +6,7 @@ import {
 	type Container,
 	type InkStroke,
 	MAX_TEXT_LENGTH,
+	MAX_TEXT_NODES,
 	type PageEntry,
 	type SectionEntry,
 } from './model';
@@ -59,7 +60,7 @@ export function readSnapshot(ctx: Pick<NotebookEditContext, 'types'>): NotebookS
 				const map = entityMap(types.containers, container.id);
 				const fragment = map && containerFragment(map);
 				const content = fragment ? readRichText(fragment) : [];
-				return fragment && textLength(fragment) > MAX_TEXT_LENGTH
+				return fragment && overLimit(fragment)
 					? { container, content, overLimit: true }
 					: { container, content };
 			}
@@ -141,4 +142,16 @@ export function textLength(fragment: Y.XmlFragment): number {
 		else if (item instanceof Y.XmlElement) stack.push(...item.toArray());
 	}
 	return length;
+}
+
+/** More text or more nodes than a text box holds (collaborators' edits can merge past both). */
+export function overLimit(fragment: Y.XmlFragment): boolean {
+	let nodes = 0;
+	const stack: unknown[] = fragment.toArray();
+	while (stack.length) {
+		const item = stack.pop();
+		if (++nodes > MAX_TEXT_NODES) return true;
+		if (item instanceof Y.XmlElement) stack.push(...item.toArray());
+	}
+	return textLength(fragment) > MAX_TEXT_LENGTH;
 }

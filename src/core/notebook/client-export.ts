@@ -2,8 +2,7 @@
 // reading order), the notebook to an archive, and an archive to a new notebook's first content.
 // New code.
 import { type PageExportItem, type PageExportOptions, exportPageToDocx } from './docx-export';
-import { MAX_TEXT_LENGTH } from './model';
-import { textLength } from './snapshot';
+import { overLimit } from './snapshot';
 import type { ExportedFile } from './client-types';
 import { exportNotebookArchive, importNotebookArchive } from './archive';
 import { containerBytes } from './canvas';
@@ -43,7 +42,7 @@ export async function exportPage(
 				x: c.x,
 				y: c.y,
 				blocks: fragment ? readRichText(fragment) : [],
-				...(fragment && textLength(fragment) > MAX_TEXT_LENGTH ? { overLimit: true } : {}),
+				...(fragment && overLimit(fragment) ? { overLimit: true } : {}),
 			});
 		} else if (c.kind === 'image') {
 			items.push({

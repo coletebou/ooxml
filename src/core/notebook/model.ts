@@ -26,6 +26,8 @@ export const MAX_LIST_LEVELS = 32;
  * inside the deepest one. Every reader uses it, so what one finds another finds too.
  */
 export const MAX_ELEMENT_DEPTH = MAX_LIST_LEVELS * 2 + 4;
+/** Nodes one text box's document holds at most (paragraphs, runs, breaks, list items). */
+export const MAX_TEXT_NODES = 100_000;
 
 export type SectionKind = 'section' | 'group';
 

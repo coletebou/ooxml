@@ -149,12 +149,18 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	const offPeers = session.on('peers', options.onChange);
 	const offError = session.on('error', (error) => options.onError(error, 'sync'));
 
+	const keeper = undoKeeper();
 	const undo = new Y.UndoManager(
 		[types.meta, types.sections, types.pages, types.containers, types.ink],
-		{ trackedOrigins: new Set([NOTEBOOK_ORIGIN]), captureTimeout: 500, deleteFilter: keepFilled },
+		{
+			trackedOrigins: new Set([NOTEBOOK_ORIGIN]),
+			captureTimeout: 500,
+			deleteFilter: keeper.filter,
+		},
 	);
 	undo.on('stack-item-added', options.onChange);
 	undo.on('stack-item-popped', options.onChange);
+	keeper.attach(undo);
 	const index = createTextIndex(types);
 
 	return {
@@ -193,19 +199,52 @@ const PROTECTED = new Set(['paragraph', 'heading', 'list_item', 'bullet_list', '
  * What undo may delete: not a paragraph or text that still holds something, as y-prosemirror's own
  * undo does, so undoing a new paragraph keeps the text a collaborator typed into it.
  */
-export function keepFilled(item: Y.Item): boolean {
-	// A field first set with a box, page or section that is kept stays with it (or it would be kept
-	// without its page and place); later changes to it (a move, a resize) undo as usual.
-	const parent = item.parent;
-	if (parent instanceof Y.Map && item.parentSub !== null && item.left === null && kept(parent))
-		return false;
-	if (!(item.content instanceof Y.ContentType)) return true;
-	const type = item.content.type;
-	if (type instanceof Y.Map) return !kept(type);
-	if (type instanceof Y.XmlFragment && !(type instanceof Y.XmlElement)) return !hasText(type);
-	if (type instanceof Y.XmlText) return type.length === 0;
-	if (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName)) return !hasText(type);
-	return true;
+/**
+ * What undo may delete. A box, page or section that is kept (it holds what a collaborator added)
+ * keeps the fields that were set with it, in the step being undone; fields set later (a move, a
+ * delete flag) undo as usual. `attach` lets it see that step.
+ */
+export function undoKeeper(): {
+	filter: (item: Y.Item) => boolean;
+	attach: (manager: Y.UndoManager) => void;
+} {
+	let step: { insertions: Parameters<typeof Y.isDeleted>[0] } | null = null;
+	const filter = (item: Y.Item): boolean => {
+		const parent = item.parent;
+		const created = parent instanceof Y.Map ? parent._item : null;
+		if (
+			created &&
+			item.parentSub !== null &&
+			step &&
+			Y.isDeleted(step.insertions, created.id) &&
+			kept(parent as Y.Map<unknown>)
+		)
+			return false;
+		if (!(item.content instanceof Y.ContentType)) return true;
+		const type = item.content.type;
+		if (type instanceof Y.Map) return !kept(type);
+		if (type instanceof Y.XmlFragment && !(type instanceof Y.XmlElement)) return !hasText(type);
+		if (type instanceof Y.XmlText) return type.length === 0;
+		if (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName)) return !hasText(type);
+		return true;
+	};
+	const attach = (manager: Y.UndoManager): void => {
+		for (const [name, stack] of [
+			['undo', () => manager.undoStack],
+			['redo', () => manager.redoStack],
+		] as const) {
+			const run = manager[name].bind(manager);
+			manager[name] = () => {
+				step = stack().at(-1) ?? null;
+				try {
+					return run();
+				} finally {
+					step = null;
+				}
+			};
+		}
+	};
+	return { filter, attach };
 }
 
 /** A text box holding text, a page with boxes or ink on it, a section with pages: undo keeps it. */

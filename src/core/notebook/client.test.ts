@@ -489,6 +489,22 @@ describe('notebook client keeps what it could not save', () => {
 	});
 });
 
+describe('notebook client undo of deletes', () => {
+	it('undoes deleting a page that has a text box on it', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		const page = client.createPage({ title: 'With a box' });
+		client.addText({ x: 0, y: 0 }, [para('on the page')]);
+		await settle(20);
+		client.deletePage(page);
+		await until(() => !client.getState().pages.some((p) => p.id === page));
+		await settle(20);
+		client.undo();
+		await until(() => client.getState().pages.some((p) => p.id === page));
+	});
+});
+
 describe('notebook client with damaged input', () => {
 	it('imports an archive whose text is malformed, keeping what is valid', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());

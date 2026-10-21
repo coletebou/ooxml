@@ -5,7 +5,7 @@ import { createIdGenerator } from '../collab/identity';
 import { NotebookArchiveError, exportNotebookArchive, importNotebookArchive } from './archive';
 import { addFile, addImage, addStroke, addText } from './canvas';
 import { NOTEBOOK_ORIGIN, NOTEBOOK_SEED_ORIGIN, notebookTypes } from './schema';
-import { readSnapshot, writeSnapshot } from './snapshot';
+import { overLimit, readSnapshot, writeSnapshot } from './snapshot';
 import { MAX_INK_POINTS } from './ink';
 import { type NotebookEditContext, addPage, addSection, deletePage, writeMeta } from './structure';
 
@@ -280,5 +280,16 @@ describe('notebook archive', () => {
 				importNotebookArchive(await zip.generateAsync({ type: 'uint8array' })),
 			).rejects.toThrow(NotebookArchiveError);
 		}
+	});
+
+	it('flags a text box with more nodes than a text box holds', () => {
+		const doc = new Y.Doc();
+		const fragment = doc.getXmlFragment('t');
+		fragment.insert(
+			0,
+			Array.from({ length: 100_001 }, () => new Y.XmlElement('paragraph')),
+		);
+		expect(overLimit(fragment)).toBe(true);
+		expect(overLimit(doc.getXmlFragment('small'))).toBe(false);
 	});
 });

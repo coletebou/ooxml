@@ -9,7 +9,7 @@
 import * as Y from 'yjs';
 import { isWordHighlightToken } from '../docx/highlight';
 import { isOpenableHyperlinkHref } from '../opc/safe-href';
-import { MAX_ELEMENT_DEPTH, MAX_TEXT_LENGTH } from './model';
+import { MAX_ELEMENT_DEPTH, MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
 
 export const RICH_BLOCK_TYPES = ['paragraph', 'heading', 'bullet_list', 'ordered_list'] as const;
 export const RICH_MARK_TYPES = ['bold', 'italic', 'underline', 'strike', 'highlight', 'link'];
@@ -31,8 +31,7 @@ export interface RichNode {
 const MAX_TEXT = MAX_TEXT_LENGTH;
 // A deeper document (only a hostile one, as the editor stops at MAX_LIST_LEVELS) is cut there.
 const MAX_DEPTH = MAX_ELEMENT_DEPTH;
-/** Nodes one text box's document is written with at most (an archive's, a paste's). */
-const MAX_NODES = 100_000;
+const MAX_NODES = MAX_TEXT_NODES;
 const LEAVES = new Set(['hard_break']);
 const CONTAINERS = new Set(['bullet_list', 'ordered_list', 'list_item']);
 
