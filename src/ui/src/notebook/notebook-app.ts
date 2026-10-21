@@ -56,7 +56,7 @@ import {
 import { createNotebook } from './store';
 import { defineNotebookTodos } from './todo-pane';
 import css from './notebook-app.css?raw';
-import './icons';
+import { registerNotebookIcons } from './icons';
 
 export type NotebookTheme = 'system' | 'light' | 'dark';
 export interface NotebookNavigateDetail {
@@ -65,6 +65,8 @@ export interface NotebookNavigateDetail {
 	pageId: string;
 }
 export interface NotebookOpenFileDetail {
+	/** The container on the page: stable while the file stays there. */
+	id: string;
 	name: string;
 	mime: string;
 	kind: 'docx' | 'xlsx' | 'pptx' | 'vsdx' | 'other';
@@ -223,6 +225,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		super.connectedCallback();
 		installOfficeUiTheme();
 		globalThis.addEventListener?.('pagehide', this.#flush);
+		// Moved in the DOM (removed and attached again): the client was released; start a new one.
+		if (!this.#client) this.requestUpdate();
 	}
 
 	override disconnectedCallback(): void {
@@ -314,12 +318,6 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	}
 
 	protected override firstUpdated(): void {
-		registerControls();
-		definePresence();
-		defineNotebookNav();
-		defineNotebookPage();
-		defineNotebookTodos();
-		defineNotebookLinkDialog();
 		this.#keytips = attachKeyTips(this.renderRoot as ShadowRoot);
 	}
 
@@ -436,7 +434,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			return html`<div class="empty">
 				<p>${this.t('app.empty')}</p>
 				<p>${this.t('app.emptyHint')}</p>
-				<office-ui-button
+				<office-ui-button command="create-notebook"
 					variant="primary"
 					icon="plus"
 					label=${this.t('app.createNotebook')}
@@ -600,7 +598,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 						</button>`
 					: nothing
 			}
-			<office-ui-button
+			<office-ui-button command="notice-dismiss"
 				size="small"
 				icon="close"
 				icon-only
@@ -611,4 +609,14 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	}
 }
 
-export const defineNotebookApp = definer('notebook-app', () => NotebookApp);
+// Everything the app renders is defined before the app is: a property set on an element before
+// its class is registered (a ribbon section's groups) would shadow the class's accessor for good.
+export const defineNotebookApp = definer(
+	'notebook-app',
+	() => {
+		registerControls();
+		registerNotebookIcons();
+		return NotebookApp;
+	},
+	[definePresence, defineNotebookNav, defineNotebookPage, defineNotebookTodos, defineNotebookLinkDialog],
+);

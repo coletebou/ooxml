@@ -25,4 +25,11 @@ const GLYPHS: Record<string, string> = {
 	import: 'M10 13V3M6 7l4-4 4 4M4 16h12',
 };
 
-for (const [name, d] of Object.entries(GLYPHS)) registerIcon(`notebook-${name}`, d);
+let registered = false;
+
+/** Register the notebook glyphs (idempotent). An explicit call, so no bundler drops it. */
+export function registerNotebookIcons(): void {
+	if (registered) return;
+	registered = true;
+	for (const [name, d] of Object.entries(GLYPHS)) registerIcon(`notebook-${name}`, d);
+}

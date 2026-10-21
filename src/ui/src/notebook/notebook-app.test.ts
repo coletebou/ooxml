@@ -1,4 +1,5 @@
 import { loadDocx } from 'ooxml-core/docx';
+import { getIcon } from '../icons';
 import { TextSelection } from 'prosemirror-state';
 import { runCommand } from './app-actions';
 import { type NotebookApp, type NotebookExportDetail, defineNotebookApp } from './notebook-app';
@@ -36,6 +37,12 @@ describe('<notebook-app>', () => {
 		expect(shadowText(nav)).toContain('New Section 1');
 		expect(shadowText(nav)).toContain('Untitled page');
 		expect(shadowText(app.page())).toContain('Click anywhere to start typing');
+		// Everything the app renders was defined before its first render, so the ribbon sections
+		// picked up their groups (a property set before an upgrade is lost) and the glyphs exist.
+		const home = app.shadowRoot!.querySelector('[data-ribbon-tab="home"] office-ui-ribbon-section')!;
+		expect(home.querySelectorAll('office-ui-ribbon-group')).toHaveLength(3);
+		expect(home.querySelector('[command="bold"]')?.hasAttribute('icon-only')).toBe(true);
+		expect(getIcon('notebook-todo')).toBeDefined();
 	});
 
 	it('places a text container on click, edits it, formats from the ribbon and exports it', async () => {

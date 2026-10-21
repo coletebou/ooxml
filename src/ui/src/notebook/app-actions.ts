@@ -194,6 +194,7 @@ export function openEmbedded(app: AppHost, id: string, download = false): void {
 	}
 	const kind = container.kind === 'file' ? container.office : 'other';
 	const detail: NotebookOpenFileDetail = {
+		id: container.id,
 		name: container.name,
 		mime: container.mime,
 		kind,

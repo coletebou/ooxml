@@ -49,7 +49,7 @@ export class NotebookTodos extends NotebookElement {
 			<header>
 				<h2>${this.t('todos.title')}</h2>
 				<span class="count">${this.tn('todos.open', open)}</span>
-				<office-ui-button
+				<office-ui-button command="close-pane"
 					size="small"
 					icon="close"
 					icon-only

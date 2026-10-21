@@ -30,6 +30,10 @@
 	align-items: stretch;
 }
 
+.panel[hidden] {
+	display: none;
+}
+
 .pens {
 	display: flex;
 	align-items: center;

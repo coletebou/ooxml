@@ -108,13 +108,13 @@ export class NotebookFile extends NotebookElement {
 				<span class="badge" data-kind=${live ? c.office : 'other'}>${glyph('notebook-file')}</span>
 				<span class="name" title=${c.name}>${c.name}</span>
 				<span class="meta">${kind} · ${formatSize(c.size, this.i18n)}</span>
-				<office-ui-button
+				<office-ui-button command="embed-open"
 					size="small"
 					icon="share"
 					label=${this.t('embed.open')}
 					@office-command=${(e: Event) => (e.stopPropagation(), this.fire('nb-file-open', { id: c.id }))}
 				></office-ui-button>
-				<office-ui-button
+				<office-ui-button command="embed-download"
 					size="small"
 					icon="notebook-download"
 					label=${this.t('embed.download')}
@@ -130,7 +130,7 @@ export class NotebookFile extends NotebookElement {
 						>
 							${this.status === 'loading' ? html`<p class="status">${this.t('embed.loading', { name: c.name })}</p>` : nothing}
 							${this.status === 'error' ? html`<p class="status" role="alert">${this.t('embed.failed')}</p>` : nothing}
-							${this.status === 'ready' || this.status === 'loading' ? keyed(this.#loaded, this.#viewer()) : nothing}
+							${this.status === 'ready' ? keyed(this.#loaded, this.#viewer()) : nothing}
 						</div>`
 					: nothing
 			}`;
