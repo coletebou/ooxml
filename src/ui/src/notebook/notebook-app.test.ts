@@ -232,6 +232,45 @@ describe('<notebook-app>', () => {
 		failing.mockRestore();
 	});
 
+	it('shows the formats of the text box being edited and lets go of it on another page', async () => {
+		app = await mount();
+		const page = app.page()!;
+		const item = (text: string) => ({
+			type: 'paragraph',
+			attrs: { todo: null },
+			content: [{ type: 'text', text }],
+		});
+		app.client!.addText({ x: 40, y: 40 }, [
+			{ type: 'bullet_list', content: [{ type: 'list_item', content: [item('listed')] }] },
+		]);
+		app.client!.addText({ x: 40, y: 400 }, [item('plain')]);
+		const texts = () => [...page.shadowRoot!.querySelectorAll<NotebookText>('notebook-text')];
+		await until(() => texts().length === 2 && texts().every((t) => t.view));
+		const listed = texts().find((t) => t.view!.state.doc.textContent === 'listed')!.view!;
+		const plain = texts().find((t) => t.view!.state.doc.textContent === 'plain')!.view!;
+		listed.focus();
+		await until(() => app.editor === listed);
+		expect(app.formats?.list).toBe('bullet');
+		// Another text box changing (a collaborator, a ticked box) leaves the ribbon on this one.
+		plain.dispatch(plain.state.tr.insertText('!'));
+		expect(app.formats?.list).toBe('bullet');
+		const before = app.state!.pageId;
+		runCommand(app, 'new-page');
+		await until(() => app.state!.pageId !== before);
+		expect([app.editor, app.formats]).toEqual([null, null]);
+	});
+
+	it('drops the previous profile from the screen when the storage changes', async () => {
+		app = await mount();
+		const before = app.state!.notebookId;
+		app.setAttribute('storage-name', `nb-test-${Math.random().toString(36).slice(2)}`);
+		await app.updateComplete;
+		// Nothing of the previous profile stays on screen while the next one loads.
+		expect(app.state?.notebookId ?? '').not.toBe(before);
+		await until(() => !!app.state?.page);
+		expect(app.state!.notebookId).not.toBe(before);
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;

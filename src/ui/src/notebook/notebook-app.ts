@@ -10,7 +10,7 @@ import {
 	type NotebookSyncConfig,
 	parseSyncConfig,
 } from 'ooxml-core/notebook';
-import type { ActiveFormats } from 'ooxml-core/notebook/editor';
+import { type ActiveFormats, activeFormats } from 'ooxml-core/notebook/editor';
 import type { EditorView } from 'prosemirror-view';
 import { controlStyles } from '../base';
 import { readOfficeProfile } from '../chrome/account-profile';
@@ -151,6 +151,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	#keytips: KeyTipsHandle | null = null;
 	#noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	#lastNav = '';
+	/** The container of `editor`: only it sets the ribbon's formats. */
+	#editorId = '';
 
 	constructor() {
 		super();
@@ -296,12 +298,28 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		this.#client = null;
 		this.#clientKey = '';
 		this.editor = null;
+		this.#editorId = '';
+		// Nothing of the previous client (another profile's notebooks) stays on screen or in reach.
+		this.state = null;
+		this.formats = null;
+		this.link = null;
+		this.menu = null;
+		clearTimeout(this.#noticeTimer);
+		this.notice = null;
+		this.#lastNav = '';
 		void client?.destroy();
 	}
 
 	#onState(client: NotebookClient): void {
 		if (client !== this.#client) return;
 		const state = client.getState();
+		// Another page or notebook takes its text boxes away, so the ribbon lets go of the editor
+		// before they go (the old one is still connected until the next render).
+		if (state.pageId !== this.state?.pageId || state.notebookId !== this.state?.notebookId) {
+			this.editor = null;
+			this.#editorId = '';
+			this.formats = null;
+		}
 		this.state = state;
 		if (this.editor && !this.editor.dom.isConnected) this.editor = null;
 		const nav = `${state.notebookId}|${state.sectionId}|${state.pageId}`;
@@ -510,10 +528,16 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			@keydown=${(e: KeyboardEvent) => appKeys(this, e)}
 			@nb-text-focus=${(e: CustomEvent<{ id: string; view: EditorView }>) => {
 				this.editor = e.detail.view;
+				this.#editorId = e.detail.id;
+				this.formats = activeFormats(e.detail.view.state);
 				this.#client?.focusContainer(e.detail.id);
 			}}
 			@nb-text-blur=${() => this.#client?.focusContainer(null)}
-			@nb-format=${(e: CustomEvent<{ formats: ActiveFormats }>) => (this.formats = e.detail.formats)}
+			@nb-format=${(e: CustomEvent<{ id: string; formats: ActiveFormats }>) => {
+				// Every text box reports as it changes (a collaborator's edit, a ticked box); the ribbon
+				// shows the one being edited.
+				if (e.detail.id === this.#editorId) this.formats = e.detail.formats;
+			}}
 			@nb-undo=${() => this.#client?.undo()}
 			@nb-redo=${() => this.#client?.redo()}
 			@nb-link-request=${() => runCommand(this, 'link')}
