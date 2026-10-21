@@ -9,6 +9,7 @@ import {
 	type NotebookClientOptions,
 	createNotebookClient,
 } from 'ooxml-core/notebook';
+import { sha256 } from 'ooxml-core/digest';
 import { notebookI18n } from './i18n/translator';
 import { createIndexedDbStorage, DEFAULT_NOTEBOOK_DATABASE, notebookUserId } from './storage';
 
@@ -35,13 +36,25 @@ export interface CreateNotebookOptions extends Omit<NotebookClientOptions, 'user
 	locale?: string;
 }
 
+/**
+ * The scope the tabs of one database share their notebook list in. It is a digest of the whole
+ * name, so two databases never share a scope (a cleaned-up or shortened name could: `notes.ada`
+ * and `notes/ada`), which would mix their notebooks.
+ */
+export function notebookScope(storageName: string): string {
+	let hex = '';
+	for (const byte of sha256(new TextEncoder().encode(storageName)).subarray(0, 16))
+		hex += byte.toString(16).padStart(2, '0');
+	return `nb-${hex}`;
+}
+
 /** `createNotebookClient` with this browser's IndexedDB storage, user id and localized names. */
 export function createNotebook(options: CreateNotebookOptions = {}): NotebookClient {
 	const { storageName = DEFAULT_NOTEBOOK_DATABASE, locale, user, ...rest } = options;
 	const t = notebookI18n(locale).t;
 	return createNotebookClient({
 		storage: createIndexedDbStorage(storageName),
-		scope: storageName.replace(/[^\w-]/gu, '-').slice(0, 48),
+		scope: notebookScope(storageName),
 		names: { notebook: t('name.notebook'), section: t('name.section'), group: t('name.group') },
 		...rest,
 		user: {
