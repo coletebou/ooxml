@@ -22,7 +22,7 @@ import { fullDate, hueOf, initials, names } from './format';
 import { defineMailHtmlFrame } from './html-frame';
 import { icon } from './icons';
 import { conversationToolbar } from './reading-toolbar';
-import { linkify } from './sanitize';
+import { linkify } from './linkify';
 import css from './reading-pane.css?raw';
 
 export type InlineUrls = (message: MailMessage) => Promise<ReadonlyMap<string, string>>;

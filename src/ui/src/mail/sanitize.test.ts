@@ -1,11 +1,5 @@
 // @vitest-environment jsdom
-import {
-	cleanCss,
-	emailDocument,
-	linkify,
-	sanitizeEmailHtml,
-	sanitizeMessageHtml,
-} from './sanitize';
+import { cleanCss, emailDocument, sanitizeEmailHtml, sanitizeMessageHtml } from './sanitize';
 
 const STYLE = {
 	font: 'system-ui',
@@ -298,12 +292,10 @@ describe('sanitizeEmailHtml', () => {
 		expect(ending.doc.body.innerHTML).toBe('<p>x</p>');
 	});
 
-	it('stays fast on hostile CSS and long words', () => {
+	it('stays fast on hostile CSS', () => {
 		const started = performance.now();
 		cleanCss('url('.repeat(50_000));
 		cleanCss('@import '.repeat(50_000));
-		linkify('a.'.repeat(100_000));
-		linkify(`${'x'.repeat(200_000)}@`);
 		expect(performance.now() - started).toBeLessThan(3000);
 	});
 });
@@ -571,22 +563,5 @@ describe('emailDocument', () => {
 			Object.fromEntries([...doc.body.attributes].map(({ name, value }) => [name, value])),
 		).toEqual({ style: 'font-family:"A&B"', class: '"><b>x</b>', bgcolor: '#000' });
 		expect(doc.body.innerHTML).toBe('<p>x</p>');
-	});
-});
-
-describe('linkify', () => {
-	it('splits plain text into text and links, never markup', () => {
-		expect(
-			linkify('See https://example.com/a?b=1. Or www.example.org, or mail ada@example.com!'),
-		).toEqual([
-			{ text: 'See ' },
-			{ text: 'https://example.com/a?b=1', href: 'https://example.com/a?b=1' },
-			{ text: '. Or ' },
-			{ text: 'www.example.org', href: 'https://www.example.org' },
-			{ text: ', or mail ' },
-			{ text: 'ada@example.com', href: 'mailto:ada@example.com' },
-			{ text: '!' },
-		]);
-		expect(linkify('<b>not markup</b>')).toEqual([{ text: '<b>not markup</b>' }]);
 	});
 });

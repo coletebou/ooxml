@@ -43,9 +43,9 @@ export {
 	type KeyLike,
 	type MailCommand,
 } from './keyboard';
+export { linkify } from './linkify';
 export {
 	emailDocument,
-	linkify,
 	sanitizeEmailHtml,
 	sanitizeMessageHtml,
 	type MessageHtml,
