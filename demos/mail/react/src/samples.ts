@@ -1,7 +1,9 @@
-// Real Office files for the demo mailbox's attachments: a workbook and a deck from the public
-// folder (copies of the xlsx and pptx demos' samples), a letter and a blank drawing written by
+// Real Office files for the demo mailbox's attachments: the workbook and the deck of the xlsx and
+// pptx demos (bundled from there as assets, not copied), a letter and a blank drawing written by
 // ooxml-core itself, so the attachment previews open genuine documents.
 import type { DemoSeedOptions } from 'ooxml-core/mail';
+import workbookUrl from '../../../xlsx/demo-vanilla/public/sample.xlsx?url';
+import deckUrl from '../../../pptx/demo-react/public/sample-deck.pptx?url';
 
 async function fetched(path: string): Promise<Uint8Array | undefined> {
 	try {
@@ -39,8 +41,8 @@ async function drawing(): Promise<Uint8Array | undefined> {
 /** The files the demo seed attaches, each optional: a failed one is simply left out. */
 export async function demoFiles(): Promise<NonNullable<DemoSeedOptions['files']>> {
 	const [xlsx, pptx, docx, vsdx] = await Promise.all([
-		fetched('samples/invoice.xlsx'),
-		fetched('samples/roadmap.pptx'),
+		fetched(workbookUrl),
+		fetched(deckUrl),
 		letter().catch(() => undefined),
 		drawing().catch(() => undefined),
 	]);
