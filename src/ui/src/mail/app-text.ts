@@ -2,6 +2,7 @@
 // language), error codes as sentences, and the localised quote wording replies and forwards use.
 import {
 	formatAddress,
+	type ComposeState,
 	type MailErrorCode,
 	type MailMessage,
 	type MailNotice,
@@ -58,6 +59,32 @@ export function noticeText(notice: MailNotice, i18n: MailI18n): string {
 			return i18n.tn('notice.eventsImported', notice.count);
 		case 'undone':
 			return i18n.t('notice.undone');
+	}
+}
+
+/** What the compose window's footer says about its draft. */
+export function composeStatus(compose: ComposeState, i18n: MailI18n): string {
+	if (compose.uploading) return i18n.tn('compose.uploading', compose.uploading);
+	switch (compose.status) {
+		case 'saving':
+			return i18n.t('compose.saving');
+		case 'sending':
+			return i18n.t('compose.sending');
+		case 'saved':
+			return compose.savedAt
+				? i18n.t('compose.savedAt', {
+						time: new Date(compose.savedAt).toLocaleTimeString(i18n.intl, {
+							hour: 'numeric',
+							minute: '2-digit',
+						}),
+					})
+				: i18n.t('compose.savedDraft');
+		case 'error':
+			return compose.error === 'invalid'
+				? i18n.t('compose.checkRecipients')
+				: errorText(compose.error ?? 'server', i18n);
+		default:
+			return '';
 	}
 }
 

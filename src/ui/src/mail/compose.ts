@@ -1,9 +1,11 @@
 // <mail-compose>: the compose window. Rich text is edited in place with the browser's editing
-// commands; pasted and quoted HTML go through the message sanitiser first (remote images are
-// dropped, so composing never loads a tracker). Every edit is an event; the client saves the draft
-// after a quiet moment, and Ctrl/Cmd+Enter sends. An address still being typed is part of the draft
-// before the window closes or sends (`commitRecipients()`).
+// commands; quoted, pasted and dropped HTML go through the message sanitiser first (see
+// compose-editor.ts: remote images are dropped, so composing never loads a tracker). Every edit is
+// an event; the client saves the draft after a quiet moment, and Ctrl/Cmd+Enter sends. An address
+// still being typed is part of the draft before the window closes or sends (`commitRecipients()`),
+// and Send waits while picked files are still being read, before they reach the draft.
 import { html, nothing, type PropertyValues } from 'lit';
+import { live } from 'lit/directives/live.js';
 import type {
 	ComposeMode,
 	ComposeState,
@@ -12,22 +14,17 @@ import type {
 	Identity,
 	MailAddress,
 } from 'ooxml-core/mail';
-import { errorText } from './app-text';
+import { composeStatus } from './app-text';
 import { readFiles } from './attachments';
 import { defineOnce, MailElement, mailStyles } from './base';
+import { caretToStart, dropClean, editorHtml, pasteClean } from './compose-editor';
 import { fileSize } from './format';
 import type { MailKey } from './i18n/translator';
 import { icon } from './icons';
 import { defineMailRecipients, type MailRecipients } from './recipients';
-import { sanitizeEmailHtml } from './sanitize';
 import css from './compose.css?raw';
 
 type Patch = Partial<Omit<Draft, 'id' | 'attachments'>>;
-
-const escapeHtml = (text: string): string =>
-	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
-/** Plain text as editor HTML (lines become breaks). */
-const textHtml = (text: string): string => escapeHtml(text).replace(/\r?\n/g, '<br>');
 
 /** The title of the compose window in each mode. */
 const TITLES: Record<ComposeMode, MailKey> = {
@@ -60,6 +57,7 @@ export class MailCompose extends MailElement {
 		showCc: { state: true },
 		showBcc: { state: true },
 		dragging: { state: true },
+		reading: { state: true },
 	};
 	declare compose: ComposeState | null;
 	declare identities: readonly Identity[];
@@ -67,8 +65,12 @@ export class MailCompose extends MailElement {
 	declare showCc: boolean;
 	declare showBcc: boolean;
 	declare dragging: boolean;
+	/** Picked or dropped files still being read, which are not in the draft yet. */
+	declare reading: number;
 	/** The compose session the editor holds, so updates of the same draft keep the caret. */
 	private session = 0;
+	/** A drag started in the editor: a move of its own content, which the browser does. */
+	private moving = false;
 
 	constructor() {
 		super();
@@ -78,6 +80,12 @@ export class MailCompose extends MailElement {
 		this.showCc = false;
 		this.showBcc = false;
 		this.dragging = false;
+		this.reading = 0;
+	}
+
+	/** Files are still being read: sending now would leave them out. */
+	get readingFiles(): boolean {
+		return this.reading > 0;
 	}
 
 	override connectedCallback(): void {
@@ -96,26 +104,14 @@ export class MailCompose extends MailElement {
 		if (compose.session === this.session) return;
 		this.session = compose.session;
 		const draft = compose.draft;
-		editor.innerHTML = draft.html
-			? sanitizeEmailHtml(draft.html, { allowRemote: false }).body
-			: textHtml(draft.text);
+		editor.innerHTML = editorHtml(draft);
 		this.showCc ||= draft.cc.length > 0;
 		this.showBcc ||= draft.bcc.length > 0;
 		const focus = draft.to.length
 			? editor
 			: this.renderRoot.querySelector<HTMLElement>('mail-recipients');
 		focus?.focus();
-		if (focus === editor) this.caretToStart(editor);
-	}
-
-	private caretToStart(editor: HTMLElement): void {
-		const selection = this.ownerDocument.getSelection();
-		if (!selection) return;
-		const range = this.ownerDocument.createRange();
-		range.setStart(editor, 0);
-		range.collapse(true);
-		selection.removeAllRanges();
-		selection.addRange(range);
+		if (focus === editor) caretToStart(this.ownerDocument, editor);
 	}
 
 	private change(patch: Patch): void {
@@ -152,42 +148,24 @@ export class MailCompose extends MailElement {
 		this.edited();
 	}
 
-	private paste(event: ClipboardEvent): void {
-		const markup = event.clipboardData?.getData('text/html');
-		if (!markup) return;
-		event.preventDefault();
-		const clean = sanitizeEmailHtml(markup, { allowRemote: false }).body;
-		this.ownerDocument.execCommand('insertHTML', false, clean);
-		this.edited();
+	/** Files dropped anywhere are attached; HTML dropped into the editor goes in clean. */
+	private dropped(event: DragEvent): void {
+		const files = event.dataTransfer?.files;
+		if (files?.length) {
+			event.preventDefault();
+			this.dragging = false;
+			void this.attachFiles(files);
+		} else if (this.editor && dropClean(event, this.editor, this.moving)) this.edited();
 	}
 
 	private async attachFiles(list: FileList | null | undefined): Promise<void> {
-		const files = await readFiles(list);
-		if (files.length) this.emit('mail-draft-attach', { files });
-	}
-
-	private status(compose: ComposeState): string {
-		if (compose.uploading) return this.tn('compose.uploading', compose.uploading);
-		switch (compose.status) {
-			case 'saving':
-				return this.t('compose.saving');
-			case 'sending':
-				return this.t('compose.sending');
-			case 'saved':
-				return compose.savedAt
-					? this.t('compose.savedAt', {
-							time: new Date(compose.savedAt).toLocaleTimeString(this.i18n.intl, {
-								hour: 'numeric',
-								minute: '2-digit',
-							}),
-						})
-					: this.t('compose.savedDraft');
-			case 'error':
-				return compose.error === 'invalid'
-					? this.t('compose.checkRecipients')
-					: errorText(compose.error ?? 'server', this.i18n);
-			default:
-				return '';
+		if (!list?.length) return;
+		this.reading++;
+		try {
+			const files = await readFiles(list);
+			if (files.length) this.emit('mail-draft-attach', { files });
+		} finally {
+			this.reading--;
 		}
 	}
 
@@ -205,6 +183,9 @@ export class MailCompose extends MailElement {
 		if (!compose) return nothing;
 		const draft = compose.draft;
 		const title = this.t(TITLES[compose.mode]);
+		// Each option says whether it is the sender: the select's own value is set before its options
+		// exist on the first render, and `live` sets it again once the person picked another.
+		const sender = draft.identityId ?? this.identities[0]?.id;
 		return html`<section
 			class=${`compose${this.dragging ? ' dragging' : ''}`}
 			role="dialog"
@@ -215,12 +196,7 @@ export class MailCompose extends MailElement {
 				this.dragging = true;
 			}}
 			@dragleave=${() => (this.dragging = false)}
-			@drop=${(e: DragEvent) => {
-				if (!e.dataTransfer?.files.length) return;
-				e.preventDefault();
-				this.dragging = false;
-				void this.attachFiles(e.dataTransfer.files);
-			}}
+			@drop=${(e: DragEvent) => this.dropped(e)}
 		>
 			<header>
 				<h2>${draft.subject || title}</h2>
@@ -238,7 +214,7 @@ export class MailCompose extends MailElement {
 					? html`<label class="from"
 							><span>${this.t('compose.from')}</span>
 							<select
-								.value=${draft.identityId ?? this.identities[0]!.id}
+								.value=${live(sender)}
 								@change=${(e: Event) => {
 									const identity = this.identities.find(
 										(i) => i.id === (e.currentTarget as HTMLSelectElement).value,
@@ -250,7 +226,7 @@ export class MailCompose extends MailElement {
 										});
 								}}
 							>
-								${this.identities.map((i) => html`<option value=${i.id}>${i.name ? `${i.name} <${i.email}>` : i.email}</option>`)}
+								${this.identities.map((i) => html`<option value=${i.id} ?selected=${i.id === sender}>${i.name ? `${i.name} <${i.email}>` : i.email}</option>`)}
 							</select></label
 						>`
 					: nothing
@@ -292,7 +268,9 @@ export class MailCompose extends MailElement {
 				aria-multiline="true"
 				aria-label=${this.t('compose.body')}
 				@input=${() => this.edited()}
-				@paste=${(e: ClipboardEvent) => this.paste(e)}
+				@paste=${(e: ClipboardEvent) => pasteClean(e, this.ownerDocument) && this.edited()}
+				@dragstart=${() => (this.moving = true)}
+				@dragend=${() => (this.moving = false)}
 			></div>
 			${
 				draft.attachments.length
@@ -318,7 +296,7 @@ export class MailCompose extends MailElement {
 				<button
 					type="button"
 					class="send"
-					?disabled=${compose.status === 'sending' || compose.uploading > 0}
+					?disabled=${compose.status === 'sending' || compose.uploading > 0 || this.reading > 0}
 					@click=${() => this.handOver('mail-draft-send')}
 				>
 					${icon('mail-sent')}<span>${this.t('compose.send')}</span>
@@ -337,7 +315,7 @@ export class MailCompose extends MailElement {
 					/>
 				</label>
 				<span class=${`status${compose.status === 'error' ? ' error' : ''}`} role="status"
-					>${this.status(compose)}</span
+					>${composeStatus(compose, this.i18n)}</span
 				>
 				<button
 					type="button"

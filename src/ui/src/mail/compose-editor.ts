@@ -1,0 +1,92 @@
+// The rich-text editor of <mail-compose>: what it starts with (the draft's HTML, else its text as
+// lines) and what arrives in it from elsewhere. A quoted message, a paste and a drop of HTML (from
+// another page or from this one) all go through the message sanitiser first, so remote images are
+// dropped and composing never loads a tracker. Plain text the browser inserts itself: it cannot
+// load anything. New code.
+import type { Draft } from 'ooxml-core/mail';
+import { sanitizeEmailHtml } from './sanitize';
+
+const escapeHtml = (text: string): string =>
+	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+/** What the editor shows for a draft: its HTML through the sanitiser, else its text as lines. */
+export function editorHtml(draft: Pick<Draft, 'html' | 'text'>): string {
+	return draft.html
+		? sanitizeEmailHtml(draft.html, { allowRemote: false }).body
+		: escapeHtml(draft.text).replace(/\r?\n/g, '<br>');
+}
+
+export function caretToStart(doc: Document, editor: HTMLElement): void {
+	const selection = doc.getSelection();
+	if (!selection) return;
+	const range = doc.createRange();
+	range.setStart(editor, 0);
+	range.collapse(true);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+
+const insertClean = (doc: Document, markup: string): void => {
+	doc.execCommand('insertHTML', false, sanitizeEmailHtml(markup, { allowRemote: false }).body);
+};
+
+/** A paste of HTML, inserted clean instead of as the browser would; true when it was. */
+export function pasteClean(event: ClipboardEvent, doc: Document): boolean {
+	const markup = event.clipboardData?.getData('text/html');
+	if (!markup) return false;
+	event.preventDefault();
+	insertClean(doc, markup);
+	return true;
+}
+
+/**
+ * Where a drop at (`x`, `y`) lands in the editor, as the caret: the point under it (through the
+ * editor's shadow root where the browser can look into one), else where the caret already is in the
+ * editor, else the end.
+ */
+function caretAtDrop(editor: HTMLElement, x: number, y: number): void {
+	const doc = editor.ownerDocument;
+	const selection = doc.getSelection();
+	if (!selection) return;
+	const root = editor.getRootNode();
+	const point = doc.caretPositionFromPoint?.(
+		x,
+		y,
+		root instanceof ShadowRoot ? { shadowRoots: [root] } : undefined,
+	);
+	let range: Range | null = null;
+	if (point && editor.contains(point.offsetNode)) {
+		range = doc.createRange();
+		range.setStart(point.offsetNode, point.offset);
+	} else {
+		const fallback = doc.caretRangeFromPoint?.(x, y);
+		if (fallback && editor.contains(fallback.startContainer)) range = fallback;
+	}
+	if (!range) {
+		const current = selection.rangeCount ? selection.getRangeAt(0) : null;
+		if (current && editor.contains(current.startContainer)) return;
+		range = doc.createRange();
+		range.selectNodeContents(editor);
+		range.collapse(false);
+	}
+	range.collapse(true);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+
+/**
+ * HTML dropped into the editor from elsewhere (another page, the reading pane), inserted clean at
+ * the drop point instead of by the browser; true when it was. The drop event is the one to take:
+ * a browser can send the `beforeinput` of a drop to the shadow host, outside the editor. A move
+ * inside the editor (`moving`) stays the browser's: it moves the editor's own, already clean,
+ * content, and it takes the text out of where it was.
+ */
+export function dropClean(event: DragEvent, editor: HTMLElement, moving: boolean): boolean {
+	const markup = event.dataTransfer?.getData('text/html');
+	const target = event.composedPath()[0];
+	if (moving || !markup || !(target instanceof Node) || !editor.contains(target)) return false;
+	event.preventDefault();
+	caretAtDrop(editor, event.clientX, event.clientY);
+	insertClean(editor.ownerDocument, markup);
+	return true;
+}

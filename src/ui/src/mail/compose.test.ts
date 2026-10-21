@@ -7,7 +7,8 @@ type Updating = HTMLElement & { updateComplete: Promise<boolean> };
 beforeAll(() => defineMailCompose());
 afterEach(() => {
 	document.body.replaceChildren();
-	Reflect.deleteProperty(document, 'execCommand');
+	for (const name of ['execCommand', 'getSelection', 'caretPositionFromPoint'])
+		Reflect.deleteProperty(document, name);
 });
 
 const composeState = (draft: Partial<Draft> = {}): ComposeState => ({
@@ -90,6 +91,120 @@ describe('<mail-compose>', () => {
 		expect(inserted).toHaveLength(1);
 		expect(inserted[0]).not.toContain('t.example');
 		expect(inserted[0]).toContain('line 4');
+	});
+
+	it('drops HTML into the editor through the sanitiser, where the browser would put it', async () => {
+		const el = await mount(composeState());
+		const inserted: [string, Range | undefined][] = [];
+		// jsdom has no caret lookup by point and keeps no selection inside a shadow tree, so the test
+		// answers the first and records what the editor asks of the second.
+		const ranges: Range[] = [];
+		let point: { offsetNode: Node; offset: number } | null = null;
+		Object.assign(document, {
+			execCommand: (command: string, _ui: boolean, value: string) => {
+				if (command === 'insertHTML') inserted.push([value, ranges.at(-1)]);
+				return true;
+			},
+			getSelection: () => ({
+				rangeCount: 0,
+				removeAllRanges: () => {},
+				addRange: (range: Range) => ranges.push(range),
+			}),
+			caretPositionFromPoint: () => point,
+		});
+		Object.defineProperty(editor(el), 'innerText', { get: () => editor(el).textContent });
+		editor(el).innerHTML = '<p>first</p><p>second</p>';
+		const second = editor(el).lastChild!;
+		const seen = record(el, 'mail-draft-change');
+		const drop = (on: Node, types: Record<string, string>) => {
+			const event = new Event('drop', { bubbles: true, cancelable: true, composed: true });
+			Object.defineProperty(event, 'dataTransfer', {
+				value: {
+					files: [],
+					types: Object.keys(types),
+					getData: (kind: string) => types[kind] ?? '',
+				},
+			});
+			on.dispatchEvent(event);
+			return event;
+		};
+		point = { offsetNode: second.firstChild!, offset: 3 };
+		const html = drop(second, { 'text/html': TRACKED, 'text/plain': 'line 0' });
+		expect(html.defaultPrevented).toBe(true);
+		expect(inserted).toHaveLength(1);
+		expect(inserted[0]![0]).not.toContain('t.example');
+		expect(inserted[0]![0]).toContain('line 4');
+		expect([inserted[0]![1]?.startContainer, inserted[0]![1]?.startOffset]).toEqual([
+			second.firstChild,
+			3,
+		]);
+		expect(seen).toHaveLength(1);
+		// No point to go by: the end of the editor.
+		point = null;
+		expect(drop(second, { 'text/html': '<b>x</b>' }).defaultPrevented).toBe(true);
+		expect([inserted[1]![1]?.startContainer, inserted[1]![1]?.startOffset]).toEqual([
+			editor(el),
+			2,
+		]);
+		// Plain text cannot load anything, and a move inside the editor is the editor's own
+		// content: the browser does both itself.
+		expect(drop(second, { 'text/plain': 'just words' }).defaultPrevented).toBe(false);
+		editor(el).dispatchEvent(new Event('dragstart', { bubbles: true, composed: true }));
+		expect(drop(second, { 'text/html': '<b>moved</b>' }).defaultPrevented).toBe(false);
+		editor(el).dispatchEvent(new Event('dragend', { bubbles: true, composed: true }));
+		expect(drop(second, { 'text/html': '<b>x</b>' }).defaultPrevented).toBe(true);
+		expect(inserted).toHaveLength(3);
+		// Dropped on the subject field, HTML becomes plain text there: the browser's to do.
+		expect(
+			drop(el.shadowRoot!.querySelector('.subject')!, { 'text/html': '<b>x</b>' }).defaultPrevented,
+		).toBe(false);
+	});
+
+	it('shows the identity a draft is sent from, also after another was picked', async () => {
+		const identities = ['one', 'two', 'three'].map((id) => ({
+			id,
+			name: id,
+			email: `${id}@example.com`,
+			replyTo: [],
+			bcc: [],
+			textSignature: '',
+			htmlSignature: '',
+		}));
+		const el = document.createElement('mail-compose') as MailCompose;
+		el.identities = identities;
+		el.compose = composeState({ identityId: 'two' });
+		document.body.append(el);
+		await settle(el);
+		const from = el.shadowRoot!.querySelector('select')!;
+		expect(from.value).toBe('two');
+		from.value = 'one';
+		from.dispatchEvent(new Event('change'));
+		el.compose = { ...composeState({ identityId: 'three' }), session: 2 };
+		await settle(el);
+		expect(from.value).toBe('three');
+	});
+
+	it('keeps Send off while picked files are still being read', async () => {
+		const el = await mount(composeState({ to: [{ name: '', email: 'ada@example.com' }] }));
+		const seen = record(el, 'mail-draft-attach');
+		let read: (bytes: ArrayBuffer) => void = () => {};
+		const file = {
+			name: 'big.bin',
+			type: 'application/octet-stream',
+			arrayBuffer: () => new Promise<ArrayBuffer>((resolve) => (read = resolve)),
+		};
+		const drop = new Event('drop', { bubbles: true, cancelable: true, composed: true });
+		Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+		el.shadowRoot!.querySelector('section')!.dispatchEvent(drop);
+		await settle(el);
+		const send = el.shadowRoot!.querySelector<HTMLButtonElement>('.send')!;
+		expect(send.disabled).toBe(true);
+		expect(el.readingFiles).toBe(true);
+		read(new Uint8Array([1, 2]).buffer);
+		await vi.waitFor(() => expect(seen).toHaveLength(1));
+		await settle(el);
+		expect(send.disabled).toBe(false);
+		expect(el.readingFiles).toBe(false);
 	});
 
 	it('puts the focus in the To field of a new message', async () => {
