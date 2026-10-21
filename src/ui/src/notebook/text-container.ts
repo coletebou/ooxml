@@ -101,6 +101,8 @@ export class NotebookText extends NotebookElement {
 	declare autofocus: boolean;
 	#view: EditorView | null = null;
 	#bound: TextBinding | null = null;
+	/** The peers' names and colours the carets were last drawn with. */
+	#drawnPeers = '';
 
 	constructor() {
 		super();
@@ -141,8 +143,13 @@ export class NotebookText extends NotebookElement {
 
 	protected override updated(changed: Map<string, unknown>): void {
 		if (changed.has('binding') && this.binding !== this.#bound) this.#mount();
-		if (changed.has('peers') && this.#view)
+		// The app's state gives a new peer list on every change; carets are only redrawn when a
+		// name or colour they show changed (y-prosemirror moves them on its own).
+		const peers = this.peers.map((p) => `${p.clientId}:${p.name}:${p.color}`).join('|');
+		if (changed.has('peers') && this.#view && peers !== this.#drawnPeers) {
+			this.#drawnPeers = peers;
 			this.#view.dispatch(refreshRemoteCursors(this.#view.state));
+		}
 		if (changed.has('autofocus') && this.autofocus) queueMicrotask(() => this.focusEnd());
 	}
 
@@ -160,6 +167,7 @@ export class NotebookText extends NotebookElement {
 		this.#view?.destroy();
 		this.#view = null;
 		this.#bound = null;
+		this.#drawnPeers = '';
 	}
 
 	#peer(clientId: number): { name: string; color: string } {
