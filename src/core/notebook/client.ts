@@ -87,6 +87,7 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 			ready,
 			loading,
 			mode: config.mode,
+			persistent: storage.persistent?.() ?? true,
 			user: {
 				...user,
 				color: open?.session.identity.userColor ?? options.user.color ?? DEFAULT_COLOR,
@@ -190,13 +191,26 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		return out;
 	};
 
-	async function switchTo(
+	// One switch at a time: two quick picks would otherwise both close the same notebook and both
+	// open one, leaving a session nobody closes (a phantom peer in its room).
+	let switching: Promise<void> = Promise.resolve();
+	function switchTo(
 		id: string,
 		seed?: (ctx: structure.NotebookEditContext) => void,
-		{ force = false } = {},
+		options: { force?: boolean } = {},
+	): Promise<void> {
+		const run = switching.then(() => switchNow(id, seed, options));
+		switching = run.catch(() => undefined);
+		return run;
+	}
+
+	async function switchNow(
+		id: string,
+		seed?: (ctx: structure.NotebookEditContext) => void,
+		{ force = false }: { force?: boolean } = {},
 	): Promise<void> {
 		const entry = readRegistry(reg).find((e) => e.id === id && !e.deleted);
-		if (!entry || destroyed) return;
+		if (!entry || destroyed || open?.id === id) return;
 		const previous = open;
 		// The open notebook closes only once its last changes are saved. When the device refuses them
 		// (storage full), it stays open, so nothing typed since is lost (save-failed says why); only
@@ -251,6 +265,11 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		input: { name?: string; color?: string },
 		seed?: (ctx: structure.NotebookEditContext) => void,
 	): Promise<string> {
+		// A notebook made now could not be listed: the stored list was not readable and is left alone.
+		if (registry.readFailed()) {
+			notice('open-failed');
+			throw new Error('The notebook list could not be read.');
+		}
 		const id = `n${randomToken()}${randomToken()}`;
 		const count = readRegistry(reg).length;
 		const name = input.name?.trim() || (count ? `${names.notebook} ${count + 1}` : names.notebook);
@@ -291,6 +310,16 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 			await create({}).catch(() => undefined);
 		refresh();
 	})();
+
+	/** Adds to `page` (default the selected one) while it is in the open notebook; else nothing. */
+	const onPage = (
+		page: string | undefined,
+		fn: (o: OpenNotebook, target: string) => string,
+	): string =>
+		discrete((o) => {
+			const target = page ?? pageId;
+			return readPages(o.types).some((p) => p.id === target) ? fn(o, target) : '';
+		}, '');
 
 	const onSelected = (fn: (o: OpenNotebook, page: string) => void): void => {
 		if (open && pageId) discrete((o) => fn(o, pageId), undefined);
@@ -401,15 +430,20 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		deletePage: (id) => discrete((o) => structure.deletePage(o.edit, id), null),
 		restore: (batch) => discrete((o) => void structure.restoreBatch(o.edit, batch), undefined),
 
-		addText: (at, content) =>
-			discrete(
-				(o) => canvas.addText(o.edit, pageId, { ...at, ...(content ? { content } : {}) }),
-				'',
+		addText: (at, content, page) =>
+			onPage(page, (o, target) =>
+				canvas.addText(o.edit, target, { ...at, ...(content ? { content } : {}) }),
 			),
-		addImage: (input) =>
-			discrete((o) => canvas.addImage(o.edit, pageId, input) || (notice('file-too-large'), ''), ''),
-		addFile: (input) =>
-			discrete((o) => canvas.addFile(o.edit, pageId, input) || (notice('file-too-large'), ''), ''),
+		addImage: (input, page) =>
+			onPage(
+				page,
+				(o, target) => canvas.addImage(o.edit, target, input) || (notice('file-too-large'), ''),
+			),
+		addFile: (input, page) =>
+			onPage(
+				page,
+				(o, target) => canvas.addFile(o.edit, target, input) || (notice('file-too-large'), ''),
+			),
 		moveContainers: (ids, dx, dy) => onSelected((o) => canvas.moveContainers(o.edit, ids, dx, dy)),
 		resizeContainer: (id, size) => onSelected((o) => canvas.resizeContainer(o.edit, id, size)),
 		bringToFront: (id) => onSelected((o) => canvas.bringToFront(o.edit, id)),

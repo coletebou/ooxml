@@ -40,6 +40,8 @@ export interface NotebookState {
 	loading: boolean;
 	status: ConnectionStatus | 'closed';
 	mode: 'local' | 'server';
+	/** False when the device storage only lasts for this session (no IndexedDB, for example). */
+	persistent: boolean;
 	user: { id: string; name: string; color: string };
 	notebooks: NotebookEntry[];
 	notebookId: string;
@@ -136,9 +138,15 @@ export interface NotebookClient {
 	deletePage: (id: string) => string | null;
 	restore: (batch: string) => void;
 
-	addText: (at: { x: number; y: number; width?: number }, content?: readonly RichNode[]) => string;
-	addImage: (input: BinaryItemInput) => string;
-	addFile: (input: BinaryItemInput) => string;
+	addText: (
+		at: { x: number; y: number; width?: number },
+		content?: readonly RichNode[],
+		pageId?: string,
+	) => string;
+	/** On the selected page, or on `pageId` when it is still in the open notebook (else nothing). */
+	addImage: (input: BinaryItemInput, pageId?: string) => string;
+	/** On the selected page, or on `pageId` when it is still in the open notebook (else nothing). */
+	addFile: (input: BinaryItemInput, pageId?: string) => string;
 	moveContainers: (ids: readonly string[], dx: number, dy: number) => void;
 	resizeContainer: (id: string, size: { width: number; height?: number }) => void;
 	bringToFront: (id: string) => void;

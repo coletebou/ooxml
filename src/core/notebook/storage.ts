@@ -8,6 +8,8 @@ export interface NotebookStorage {
 	load: (key: string) => Promise<Uint8Array | null>;
 	save: (key: string, bytes: Uint8Array) => Promise<void>;
 	remove: (key: string) => Promise<void>;
+	/** False when what is saved only lasts for this session (memory); omitted means it persists. */
+	persistent?: () => boolean;
 }
 
 export const REGISTRY_KEY = 'registry';
@@ -20,6 +22,7 @@ export function createMemoryStorage(): NotebookStorage & { readonly keys: () => 
 		load: async (key) => data.get(key)?.slice() ?? null,
 		save: async (key, bytes) => void data.set(key, bytes.slice()),
 		remove: async (key) => void data.delete(key),
+		persistent: () => false,
 		keys: () => [...data.keys()],
 	};
 }

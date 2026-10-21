@@ -63,8 +63,10 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 		const bytes = await storage?.load(key);
 		if (bytes?.length) Y.applyUpdate(doc, bytes, NOTEBOOK_STORAGE_ORIGIN);
 	} catch (error) {
-		// A corrupt or unreadable copy is ignored: the room (or a peer) supplies the state again.
-		options.onError(error, 'load');
+		// A stored copy that cannot be read (a transient storage error, damaged bytes) is not opened:
+		// an empty document would be saved over it with the first change. The caller reports it.
+		doc.destroy();
+		throw error;
 	}
 	const context = (origin: unknown): NotebookEditContext => ({
 		types,

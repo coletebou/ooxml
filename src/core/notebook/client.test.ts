@@ -313,9 +313,98 @@ describe('notebook client when storage fails or is missing', () => {
 		await settle();
 		expect(client.getState().notebooks).toEqual([]);
 		expect(notices).toContain('open-failed');
-		await client.createNotebook({ name: 'Made while unreadable' }).catch(() => undefined);
+		// A notebook made now could not be listed, so none is made.
+		await expect(client.createNotebook({ name: 'Made while unreadable' })).rejects.toThrow();
+		expect(client.getState().notebooks).toEqual([]);
 		await client.flush().catch(() => undefined);
 		expect(await inner.load(REGISTRY_KEY)).toEqual(stored);
+	});
+
+	it('does not open a notebook whose stored copy cannot be read, so nothing is saved over it', async () => {
+		const inner = createMemoryStorage();
+		const before = start(inner, createChannelHub());
+		await before.whenReady();
+		await settle();
+		const id = before.getState().notebookId;
+		before.renamePage(before.getState().pageId, 'On disk');
+		await before.flush();
+		await before.destroy();
+		const key = `notebook:${id}`;
+		const stored = await inner.load(key);
+		const storage: NotebookStorage = {
+			...inner,
+			load: async (k) => {
+				if (k === key) throw new Error('read failed');
+				return inner.load(k);
+			},
+		};
+		const notices: string[] = [];
+		const client = start(storage, createChannelHub());
+		client.on('notice', (n) => notices.push(n.code));
+		await client.whenReady();
+		await settle(20);
+		expect(client.getState().notebook).toBeNull();
+		expect(notices).toContain('open-failed');
+		expect(await inner.load(key)).toEqual(stored);
+	});
+
+	it('reports whether the device keeps what is saved', async () => {
+		const memory = start(createMemoryStorage(), createChannelHub());
+		await memory.whenReady();
+		expect(memory.getState().persistent).toBe(false);
+		const { storage } = flaky();
+		const kept = start({ ...storage, persistent: () => true }, createChannelHub());
+		await kept.whenReady();
+		expect(kept.getState().persistent).toBe(true);
+	});
+});
+
+describe('notebook client switching and adding', () => {
+	it('runs quick notebook switches one after another, leaving one session open', async () => {
+		const hub = createChannelHub();
+		const client = start(createMemoryStorage(), hub);
+		await client.whenReady();
+		await settle();
+		const first = client.getState().notebookId;
+		const second = await client.createNotebook({ name: 'Second' });
+		await opened(client, second);
+		const settled = hub.open();
+		await Promise.all([
+			client.openNotebook(first),
+			client.openNotebook(second),
+			client.openNotebook(first),
+		]);
+		await opened(client, first);
+		await settle(20);
+		expect(hub.open()).toBe(settled);
+	});
+
+	it('adds to the page it was asked for, and to nothing once that page is in another notebook', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		const original = client.getState().pageId;
+		const other = client.createPage({ title: 'Other' });
+		await settle();
+		expect(client.getState().pageId).toBe(other);
+		const input = {
+			x: 10,
+			y: 10,
+			width: 40,
+			height: 40,
+			name: 'a.png',
+			mime: 'image/png',
+			bytes: new Uint8Array([1]),
+		};
+		expect(client.addImage(input, original)).not.toBe('');
+		expect(client.getState().containers).toHaveLength(0);
+		client.selectPage(original);
+		await settle();
+		expect(client.getState().containers).toHaveLength(1);
+		const second = await client.createNotebook({ name: 'Second' });
+		await opened(client, second);
+		expect(client.addImage(input, original)).toBe('');
+		expect(client.addText({ x: 0, y: 0 }, undefined, original)).toBe('');
 	});
 });
 
