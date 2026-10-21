@@ -1,0 +1,238 @@
+// The shape of the mail client: one immutable `MailState` snapshot and plain actions, the surface
+// every binding's raw hook wraps (React `useMail`, ...). Anything a screen shows is in the state;
+// anything a button does is an action. New code.
+import type { CalendarEvent } from '../calendar/model';
+import type { ComposeMode, QuoteFormat } from './compose';
+import type { Contact, ContactStore } from './contacts';
+import type { CalendarStore } from './calendar-store';
+import type {
+	Draft,
+	EmailSummary,
+	Identity,
+	MailAccount,
+	MailAddress,
+	MailAttachment,
+	Mailbox,
+	MailMessage,
+} from './model';
+import type { MailErrorCode, MailTransport } from './transport';
+
+export type MailStatus = 'connecting' | 'ready' | 'error' | 'closed';
+
+/** A mailbox as the folder pane lists it: special-use folders first, children under parents. */
+export interface MailboxView extends Mailbox {
+	depth: number;
+}
+
+/** One row of the message list: a conversation (or a single message when threading is off). */
+export interface ConversationView {
+	id: string;
+	/** Every message, in reading order. */
+	emailIds: readonly string[];
+	/** The first message's subject. */
+	subject: string;
+	/** Senders, in the order they first wrote, each once. */
+	participants: readonly MailAddress[];
+	/** Who the newest message went to (To, then Cc): what Sent and Drafts show. */
+	recipients: readonly MailAddress[];
+	/** The newest message's preview. */
+	preview: string;
+	date: number;
+	count: number;
+	unread: number;
+	flagged: boolean;
+	hasAttachment: boolean;
+	draft: boolean;
+}
+
+export interface OpenMessageView {
+	summary: EmailSummary;
+	depth: number;
+	/** The full message once loaded. */
+	message: MailMessage | null;
+	error: MailErrorCode | null;
+}
+
+/** The conversation in the reading pane. */
+export interface OpenConversationView {
+	id: string;
+	subject: string;
+	messages: readonly OpenMessageView[];
+}
+
+export type ComposeStatus = 'editing' | 'saving' | 'saved' | 'sending' | 'error';
+
+export interface ComposeState {
+	/** Changes each time a compose window opens, so a UI knows to load the new draft's body. */
+	session: number;
+	mode: ComposeMode;
+	draft: Draft;
+	status: ComposeStatus;
+	/** When the draft was last saved on the server. */
+	savedAt: number | null;
+	error: MailErrorCode | null;
+	/** Files still uploading. */
+	uploading: number;
+}
+
+export type SearchScope = 'mailbox' | 'all';
+
+export interface MailState {
+	status: MailStatus;
+	error: MailErrorCode | null;
+	account: MailAccount | null;
+	identities: readonly Identity[];
+	canSend: boolean;
+	mailboxes: readonly MailboxView[];
+	/** The open folder (kept while searching, so a search can be scoped to it). */
+	mailboxId: string | null;
+	threaded: boolean;
+	/** The search box text; empty when not searching. */
+	query: string;
+	searchScope: SearchScope;
+	/** The list is loading (a folder switch, a search, a refresh). */
+	loading: boolean;
+	conversations: readonly ConversationView[];
+	/** Messages the folder or search holds on the server; may exceed what is loaded. */
+	total: number;
+	/** Messages loaded into the list. */
+	loaded: number;
+	selection: readonly string[];
+	/** The list cursor (keyboard focus), a conversation id. */
+	focusedId: string | null;
+	open: OpenConversationView | null;
+	compose: ComposeState | null;
+	contacts: readonly Contact[];
+	events: readonly CalendarEvent[];
+}
+
+/** What just happened, for a toast; `undo` reverses it while the toast is shown. */
+export type MailNotice =
+	| {
+			kind: 'done';
+			action:
+				| 'sent'
+				| 'saved'
+				| 'moved'
+				| 'archived'
+				| 'junk'
+				| 'deleted'
+				| 'discarded'
+				| 'imported'
+				| 'contactsImported'
+				| 'eventsImported'
+				| 'undone';
+			count: number;
+			/** Mailbox name for `moved`. */
+			target?: string;
+			undo?: () => Promise<void>;
+	  }
+	| { kind: 'error'; action: MailAction; code: MailErrorCode }
+	/** Cards a vCard import could not read. */
+	| { kind: 'warning'; action: 'contactsImported'; skipped: number }
+	/** What an iCalendar import could not represent, one line per problem. */
+	| { kind: 'warning'; action: 'eventsImported'; unsupported: readonly string[] };
+
+export type MailAction =
+	| 'connect'
+	| 'load'
+	| 'open'
+	| 'update'
+	| 'move'
+	| 'delete'
+	| 'mailbox'
+	| 'save'
+	| 'send'
+	| 'upload'
+	| 'download'
+	| 'import'
+	| 'contacts'
+	| 'calendar';
+
+export interface FileInput {
+	name: string;
+	type: string;
+	bytes: Uint8Array;
+}
+
+export interface MailClientOptions {
+	transport: MailTransport;
+	contacts?: ContactStore;
+	calendar?: CalendarStore;
+	/** The words around quoted replies and forwards; English when omitted. */
+	quoteFormat?: QuoteFormat;
+	now?: () => number;
+	/** Quiet time before a draft is saved automatically. Default 2 seconds. */
+	draftSaveMs?: number;
+	/** Newest messages a folder or search loads at first; `loadMore` raises it. Default 2000. */
+	listLimit?: number;
+	/** Open conversations are marked read. Default true. */
+	markReadOnOpen?: boolean;
+	/** Thread the list into conversations. Default true. */
+	threaded?: boolean;
+	setTimeout?: (callback: () => void, ms: number) => unknown;
+	clearTimeout?: (handle: unknown) => void;
+}
+
+/** Conversation ids; omitted means the selection, or else the open conversation. */
+export type Targets = readonly string[] | undefined;
+
+export interface MailClient {
+	getState(): MailState;
+	/** Called after every state change (coalesced per tick); returns the unsubscribe function. */
+	subscribe(listener: () => void): () => void;
+	onNotice(listener: (notice: MailNotice) => void): () => void;
+	refresh(): Promise<void>;
+	selectMailbox(id: string): Promise<void>;
+	setThreaded(threaded: boolean): void;
+	search(query: string): Promise<void>;
+	setSearchScope(scope: SearchScope): Promise<void>;
+	loadMore(): Promise<void>;
+	select(ids: readonly string[]): void;
+	toggleSelected(id: string): void;
+	/** Extend the selection from the cursor to `id` (shift-click). */
+	selectRange(id: string): void;
+	selectAll(): void;
+	clearSelection(): void;
+	focus(id: string | null): void;
+	/** Move the cursor one row; returns the new cursor. */
+	focusNext(step?: 1 | -1): string | null;
+	open(id: string): Promise<void>;
+	close(): void;
+	markRead(read: boolean, ids?: Targets): Promise<void>;
+	toggleRead(ids?: Targets): Promise<void>;
+	setFlagged(flagged: boolean, ids?: Targets): Promise<void>;
+	toggleFlagged(ids?: Targets): Promise<void>;
+	moveTo(mailboxId: string, ids?: Targets): Promise<void>;
+	archive(ids?: Targets): Promise<void>;
+	markJunk(ids?: Targets): Promise<void>;
+	/** To Trash; messages already in Trash are deleted for good. */
+	remove(ids?: Targets): Promise<void>;
+	createMailbox(name: string, parentId?: string | null): Promise<void>;
+	renameMailbox(id: string, name: string): Promise<void>;
+	deleteMailbox(id: string): Promise<void>;
+	compose(mode: ComposeMode, emailId?: string): Promise<void>;
+	/** Reopen a saved draft from Drafts in the compose window. */
+	editDraft(emailId: string): Promise<void>;
+	updateDraft(patch: Partial<Omit<Draft, 'id' | 'attachments'>>): void;
+	attach(files: readonly FileInput[]): Promise<void>;
+	detach(blobId: string): void;
+	saveDraft(): Promise<void>;
+	/** True when the message was handed to the server. */
+	send(): Promise<boolean>;
+	discardDraft(): Promise<void>;
+	/** Close the compose window, saving a draft that has anything in it. */
+	closeCompose(): Promise<void>;
+	download(attachment: MailAttachment): Promise<Uint8Array>;
+	exportEml(emailId: string): Promise<FileInput>;
+	importEml(files: readonly FileInput[], mailboxId?: string): Promise<void>;
+	saveContact(contact: Contact): Promise<void>;
+	deleteContact(id: string): Promise<void>;
+	importVCards(text: string): Promise<number>;
+	exportVCards(ids?: readonly string[]): string;
+	saveEvent(event: CalendarEvent): Promise<void>;
+	deleteEvent(id: string): Promise<void>;
+	importIcs(text: string, zone?: string): Promise<number>;
+	exportIcs(ids?: readonly string[]): string;
+	destroy(): void;
+}

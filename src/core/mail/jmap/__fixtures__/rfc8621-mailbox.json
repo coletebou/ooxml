@@ -1,0 +1,127 @@
+{
+	"source": "RFC 8621 section 2.6, the Mailbox/get, Mailbox/changes and Mailbox/set examples",
+	"changes": "Copied exactly except what JSON needs: the Mailbox/get list shows one Mailbox in full and elides the rest; the second (\"Important mail\", id MB674cc24095db49ce, whose other properties the RFC elides) is completed with plausible values, and \"...\" removed.",
+	"getRequest": ["Mailbox/get", { "accountId": "u33084183", "ids": null }, "0"],
+	"getResponse": [
+		"Mailbox/get",
+		{
+			"accountId": "u33084183",
+			"state": "78540",
+			"list": [
+				{
+					"id": "MB23cfa8094c0f41e6",
+					"name": "Inbox",
+					"parentId": null,
+					"role": "inbox",
+					"sortOrder": 10,
+					"totalEmails": 16307,
+					"unreadEmails": 13905,
+					"totalThreads": 5833,
+					"unreadThreads": 5128,
+					"myRights": {
+						"mayAddItems": true,
+						"mayRename": false,
+						"maySubmit": true,
+						"mayDelete": false,
+						"maySetKeywords": true,
+						"mayRemoveItems": true,
+						"mayCreateChild": true,
+						"maySetSeen": true,
+						"mayReadItems": true
+					},
+					"isSubscribed": true
+				},
+				{
+					"id": "MB674cc24095db49ce",
+					"name": "Important mail",
+					"parentId": null,
+					"role": null,
+					"sortOrder": 20,
+					"totalEmails": 12,
+					"unreadEmails": 2,
+					"totalThreads": 10,
+					"unreadThreads": 2,
+					"isSubscribed": true
+				}
+			],
+			"notFound": []
+		},
+		"0"
+	],
+	"changesRequest": [
+		["Mailbox/changes", { "accountId": "u33084183", "sinceState": "78540" }, "0"],
+		[
+			"Mailbox/get",
+			{
+				"accountId": "u33084183",
+				"#ids": { "resultOf": "0", "name": "Mailbox/changes", "path": "/created" }
+			},
+			"1"
+		],
+		[
+			"Mailbox/get",
+			{
+				"accountId": "u33084183",
+				"#ids": { "resultOf": "0", "name": "Mailbox/changes", "path": "/updated" },
+				"#properties": { "resultOf": "0", "name": "Mailbox/changes", "path": "/updatedProperties" }
+			},
+			"2"
+		]
+	],
+	"changesResponse": [
+		[
+			"Mailbox/changes",
+			{
+				"accountId": "u33084183",
+				"oldState": "78541",
+				"newState": "78542",
+				"hasMoreChanges": false,
+				"updatedProperties": ["totalEmails", "unreadEmails", "totalThreads", "unreadThreads"],
+				"created": [],
+				"updated": ["MB23cfa8094c0f41e6"],
+				"destroyed": []
+			},
+			"0"
+		],
+		["Mailbox/get", { "accountId": "u33084183", "state": "78542", "list": [], "notFound": [] }, "1"],
+		[
+			"Mailbox/get",
+			{
+				"accountId": "u33084183",
+				"state": "78542",
+				"list": [
+					{
+						"id": "MB23cfa8094c0f41e6",
+						"totalEmails": 16307,
+						"unreadEmails": 13903,
+						"totalThreads": 5833,
+						"unreadThreads": 5127
+					}
+				],
+				"notFound": []
+			},
+			"2"
+		]
+	],
+	"setRequest": [
+		"Mailbox/set",
+		{
+			"accountId": "u33084183",
+			"ifInState": "78542",
+			"update": { "MB674cc24095db49ce": { "name": "Maybe important mail" } },
+			"destroy": ["MB23cfa8094c0f41e6"]
+		},
+		"0"
+	],
+	"setResponse": [
+		"Mailbox/set",
+		{
+			"accountId": "u33084183",
+			"oldState": "78542",
+			"newState": "78549",
+			"updated": { "MB674cc24095db49ce": null },
+			"notDestroyed": { "MB23cfa8094c0f41e6": { "type": "forbidden" } }
+		},
+		"0"
+	]
+}

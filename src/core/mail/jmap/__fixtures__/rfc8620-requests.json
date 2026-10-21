@@ -1,0 +1,148 @@
+{
+	"source": "RFC 8620 sections 3.4.1 (example Response), 3.6.1.1 (problem details), 3.7 (result references) and 7.1.1 (StateChange)",
+	"changes": "Copied exactly except what JSON needs: the \"...\" elisions in the 3.7 response removed, and the line-wrapped problem-details \"detail\" strings joined with single spaces.",
+	"exampleResponse": {
+		"methodResponses": [
+			["method1", { "arg1": 3, "arg2": "foo" }, "c1"],
+			["method2", { "isBlah": true }, "c2"],
+			["anotherResponseFromMethod2", { "data": 10, "yetmoredata": "Hello" }, "c2"],
+			["error", { "type": "unknownMethod" }, "c3"]
+		],
+		"sessionState": "75128aab4b1b"
+	},
+	"unknownCapability": {
+		"type": "urn:ietf:params:jmap:error:unknownCapability",
+		"status": 400,
+		"detail": "The Request object used capability 'https://example.com/apis/foobar', which is not supported by this server."
+	},
+	"limit": {
+		"type": "urn:ietf:params:jmap:error:limit",
+		"limit": "maxSizeRequest",
+		"status": 400,
+		"detail": "The request is larger than the server is willing to process."
+	},
+	"simpleReference": {
+		"methodCalls": [
+			["Foo/changes", { "accountId": "A1", "sinceState": "abcdef" }, "t0"],
+			[
+				"Foo/get",
+				{ "accountId": "A1", "#ids": { "resultOf": "t0", "name": "Foo/changes", "path": "/created" } },
+				"t1"
+			]
+		],
+		"methodResponses": [
+			[
+				"Foo/changes",
+				{
+					"accountId": "A1",
+					"oldState": "abcdef",
+					"newState": "123456",
+					"hasMoreChanges": false,
+					"created": ["f1", "f4"],
+					"updated": [],
+					"destroyed": []
+				},
+				"t0"
+			]
+		],
+		"resolvedIds": ["f1", "f4"]
+	},
+	"threadReference": {
+		"methodCalls": [
+			[
+				"Email/query",
+				{
+					"accountId": "A1",
+					"filter": { "inMailbox": "id_of_inbox" },
+					"sort": [{ "property": "receivedAt", "isAscending": false }],
+					"collapseThreads": true,
+					"position": 0,
+					"limit": 10,
+					"calculateTotal": true
+				},
+				"t0"
+			],
+			[
+				"Email/get",
+				{
+					"accountId": "A1",
+					"#ids": { "resultOf": "t0", "name": "Email/query", "path": "/ids" },
+					"properties": ["threadId"]
+				},
+				"t1"
+			],
+			[
+				"Thread/get",
+				{
+					"accountId": "A1",
+					"#ids": { "resultOf": "t1", "name": "Email/get", "path": "/list/*/threadId" }
+				},
+				"t2"
+			],
+			[
+				"Email/get",
+				{
+					"accountId": "A1",
+					"#ids": { "resultOf": "t2", "name": "Thread/get", "path": "/list/*/emailIds" },
+					"properties": ["from", "receivedAt", "subject"]
+				},
+				"t3"
+			]
+		],
+		"methodResponses": [
+			[
+				"Email/query",
+				{
+					"accountId": "A1",
+					"queryState": "abcdefg",
+					"canCalculateChanges": true,
+					"position": 0,
+					"total": 101,
+					"ids": ["msg1023", "msg223", "msg110", "msg93", "msg91", "msg38", "msg36", "msg33", "msg11", "msg1"]
+				},
+				"t0"
+			],
+			[
+				"Email/get",
+				{
+					"accountId": "A1",
+					"state": "123456",
+					"list": [
+						{ "id": "msg1023", "threadId": "trd194" },
+						{ "id": "msg223", "threadId": "trd114" }
+					],
+					"notFound": []
+				},
+				"t1"
+			],
+			[
+				"Thread/get",
+				{
+					"accountId": "A1",
+					"state": "123456",
+					"list": [
+						{ "id": "trd194", "emailIds": ["msg1020", "msg1021", "msg1023"] },
+						{ "id": "trd114", "emailIds": ["msg201", "msg223"] }
+					],
+					"notFound": []
+				},
+				"t2"
+			]
+		],
+		"resolvedIds": ["msg1020", "msg1021", "msg1023", "msg201", "msg223"]
+	},
+	"stateChange": {
+		"@type": "StateChange",
+		"changed": {
+			"a3123": {
+				"Email": "d35ecb040aab",
+				"EmailDelivery": "428d565f2440",
+				"CalendarEvent": "87accfac587a"
+			},
+			"a43461d": {
+				"Mailbox": "0af7a512ce70",
+				"CalendarEvent": "7a4297cecd76"
+			}
+		}
+	}
+}

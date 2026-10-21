@@ -1,0 +1,130 @@
+import { summary } from './test-support/emails';
+import { threadConversations } from './threading';
+
+const ids = (conversation: { entries: readonly { email: { id: string }; depth: number }[] }) =>
+	conversation.entries.map((entry) => `${entry.email.id}@${entry.depth}`);
+
+describe('threadConversations (RFC 5256 REFERENCES)', () => {
+	it('links replies by References and orders siblings by date', () => {
+		const list = threadConversations([
+			summary('c', { references: ['a@example.test'], minute: 3, subject: 'Re: Plan' }),
+			summary('a', { minute: 1, subject: 'Plan' }),
+			summary('b', { references: ['a@example.test'], minute: 2, subject: 'Re: Plan' }),
+			summary('d', {
+				references: ['a@example.test', 'b@example.test'],
+				minute: 4,
+				subject: 'Re: Plan',
+			}),
+		]);
+		expect(list).toHaveLength(1);
+		expect(ids(list[0]!)).toEqual(['a@0', 'b@1', 'd@2', 'c@1']);
+		expect(list[0]!.id).toBe('a');
+		expect(list[0]!.latest.id).toBe('d');
+	});
+
+	it('falls back to the first In-Reply-To id without References', () => {
+		const list = threadConversations([
+			summary('a', { minute: 1 }),
+			summary('b', { inReplyTo: ['a@example.test'], minute: 2, subject: 'unrelated' }),
+		]);
+		expect(list).toHaveLength(1);
+		expect(ids(list[0]!)).toEqual(['a@0', 'b@1']);
+	});
+
+	it('keeps siblings whose parent is missing together under no visible placeholder', () => {
+		const list = threadConversations([
+			summary('b', { references: ['gone@example.test'], minute: 2, subject: 'Re: Gone' }),
+			summary('c', { references: ['gone@example.test'], minute: 3, subject: 'Re: Gone' }),
+		]);
+		expect(list).toHaveLength(1);
+		expect(ids(list[0]!)).toEqual(['b@0', 'c@0']);
+	});
+
+	it('promotes the only child of a missing root', () => {
+		const list = threadConversations([
+			summary('b', { references: ['gone@example.test'], minute: 2, subject: 'Re: Gone' }),
+		]);
+		expect(ids(list[0]!)).toEqual(['b@0']);
+	});
+
+	it('groups by base subject when references were lost, the reply under the original', () => {
+		const list = threadConversations([
+			summary('a', { minute: 1, subject: 'Budget' }),
+			summary('b', { messageId: 'b@example.test', minute: 2, subject: 'Re: Budget' }),
+			summary('x', { minute: 3, subject: 'Something else' }),
+		]);
+		expect(list.map(ids)).toEqual([['x@0'], ['a@0', 'b@1']]);
+	});
+
+	it('makes two originals with one subject siblings, not parent and child', () => {
+		const list = threadConversations([
+			summary('a', { minute: 1, subject: 'Weekly' }),
+			summary('b', { minute: 2, subject: 'Weekly' }),
+			summary('c', { minute: 3, subject: 'Re: Weekly' }),
+		]);
+		expect(list).toHaveLength(1);
+		expect(ids(list[0]!)).toEqual(['a@0', 'b@0', 'c@0']);
+	});
+
+	it('can skip subject grouping and threading altogether', () => {
+		const emails = [
+			summary('a', { subject: 'Same' }),
+			summary('b', { subject: 'Same', minute: 1 }),
+		];
+		expect(threadConversations(emails, { bySubject: false })).toHaveLength(2);
+		const flat = threadConversations(
+			[summary('a'), summary('b', { references: ['a@example.test'], minute: 1 })],
+			{ byReferences: false },
+		);
+		expect(flat.map((c) => c.id)).toEqual(['b', 'a']);
+	});
+
+	it('survives reference loops and duplicate message ids', () => {
+		const list = threadConversations([
+			summary('a', { references: ['b@example.test'], minute: 1, subject: 'Loop' }),
+			summary('b', { references: ['a@example.test'], minute: 2, subject: 'Loop' }),
+			summary('c', { messageId: 'a@example.test', minute: 3, subject: 'Dup' }),
+		]);
+		const all = list.flatMap((c) => c.entries.map((entry) => entry.email.id)).sort();
+		expect(all).toEqual(['a', 'b', 'c']);
+	});
+
+	it('ignores messages without a subject when grouping', () => {
+		const list = threadConversations([
+			summary('a', { subject: '' }),
+			summary('b', { subject: '', minute: 1 }),
+		]);
+		expect(list).toHaveLength(2);
+	});
+
+	it('handles a reply chain thousands deep without recursion', () => {
+		const emails = Array.from({ length: 6000 }, (_, i) =>
+			summary(`m${i}`, {
+				minute: i,
+				subject: i ? 'Re: Chain' : 'Chain',
+				inReplyTo: i ? [`m${i - 1}@example.test`] : [],
+			}),
+		);
+		const [only] = threadConversations(emails);
+		expect(only!.entries).toHaveLength(6000);
+		expect(only!.entries.at(-1)!.depth).toBe(5999);
+	});
+
+	it('threads ten thousand messages quickly', () => {
+		const emails = Array.from({ length: 10_000 }, (_, i) => {
+			const root = Math.floor(i / 5) * 5;
+			return summary(`m${i}`, {
+				minute: i,
+				subject: i === root ? `Topic ${root}` : `Re: Topic ${root}`,
+				references: i === root ? [] : [`m${root}@example.test`],
+			});
+		});
+		const started = performance.now();
+		const list = threadConversations(emails);
+		const elapsed = performance.now() - started;
+		expect(list).toHaveLength(2000);
+		expect(list[0]!.entries).toHaveLength(5);
+		// Generous: a loaded CI runner must not flake; the point is "not quadratic".
+		expect(elapsed).toBeLessThan(3000);
+	});
+});

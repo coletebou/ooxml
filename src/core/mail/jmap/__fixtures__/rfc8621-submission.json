@@ -1,0 +1,97 @@
+{
+	"source": "RFC 8621 sections 6.4 (Identity/get) and 7.5.1 (EmailSubmission/set with onSuccessUpdateEmail)",
+	"changes": "Copied exactly except what JSON needs: the \"...\" elision in rcptTo removed, and the line-wrapped htmlSignature (joined with nothing between the tags) and forbiddenToSend description (joined with single spaces) joined.",
+	"identityRequest": ["Identity/get", { "accountId": "acme" }, "0"],
+	"identityResponse": [
+		"Identity/get",
+		{
+			"accountId": "acme",
+			"state": "99401312ae-11-333",
+			"list": [
+				{
+					"id": "XD-3301-222-11_22AAz",
+					"name": "Joe Bloggs",
+					"email": "joe@example.com",
+					"replyTo": null,
+					"bcc": [{ "name": null, "email": "joe+archive@example.com" }],
+					"textSignature": "-- \nJoe Bloggs\nMaster of Email",
+					"htmlSignature": "<div><b>Joe Bloggs</b></div><div>Master of Email</div>",
+					"mayDelete": false
+				},
+				{
+					"id": "XD-9911312-11_22AAz",
+					"name": "Joe B",
+					"email": "*@example.com",
+					"replyTo": null,
+					"bcc": null,
+					"textSignature": "",
+					"htmlSignature": "",
+					"mayDelete": true
+				}
+			],
+			"notFound": []
+		},
+		"0"
+	],
+	"submissionRequest": [
+		"EmailSubmission/set",
+		{
+			"accountId": "ue411d190",
+			"create": {
+				"k1490": {
+					"identityId": "I64588216",
+					"emailId": "M7f6ed5bcfd7e2604d1753f6c",
+					"envelope": {
+						"mailFrom": { "email": "john@example.com", "parameters": null },
+						"rcptTo": [{ "email": "jane@example.com", "parameters": null }]
+					}
+				}
+			},
+			"onSuccessUpdateEmail": {
+				"#k1490": {
+					"mailboxIds/7cb4e8ee-df87-4757-b9c4-2ea1ca41b38e": null,
+					"mailboxIds/73dbcb4b-bffc-48bd-8c2a-a2e91ca672f6": true,
+					"keywords/$draft": null
+				}
+			}
+		},
+		"0"
+	],
+	"submissionResponse": [
+		[
+			"EmailSubmission/set",
+			{
+				"accountId": "ue411d190",
+				"oldState": "012421s6-8nrq-4ps4-n0p4-9330r951ns21",
+				"newState": "355421f6-8aed-4cf4-a0c4-7377e951af36",
+				"created": { "k1490": { "id": "ES-3bab7f9a-623e-4acf-99a5-2e67facb02a0" } }
+			},
+			"0"
+		],
+		[
+			"Email/set",
+			{
+				"accountId": "ue411d190",
+				"oldState": "778193",
+				"newState": "778197",
+				"updated": { "M7f6ed5bcfd7e2604d1753f6c": null }
+			},
+			"0"
+		]
+	],
+	"forbiddenResponse": [
+		"EmailSubmission/set",
+		{
+			"accountId": "ue411d190",
+			"oldState": "012421s6-8nrq-4ps4-n0p4-9330r951ns21",
+			"newState": "012421s6-8nrq-4ps4-n0p4-9330r951ns21",
+			"notCreated": {
+				"k1490": {
+					"type": "forbiddenToSend",
+					"description": "Verzeihung, wegen verdaechtiger Aktivitaeten Ihres Benutzerkontos haben wir den Versand von Nachrichten gesperrt. Bitte wenden Sie sich fuer Hilfe an unser Support Team."
+				}
+			}
+		},
+		"0"
+	]
+}

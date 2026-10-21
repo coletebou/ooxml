@@ -1,0 +1,275 @@
+import submission from './__fixtures__/rfc8621-submission.json';
+import type { Draft } from '../model';
+import { createFakeServer, rfcSession } from './test-support/fake-server';
+import { installMailStore } from './test-support/mail-store';
+import { DRAFTS, MAILBOXES, SENT, failure, setup } from './test-support/setup';
+
+const draft: Draft = {
+	to: [{ name: 'John', email: 'john@example.com' }],
+	cc: [{ name: '', email: 'cc@example.com' }],
+	bcc: [],
+	subject: 'World domination',
+	text: 'I have the most brilliant plan.',
+	html: '<p>I have the most <b>brilliant</b> plan.</p>',
+	attachments: [{ blobId: 'G1', name: 'plan.pdf', type: 'application/pdf', size: 3 }],
+	inReplyTo: ['parent@example.com'],
+	references: ['root@example.com', 'parent@example.com'],
+};
+
+function mail() {
+	const context = setup();
+	return { ...context, store: installMailStore(context.server) };
+}
+
+const callNames = (requests: { methodCalls: [string, unknown, string][] }[]) =>
+	requests.map((request) => request.methodCalls.map(([name]) => name));
+
+describe('saveDraft', () => {
+	it('creates the draft in Drafts with $draft and $seen, one text and one HTML part', async () => {
+		const { server, transport } = mail();
+		expect(await transport.saveDraft(draft)).toEqual({ id: 'E1' });
+		expect(server.argsOf('Email/set')).toEqual([
+			{
+				accountId: 'A13824',
+				create: {
+					draft: {
+						mailboxIds: { [DRAFTS]: true },
+						keywords: { $draft: true, $seen: true },
+						from: [{ name: 'Joe Bloggs', email: 'joe@example.com' }],
+						to: [{ name: 'John', email: 'john@example.com' }],
+						cc: [{ name: null, email: 'cc@example.com' }],
+						subject: 'World domination',
+						inReplyTo: ['parent@example.com'],
+						references: ['root@example.com', 'parent@example.com'],
+						bodyValues: {
+							text: { value: 'I have the most brilliant plan.' },
+							html: { value: '<p>I have the most <b>brilliant</b> plan.</p>' },
+						},
+						textBody: [{ partId: 'text', type: 'text/plain' }],
+						htmlBody: [{ partId: 'html', type: 'text/html' }],
+						attachments: [
+							{
+								blobId: 'G1',
+								type: 'application/pdf',
+								name: 'plan.pdf',
+								disposition: 'attachment',
+							},
+						],
+					},
+				},
+			},
+		]);
+	});
+
+	it('destroys the previous draft in the same request, only once the new one exists', async () => {
+		const { server, transport, store } = mail();
+		expect(await transport.saveDraft({ ...draft, id: 'old-draft' })).toEqual({ id: 'E1' });
+		expect(store.emails.has('old-draft')).toBe(false);
+		const requests = server.apiRequests();
+		expect(callNames(requests).slice(-2)).toEqual([
+			['Core/echo', 'Core/echo'],
+			['Email/set', 'Core/echo', 'Email/set'],
+		]);
+		expect(requests.at(-1)!.methodCalls.slice(1)).toEqual([
+			[
+				'Core/echo',
+				{
+					'#saved': { resultOf: '0', name: 'Email/set', path: '/created/draft/id' },
+					destroy: ['old-draft'],
+				},
+				'1',
+			],
+			[
+				'Email/set',
+				{ accountId: 'A13824', '#destroy': { resultOf: '1', name: 'Core/echo', path: '/destroy' } },
+				'2',
+			],
+		]);
+		await transport.saveDraft({ ...draft, id: 'E1' });
+		expect(
+			callNames(server.apiRequests()).filter((names) => names[0] === 'Core/echo'),
+		).toHaveLength(1);
+	});
+
+	it('keeps the previous draft when the new one is refused', async () => {
+		const { transport, store } = mail();
+		store.refuseCreate = 'overQuota';
+		expect(await failure(transport.saveDraft({ ...draft, id: 'old-draft' }))).toMatchObject({
+			code: 'overQuota',
+			type: 'overQuota',
+		});
+		expect(store.emails.has('old-draft')).toBe(true);
+	});
+
+	it('destroys the previous draft in a second request when the server does not resolve echoes', async () => {
+		const { server, transport, store } = mail();
+		server.on('Core/echo', () => ({}));
+		await transport.saveDraft({ ...draft, id: 'old-draft' });
+		expect(callNames(server.apiRequests()).slice(-2)).toEqual([['Email/set'], ['Email/set']]);
+		expect(server.argsOf('Email/set').at(-1)).toEqual({
+			accountId: 'A13824',
+			destroy: ['old-draft'],
+		});
+		expect(store.emails.has('old-draft')).toBe(false);
+	});
+
+	it('needs a Drafts mailbox', async () => {
+		const { server, transport } = mail();
+		server.on('Mailbox/get', () => ({
+			state: 'M1',
+			list: MAILBOXES.filter((m) => m.role !== 'drafts'),
+		}));
+		expect(await failure(transport.saveDraft(draft))).toMatchObject({ code: 'notFound' });
+	});
+});
+
+describe('send', () => {
+	const reply: Draft = { ...draft, id: 'old-draft', replyToEmailId: 'original' };
+
+	it('creates, submits, files in Sent, drops the draft and marks the original in one request', async () => {
+		const { server, transport, store } = mail();
+		expect(await transport.send(reply)).toEqual({ id: 'E1' });
+		const last = server.apiRequests().at(-1)!;
+		expect(last.methodCalls.map(([name]) => name)).toEqual([
+			'Email/set',
+			'EmailSubmission/set',
+			'Core/echo',
+			'Email/set',
+		]);
+		const [, submit, echo, clean] = last.methodCalls;
+		expect(submit![1]).toEqual({
+			accountId: 'A13824',
+			create: { send: { identityId: 'XD-3301-222-11_22AAz', emailId: '#draft' } },
+			onSuccessUpdateEmail: {
+				'#send': (
+					submission.submissionRequest[1] as { onSuccessUpdateEmail: Record<string, unknown> }
+				).onSuccessUpdateEmail['#k1490'],
+			},
+		});
+		expect(echo![1]).toEqual({
+			'#sent': { resultOf: '1', name: 'EmailSubmission/set', path: '/created/send/id' },
+			destroy: ['old-draft'],
+			update: { original: { 'keywords/$answered': true } },
+		});
+		expect(clean![1]).toEqual({
+			accountId: 'A13824',
+			'#destroy': { resultOf: '2', name: 'Core/echo', path: '/destroy' },
+			'#update': { resultOf: '2', name: 'Core/echo', path: '/update' },
+		});
+		expect(store.emails.get('E1')).toMatchObject({
+			mailboxIds: { [SENT]: true },
+			keywords: { $seen: true },
+		});
+		expect(store.emails.get('E1')!.keywords).not.toHaveProperty('$draft');
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true, $answered: true });
+		expect(store.submissions).toEqual([{ identityId: 'XD-3301-222-11_22AAz', emailId: 'E1' }]);
+	});
+
+	it('marks a forward $forwarded and writes as the identity the draft names', async () => {
+		const { transport, store } = mail();
+		await transport.send({
+			...draft,
+			identityId: 'XD-9911312-11_22AAz',
+			from: { name: 'Joe', email: 'joe@example.com' },
+			forwardOfEmailId: 'original',
+		});
+		expect(store.submissions[0]).toMatchObject({ identityId: 'XD-9911312-11_22AAz' });
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true, $forwarded: true });
+	});
+
+	it('surfaces a refused submission and leaves the saved draft as it was', async () => {
+		const { server, transport, store } = mail();
+		store.refuseSubmission = 'forbiddenFrom';
+		expect(await failure(transport.send(reply))).toMatchObject({
+			code: 'forbidden',
+			type: 'forbiddenFrom',
+		});
+		expect(store.emails.has('old-draft')).toBe(true);
+		expect(store.emails.has('E1')).toBe(false);
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true });
+		expect(server.argsOf('Email/set').at(-1)).toEqual({ accountId: 'A13824', destroy: ['E1'] });
+	});
+
+	it.each([
+		['invalidEmail', 'invalid'],
+		['noRecipients', 'invalid'],
+		['invalidRecipients', 'invalid'],
+		['tooManyRecipients', 'invalid'],
+		['forbiddenMailFrom', 'forbidden'],
+		['forbiddenToSend', 'forbidden'],
+		['tooLarge', 'tooLarge'],
+	])('maps a %s submission error to %s', async (type, code) => {
+		const { transport, store } = mail();
+		store.refuseSubmission = type;
+		expect(await failure(transport.send(draft))).toMatchObject({ code, type, level: 'set' });
+	});
+
+	it('sends nothing and keeps everything when the message cannot be created', async () => {
+		const { transport, store } = mail();
+		store.refuseCreate = 'blobNotFound';
+		expect(await failure(transport.send(reply))).toMatchObject({
+			code: 'notFound',
+			type: 'blobNotFound',
+		});
+		expect(store.submissions).toEqual([]);
+		expect(store.emails.has('old-draft')).toBe(true);
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true });
+	});
+
+	it('cleans up in a second request when the server does not resolve echoes', async () => {
+		const { server, transport, store } = mail();
+		server.on('Core/echo', (_args, call) => [['error', { type: 'unknownMethod' }, call.id]]);
+		await transport.send(reply);
+		expect(callNames(server.apiRequests()).slice(-2)).toEqual([
+			['Email/set', 'EmailSubmission/set'],
+			['Email/set'],
+		]);
+		expect(server.argsOf('Email/set').at(-1)).toEqual({
+			accountId: 'A13824',
+			destroy: ['old-draft'],
+			update: { original: { 'keywords/$answered': true } },
+		});
+		expect(store.emails.has('old-draft')).toBe(false);
+	});
+
+	it('files the message itself when the server skipped onSuccessUpdateEmail', async () => {
+		const { server, transport, store } = mail();
+		store.skipImplicit = true;
+		await transport.send(draft);
+		expect(server.argsOf('Email/set').at(-1)).toEqual({
+			accountId: 'A13824',
+			update: {
+				E1: {
+					[`mailboxIds/${DRAFTS}`]: null,
+					[`mailboxIds/${SENT}`]: true,
+					'keywords/$draft': null,
+				},
+			},
+		});
+		expect(store.emails.get('E1')!.mailboxIds).toEqual({ [SENT]: true });
+	});
+
+	it('keeps a sent message in Drafts, no longer a draft, when there is no Sent mailbox', async () => {
+		const { server, transport } = mail();
+		server.on('Mailbox/get', () => ({
+			state: 'M1',
+			list: MAILBOXES.filter((m) => m.role !== 'sent'),
+		}));
+		await transport.send(draft);
+		expect(server.argsOf('EmailSubmission/set')[0]!.onSuccessUpdateEmail).toEqual({
+			'#send': { 'keywords/$draft': null },
+		});
+	});
+
+	it('refuses to send without submission or without an identity', async () => {
+		const plain = setup({
+			server: createFakeServer({ session: rfcSession({ submission: false }) }),
+		});
+		installMailStore(plain.server);
+		expect(await failure(plain.transport.send(draft))).toMatchObject({ code: 'unsupported' });
+		const nobody = mail();
+		nobody.server.on('Identity/get', () => ({ state: 'I1', list: [] }));
+		expect(await failure(nobody.transport.send(draft))).toMatchObject({ code: 'forbidden' });
+	});
+});
