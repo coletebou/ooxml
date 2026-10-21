@@ -10,6 +10,11 @@ export interface NotebookStorage {
 	remove: (key: string) => Promise<void>;
 	/** False when what is saved only lasts for this session (memory); omitted means it persists. */
 	persistent?: () => boolean;
+	/**
+	 * Names where the bytes go (an IndexedDB database), so a later client in this tab on the same
+	 * storage finds what an earlier one could not save. Omitted, the storage object itself is used.
+	 */
+	readonly id?: string;
 }
 
 export const REGISTRY_KEY = 'registry';

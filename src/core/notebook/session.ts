@@ -64,6 +64,9 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	try {
 		const bytes = await storage?.load(key);
 		if (bytes?.length) Y.applyUpdate(doc, bytes, NOTEBOOK_STORAGE_ORIGIN);
+		// What a closed copy of this notebook could not save in this tab comes back, to save again.
+		const kept = storage && rescued(storage).get(key);
+		if (kept) Y.applyUpdate(doc, kept);
 	} catch (error) {
 		// A stored copy that cannot be read (a transient storage error, damaged bytes) is not opened:
 		// an empty document would be saved over it with the first change. The caller reports it.
@@ -88,7 +91,7 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let saving: Promise<void> = Promise.resolve();
-	let dirty = !!options.seed;
+	let dirty = !!options.seed || !!(storage && rescued(storage).has(key));
 	let closed = false;
 	let failed: unknown = null;
 	const save = (): Promise<void> => {
@@ -102,6 +105,7 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 			.then(
 				() => {
 					failed = null;
+					if (storage) rescued(storage).delete(key);
 					options.onSaved?.();
 				},
 				(error: unknown) => {
@@ -164,6 +168,8 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 			if (closed) return;
 			closed = true;
 			await save();
+			// The device refused the last save: the tab keeps a copy for the next open of it.
+			if (failed && storage) rescued(storage).set(key, Y.encodeStateAsUpdate(doc));
 			offStatus();
 			offPeers();
 			offError();
@@ -176,12 +182,19 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	};
 }
 
-const PROTECTED = new Set(['paragraph', 'heading']);
+const PROTECTED = new Set(['paragraph', 'heading', 'list_item', 'bullet_list', 'ordered_list']);
 /**
  * What undo may delete: not a paragraph or text that still holds something, as y-prosemirror's own
  * undo does, so undoing a new paragraph keeps the text a collaborator typed into it.
  */
 export function keepFilled(item: Y.Item): boolean {
+	// The fields of a text box that is kept (it holds a collaborator's text) are kept with it, or it
+	// would stay without its page and place and no longer be read.
+	const parent = item.parent;
+	if (parent instanceof Y.Map) {
+		const content = parent.get('content');
+		if (content instanceof Y.XmlFragment && hasText(content)) return false;
+	}
 	if (!(item.content instanceof Y.ContentType)) return true;
 	const type = item.content.type;
 	// A text box (and its text) that still holds something (a collaborator's) is kept as well.
@@ -190,12 +203,12 @@ export function keepFilled(item: Y.Item): boolean {
 		const content = type.get('content');
 		return !(content instanceof Y.XmlFragment) || !hasText(content);
 	}
-	const kept =
-		type instanceof Y.XmlText || (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName));
-	return !kept || type.length === 0;
+	if (type instanceof Y.XmlText) return type.length === 0;
+	if (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName)) return !hasText(type);
+	return true;
 }
 
-function hasText(fragment: Y.XmlFragment): boolean {
+function hasText(fragment: Y.XmlFragment | Y.XmlElement): boolean {
 	const stack: unknown[] = fragment.toArray();
 	while (stack.length) {
 		const item = stack.pop();
@@ -203,4 +216,19 @@ function hasText(fragment: Y.XmlFragment): boolean {
 		if (item instanceof Y.XmlElement) stack.push(...item.toArray());
 	}
 	return false;
+}
+
+// Copies of what closed notebooks could not save, for this tab's life: per storage (its id, else
+// the object) and notebook key.
+const byId = new Map<string, Map<string, Uint8Array>>();
+const byObject = new WeakMap<NotebookStorage, Map<string, Uint8Array>>();
+function rescued(storage: NotebookStorage): Map<string, Uint8Array> {
+	if (storage.id !== undefined) {
+		let map = byId.get(storage.id);
+		if (!map) byId.set(storage.id, (map = new Map()));
+		return map;
+	}
+	let map = byObject.get(storage);
+	if (!map) byObject.set(storage, (map = new Map()));
+	return map;
 }

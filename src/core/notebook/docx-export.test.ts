@@ -292,4 +292,20 @@ describe('page export to .docx', () => {
 		expect(start('second')).toEqual([1, 2]);
 		expect(start('one')).toEqual([0, null]);
 	});
+
+	it('reports a text box that holds more than the limit', async () => {
+		const { report } = await exportPageToDocx({
+			title: 'Long',
+			items: [
+				{
+					kind: 'text',
+					x: 0,
+					y: 0,
+					blocks: [{ type: 'paragraph', attrs: { todo: null }, content: [text('start')] }],
+					overLimit: true,
+				},
+			],
+		});
+		expect(report.skipped).toEqual([{ kind: 'text', reason: 'text-over-limit' }]);
+	});
 });

@@ -132,7 +132,7 @@ export function writeSnapshot(ctx: NotebookEditContext, snapshot: NotebookSnapsh
 }
 
 /** All the text in a fragment, counted without building it. */
-function textLength(fragment: Y.XmlFragment): number {
+export function textLength(fragment: Y.XmlFragment): number {
 	let length = 0;
 	const stack: unknown[] = fragment.toArray();
 	while (stack.length) {

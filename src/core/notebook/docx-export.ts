@@ -23,7 +23,7 @@ import { readingOrder } from './reading-order';
 import { type RichNode, inlineText } from './rich-text';
 
 export type PageExportItem =
-	| { kind: 'text'; x: number; y: number; blocks: readonly RichNode[] }
+	| { kind: 'text'; x: number; y: number; blocks: readonly RichNode[]; overLimit?: boolean }
 	| {
 			kind: 'image';
 			x: number;
@@ -70,9 +70,9 @@ export interface PageExportReport {
 	ink: number;
 	files: number;
 	skipped: {
-		kind: 'image' | 'ink';
+		kind: 'image' | 'ink' | 'text';
 		name?: string;
-		reason: 'no-bytes' | 'unsupported-format' | 'no-rasterizer';
+		reason: 'no-bytes' | 'unsupported-format' | 'no-rasterizer' | 'text-over-limit';
 	}[];
 }
 
@@ -227,6 +227,8 @@ export async function exportPageToDocx(
 	for (const item of readingOrder(input.items)) {
 		if (item.kind === 'text') {
 			if (inlineTextOf(item.blocks)) writer.text(item.blocks);
+			// Collaborators can merge a box past the text limit; what is past it is not in the file.
+			if (item.overLimit) writer.report.skipped.push({ kind: 'text', reason: 'text-over-limit' });
 		} else if (item.kind === 'file') {
 			writer.paragraph([{ text: label(item) }]);
 			writer.report.files++;

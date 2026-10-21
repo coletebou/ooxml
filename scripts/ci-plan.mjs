@@ -179,7 +179,8 @@ const viewerOfFile = (file) => /^(?:viewers|demos|e2e)\/([^/]+)\//.exec(file)?.[
 /** The area a format owns: only its own viewer can break. */
 const AREA_CONSUMERS = { docx: [], xlsx: [], visio: [], teams: [], notebook: [], pptx: [] };
 const AREA_VIEWERS = {
-	docx: ['docx'],
+	// The notebook's editor marks and Word export use the docx area.
+	docx: ['docx', 'notebook'],
 	xlsx: ['xlsx'],
 	visio: ['visio'],
 	teams: ['teams'],

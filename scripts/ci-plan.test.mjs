@@ -54,12 +54,13 @@ test('a docs-only change runs nothing', () => {
 	assert.deepEqual(result.viewers, []);
 });
 
-test('a docx change tests the changed files, typechecks and checks only the docx viewer', () => {
+test('a docx change tests the changed files, typechecks and checks the viewers that read it', () => {
 	const result = plan(['src/core/docx/block-parser.ts'], { testFiles: 20 });
 	assert.equal(result.test.mode, 'changed');
 	assert.deepEqual(result.test.shards, [1]);
 	assert.equal(result.typecheck.strict, true);
-	assert.deepEqual(viewers(result), ['docx']);
+	// The notebook's editor marks and Word export use the docx area.
+	assert.deepEqual(viewers(result), ['docx', 'notebook']);
 	assert.deepEqual(result.consumers, []);
 });
 

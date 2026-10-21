@@ -44,4 +44,34 @@ describe('notebook undo', () => {
 		undo.undo();
 		expect(boxes.has('c1')).toBe(true);
 	});
+
+	it('keeps a list and a text box with all its fields when a collaborator wrote in them', () => {
+		const doc = new Y.Doc();
+		const boxes = doc.getMap('containers');
+		const undo = new Y.UndoManager(boxes, {
+			trackedOrigins: new Set(['local']),
+			deleteFilter: keepFilled,
+		});
+		const box = new Y.Map();
+		const content = new Y.XmlFragment();
+		const item = new Y.XmlElement('list_item');
+		doc.transact(() => {
+			boxes.set('c1', box);
+			box.set('page', 'p1');
+			box.set('x', 10);
+			box.set('content', content);
+			const list = new Y.XmlElement('bullet_list');
+			content.insert(0, [list]);
+			list.insert(0, [item]);
+		}, 'local');
+		doc.transact(() => {
+			const p = new Y.XmlElement('paragraph');
+			item.insert(0, [p]);
+			p.insert(0, [new Y.XmlText('theirs')]);
+		}, 'remote');
+		undo.undo();
+		expect(box.get('page')).toBe('p1');
+		expect(box.get('x')).toBe(10);
+		expect(content.toString()).toContain('theirs');
+	});
 });

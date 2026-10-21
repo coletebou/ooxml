@@ -205,6 +205,13 @@ describe('rich text in the y-prosemirror encoding', () => {
 		expect(p.length).toBeLessThanOrEqual(100_000);
 	});
 
+	it('counts list items against the node budget', () => {
+		const f = fragment();
+		const items = Array.from({ length: 300_000 }, () => ({ type: 'list_item', content: [] }));
+		writeRichText(f, [{ type: 'bullet_list', content: items } as RichNode]);
+		expect((f.get(0) as Y.XmlElement).length).toBeLessThanOrEqual(100_000);
+	});
+
 	it('turns pasted plain text into paragraphs', () => {
 		const blocks = richTextFromPlain('a\r\n\r\nb');
 		expect(blocks).toHaveLength(3);

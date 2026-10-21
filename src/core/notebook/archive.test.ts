@@ -149,8 +149,6 @@ describe('notebook archive', () => {
 						y: -1e12,
 						content: [{ type: 'script', content: [{ type: 'text', text: 'x' }] }],
 					},
-					{ id: 'c2', pageId: 'p1', kind: 'image', media: 'secret.txt', name: 'a.png' },
-					{ id: 'c3', pageId: 'p1', kind: 'image', media: 'media/missing.png' },
 				],
 				ink: [{ id: 'i1', pageId: 'p1', points: [1, 2, 'x', 4], color: 'red', width: 1e9 }],
 			}),
@@ -260,5 +258,25 @@ describe('notebook archive', () => {
 		await expect(
 			importNotebookArchive(await zip.generateAsync({ type: 'uint8array' })),
 		).rejects.toThrow(NotebookArchiveError);
+	});
+
+	it('refuses an archive whose pictures or files are missing or outside its media', async () => {
+		for (const media of ['secret.txt', 'media/missing.png']) {
+			const zip = new JSZip();
+			zip.file('secret.txt', 'not media');
+			zip.file(
+				'notebook.json',
+				JSON.stringify({
+					format: 'ooxml-notebook',
+					version: 1,
+					sections: [{ id: 's1', name: 'S' }],
+					pages: [{ id: 'p1', sectionId: 's1' }],
+					containers: [{ id: 'c1', pageId: 'p1', kind: 'image', media, name: 'a.png' }],
+				}),
+			);
+			await expect(
+				importNotebookArchive(await zip.generateAsync({ type: 'uint8array' })),
+			).rejects.toThrow(NotebookArchiveError);
+		}
 	});
 });

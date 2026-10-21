@@ -454,6 +454,25 @@ describe('notebook client fourth review round', () => {
 	});
 });
 
+describe('notebook client keeps what it could not save', () => {
+	it('brings back changes a closed client could not save, for the next client on that storage', async () => {
+		const { storage, control } = flaky();
+		const named = { ...storage, id: `db-${Math.random().toString(36).slice(2)}` };
+		const first = start(named, createChannelHub());
+		await first.whenReady();
+		await settle();
+		const id = first.getState().notebookId;
+		control.fail = true;
+		first.renamePage(first.getState().pageId, 'Kept in the tab');
+		await first.destroy();
+		control.fail = false;
+		const second = start({ ...named }, createChannelHub());
+		await second.whenReady();
+		await until(() => second.getState().notebookId === id && !second.getState().loading);
+		expect(second.getState().page?.title).toBe('Kept in the tab');
+	});
+});
+
 describe('notebook client with damaged input', () => {
 	it('imports an archive whose text is malformed, keeping what is valid', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());

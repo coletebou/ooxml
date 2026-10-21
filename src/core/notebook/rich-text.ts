@@ -179,7 +179,7 @@ function normaliseBlocks(
 		flush();
 		if (node.type === 'bullet_list' || node.type === 'ordered_list') {
 			const items = childrenOf(node)
-				.filter((c) => c.type === 'list_item')
+				.filter((c) => c.type === 'list_item' && --budget.nodes >= 0)
 				.map((c) => ({ ...c, content: normaliseBlocks(childrenOf(c), depth + 1, budget) }))
 				.map((c) => (c.content.length ? c : { ...c, content: [emptyParagraph()] }));
 			if (items.length) out.push({ ...node, content: items });

@@ -175,7 +175,9 @@ export async function importNotebookArchive(
 			media.set(path, file ? await file.async('uint8array') : null);
 		}
 		const data = media.get(path);
-		if (!data || !data.length || data.length > MAX_FILE_BYTES) continue;
+		// A listed picture or file that is not there (or too large) is refused, not dropped unsaid.
+		if (!data || !data.length || data.length > MAX_FILE_BYTES)
+			throw new NotebookArchiveError('This archive is missing a picture or file it lists');
 		budget -= data.length;
 		if (budget < 0)
 			throw new NotebookArchiveError('This archive holds more media than an import takes');
