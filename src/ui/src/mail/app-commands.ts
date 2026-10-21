@@ -48,8 +48,9 @@ async function moveAway(mail: MailClient, run: (ids: string[]) => Promise<void>)
 	if (!ids.length) return;
 	const wasOpen = mail.getState().open?.id;
 	const next = wasOpen && ids.includes(wasOpen) ? neighbour(mail, ids) : null;
-	await run(ids);
-	if (next) await mail.open(next);
+	// The move shows in the list at once, and the next conversation opens with it: the reading pane
+	// goes straight from one to the next, so the control that had the focus there keeps it.
+	await Promise.all([run(ids), next ? mail.open(next) : null]);
 }
 
 /** The commands that act on conversations, so only while the mail view shows. */

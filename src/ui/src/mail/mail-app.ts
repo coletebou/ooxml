@@ -22,6 +22,7 @@ import { defineMailCalendar } from './calendar-pane';
 import { defineMailCompose, type MailCompose } from './compose';
 import { defineMailContacts } from './contacts-pane';
 import { defineOnce, MailElement, mailStyles } from './base';
+import { FocusKeeper } from './focus-keeper';
 import { defineMailFolderPane } from './folder-pane';
 import { icon } from './icons';
 import { InlineImages } from './inline-images';
@@ -95,6 +96,8 @@ export class MailApp extends MailElement {
 	private images: InlineImages | null = null;
 	/** What had the focus before the shortcuts dialog opened. */
 	private readonly dialogFocus = new FocusReturn();
+	/** Keeps the focus in the app when an update takes away what had it. */
+	private readonly focusKeeper = new FocusKeeper(this);
 	private readonly onKey = (event: KeyboardEvent): void => this.keydown(event);
 
 	constructor() {
@@ -164,9 +167,12 @@ export class MailApp extends MailElement {
 		}
 		if (changed.has('dialog') && this.dialog && !changed.get('dialog'))
 			this.dialogFocus.take(this.ownerDocument);
+		const before = changed.get('state') as MailState | null | undefined;
+		this.focusKeeper.note(changed.has('state') && !before?.compose && !!this.state?.compose);
 	}
 
 	protected override updated(changed: PropertyValues<this>): void {
+		this.focusKeeper.keep(this.state);
 		// The shortcuts dialog is modal: the focus moves in, and back to what had it once it closes.
 		if (!changed.has('dialog')) return;
 		if (this.dialog && !changed.get('dialog'))

@@ -64,6 +64,11 @@ export class MailMessageList extends MailElement {
 		return this.renderRoot.querySelector<HTMLElement>('.viewport');
 	}
 
+	/** Focus the list itself (the listbox), where the arrows and the shortcuts work. */
+	override focus(options?: FocusOptions): void {
+		this.viewport?.focus(options);
+	}
+
 	override connectedCallback(): void {
 		super.connectedCallback();
 		if (typeof ResizeObserver !== 'undefined')

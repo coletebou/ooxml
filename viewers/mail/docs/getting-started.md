@@ -77,7 +77,10 @@ toast in the reader's language:
 ## Keyboard
 
 The shortcuts work while the focus is inside the app, so they never take keys from the rest of
-your page. Those that act on conversations work in the mail view only.
+your page. Those that act on conversations work in the mail view only. When what has the focus
+goes (a conversation closed with Escape, the compose window sent or closed, the folder drawer of a
+narrow app), the focus stays in the app: on the list, or back on what opened the compose window.
+Archive, Delete and Junk open the next conversation, and the button that had the focus keeps it.
 
 `c` new message, `/` search, `j`/`k` next and previous, `o` or Enter open, `x` select, `e` archive,
 `#` or Delete delete, `!` junk, `s` flag, Shift+I and Shift+U read and unread, `r` reply, `a` reply

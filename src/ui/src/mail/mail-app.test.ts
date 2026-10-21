@@ -370,6 +370,93 @@ describe('<mail-app>', () => {
 		expect(pane.shadowRoot!.activeElement?.closest('.toolbar')).not.toBeNull();
 	});
 
+	it('gives the focus to the list when Escape closes the conversation that had it', async () => {
+		const app = await mount();
+		await app.client!.open(state(app).conversations[1]!.id);
+		await app.updateComplete;
+		const pane = inner<Updating>(app, 'mail-reading-pane')!;
+		await pane.updateComplete;
+		const back = inner<HTMLElement>(pane, '.toolbar button')!;
+		back.focus();
+		back.dispatchEvent(key('Escape'));
+		await until(() => state(app).open === null);
+		// Out of the app, the focus would take the shortcuts with it.
+		await until(() => app.shadowRoot!.activeElement?.tagName === 'MAIL-MESSAGE-LIST');
+		const list = inner<Updating>(app, 'mail-message-list')!;
+		expect(list.shadowRoot!.activeElement?.className).toBe('viewport');
+		const next = key('j');
+		list.shadowRoot!.activeElement!.dispatchEvent(next);
+		expect(next.defaultPrevented).toBe(true);
+	});
+
+	it('keeps the focus on the toolbar button when archiving opens the next conversation', async () => {
+		const app = await mount();
+		const [, second, third] = state(app).conversations;
+		await app.client!.open(second!.id);
+		await app.updateComplete;
+		const pane = inner<Updating>(app, 'mail-reading-pane')!;
+		await pane.updateComplete;
+		const archive = inner<HTMLButtonElement>(pane, '.toolbar button[aria-label="Archive"]')!;
+		archive.focus();
+		archive.click();
+		await until(() => state(app).open?.id === third!.id);
+		await app.updateComplete;
+		await pane.updateComplete;
+		expect(state(app).conversations.some((c) => c.id === second!.id)).toBe(false);
+		// The pane went straight from one conversation to the next, keeping its toolbar.
+		expect(archive.isConnected).toBe(true);
+		expect(app.shadowRoot!.activeElement).toBe(pane);
+		expect(pane.shadowRoot!.activeElement).toBe(archive);
+	});
+
+	it('gives the focus to the list when the row whose checkbox had it leaves', async () => {
+		const app = await mount();
+		const list = inner<Updating>(app, 'mail-message-list')!;
+		await list.updateComplete;
+		const id = state(app).conversations[0]!.id;
+		const box = list.shadowRoot!.querySelector<HTMLInputElement>('.row input[type="checkbox"]')!;
+		box.focus();
+		box.click();
+		box.dispatchEvent(key('e'));
+		await until(() => !state(app).conversations.some((c) => c.id === id));
+		await until(() => list.shadowRoot!.activeElement?.className === 'viewport');
+		expect(app.shadowRoot!.activeElement).toBe(list);
+	});
+
+	it('gives the focus back to what had it when the compose window opened', async () => {
+		const app = await mount();
+		const list = inner<Updating>(app, 'mail-message-list')!;
+		await list.updateComplete;
+		const viewport = inner<HTMLElement>(list, '.viewport')!;
+		viewport.focus();
+		viewport.dispatchEvent(key('c'));
+		await until(() => app.shadowRoot!.activeElement?.tagName === 'MAIL-COMPOSE');
+		// Escape pressed where the window put the focus (its first address field).
+		let typing: Element | null = document.activeElement;
+		while (typing?.shadowRoot?.activeElement) typing = typing.shadowRoot.activeElement;
+		expect(typing?.tagName).toBe('INPUT');
+		typing!.dispatchEvent(key('Escape'));
+		await until(() => state(app).compose === null);
+		await until(() => app.shadowRoot!.activeElement === list);
+		expect(list.shadowRoot!.activeElement).toBe(viewport);
+	});
+
+	it('leaves the focus alone when it is outside the app', async () => {
+		const app = await mount();
+		const outside = document.createElement('button');
+		document.body.append(outside);
+		await app.client!.open(state(app).conversations[1]!.id);
+		await app.updateComplete;
+		const pane = inner<Updating>(app, 'mail-reading-pane')!;
+		await pane.updateComplete;
+		outside.focus();
+		app.client!.close();
+		await app.updateComplete;
+		await pane.updateComplete;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(document.activeElement).toBe(outside);
+	});
+
 	it('opens compose from the keyboard and closes it with Escape', async () => {
 		const app = await mount();
 		app.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, composed: true }));
