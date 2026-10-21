@@ -25,12 +25,15 @@ export interface MailProps {
 	) => void;
 }
 
-/** Push props onto the element. Only changed values are written, so frameworks can call it freely. */
+/**
+ * Push props onto the element. Only changed values are written, so frameworks can call it freely.
+ * A connection taken away is the default again, the demo mailbox.
+ */
 export function applyMailProps(el: MailApp, props: MailProps, prev: MailProps = {}): void {
 	if (props.locale !== prev.locale) el.locale = props.locale ?? '';
 	if (props.theme !== prev.theme) el.theme = props.theme ?? 'system';
 	if (props.view !== prev.view && props.view) el.view = props.view;
-	if (props.config !== prev.config && props.config !== undefined) el.config = props.config;
+	if (props.config !== prev.config) el.config = props.config ?? null;
 }
 
 /** Subscribe to the element's events; the latest handlers are read through `get`. */

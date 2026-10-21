@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createDemoSeed, createMemoryTransport, type MailTransport } from 'ooxml-core/mail';
 import {
 	bindMail,
 	defineMailApp,
 	pickMailProps,
 	type MailApp,
+	type MailConnection,
 	type MailElementProps,
 } from './index';
 
@@ -62,6 +64,38 @@ describe('bindMail', () => {
 		binding.destroy();
 		el.dispatchEvent(new CustomEvent('mail-open-attachment', { detail }));
 		expect(latest).toHaveBeenCalledOnce();
+	});
+});
+
+describe('config', () => {
+	it('goes back to the demo mailbox once the framework no longer passes one', async () => {
+		const base = createMemoryTransport(createDemoSeed({ now: Date.UTC(2026, 9, 20) }));
+		let closed = false;
+		const transport: MailTransport = {
+			...base,
+			close() {
+				closed = true;
+				base.close();
+			},
+		};
+		const el = element();
+		const binding = bindMail(el, () => ({}));
+		binding.update({ config: { kind: 'transport', transport } satisfies MailConnection });
+		document.body.append(el);
+		try {
+			await el.updateComplete;
+			const first = el.client;
+			expect(first).not.toBeNull();
+			binding.update({});
+			await el.updateComplete;
+			// No connection is the demo mailbox: the host's mailbox is let go.
+			expect(el.config).toBeNull();
+			expect(el.client).not.toBe(first);
+			await vi.waitFor(() => expect(closed).toBe(true));
+		} finally {
+			binding.destroy();
+			el.remove();
+		}
 	});
 });
 
