@@ -532,7 +532,13 @@ export class NotebookApp extends NotebookElement implements AppHost {
 
 	protected override render() {
 		const s = this.state;
-		const status = !s?.notebook ? 'closed' : s.mode === 'local' ? 'local' : s.status;
+		const status = !s?.notebook
+			? 'closed'
+			: s.mode !== 'local'
+				? s.status
+				: s.persistent
+					? 'local'
+					: 'memory';
 		const peers = s?.peers ?? [];
 		return html`<div
 			class="app"

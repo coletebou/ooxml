@@ -191,6 +191,8 @@ export const es: Record<keyof typeof en, string> = {
 	'notice.sync-error': 'Hubo un problema con la conexión con los colaboradores.',
 
 	'status.local': 'Guardado en este dispositivo',
+	'status.memory':
+		'No se guarda en este dispositivo: los blocs de notas duran hasta que se cierre esta pestaña',
 	'status.connected': 'Conectado',
 	'status.connecting': 'Conectando',
 	'status.disconnected': 'Sin conexión',

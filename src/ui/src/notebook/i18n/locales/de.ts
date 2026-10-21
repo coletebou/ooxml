@@ -193,6 +193,8 @@ export const de: Record<keyof typeof en, string> = {
 	'notice.sync-error': 'Bei der Verbindung zu Mitwirkenden ist ein Problem aufgetreten.',
 
 	'status.local': 'Auf diesem Gerät gespeichert',
+	'status.memory':
+		'Nicht auf diesem Gerät gespeichert: Notizbücher bleiben nur, bis dieser Tab geschlossen wird',
 	'status.connected': 'Verbunden',
 	'status.connecting': 'Verbindung wird hergestellt',
 	'status.disconnected': 'Offline',

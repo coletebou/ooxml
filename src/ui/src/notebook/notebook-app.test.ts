@@ -1,3 +1,4 @@
+import { IDBFactory } from 'fake-indexeddb';
 import { loadDocx } from 'ooxml-core/docx';
 import { getIcon } from '../icons';
 import { TextSelection } from 'prosemirror-state';
@@ -280,6 +281,19 @@ describe('<notebook-app>', () => {
 		expect(app.state!.sections.map((s) => s.name)).toContain('Neuer Abschnitt 2');
 	});
 
+	it('says the notebooks are saved on the device only when IndexedDB keeps them', async () => {
+		vi.stubGlobal('indexedDB', new IDBFactory());
+		try {
+			app = await mount();
+			await app.updateComplete;
+			expect(app.shadowRoot!.querySelector('.status .sync')?.textContent).toBe(
+				'Saved on this device',
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('lets go of the editor when its text box is deleted and keeps KeyTips after a move', async () => {
 		app = await mount();
 		const page = app.page()!;
@@ -363,8 +377,9 @@ describe('<notebook-app>', () => {
 		expect(ribbon.querySelector('[data-ribbon-tab="home"]')?.getAttribute('data-label')).toBe(
 			'Start',
 		);
+		// This DOM has no IndexedDB, so the notebooks only last for the session, and the status says so.
 		expect(app.shadowRoot!.querySelector('.status .sync')?.textContent).toBe(
-			'Auf diesem Gerät gespeichert',
+			'Nicht auf diesem Gerät gespeichert: Notizbücher bleiben nur, bis dieser Tab geschlossen wird',
 		);
 	});
 });
