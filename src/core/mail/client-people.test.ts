@@ -1,8 +1,12 @@
 import type { CalendarEvent } from '../calendar/model';
 import { createMemoryCalendarStore } from './calendar-store';
 import { createMailClient } from './client';
+import type { MailNotice } from './client-types';
+import { createMemoryContactStore, emptyContact, type ContactStore } from './contacts';
 import { createMemoryTransport } from './memory-transport';
+import type { KeyValueStorage } from './record-store';
 import { until } from './test-support/client';
+import { MailTransportError } from './transport';
 
 const STAND_UP: CalendarEvent = {
 	id: 'stand-up',
@@ -146,6 +150,86 @@ describe('the calendar actions', () => {
 		expect(await client.importIcs(file)).toBe(1);
 		expect(others()).toHaveLength(1);
 		expect(client.getState().events).toHaveLength(2);
+		client.destroy();
+	});
+});
+
+describe('a change the storage does not take', () => {
+	/** A storage that refuses every write, as a full one does. */
+	const full: KeyValueStorage = {
+		getItem: () => null,
+		setItem: () => {
+			throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+		},
+	};
+	const card = (name: string): string =>
+		`BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${name}\r\nFN:${name}\r\nEND:VCARD\r\n`;
+	const event = (uid: string, start: string): string[] => [
+		'BEGIN:VEVENT',
+		`UID:${uid}`,
+		`SUMMARY:${uid}`,
+		`DTSTART:${start}`,
+		'END:VEVENT',
+	];
+	const setup = (contacts: ContactStore) => {
+		const client = createMailClient({
+			transport: createMemoryTransport(),
+			contacts,
+			calendar: createMemoryCalendarStore({ storage: full }),
+		});
+		const notices: MailNotice[] = [];
+		client.onNotice((notice) => notices.push(notice));
+		const errors = () => notices.filter((notice) => notice.kind === 'error');
+		return { client, notices, errors };
+	};
+
+	it('is kept for the session and listed, and reported as not stored', async () => {
+		const { client, errors } = setup(createMemoryContactStore({ storage: full }));
+		await until(client, (s) => s.status === 'ready');
+		const names = () => client.getState().contacts.map((contact) => contact.name);
+		await client.saveContact({ ...emptyContact('ada', 0), name: 'Ada' });
+		expect(names()).toEqual(['Ada']);
+		expect(errors()).toEqual([{ kind: 'error', action: 'contacts', code: 'storage' }]);
+		// Every card of an import is kept, and the failure said once.
+		expect(await client.importVCards(card('Grace') + card('Alan'))).toBe(2);
+		expect(names()).toEqual(['Ada', 'Alan', 'Grace']);
+		expect(errors()).toHaveLength(2);
+		await client.deleteContact('ada');
+		expect(names()).toEqual(['Alan', 'Grace']);
+		expect(errors()).toHaveLength(3);
+
+		await client.saveEvent(STAND_UP);
+		expect(client.getState().events).toEqual([STAND_UP]);
+		const file = ['BEGIN:VCALENDAR', 'VERSION:2.0'];
+		file.push(...event('one', '20261020T090000Z'), ...event('two', '20261021T090000Z'));
+		expect(await client.importIcs([...file, 'END:VCALENDAR'].join('\r\n'))).toBe(2);
+		expect(client.getState().events.map((e) => e.id)).toEqual(['one', 'stand-up', 'two']);
+		await client.deleteEvent('stand-up');
+		expect(client.getState().events.map((e) => e.id)).toEqual(['one', 'two']);
+		expect(errors().slice(3)).toEqual([
+			{ kind: 'error', action: 'calendar', code: 'storage' },
+			{ kind: 'error', action: 'calendar', code: 'storage' },
+			{ kind: 'error', action: 'calendar', code: 'storage' },
+		]);
+		client.destroy();
+	});
+
+	it('shows what the store holds when it fails otherwise', async () => {
+		const memory = createMemoryContactStore();
+		// A store of the host's own that takes the first card and then fails.
+		const contacts: ContactStore = {
+			list: () => memory.list(),
+			remove: (id) => memory.remove(id),
+			save: async (contact) => {
+				if ((await memory.list()).length) throw new MailTransportError('network', 'Offline.');
+				return memory.save(contact);
+			},
+		};
+		const { client, errors } = setup(contacts);
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.importVCards(card('Grace') + card('Alan'))).toBe(1);
+		expect(client.getState().contacts.map((contact) => contact.name)).toEqual(['Grace']);
+		expect(errors()).toEqual([{ kind: 'error', action: 'contacts', code: 'network' }]);
 		client.destroy();
 	});
 });

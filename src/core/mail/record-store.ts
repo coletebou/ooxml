@@ -1,7 +1,12 @@
 // A small keyed store for the address book and the calendar: in memory, seeded, and optionally
 // persisted as one JSON entry in a `Storage`-like object. Everything read back from storage is
 // re-validated, because storage is shared with other code and may be stale or edited. New code.
+import { MailTransportError } from './transport';
 
+/**
+ * Records by id. A change the store keeps but cannot persist (its storage is full or turned off)
+ * rejects with a `MailTransportError` of code `storage`; the change holds for the session.
+ */
 export interface RecordStore<T extends { id: string }> {
 	list(): Promise<T[]>;
 	/** Adds or replaces the record with the same id. */
@@ -23,7 +28,10 @@ export interface MemoryStoreOptions<T> {
 
 /**
  * A store seeded with `seed`, or with what `storage` holds under `key` once anything was saved.
- * A failing storage (private mode, quota) is ignored: the store still works for the session.
+ * A storage that cannot be read leaves the seed. A write it refuses (quota, storage turned off)
+ * keeps the change in memory, so the store still works for the session, and `save` or `remove`
+ * rejects with a `storage` error, so that the person can be told; the next write it takes stores
+ * every record again.
  */
 export function createMemoryRecordStore<T extends { id: string }>(
 	options: MemoryStoreOptions<T> & { key: string; sanitize: (raw: unknown) => T | null },
@@ -48,8 +56,12 @@ export function createMemoryRecordStore<T extends { id: string }>(
 	const persist = (): void => {
 		try {
 			options.storage?.setItem(options.key, JSON.stringify([...records.values()]));
-		} catch {
-			// Storage full or unavailable: keep working in memory.
+		} catch (cause) {
+			throw new MailTransportError(
+				'storage',
+				'The change is kept in memory only: the storage did not take it.',
+				{ cause },
+			);
 		}
 	};
 	return {

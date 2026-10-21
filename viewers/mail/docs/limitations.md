@@ -7,7 +7,11 @@ OpenMail is an early implementation. This page lists what it does not do, so not
 - **Contacts and the calendar are local** to the browser (the demo keeps them in memory; with a
   server they are kept in local storage). JMAP for contacts and calendars is not used yet. They are
   kept per server address, not per account: two accounts on one server in the same browser profile
-  share them (as do all custom transports).
+  share them (as do all custom transports). When local storage is full, a change or an import is
+  kept only until the page is closed, and a notice says so; once there is room again, the next
+  change stores them all. When the browser does not let the page use local storage at all (it is
+  turned off, or the page is in a frame that may not use it), contacts and the calendar are kept
+  only until the page is closed, without a notice.
 - **Commas in a contact's name and address**: the parts of a vCard's `N` and `ADR` are lists, their
   values separated by commas (RFC 6350), and they are written back as lists. A comma a card escaped
   inside one value (`1 Main St\, Apt 2`) is read as the comma it is, and written back as a list

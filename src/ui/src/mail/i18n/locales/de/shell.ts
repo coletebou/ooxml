@@ -67,6 +67,8 @@ export const deShell: Record<keyof typeof enShell, string> = {
 	'error.server': 'Auf dem Server ist ein Fehler aufgetreten.',
 	'error.uncertain':
 		'Der Server hat nicht mitgeteilt, ob diese Nachricht gesendet wurde. Sehen Sie im Ordner Gesendet nach, bevor Sie sie ändern oder erneut senden.',
+	'error.storage':
+		'Ihr Browser konnte diese Änderung nicht speichern. Sie bleibt nur erhalten, bis Sie die Seite schließen.',
 
 	'size.bytes': '{size} Byte',
 	'size.kb': '{size} KB',

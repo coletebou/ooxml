@@ -62,6 +62,7 @@ export const zhCNShell: Record<keyof typeof enShell, string> = {
 	'error.unsupported': '服务器不支持此操作。',
 	'error.server': '服务器出错。',
 	'error.uncertain': '服务器未告知这封邮件是否已发送。修改或再次发送前，请先查看已发送文件夹。',
+	'error.storage': '你的浏览器无法保存此更改。它只会保留到你关闭页面为止。',
 
 	'size.bytes': '{size} 字节',
 	'size.kb': '{size} KB',

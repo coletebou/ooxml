@@ -125,7 +125,9 @@ URI, and a quoted-printable 2.1 value as the text it encodes, `vcard-legacy.ts`)
 UID gets an id from a hash of its content, the same
 wherever it stands in a file, and two copies of it are one contact. `record-store.ts` keeps
 contacts and events in memory, optionally persisted to a `Storage`-like object and re-validated
-when read back. `calendar-store.ts` stores the shared `CalendarEvent`.
+when read back; a write the storage refuses keeps the change in memory and fails as `storage`.
+After each change, saved or not, the client lists what the store holds, and an import goes on past
+a refused write and reports it once. `calendar-store.ts` stores the shared `CalendarEvent`.
 
 ## Demo data
 

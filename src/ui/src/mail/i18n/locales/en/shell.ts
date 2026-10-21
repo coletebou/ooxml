@@ -64,6 +64,8 @@ export const enShell = {
 	'error.server': 'Something went wrong on the server.',
 	'error.uncertain':
 		'The server did not say whether this message was sent. Look in Sent before you change it or send it again.',
+	'error.storage':
+		'Your browser could not store this change. It is kept only until you close the page.',
 
 	'size.bytes': '{size} bytes',
 	'size.kb': '{size} KB',

@@ -23,6 +23,7 @@ const ERRORS: Record<MailErrorCode, MailKey> = {
 	unsupported: 'error.unsupported',
 	server: 'error.server',
 	uncertain: 'error.uncertain',
+	storage: 'error.storage',
 };
 
 /** A transport error code as a sentence. */

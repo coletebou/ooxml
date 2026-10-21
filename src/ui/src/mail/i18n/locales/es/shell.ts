@@ -67,6 +67,8 @@ export const esShell: Record<keyof typeof enShell, string> = {
 	'error.server': 'Se produjo un error en el servidor.',
 	'error.uncertain':
 		'El servidor no indicó si este mensaje se envió. Mira en Enviados antes de cambiarlo o volver a enviarlo.',
+	'error.storage':
+		'Tu navegador no pudo guardar este cambio. Solo se conservará hasta que cierres la página.',
 
 	'size.bytes': '{size} bytes',
 	'size.kb': '{size} KB',

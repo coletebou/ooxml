@@ -138,7 +138,9 @@ export type MailErrorCode =
 	| 'unsupported'
 	| 'server'
 	/** A send the server did not confirm, which may have gone out: not a failure to send. */
-	| 'uncertain';
+	| 'uncertain'
+	/** A change kept in memory only: its storage (full, or turned off) did not take it. */
+	| 'storage';
 
 export class MailTransportError extends Error {
 	readonly code: MailErrorCode;

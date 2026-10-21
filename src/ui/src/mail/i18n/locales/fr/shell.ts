@@ -67,6 +67,8 @@ export const frShell: Record<keyof typeof enShell, string> = {
 	'error.server': 'Une erreur est survenue sur le serveur.',
 	'error.uncertain':
 		"Le serveur n'a pas indiqué si ce message a été envoyé. Regardez dans Envoyés avant de le modifier ou de le renvoyer.",
+	'error.storage':
+		"Votre navigateur n'a pas pu enregistrer cette modification. Elle n'est conservée que jusqu'à la fermeture de la page.",
 
 	'size.bytes': '{size} octets',
 	'size.kb': '{size} Ko',
