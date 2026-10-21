@@ -198,4 +198,15 @@ describe('notebook structure', () => {
 		movePage(ctx, b, { sectionId: s, beforeId: a1 });
 		expect(titles(ctx, s)).toEqual(['0:A', '1:A1', '0:B']);
 	});
+
+	it('refuses an indent that would push a subpage past the deepest level', () => {
+		const ctx = context();
+		const s = addSection(ctx, { name: 'S' });
+		const a = addPage(ctx, { sectionId: s, title: 'A' });
+		const b = addPage(ctx, { sectionId: s, title: 'B', afterId: a, level: 1 });
+		const c = addPage(ctx, { sectionId: s, title: 'C', afterId: b, level: 1 });
+		addPage(ctx, { sectionId: s, title: 'C1', afterId: c, level: 2 });
+		expect(shiftPageLevel(ctx, c, 1)).toBe(false);
+		expect(titles(ctx, s)).toEqual(['0:A', '1:B', '1:C', '2:C1']);
+	});
 });

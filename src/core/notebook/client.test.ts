@@ -505,6 +505,57 @@ describe('notebook client undo of deletes', () => {
 	});
 });
 
+describe('notebook client tenth review round', () => {
+	it('keeps both clients edits when they share a storage but cannot sync', async () => {
+		const shared = createMemoryStorage();
+		const a = start(shared, createChannelHub());
+		await a.whenReady();
+		await settle();
+		const id = a.getState().notebookId;
+		await a.flush();
+		const b = start(shared, createChannelHub());
+		await b.whenReady();
+		await until(() => b.getState().notebookId === id && !b.getState().loading);
+		a.renamePage(a.getState().pageId, 'From A');
+		b.createPage({ title: 'From B' });
+		await a.flush();
+		await b.flush();
+		await a.destroy();
+		await b.destroy();
+		const c = start(shared, createChannelHub());
+		await c.whenReady();
+		await until(() => c.getState().notebookId === id && !c.getState().loading);
+		expect(
+			c
+				.getState()
+				.pages.map((p) => p.title)
+				.sort(),
+		).toEqual(['From A', 'From B']);
+	});
+
+	it('joins a notebook made on another device by its id in server mode', async () => {
+		class Socket {
+			readyState = 0;
+			binaryType = 'arraybuffer';
+			onopen = null;
+			onclose = null;
+			onerror = null;
+			onmessage = null;
+			send(): void {}
+			close(): void {}
+		}
+		const client = start(createMemoryStorage(), createChannelHub(), {
+			config: { mode: 'server', syncUrl: 'wss://sync.test' },
+			WebSocket: Socket as never,
+		});
+		await client.whenReady();
+		await settle();
+		await client.openNotebook('nshared0123456789');
+		await until(() => client.getState().notebookId === 'nshared0123456789');
+		expect(client.getState().notebooks.map((n) => n.id)).toContain('nshared0123456789');
+	});
+});
+
 describe('notebook client with damaged input', () => {
 	it('imports an archive whose text is malformed, keeping what is valid', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());

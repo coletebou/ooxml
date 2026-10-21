@@ -105,9 +105,14 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 		timer = undefined;
 		if (!storage || !dirty) return saving;
 		dirty = false;
-		const bytes = Y.encodeStateAsUpdate(doc);
+		const ours = Y.encodeStateAsUpdate(doc);
 		saving = saving
-			.then(() => storage.save(key, bytes))
+			// Merged with what is stored: another client on the same storage (a tab cut off from the
+			// sync server) may have saved edits this one does not have.
+			.then(async () => {
+				const stored = await storage.load(key).catch(() => null);
+				await storage.save(key, stored?.length ? Y.mergeUpdates([stored, ours]) : ours);
+			})
 			.then(
 				() => {
 					failed = null;

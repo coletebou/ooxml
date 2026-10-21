@@ -273,6 +273,10 @@ export function shiftPageLevel(ctx: NotebookEditContext, id: string, delta: 1 | 
 	const max = Math.min(MAX_PAGE_LEVEL, index === 0 ? 0 : (pages[index - 1]?.level ?? 0) + 1);
 	const level = Math.max(0, Math.min(max, current.level + delta));
 	if (level === current.level) return false;
+	// The block moves as one: an indent that would push one of its subpages past the deepest level
+	// would turn it into a sibling, so it is refused.
+	const block = pageBlock(pages, id);
+	if (block.some((p) => p.level + level - current.level > MAX_PAGE_LEVEL)) return false;
 	transact(ctx, () => {
 		for (const p of pageBlock(pages, id))
 			entityMap(ctx.types.pages, p.id)?.set(

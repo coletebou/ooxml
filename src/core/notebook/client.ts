@@ -384,7 +384,19 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 
 		createNotebook: (input = {}) => create(input),
 		setNames,
-		openNotebook: (id) => (open?.id === id ? Promise.resolve() : switchTo(id)),
+		openNotebook: async (id) => {
+			if (open?.id === id) return;
+			// In server mode a notebook made on another device can be joined by its id: it is listed
+			// here first (its name follows from the room once it syncs).
+			if (
+				config.mode === 'server' &&
+				isEntityId(id) &&
+				!readRegistry(reg).some((e) => e.id === id) &&
+				!registry.readFailed()
+			)
+				registerNotebook(reg, { id, name: names.notebook, color: paletteColor(0), created: now() });
+			await switchTo(id);
+		},
 		renameNotebook(id, name) {
 			if (open?.id === id) discrete((o) => structure.writeMeta(o.edit, { name }), undefined);
 			updateRegistry(reg, id, { name, ...(open?.id === id ? {} : { pending: true }) });
