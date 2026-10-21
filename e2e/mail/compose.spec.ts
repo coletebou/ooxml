@@ -22,13 +22,17 @@ test('reply quotes the original and threads under it', async ({ page }) => {
 	await page.keyboard.press('r');
 	const compose = page.locator('mail-compose');
 	await expect(compose.getByPlaceholder('Subject')).toHaveValue('Re: Contract renewal');
-	await expect(compose.locator('blockquote')).toContainText('3 pm');
+	// Threads are per folder, so the conversation in the Inbox is Julia's message (the earlier reply
+	// from this account is in Sent): that is what the reply quotes.
+	await expect(compose.locator('blockquote')).toContainText('renewal terms are ready');
 	await compose.getByRole('button', { name: 'Send' }).click();
 	await expect(page.locator('mail-app .toast')).toContainText('Message sent');
 });
 
 test('a draft is saved automatically and reopens', async ({ page }) => {
 	await openDemo(page);
+	// Shortcuts belong to the element, so the focus has to be inside it first.
+	await row(page, 'Q3 roadmap review').click();
 	await page.keyboard.press('c');
 	const compose = page.locator('mail-compose');
 	await compose.getByPlaceholder('Subject').fill('Unfinished thought');

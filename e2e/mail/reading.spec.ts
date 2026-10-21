@@ -5,7 +5,9 @@ test('a conversation opens oldest first with the newest message expanded', async
 	await openDemo(page);
 	await openConversation(page, 'Q3 roadmap review');
 	const messages = page.locator('mail-reading-pane article.message');
-	await expect(messages).toHaveCount(4);
+	// Threads are per folder: the Inbox holds the request and two replies; the reply sent from this
+	// account is in Sent.
+	await expect(messages).toHaveCount(3);
 	await expect(messages.last()).toHaveClass(/open/);
 	await expect(messages.last()).toContainText('update the tickets');
 	// Opening marks it read.
