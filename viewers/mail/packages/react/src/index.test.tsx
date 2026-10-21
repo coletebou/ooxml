@@ -79,6 +79,9 @@ describe('useMail', () => {
 		expect(container.textContent).toBe('ready');
 		const destroy = vi.spyOn(client!, 'destroy');
 		await act(async () => view.unmount());
+		// Destroyed once its open draft (none here) is closed, which is asynchronous.
+		for (let i = 0; i < 200 && !destroy.mock.calls.length; i++)
+			await act(() => new Promise((done) => setTimeout(done, 5)));
 		expect(destroy).toHaveBeenCalledOnce();
 		destroy.mockRestore();
 	});

@@ -29,6 +29,8 @@ export { MailMessageList, defineMailMessageList } from './message-list';
 export { MailReadingPane, defineMailReadingPane, type InlineUrls } from './reading-pane';
 export { MailRecipients, defineMailRecipients } from './recipients';
 export { applyMailProps, listenMailEvents, type MailProps } from './bind';
+/** Close a client's compose window (saving the draft, retrying for a while), then destroy it. */
+export { release as releaseMailClient } from './app-client';
 export * from './store';
 export { previewKind, type PreviewKind } from './attachments';
 export {

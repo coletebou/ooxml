@@ -13,6 +13,7 @@ import {
 	createMail,
 	defineMailApp,
 	pickMailProps,
+	releaseMailClient,
 	sameMailConnection,
 	type MailApp,
 	type MailBinding,
@@ -88,7 +89,8 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 		const created = createMail(opts);
 		setClient(created);
 		return () => {
-			created.destroy();
+			// The open draft is saved (retried for a while) before the client goes.
+			void releaseMailClient(created);
 			setClient(null);
 		};
 	}, [options === null, config]);
