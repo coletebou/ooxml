@@ -100,13 +100,18 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			}),
 		async importIcs(text, zone) {
 			if (!calendar) return 0;
-			const { events, unsupported } = parseIcs(text, {
-				uidDomain: UID_DOMAIN,
-				...(zone ? { zone } : {}),
-			});
 			let count = 0;
+			let unsupported: string[] = [];
 			await guard('calendar', async () => {
-				for (const event of events) {
+				// An event without a UID gets an id no stored event has, so it never replaces one.
+				const stored = new Set((await calendar.list()).map((event) => event.id));
+				const read = parseIcs(text, {
+					uidDomain: UID_DOMAIN,
+					...(zone ? { zone } : {}),
+					taken: (id) => stored.has(id),
+				});
+				unsupported = read.unsupported;
+				for (const event of read.events) {
 					await calendar.save(event);
 					count++;
 				}

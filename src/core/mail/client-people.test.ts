@@ -28,4 +28,31 @@ describe('the calendar actions', () => {
 		expect(client.getState().events).toEqual([STAND_UP]);
 		client.destroy();
 	});
+
+	it('keeps what an earlier import brought when another file without UIDs comes in', async () => {
+		const client = createMailClient({
+			transport: createMemoryTransport(),
+			calendar: createMemoryCalendarStore(),
+		});
+		const file = (title: string, ...lines: string[]): string =>
+			[
+				'BEGIN:VCALENDAR',
+				'VERSION:2.0',
+				'BEGIN:VEVENT',
+				...lines,
+				`SUMMARY:${title}`,
+				'DTSTART:20261020T090000Z',
+				'END:VEVENT',
+				'END:VCALENDAR',
+			].join('\r\n');
+		const titles = () => client.getState().events.map((event) => event.title);
+		expect(await client.importIcs(file('First'))).toBe(1);
+		expect(await client.importIcs(file('Second'))).toBe(1);
+		expect(titles()).toEqual(['First', 'Second']);
+		// An event with a UID is still the same event when it comes in again.
+		await client.importIcs(file('Review', 'UID:review@example.com'));
+		await client.importIcs(file('Review, moved', 'UID:review@example.com'));
+		expect(titles()).toEqual(['First', 'Second', 'Review, moved']);
+		client.destroy();
+	});
 });
