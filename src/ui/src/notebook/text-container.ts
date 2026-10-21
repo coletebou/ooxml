@@ -74,8 +74,12 @@ const todoPlugin = (label: (done: boolean) => string): Plugin =>
  * that root: no prototype or global is changed).
  */
 function shadowRootRanges(view: EditorView): void {
-	const root = view.root as Document | (ShadowRoot & { createRange?: unknown });
-	if (typeof root.createRange === 'function') return;
+	const root = view.root;
+	if (
+		!(root instanceof ShadowRoot) ||
+		typeof (root as { createRange?: unknown }).createRange === 'function'
+	)
+		return;
 	const doc = root.ownerDocument;
 	Object.defineProperty(root, 'createRange', {
 		value: () => doc.createRange(),
