@@ -186,6 +186,26 @@ describe('<notebook-app>', () => {
 		undo.click();
 		await until(() => app.state!.pages.length === before + 1);
 
+		// Undo of a delete restores in the notebook it happened in, even after switching away.
+		const first = app.state!.notebookId;
+		const doomed = app.state!.pageId;
+		nav.dispatchEvent(
+			new CustomEvent('nb-delete-item', {
+				detail: { kind: 'page', id: doomed },
+				bubbles: true,
+				composed: true,
+			}),
+		);
+		await until(() => !app.state!.pages.some((p) => p.id === doomed));
+		await app.updateComplete;
+		const undoLater = app.shadowRoot!.querySelector<HTMLButtonElement>('.notice .undo')!;
+		await app.client!.createNotebook({ name: 'Other' });
+		await until(() => app.state!.notebookId !== first && !app.state!.loading);
+		undoLater.click();
+		await until(
+			() => app.state!.notebookId === first && app.state!.pages.some((p) => p.id === doomed),
+		);
+
 		app.locale = 'de';
 		await app.updateComplete;
 		const ribbon = app.shadowRoot!.querySelector('office-ui-ribbon')!;

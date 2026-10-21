@@ -28,7 +28,7 @@ export interface AppHost {
 	readonly updateComplete: Promise<boolean>;
 	tr: (key: NotebookKey, params?: MessageParams) => string;
 	trn: (key: NotebookPluralKey, count: number, params?: MessageParams) => string;
-	notify: (message: string, undo?: () => void) => void;
+	notify: (message: string, undo?: () => unknown) => void;
 	noticeDeleted: (kind: NavItemKind, batch: string | null, id: string) => void;
 	openMenu: (spec: MenuSpec | null, x: number, y: number) => void;
 	page: () => NotebookPage | null;

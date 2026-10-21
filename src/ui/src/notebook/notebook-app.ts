@@ -141,7 +141,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	declare todosOpen: boolean;
 	declare formats: ActiveFormats | null;
 	declare menu: (OfficeMenuState & { spec: MenuSpec }) | null;
-	declare notice: { message: string; undo?: () => void } | null;
+	declare notice: { message: string; undo?: () => unknown } | null;
 	declare link: LinkDialogValue | null;
 	declare focusId: string;
 	editor: EditorView | null = null;
@@ -190,7 +190,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	pick = (kind: 'picture' | 'file' | 'archive'): void =>
 		this.renderRoot.querySelector<HTMLInputElement>(`input[data-pick="${kind}"]`)?.click();
 
-	notify = (message: string, undo?: () => void): void => {
+	notify = (message: string, undo?: () => unknown): void => {
 		clearTimeout(this.#noticeTimer);
 		this.notice = undo ? { message, undo } : { message };
 		this.#noticeTimer = setTimeout(() => (this.notice = null), 8000);
@@ -200,11 +200,16 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	noticeDeleted = (kind: NavItemKind, batch: string | null, id: string): void => {
 		const client = this.#client;
 		if (!client) return;
+		// Undo restores in the notebook the delete happened in, even after switching to another.
+		const source = this.state?.notebookId ?? '';
 		const undo =
 			kind === 'notebook'
 				? () => void client.restoreNotebook(id)
 				: batch
-					? () => client.restore(batch)
+					? async () => {
+							if (client.getState().notebookId !== source) await client.openNotebook(source);
+							client.restore(batch);
+						}
 					: undefined;
 		const key =
 			kind === 'page'
