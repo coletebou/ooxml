@@ -62,8 +62,10 @@ out, and sending the same draft again first asks the server whether it did.
   server in memory for demos and tests; a message sent to your own address arrives in the Inbox.
 - `createJmapTransport({ url, auth, fetch?, push? })`: JMAP (RFC 8620 core, RFC 8621 mail). Session
   discovery through `/.well-known/jmap`, bearer or basic auth, `Mailbox`, `Email`, `Thread`,
-  `EmailSubmission` and `Identity`, back references, batching by the server's limits, state tracking
-  with `*/changes`, push through the event source (read with `fetch` so the `Authorization` header
+  `EmailSubmission` and `Identity`, back references, batching by the server's limits, no more
+  requests and uploads in flight at once than the session says the server takes (the rest wait
+  their turn: `maxConcurrentRequests`, `maxConcurrentUpload`), state tracking with `*/changes`,
+  push through the event source (read with `fetch` so the `Authorization` header
   is sent) or polling. A message read over JMAP shows the body and attachments the server lists
   (`textBody`, `htmlBody`, `attachments`), so an attached multipart shows as the server decides;
   `readEmail` lists each of its parts as a file (RFC 2183 section 2.9). Credentials are never

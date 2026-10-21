@@ -1,7 +1,15 @@
 // The JMAP client under the transport: the session (discovered on first use, refetched when a
-// response's `sessionState` says it changed), requests that declare the capabilities they use, and
-// batching by the server's limits. New code.
-import { createJmapHttp, sessionResourceUrl, type JmapAuth, type JmapHttp } from './http';
+// response's `sessionState` says it changed), requests that declare the capabilities they use,
+// batching by the server's limits, and no more requests or uploads in flight at once than the
+// session says the server takes (RFC 8620 2). New code.
+import {
+	createJmapGate,
+	createJmapHttp,
+	sessionResourceUrl,
+	type JmapAuth,
+	type JmapGate,
+	type JmapHttp,
+} from './http';
 import { JmapRequestBuilder, JmapResult, parseJmapResponse, type JmapCall } from './request';
 import { loadJmapSession, mailAccountId, type JmapLimits, type JmapSession } from './session';
 import { CORE, MAIL, SUBMISSION, type JmapResponse } from './types';
@@ -22,13 +30,18 @@ const MAX_REFRESH_TRIES = 3;
 
 export interface JmapClient {
 	readonly http: JmapHttp;
+	/** Slots for uploads, as many as the session's `maxConcurrentUpload`. */
+	readonly uploads: JmapGate;
 	/** The session, discovered on first use. */
 	session(signal?: AbortSignal): Promise<JmapSession>;
 	/** Discovers the session again from the configured URL. */
 	connect(signal?: AbortSignal): Promise<JmapSession>;
 	/** The account every call uses (valid once the session is loaded). */
 	accountId(): string;
-	/** Runs one request; `build` adds its calls and returns the handles to read them by. */
+	/**
+	 * Runs one request; `build` adds its calls and returns the handles to read them by. It waits
+	 * while as many requests as the session's `maxConcurrentRequests` are in flight.
+	 */
 	request<T>(
 		build: (builder: JmapRequestBuilder, accountId: string) => T,
 		signal?: AbortSignal,
@@ -74,6 +87,10 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 	/** The state the last refetch failed for, and how often in a row. */
 	let failedFor = '';
 	let failures = 0;
+	// Each request to the API, and each upload, waits for a slot of its gate; a slot is only asked
+	// for once the session, whose limits size the gates, is loaded.
+	const requests = createJmapGate(() => session?.limits.maxConcurrentRequests ?? 1);
+	const uploads = createJmapGate(() => session?.limits.maxConcurrentUpload ?? 1);
 
 	const discover = (signal?: AbortSignal): Promise<JmapSession> => {
 		const attempt = (async () => {
@@ -117,6 +134,7 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 
 	const client: JmapClient = {
 		http,
+		uploads,
 		session: ensure,
 		connect: discover,
 		accountId: () => accountId,
@@ -133,6 +151,7 @@ export function createJmapClient(options: JmapClientOptions): JmapClient {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 					body: JSON.stringify(builder.build()),
+					gate: requests,
 					...(signal ? { signal } : {}),
 				},
 				what,

@@ -1,7 +1,8 @@
 // HTTP for the JMAP client: the `Authorization` header built for each request from the credentials,
-// `fetch` and status failures as `JmapError`s, JSON bodies, URI templates (RFC 6570 level 1) and
-// the rule that credentials and request bodies only travel over https (plain http for loopback
-// hosts), redirects included (`redirects.ts`). New code.
+// `fetch` and status failures as `JmapError`s, JSON bodies, URI templates (RFC 6570 level 1), the
+// rule that credentials and request bodies only travel over https (plain http for loopback hosts),
+// redirects included (`redirects.ts`), and gates that keep the exchanges of one kind to as many at
+// once as the server takes. New code.
 import { encodeBase64 } from '../../digest/base64';
 import { MailTransportError } from '../transport';
 import { JmapError, createRedactor, networkError, responseError, type Redact } from './errors';
@@ -49,6 +50,17 @@ export interface JmapHttpInit {
 	signal?: AbortSignal;
 	/** Leave a failure status to `read` instead of throwing it. */
 	anyStatus?: boolean;
+	/** `exchange` waits for a slot of this before the request goes, and holds it until read. */
+	gate?: JmapGate;
+}
+
+/** Slots for exchanges in flight at once: a server takes so many at a time (RFC 8620 2). */
+export interface JmapGate {
+	/**
+	 * Waits for a free slot, in turn, and resolves to the function that frees it (once, however
+	 * often it is called). A wait whose signal aborts leaves the queue with the signal's reason.
+	 */
+	enter(signal?: AbortSignal): Promise<() => void>;
 }
 
 export interface JmapHttp {
@@ -74,6 +86,50 @@ function abortReason(signal: AbortSignal): unknown {
 	return reason instanceof Error
 		? reason
 		: new DOMException('The request was aborted.', 'AbortError');
+}
+
+/**
+ * A gate of `limit()` slots (at least one). The limit is read each time a slot is given out, so
+ * that of a refetched session applies from then on.
+ */
+export function createJmapGate(limit: () => number): JmapGate {
+	let held = 0;
+	/** The waits, oldest first; each takes its slot when called. */
+	const waiting = new Set<() => void>();
+	const admit = (): void => {
+		for (const next of waiting) {
+			if (held >= Math.max(1, limit())) return;
+			waiting.delete(next);
+			held++;
+			next();
+		}
+	};
+	const enter = (signal?: AbortSignal): Promise<() => void> =>
+		new Promise((resolve, reject) => {
+			if (signal?.aborted) {
+				reject(abortReason(signal));
+				return;
+			}
+			let freed = false;
+			const free = (): void => {
+				if (freed) return;
+				freed = true;
+				held--;
+				admit();
+			};
+			const onAbort = (): void => {
+				waiting.delete(take);
+				if (signal) reject(abortReason(signal));
+			};
+			const take = (): void => {
+				signal?.removeEventListener('abort', onAbort);
+				resolve(free);
+			};
+			signal?.addEventListener('abort', onAbort, { once: true });
+			waiting.add(take);
+			admit();
+		});
+	return { enter };
 }
 
 /** One signal for both, and a function to drop the link once the exchange is over. */
@@ -174,7 +230,9 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 		json,
 		async exchange(url, init, what, read) {
 			const { signal, release } = linkSignals(init.signal, options.signal);
+			let leave = (): void => {};
 			try {
+				if (init.gate) leave = await init.gate.enter(signal);
 				const { response, landed } = await request(url, init, signal, what);
 				if (!response.ok && !init.anyStatus) throw await responseError(response, what, redact);
 				return await read(response, landed);
@@ -182,6 +240,7 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 				if (signal?.aborted) throw abortReason(signal);
 				throw error;
 			} finally {
+				leave();
 				release();
 			}
 		},

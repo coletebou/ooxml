@@ -19,6 +19,10 @@ import { CORE, MAIL, isRecord } from './types';
 export interface JmapLimits {
 	/** Octets one upload may hold; `Infinity` when the server does not say. */
 	maxSizeUpload: number;
+	/** Uploads the server takes at once; it may refuse more with a `limit` error. */
+	maxConcurrentUpload: number;
+	/** Requests to the API the server takes at once; it may refuse more with a `limit` error. */
+	maxConcurrentRequests: number;
 	maxCallsInRequest: number;
 	maxObjectsInGet: number;
 	maxObjectsInSet: number;
@@ -134,6 +138,12 @@ export function parseJmapSession(json: unknown, url: string): JmapSession {
 		state: typeof json.state === 'string' ? json.state : '',
 		limits: {
 			maxSizeUpload: positive(core.maxSizeUpload, Number.POSITIVE_INFINITY),
+			maxConcurrentUpload: positive(core.maxConcurrentUpload, 4),
+			// The example session of RFC 8620 2.1 spells it without the `s` that section 2 gives it.
+			maxConcurrentRequests: positive(
+				core.maxConcurrentRequests,
+				positive(core.maxConcurrentRequest, 4),
+			),
 			maxCallsInRequest: positive(core.maxCallsInRequest, 16),
 			maxObjectsInGet: positive(core.maxObjectsInGet, 500),
 			maxObjectsInSet: positive(core.maxObjectsInSet, 500),

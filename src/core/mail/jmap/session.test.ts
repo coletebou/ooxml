@@ -49,6 +49,9 @@ describe('discoverJmapSession', () => {
 			username: 'john@example.com',
 			limits: {
 				maxSizeUpload: 50_000_000,
+				maxConcurrentUpload: 8,
+				// The example spells it `maxConcurrentRequest`; section 2 names it with an `s`.
+				maxConcurrentRequests: 8,
 				maxCallsInRequest: 32,
 				maxObjectsInGet: 256,
 				maxObjectsInSet: 128,
@@ -262,10 +265,31 @@ describe('discoverJmapSession', () => {
 		(session.capabilities as Record<string, unknown>)['urn:ietf:params:jmap:core'] = {};
 		expect(parseJmapSession(session, 'https://jmap.example.com/').limits).toEqual({
 			maxSizeUpload: Number.POSITIVE_INFINITY,
+			maxConcurrentUpload: 4,
+			maxConcurrentRequests: 4,
 			maxCallsInRequest: 16,
 			maxObjectsInGet: 500,
 			maxObjectsInSet: 500,
 		});
+	});
+
+	it('reads how many requests and uploads the server takes at once', () => {
+		const limits = (core: Record<string, unknown>) => {
+			const session = rfcSession();
+			(session.capabilities as Record<string, unknown>)['urn:ietf:params:jmap:core'] = core;
+			const { maxConcurrentRequests, maxConcurrentUpload } = parseJmapSession(
+				session,
+				'https://jmap.example.com/',
+			).limits;
+			return [maxConcurrentRequests, maxConcurrentUpload];
+		};
+		expect(limits({ maxConcurrentRequests: 2, maxConcurrentUpload: 1 })).toEqual([2, 1]);
+		// The name section 2 gives wins over the spelling of the example in 2.1.
+		expect(limits({ maxConcurrentRequests: 3, maxConcurrentRequest: 9 })).toEqual([3, 4]);
+		expect(limits({ maxConcurrentRequest: 2 })).toEqual([2, 4]);
+		// No request could ever go at zero, and a limit is a whole number.
+		expect(limits({ maxConcurrentRequests: 0, maxConcurrentUpload: 1.5 })).toEqual([4, 4]);
+		expect(limits({ maxConcurrentRequests: '2', maxConcurrentUpload: null })).toEqual([4, 4]);
 	});
 });
 

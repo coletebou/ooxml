@@ -34,6 +34,7 @@ export function createBlobMethods(client: JmapClient, nudge: () => void): BlobMe
 				method: 'POST',
 				headers: { 'Content-Type': contentType, Accept: 'application/json' },
 				body: bodyOf(bytes),
+				gate: client.uploads,
 			},
 			what,
 			(response) => http.json(response, what),
