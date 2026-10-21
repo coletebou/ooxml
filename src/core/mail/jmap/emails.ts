@@ -4,6 +4,7 @@
 import { DRAFT, type EmailSummary, type MailMessage } from '../model';
 import {
 	MailTransportError,
+	PartialUpdateError,
 	type EmailPatch,
 	type MailQuery,
 	type MailQueryPage,
@@ -179,17 +180,33 @@ export function createEmailMethods(
 			const entries = Object.entries(patches)
 				.map(([id, patch]) => [id, emailPatch(patch)] as const)
 				.filter(([, patch]) => Object.keys(patch).length > 0);
+			const updated: string[] = [];
+			let failure: unknown;
 			try {
 				await client.batch(
 					entries,
 					(limits) => limits.maxObjectsInSet,
 					(builder, accountId, chunk) =>
 						builder.call('Email/set', { accountId, update: Object.fromEntries(chunk) }),
-					(result, call) => void result.set(call),
+					// Each message is changed on its own (RFC 8620 5.3): one refused, the rest still go.
+					(result, call) => {
+						try {
+							const args = result.get(call);
+							if (isRecord(args.updated)) updated.push(...Object.keys(args.updated));
+							result.set(call);
+						} catch (error) {
+							failure ??= error;
+						}
+					},
 				);
+			} catch (error) {
+				// A request that failed: what it held is not known to have changed, and the rest is not sent.
+				failure ??= error;
 			} finally {
 				if (entries.length) nudge();
 			}
+			if (failure !== undefined)
+				throw updated.length ? new PartialUpdateError(updated, failure) : failure;
 		},
 
 		async destroy(ids) {

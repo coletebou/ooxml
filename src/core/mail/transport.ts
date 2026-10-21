@@ -101,6 +101,10 @@ export interface MailTransport {
 	/** Summaries in the order of `ids`; unknown ids are left out. */
 	summaries(ids: readonly string[]): Promise<EmailSummary[]>;
 	message(id: string, options?: MessageReadOptions): Promise<MailMessage>;
+	/**
+	 * Changes the messages `patches` names. When it changes only some of them, it fails with a
+	 * `PartialUpdateError` that names those.
+	 */
 	update(patches: Readonly<Record<string, EmailPatch>>): Promise<void>;
 	/** Deletes for good (the client moves to Trash first and only destroys from there). */
 	destroy(ids: readonly string[]): Promise<void>;
@@ -147,4 +151,22 @@ export class MailTransportError extends Error {
 
 export function isMailTransportError(error: unknown): error is MailTransportError {
 	return error instanceof MailTransportError;
+}
+
+/**
+ * An `update` that changed some of the messages only, as a server may: a JMAP `/set` changes each
+ * record on its own (RFC 8620 5.3). `updated` names the ones it changed; `code` and `cause` say
+ * why the others were not.
+ */
+export class PartialUpdateError extends MailTransportError {
+	readonly updated: readonly string[];
+	constructor(updated: readonly string[], cause: unknown) {
+		super(
+			isMailTransportError(cause) ? cause.code : 'server',
+			'Some of the messages were not changed.',
+			{ cause },
+		);
+		this.name = 'PartialUpdateError';
+		this.updated = updated;
+	}
 }

@@ -1,11 +1,12 @@
 // What the toolbar and the keyboard do to messages: read and unread, flags, moves (archive, junk,
 // trash) and folders. Each change is applied to the list at once and put back if the server
-// refuses it; moves can be undone from their notice. New code.
+// refuses it, for the messages it refuses it for: a server changes each on its own. Moves can be
+// undone from their notice. New code.
 import type { ClientCore } from './client-core';
 import type { ListLoader } from './client-list';
-import type { MailClient, MailNotice, Targets } from './client-types';
+import type { MailClient, Targets } from './client-types';
 import { FLAGGED, SEEN, type EmailSummary, type MailboxRole } from './model';
-import { MailTransportError, type EmailPatch } from './transport';
+import { MailTransportError, PartialUpdateError, type EmailPatch } from './transport';
 
 type Mutations = Pick<
 	MailClient,
@@ -35,6 +36,17 @@ const withKeyword = (email: EmailSummary, keyword: string, on: boolean): EmailSu
 	return { ...email, keywords };
 };
 
+/** The messages a failed update changed all the same: those it names when it made only some. */
+const changedBy = (error: unknown): ReadonlySet<string> =>
+	new Set(error instanceof PartialUpdateError ? error.updated : []);
+
+/** The patches of `patches` for the messages `ids`. */
+const only = (
+	patches: Readonly<Record<string, EmailPatch>>,
+	ids: ReadonlySet<string>,
+): Record<string, EmailPatch> =>
+	Object.fromEntries(Object.entries(patches).filter(([id]) => ids.has(id)));
+
 export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 	/** Sets `keyword` on the messages `emailIds` (resolved already, see `emailIdsOf`). */
 	const setKeyword = async (
@@ -46,7 +58,8 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 			(id) => (core.emails.get(id)?.keywords[keyword] === true) !== on,
 		);
 		if (!targets.length) return;
-		const revert = core.applyLocal(targets, (email) => withKeyword(email, keyword, on));
+		const change = (email: EmailSummary): EmailSummary => withKeyword(email, keyword, on);
+		const revert = core.applyLocal(targets, change);
 		try {
 			await core.transport.update(
 				Object.fromEntries(targets.map((id) => [id, { keywords: { [keyword]: on } }])),
@@ -54,6 +67,9 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		} catch (error) {
 			revert();
 			core.fail('update', error);
+			const changed = changedBy(error);
+			const kept = targets.filter((id) => changed.has(id));
+			if (kept.length) core.applyLocal(kept, change);
 		}
 	};
 
@@ -118,45 +134,56 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		core.rebuild();
 	};
 
-	/** Applies folder `patches` at once and then on the server, with a notice that undoes them. */
-	const commit = async (
+	/**
+	 * Applies folder `patches` at once and then on the server; resolves to those the server made.
+	 * What it did not make is put back, with a notice saying why; what it made before refusing the
+	 * rest stays made.
+	 */
+	const moveNow = async (
 		patches: Record<string, EmailPatch>,
-		action: 'moved' | 'archived' | 'junk' | 'deleted',
-		target?: string,
-	): Promise<void> => {
-		const count = Object.keys(patches).length;
-		if (!count) return;
-		const restore = restorePatches(patches);
+	): Promise<Record<string, EmailPatch>> => {
 		const listBefore = core.listIds;
 		const revert = applyPatches(patches);
 		hideMoved(patches);
 		try {
 			await core.transport.update(patches);
+			return patches;
 		} catch (error) {
 			core.listIds = listBefore;
 			revert();
 			core.fail('move', error);
-			return;
+			const made = only(patches, changedBy(error));
+			if (Object.keys(made).length) {
+				applyPatches(made);
+				hideMoved(made);
+			}
+			return made;
 		}
-		const notice: MailNotice = {
+	};
+
+	/** Moves as `patches` say, with a notice that undoes the moves the server made. */
+	const commit = async (
+		patches: Record<string, EmailPatch>,
+		action: 'moved' | 'archived' | 'junk' | 'deleted',
+		target?: string,
+	): Promise<void> => {
+		if (!Object.keys(patches).length) return;
+		const restore = restorePatches(patches);
+		const moved = Object.keys(await moveNow(patches));
+		if (!moved.length) return;
+		const back = only(restore, new Set(moved));
+		core.notice({
 			kind: 'done',
 			action,
-			count,
+			count: moved.length,
 			...(target ? { target } : {}),
 			undo: async () => {
-				const putBack = applyPatches(restore);
-				try {
-					await core.transport.update(restore);
-				} catch (error) {
-					putBack();
-					core.fail('move', error);
-					return;
-				}
+				const undone = Object.keys(await moveNow(back)).length;
+				if (!undone) return;
 				await list.loadList();
-				core.notice({ kind: 'done', action: 'undone', count });
+				core.notice({ kind: 'done', action: 'undone', count: undone });
 			},
-		};
-		core.notice(notice);
+		});
 	};
 
 	const move = (
