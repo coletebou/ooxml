@@ -104,6 +104,13 @@ describe('parseVCards', () => {
 		expect(skipped).toBe(4);
 	});
 
+	it('reads the first card of a file that starts with a byte order mark', () => {
+		const card = 'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Ada Lovelace\r\nEND:VCARD\r\n';
+		const { contacts, skipped } = parseVCards(`\uFEFF${card}${card.replace('Ada', 'Grace')}`);
+		expect(contacts.map((c) => c.name)).toEqual(['Ada Lovelace', 'Grace Lovelace']);
+		expect(skipped).toBe(0);
+	});
+
 	it('gives cards without a UID a stable id', () => {
 		const card = 'BEGIN:VCARD\nFN:Ada\nEND:VCARD';
 		expect(parseVCards(card).contacts[0]!.id).toBe(parseVCards(card).contacts[0]!.id);
