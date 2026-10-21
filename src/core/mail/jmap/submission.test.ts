@@ -165,3 +165,33 @@ describe('a send whose answer never came', () => {
 		expect(store.submissions).toHaveLength(2);
 	});
 });
+
+describe('a send that may have gone out, its submission undone since', () => {
+	it('sends the message again when the submission was canceled, and only then', async () => {
+		for (const status of ['canceled', 'pending', 'final'] as const) {
+			const { server, transport, store } = mail();
+			// The server sends it and files it in Sent, and the answer is lost.
+			loseAnswer(server, true);
+			expect(await failure(transport.send(reply)), status).toMatchObject({ code: 'uncertain' });
+			expect(store.emails.get('E1'), status).toMatchObject({ mailboxIds: { [SENT]: true } });
+			// Another client undid it (RFC 8621 7: a canceled one is never delivered), or it is still
+			// to go out, or it went.
+			store.undoStatus['ES-1'] = status;
+			const again = await transport.send(reply);
+			if (status === 'canceled') {
+				expect(again).toEqual({ id: 'E2' });
+				expect(store.submissions.map((submission) => submission.emailId)).toEqual(['E1', 'E2']);
+			} else {
+				expect(again, status).toEqual({ id: 'E1' });
+				expect(store.submissions, status).toHaveLength(1);
+			}
+			// One copy of what was sent, in Sent, and no draft of it left.
+			const filed = [...store.emails].filter(([, email]) => email.mailboxIds[SENT]);
+			expect(
+				filed.map(([id]) => id),
+				status,
+			).toEqual([again.id]);
+			expect(store.emails.has('old-draft'), status).toBe(false);
+		}
+	});
+});

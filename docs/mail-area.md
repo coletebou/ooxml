@@ -86,11 +86,12 @@ the host owns and gives to the next client (`ooxml-ui/mail`'s `createMail` does 
   memory, or that Message-ID when the request that creates and submits the message at once got no
   answer at all: the same draft sent again first finds that copy (an `Email/query` for the
   Message-ID, RFC 8621 4.4.1) and asks the server whether it went out (7.3), sends nothing while
-  the server cannot be asked, and sends it again only when the server says it did not, has
-  neither the copy nor a submission of it any more (the search finds no copy), or cannot search by
-  header field (`unsupportedFilter`), so it can never say. A reload forgets the copy, and a changed
-  draft is a new message. A request the server refused as a whole (HTTP 4xx, RFC 8620 3.6) sent
-  nothing and fails with its own error.
+  the server cannot be asked, and sends it again only when the server says it did not (no
+  submission of it and the copy still a draft, or only submissions undone since: `undoStatus`
+  `canceled`, 7), has neither the copy nor a submission of it any more (the search finds no copy),
+  or cannot search by header field (`unsupportedFilter`), so it can never say. A reload forgets the
+  copy, and a changed draft is a new message. A request the server refused as a whole (HTTP 4xx,
+  RFC 8620 3.6) sent nothing and fails with its own error.
 
 ## Messages
 

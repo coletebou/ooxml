@@ -1,7 +1,7 @@
-// `Email/set`, `Email/get`, `Email/query` (by Message-ID), `EmailSubmission/set` and
-// `EmailSubmission/query` on the fake server, over a small store of messages, so the draft and send
-// tests can check where messages end up. Creation ids (`#draft`) are resolved the way RFC 8620 5.3
-// says, within the request and across it.
+// `Email/set`, `Email/get`, `Email/query` (by Message-ID), `EmailSubmission/set`,
+// `EmailSubmission/query` and `EmailSubmission/get` on the fake server, over a small store of
+// messages, so the draft and send tests can check where messages end up. Creation ids (`#draft`)
+// are resolved the way RFC 8620 5.3 says, within the request and across it.
 import { isRecord, type JmapInvocation } from '../types';
 import type { FakeServer } from './fake-server';
 
@@ -27,6 +27,11 @@ export interface MailStore {
 	failSubmission: 'before' | 'after' | null;
 	/** False: `Email/query` refuses a `header` condition (`unsupportedFilter`, RFC 8620 5.5). */
 	headerSearch: boolean;
+	/**
+	 * The `undoStatus` of each submission by id (`ES-1`, ...), `final` unless set here: a test sets
+	 * `canceled` for one another client undid (RFC 8621 7).
+	 */
+	undoStatus: Record<string, 'pending' | 'final' | 'canceled'>;
 }
 
 /**
@@ -65,6 +70,7 @@ export function installMailStore(server: FakeServer): MailStore {
 		skipImplicit: false,
 		failSubmission: null,
 		headerSearch: true,
+		undoStatus: {},
 	};
 	const created = new Map<string, string>();
 	let next = 0;
@@ -143,6 +149,16 @@ export function installMailStore(server: FakeServer): MailStore {
 			.filter(([emailId]) => !emailIds || emailIds.includes(emailId))
 			.map(([, id]) => id);
 		return { ids, position: 0, total: ids.length };
+	});
+
+	server.on('EmailSubmission/get', (args) => {
+		const ids = Array.isArray(args.ids) ? (args.ids as string[]) : [];
+		const known = (id: string): boolean =>
+			/^ES-\d+$/.test(id) && Number(id.slice(3)) <= store.submissions.length;
+		return {
+			list: ids.filter(known).map((id) => ({ id, undoStatus: store.undoStatus[id] ?? 'final' })),
+			notFound: ids.filter((id) => !known(id)),
+		};
 	});
 
 	server.on('Email/get', (args) => {

@@ -73,17 +73,26 @@ export async function copyWithId(
 
 /**
  * Whether a copy whose submission was not certain went out: the server holds a submission of it
- * (RFC 8621 7.3), or it is no longer a draft, which only its submission makes it (a server may
- * drop the record of a submission, 7.5). Null when the server has neither a submission of it nor
- * the copy any more, so it can never say. When it cannot be asked (a request or a call fails),
- * this throws: it may say later.
+ * (RFC 8621 7.3) that is to go or has gone (`undoStatus` `pending` or `final`, 7), not only ones
+ * undone since (`canceled`, which is never delivered); or, when it holds none, the copy is no
+ * longer a draft, which only its submission makes it (a server may drop the record of a
+ * submission, 7.5). Null when the server has neither a submission of it nor the copy any more, so
+ * it can never say. When it cannot be asked (a request or a call fails), this throws: it may say
+ * later.
  */
 export async function wentOut(client: JmapClient, emailId: string): Promise<boolean | null> {
 	const query = await client.request((builder, accountId) =>
 		builder.call('EmailSubmission/query', { accountId, filter: { emailIds: [emailId] } }),
 	);
-	const ids = query.result.get(query.calls).ids;
-	if (Array.isArray(ids) && ids.length) return true;
+	const ids = strings(query.result.get(query.calls).ids);
+	if (ids.length) {
+		const held = await client.request((builder, accountId) =>
+			builder.call('EmailSubmission/get', { accountId, ids, properties: ['undoStatus'] }),
+		);
+		const submissions = objects(held.result.get(held.calls).list);
+		// An undoStatus this does not know is taken to have gone: sending again could send twice.
+		if (submissions.length) return submissions.some(({ undoStatus }) => undoStatus !== 'canceled');
+	}
 	const get = await client.request((builder, accountId) =>
 		builder.call('Email/get', { accountId, ids: [emailId], properties: ['keywords'] }),
 	);
