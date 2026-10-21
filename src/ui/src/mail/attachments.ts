@@ -2,10 +2,11 @@
 // PowerPoint and Visio files through the suite's own viewers, images, text) and Download. Files a
 // person picks or drops are read here for the client too.
 import { html, nothing } from 'lit';
-import type { FileInput, MailAttachment } from 'ooxml-core/mail';
+import type { FileInput, MailAttachment, MailMessage } from 'ooxml-core/mail';
 import { fileSize } from './format';
 import type { MailI18n } from './i18n/translator';
 import { icon } from './icons';
+import { sanitizeEmailHtml } from './sanitize';
 
 export type PreviewKind = 'docx' | 'xlsx' | 'pptx' | 'vsdx' | 'image' | 'text' | null;
 
@@ -57,13 +58,44 @@ export interface AttachmentHandlers {
 	download(attachment: MailAttachment): void;
 }
 
-/** The files of a message (inline images referenced by the body are not listed). */
+type StripMessage = Pick<MailMessage, 'id' | 'html' | 'attachments'>;
+
+/** The `cid`s the latest messages' bodies load, so a body is read once rather than per render. */
+const shownCache = new Map<string, { html: string; cids: ReadonlySet<string> }>();
+const SHOWN_KEPT = 32;
+const NONE: ReadonlySet<string> = new Set();
+
+/** The `cid`s (lower case) a message's HTML body loads as images or backgrounds. */
+function shownCids(message: StripMessage): ReadonlySet<string> {
+	const markup = message.html;
+	if (!markup || !message.attachments.some((a) => a.cid)) return NONE;
+	const known = shownCache.get(message.id);
+	if (known?.html === markup) return known.cids;
+	const cids = new Set(sanitizeEmailHtml(markup, { allowRemote: false }).cids);
+	shownCache.delete(message.id);
+	shownCache.set(message.id, { html: markup, cids });
+	if (shownCache.size > SHOWN_KEPT) shownCache.delete(shownCache.keys().next().value!);
+	return cids;
+}
+
+/**
+ * The files of a message: every part but the images its HTML body shows in place. A part the body
+ * only links to, or one that is not an image, can only be opened from here, and one the sender
+ * attached as a file stays a file.
+ */
 export function attachmentStrip(
-	attachments: readonly MailAttachment[],
+	message: StripMessage,
 	i18n: MailI18n,
 	handlers: AttachmentHandlers,
 ) {
-	const listed = attachments.filter((a) => a.disposition !== 'inline' || !a.cid);
+	const shown = shownCids(message);
+	const listed = message.attachments.filter(
+		(a) =>
+			!a.cid ||
+			a.disposition === 'attachment' ||
+			!a.type.startsWith('image/') ||
+			!shown.has(a.cid.toLowerCase()),
+	);
 	if (!listed.length) return nothing;
 	return html`<ul class="attachments" aria-label=${i18n.tn('reading.attachments', listed.length)}>
 		${listed.map((attachment) => {

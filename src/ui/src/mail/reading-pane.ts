@@ -159,7 +159,7 @@ export class MailReadingPane extends MailElement {
 							: part.text,
 					)}</div
 				>`;
-		return html`${banner}${content}${attachmentStrip(message.attachments, this.i18n, {
+		return html`${banner}${content}${attachmentStrip(message, this.i18n, {
 			preview: (attachment: MailAttachment) =>
 				this.emit('mail-attachment', { action: 'preview', attachment, emailId: id }),
 			download: (attachment: MailAttachment) =>
