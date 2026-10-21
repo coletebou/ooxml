@@ -168,9 +168,13 @@ describe('discoverJmapSession', () => {
 
 	it('refuses credentials in the server address', async () => {
 		const server = createFakeServer();
+		// Built with the URL API, so the fake credentials never sit in the source as a literal address.
+		const withCredentials = new URL('https://jmap.example.com');
+		withCredentials.username = 'john';
+		withCredentials.password = 'hunter2';
 		const error = await failure(
 			discoverJmapSession({
-				url: 'https://john:hunter2@jmap.example.com',
+				url: withCredentials.href,
 				auth,
 				fetch: server.fetch,
 			}),
