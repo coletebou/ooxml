@@ -1,7 +1,8 @@
 // Loading what the client shows: the session, the folders, the message list of a folder or a
 // search (newest first, summaries fetched in batches), and the transport's change feed, which
 // refreshes what changed and re-runs the list. Stale responses from an earlier folder or search
-// are dropped by a generation counter. New code.
+// are dropped by a generation counter; a connection that failed is made again on request, one
+// attempt at a time. New code.
 import type { ClientCore } from './client-core';
 import { errorCode } from './client-core';
 import { parseSearch } from './search';
@@ -12,7 +13,10 @@ const DEFAULT_LIMIT = 2000;
 const CHANGE_DELAY_MS = 30;
 
 export interface ListLoader {
+	/** Connect (the session, identities, folders, change feed, list); joins an attempt under way. */
 	connect(): Promise<void>;
+	/** True once a connection worked: until then there is no account and no change feed. */
+	connected(): boolean;
 	loadMailboxes(): Promise<void>;
 	/**
 	 * Run the list's folder or search again; with `refetch` (an explicit refresh), fetch the cached
@@ -32,6 +36,8 @@ export function createListLoader(core: ClientCore): ListLoader {
 	let unwatch: (() => void) | undefined;
 	let pending: MailChange[] = [];
 	let flushing: unknown;
+	let connected = false;
+	let connecting: Promise<void> | undefined;
 
 	const query = (): MailQuery => {
 		const text = core.state.query;
@@ -123,28 +129,39 @@ export function createListLoader(core: ClientCore): ListLoader {
 		flushing ??= core.later(() => void flush(), CHANGE_DELAY_MS);
 	};
 
+	const connectOnce = async (): Promise<void> => {
+		core.patch({ status: 'connecting', error: null });
+		try {
+			const session = await core.transport.connect();
+			if (core.destroyed) return;
+			const mailboxes = await core.transport.mailboxes();
+			// Destroyed meanwhile: subscribing now would outlive the client.
+			if (core.destroyed) return;
+			core.setMailboxes(mailboxes);
+			const inbox = mailboxes.find((mailbox) => mailbox.role === 'inbox') ?? mailboxes[0];
+			core.patch({
+				account: session.account,
+				identities: session.identities,
+				canSend: session.canSend,
+				mailboxId: core.state.mailboxId ?? inbox?.id ?? null,
+			});
+			connected = true;
+			unwatch ??= core.transport.watch(onChange);
+			await loadList();
+			core.patch({ status: 'ready' });
+		} catch (error) {
+			core.patch({ status: 'error', error: errorCode(error) });
+		}
+	};
+
 	return {
-		async connect() {
-			core.patch({ status: 'connecting', error: null });
-			try {
-				const session = await core.transport.connect();
-				if (core.destroyed) return;
-				const mailboxes = await core.transport.mailboxes();
-				core.setMailboxes(mailboxes);
-				const inbox = mailboxes.find((mailbox) => mailbox.role === 'inbox') ?? mailboxes[0];
-				core.patch({
-					account: session.account,
-					identities: session.identities,
-					canSend: session.canSend,
-					mailboxId: core.state.mailboxId ?? inbox?.id ?? null,
-				});
-				unwatch ??= core.transport.watch(onChange);
-				await loadList();
-				core.patch({ status: 'ready' });
-			} catch (error) {
-				core.patch({ status: 'error', error: errorCode(error) });
-			}
+		connect() {
+			connecting ??= connectOnce().finally(() => {
+				connecting = undefined;
+			});
+			return connecting;
 		},
+		connected: () => connected,
 		loadMailboxes,
 		loadList,
 		async loadMore() {

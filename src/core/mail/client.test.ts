@@ -166,6 +166,47 @@ describe('createMailClient', () => {
 		client.destroy();
 	});
 
+	it('connects again on refresh when the first connection failed, one attempt at a time', async () => {
+		const memory = createMemoryTransport({ messages: seed(), now: () => T0 + 3_600_000 });
+		let offline = true;
+		let attempts = 0;
+		const transport: MailTransport = {
+			...memory,
+			async connect() {
+				attempts++;
+				if (offline) throw new MailTransportError('network', 'Offline.');
+				return memory.connect();
+			},
+		};
+		const client = createMailClient({ transport });
+		await until(client, (s) => s.status === 'error');
+		expect(client.getState()).toMatchObject({ error: 'network', account: null, canSend: false });
+		offline = false;
+		await Promise.all([client.refresh(), client.refresh()]);
+		expect(attempts).toBe(2);
+		expect(client.getState()).toMatchObject({
+			status: 'ready',
+			error: null,
+			account: { name: 'you@example.com' },
+			canSend: true,
+			mailboxId: 'inbox',
+		});
+		expect(client.getState().conversations).toHaveLength(2);
+		// The change feed is on: new mail shows without another refresh.
+		memory.deliver({
+			mailboxId: 'inbox',
+			from: ada,
+			to: [me],
+			subject: 'Back online',
+			receivedAt: T0 + 7_200_000,
+		});
+		await until(client, (s) => s.conversations.length === 3);
+		// Connected now: a refresh reloads what it shows, it does not connect again.
+		await client.refresh();
+		expect(attempts).toBe(2);
+		client.destroy();
+	});
+
 	it('flags optimistically and archives with an undo', async () => {
 		const { client, transport, notices } = setup();
 		await until(client, (s) => s.conversations.length > 0);

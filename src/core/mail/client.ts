@@ -24,7 +24,12 @@ export function createMailClient(options: MailClientOptions): MailClient {
 		subscribe: (listener) => core.subscribe(listener),
 		onNotice: (listener) => core.notices.on('notice', listener),
 		async refresh() {
-			await Promise.all([list.loadMailboxes(), list.loadList({ refetch: true }), loadPeople()]);
+			// Until a connection works there is no account, identity or change feed to reload with:
+			// connect again instead (joining an attempt under way).
+			const mail = list.connected()
+				? Promise.all([list.loadMailboxes(), list.loadList({ refetch: true })])
+				: list.connect();
+			await Promise.all([mail, loadPeople()]);
 		},
 		async selectMailbox(id) {
 			if (!core.mailboxes.some((mailbox) => mailbox.id === id)) return;
