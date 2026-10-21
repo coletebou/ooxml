@@ -51,4 +51,5 @@ export const esCalendar: Record<keyof typeof enCalendar, string> = {
 	'calendar.titleRequired': 'Agrega un título.',
 	'calendar.endBeforeStart': 'El fin no puede ser anterior al inicio.',
 	'calendar.pickWhen': 'Escribe un inicio y un fin válidos.',
+	'calendar.seriesEnds': 'Esta serie termina el {date}. Elige un inicio ese día o antes.',
 };

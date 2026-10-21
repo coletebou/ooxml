@@ -2,7 +2,8 @@
 // values in the calendar's zone (all-day dates in the event's own zone); an all-day event's end date
 // is its last day, stored as the start of the day after it (the model's exclusive end). Moving the
 // start keeps the length. `buildEvent` turns a draft into the `CalendarEvent` to store or names what
-// keeps it from being saved. A repeating event is edited as a whole series. DOM-free. New code.
+// keeps it from being saved. A repeating event is edited as a whole series, which keeps the day it
+// ends on. DOM-free. New code.
 import {
 	dayMatchesOrdinal,
 	MINUTE_MS,
@@ -29,8 +30,11 @@ export interface EventDraft {
 	repeat: Repeat;
 }
 
-/** What keeps a draft from being saved: no title, no valid times, or an end before the start. */
-export type DraftIssue = 'title' | 'when' | 'order';
+/**
+ * What keeps a draft from being saved: no title, no valid times, an end before the start, or a
+ * series that would start after the day it ends.
+ */
+export type DraftIssue = 'title' | 'when' | 'order' | 'series';
 
 const NEW_LENGTH = 30 * MINUTE_MS;
 
@@ -108,11 +112,46 @@ function kept(event: CalendarEvent): Partial<CalendarEvent> {
 	return out;
 }
 
+/** The time of day `ms` shows on a clock in the zone, in milliseconds since that day's midnight. */
+const clock = (ms: number, zone: string): number => {
+	const p = zonedParts(ms, zone);
+	return ((p.hour * 60 + p.minute) * 60 + p.second) * 1000 + (((ms % 1000) + 1000) % 1000);
+};
+
 /**
- * The repeat fields to keep from the stored event: its end (count or date) while it still repeats,
- * the monthly rule while it stays monthly (the weekday ordinal while the start's date in the
- * event's zone still fits it: a new time keeps "the last Friday"), and the changed or cancelled
- * occurrences only while the series keeps its start, repeat and kind.
+ * The end of a series whose first occurrence moved from `from` to `to`: on its own day, with the
+ * time of day moved as far as the start's, so each day keeps its occurrence on or before it (UNTIL
+ * counts, RFC 5545). A series that only gets a new time, or a whole day instead of one, keeps its
+ * last occurrence; one moved to other days still ends by the same day.
+ */
+function movedUntil(until: number, from: number, to: number, zone: string): number {
+	const shift = clock(to, zone) - clock(from, zone);
+	if (!shift) return until;
+	const day = zonedParts(until, zone);
+	// The new clock time worked out on a clock without a zone (it may fall on the next day or the
+	// one before), then the instant at which the zone's clocks show it.
+	const wall = new Date(Date.UTC(day.year, day.month - 1, day.day) + clock(until, zone) + shift);
+	const at = zonedToUtc(
+		{
+			year: wall.getUTCFullYear(),
+			month: wall.getUTCMonth() + 1,
+			day: wall.getUTCDate(),
+			hour: wall.getUTCHours(),
+			minute: wall.getUTCMinutes(),
+			second: wall.getUTCSeconds(),
+		},
+		zone,
+	);
+	return at + wall.getUTCMilliseconds();
+}
+
+type SeriesFields = Pick<CalendarEvent, 'until' | 'count' | 'monthlyBy' | 'ordinal' | 'exceptions'>;
+
+/**
+ * The repeat fields to keep from the stored event: its end (count, or the day it ends on) while it
+ * still repeats, the monthly rule while it stays monthly (the weekday ordinal while the start's
+ * date in the event's zone still fits it: a new time keeps "the last Friday"), and the changed or
+ * cancelled occurrences only while the series keeps its start, repeat and kind.
  */
 function series(
 	original: CalendarEvent,
@@ -120,7 +159,7 @@ function series(
 	start: number,
 	allDay: boolean,
 	zone: string,
-) {
+): Partial<SeriesFields> {
 	if (repeat === 'none' || original.repeat === 'none') return {};
 	const same = original.repeat === repeat;
 	const moved = start !== original.start || !same || allDay !== (original.allDay === true);
@@ -131,7 +170,9 @@ function series(
 		same &&
 		(!moved || dayMatchesOrdinal(day.year, day.month, day.day, ordinal));
 	return {
-		...(original.until !== undefined ? { until: original.until } : {}),
+		...(original.until !== undefined
+			? { until: movedUntil(original.until, original.start, start, zone) }
+			: {}),
 		...(original.count !== undefined ? { count: original.count } : {}),
 		...(same && repeat === 'monthly' && original.monthlyBy
 			? { monthlyBy: original.monthlyBy }
@@ -181,6 +222,9 @@ export function buildEvent(
 		original && shown && shows(draft, shown, 'endDate', 'endTime')
 			? original.end
 			: Math.max(namedEnd, start);
+	const repeating = original ? series(original, draft.repeat, start, draft.allDay, eventZone) : {};
+	// Starting after the day it ends, the series would have no occurrence to show at all.
+	if (repeating.until !== undefined && repeating.until < start) return { issue: 'series' };
 	const location = draft.location.trim();
 	return {
 		event: {
@@ -194,7 +238,7 @@ export function buildEvent(
 			repeat: draft.repeat,
 			...(draft.allDay ? { allDay: true } : {}),
 			...(location ? { location } : {}),
-			...(original ? series(original, draft.repeat, start, draft.allDay, eventZone) : {}),
+			...repeating,
 		},
 	};
 }

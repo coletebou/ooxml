@@ -49,4 +49,5 @@ export const enCalendar = {
 	'calendar.titleRequired': 'Add a title.',
 	'calendar.endBeforeStart': 'The end cannot be before the start.',
 	'calendar.pickWhen': 'Enter a valid start and end.',
+	'calendar.seriesEnds': 'This series ends on {date}. Pick a start on or before that day.',
 } as const;

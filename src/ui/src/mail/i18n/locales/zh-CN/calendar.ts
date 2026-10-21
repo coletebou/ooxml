@@ -51,4 +51,5 @@ export const zhCNCalendar: Record<keyof typeof enCalendar, string> = {
 	'calendar.titleRequired': '请添加标题。',
 	'calendar.endBeforeStart': '结束时间不能早于开始时间。',
 	'calendar.pickWhen': '请输入有效的开始和结束时间。',
+	'calendar.seriesEnds': '此系列于 {date} 结束。请选择该日或更早的开始时间。',
 };

@@ -6,6 +6,7 @@
 import { html, nothing } from 'lit';
 import { REPEATS, type Repeat } from 'ooxml-core/calendar';
 import { keepLength, type DraftIssue, type EventDraft } from '../calendar/event-draft';
+import { dateFormat } from '../calendar/format';
 import type { MailI18n, MailKey } from './i18n/translator';
 import { icon } from './icons';
 import { trapKeys } from './modal';
@@ -15,6 +16,7 @@ export const ISSUE_TEXT: Record<DraftIssue, MailKey> = {
 	title: 'calendar.titleRequired',
 	when: 'calendar.pickWhen',
 	order: 'calendar.endBeforeStart',
+	series: 'calendar.seriesEnds',
 };
 
 /** The field to put the focus on for an issue. */
@@ -22,6 +24,7 @@ export const ISSUE_FIELD: Record<DraftIssue, string> = {
 	title: 'title',
 	when: 'startDate',
 	order: 'endDate',
+	series: 'startDate',
 };
 
 const REPEAT_TEXT: Record<Repeat, MailKey> = {
@@ -31,6 +34,15 @@ const REPEAT_TEXT: Record<Repeat, MailKey> = {
 	monthly: 'calendar.repeat.monthly',
 	yearly: 'calendar.repeat.yearly',
 };
+
+/** The message of `issue`; a series names the day it ends on, in the zone the form shows it in. */
+function issueText(issue: DraftIssue, draft: EventDraft, zone: string, i18n: MailI18n): string {
+	const original = draft.original;
+	if (issue !== 'series' || original?.until === undefined) return i18n.t(ISSUE_TEXT[issue]);
+	const timeZone = draft.allDay ? original.zone : zone;
+	const date = dateFormat(i18n.intl, { dateStyle: 'long', timeZone }).format(original.until);
+	return i18n.t(ISSUE_TEXT.series, { date });
+}
 
 /** The draft as the form now reads. */
 export function readDraft(form: HTMLFormElement, previous: EventDraft): EventDraft {
@@ -150,7 +162,7 @@ export function eventDialog(
 					><span>${t('calendar.description')}</span
 					><textarea name="description" rows="3" .value=${draft.description}></textarea>
 				</label>
-				${issue ? html`<p class="issue" id="event-issue" role="alert">${t(ISSUE_TEXT[issue])}</p>` : nothing}
+				${issue ? html`<p class="issue" id="event-issue" role="alert">${issueText(issue, draft, zone, i18n)}</p>` : nothing}
 				<footer>
 					<button type="submit" class="primary">${t('calendar.save')}</button>
 					<button type="button" @click=${() => on.cancel()}>${t('calendar.cancel')}</button>

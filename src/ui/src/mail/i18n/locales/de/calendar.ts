@@ -51,4 +51,6 @@ export const deCalendar: Record<keyof typeof enCalendar, string> = {
 	'calendar.titleRequired': 'Fügen Sie einen Titel hinzu.',
 	'calendar.endBeforeStart': 'Das Ende darf nicht vor dem Beginn liegen.',
 	'calendar.pickWhen': 'Geben Sie einen gültigen Beginn und ein gültiges Ende ein.',
+	'calendar.seriesEnds':
+		'Diese Serie endet am {date}. Wählen Sie einen Beginn an diesem Tag oder davor.',
 };
