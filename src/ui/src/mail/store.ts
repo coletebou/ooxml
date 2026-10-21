@@ -43,7 +43,8 @@ export type {
 
 /**
  * Where the mail comes from: the built-in demo mailbox (in memory, nothing leaves the page), a JMAP
- * server (RFC 8620, RFC 8621), or a transport of your own.
+ * server (RFC 8620, RFC 8621), or a transport of your own. A transport of your own stays yours to
+ * close: every client made on it leaves it open, so the next one can use it.
  */
 export type MailConnection =
 	| { kind: 'demo'; seed?: DemoSeedOptions }
@@ -142,7 +143,10 @@ export function browserStorage(): KeyValueStorage | null {
 const accountKey = (config: MailConnection): string =>
 	config.kind === 'jmap' ? `jmap:${config.url.trim().toLowerCase()}` : config.kind;
 
-/** A mail client for `options.config` (the demo mailbox by default). */
+/**
+ * A mail client for `options.config` (the demo mailbox by default). Destroying it closes the
+ * transport it made (the demo mailbox, a JMAP connection), never a transport of your own.
+ */
 export function createMail(options: MailOptions = {}): MailClient {
 	const config = options.config ?? { kind: 'demo' };
 	// Only a real account keeps its address book and calendar; the demo never touches storage.
@@ -168,6 +172,8 @@ export function createMail(options: MailOptions = {}): MailClient {
 	}
 	return createMailClient({
 		transport,
+		// The host's transport may outlive this client: a remounted app or a hook makes another on it.
+		closeTransport: config.kind !== 'transport',
 		contacts,
 		calendar,
 		// Answers, forwards and reopened drafts start with every part of an HTML body, cleaned.

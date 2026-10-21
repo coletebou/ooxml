@@ -53,13 +53,16 @@ const key = (name: string, init: KeyboardEventInit = {}) =>
 	});
 
 /**
- * The demo mailbox through a transport that, like the JMAP one, abandons the requests still running
- * when it is closed, and that records what it saved and sent. Its first `failSaves` saves fail.
+ * The demo mailbox through a transport of the host's own that, like the JMAP one, abandons the
+ * requests still running when it is closed, and that records what it saved and sent, whether it
+ * was closed, and whether every client let it go (none watches it any more). Its first `failSaves`
+ * saves fail.
  */
 function testTransport(options: { failSaves?: number } = {}) {
 	const base = createMemoryTransport(createDemoSeed({ now: Date.UTC(2026, 9, 20) }));
 	const saved: Draft[] = [];
 	const sent: Draft[] = [];
+	const watching = new Set<() => void>();
 	let closed = false;
 	let failSaves = options.failSaves ?? 0;
 	const request = async (): Promise<void> => {
@@ -79,12 +82,26 @@ function testTransport(options: { failSaves?: number } = {}) {
 			sent.push(draft);
 			return base.send(draft);
 		},
+		watch(listener) {
+			const stop = base.watch(listener);
+			watching.add(stop);
+			return () => {
+				watching.delete(stop);
+				stop();
+			};
+		},
 		close() {
 			closed = true;
 			base.close();
 		},
 	};
-	return { transport, saved, sent, closed: () => closed };
+	return {
+		transport,
+		saved,
+		sent,
+		closed: () => closed,
+		released: () => watching.size === 0,
+	};
 }
 
 /** The connection each client of a `<mail-app>` is started with, from now on. */
@@ -277,7 +294,7 @@ describe('<mail-app>', () => {
 	});
 
 	it('keeps its client, its draft and the transport it was given when moved in the page', async () => {
-		const { transport, closed } = testTransport();
+		const { transport, closed, released } = testTransport();
 		const app = await mount({ kind: 'transport', transport });
 		const client = app.client!;
 		await client.compose('new');
@@ -291,10 +308,32 @@ describe('<mail-app>', () => {
 		expect(app.client).toBe(client);
 		expect(closed()).toBe(false);
 		expect(state(app).compose?.draft.subject).toBe('Moved along');
-		// Taken out for good, it lets them go as before.
+		// Taken out for good, it lets its client go; the transport stays the host's, open.
 		box.remove();
-		await until(closed);
+		await until(released);
 		expect(app.client).toBeNull();
+		expect(closed()).toBe(false);
+	});
+
+	it('starts again on the transport it was given, still open, once put back after it let it go', async () => {
+		const { transport, saved, sent, closed, released } = testTransport();
+		const app = await mount({ kind: 'transport', transport });
+		const first = app.client;
+		// Out of the page for longer than a move: its client goes, the host's transport stays.
+		app.remove();
+		await until(released);
+		document.body.append(app);
+		await until(() => !!app.client && state(app).status !== 'connecting');
+		expect(app.client).not.toBe(first);
+		expect(state(app).status).toBe('ready');
+		const client = app.client!;
+		expect(await client.compose('new')).toBe(true);
+		client.updateDraft({ to: [{ name: '', email: 'bob@example.com' }], subject: 'Back again' });
+		await client.saveDraft();
+		expect(saved.map((draft) => draft.subject)).toEqual(['Back again']);
+		expect(await client.send()).toBe(true);
+		expect(sent.map((draft) => draft.subject)).toEqual(['Back again']);
+		expect(closed()).toBe(false);
 	});
 
 	it('defines and shows the calendar and contacts views on its own', async () => {
@@ -470,17 +509,17 @@ describe('<mail-app>', () => {
 	});
 
 	it('saves the open draft before it lets its connection go', async () => {
-		const { transport, saved, closed } = testTransport();
+		const { transport, saved, released } = testTransport();
 		const app = await mount({ kind: 'transport', transport });
 		await app.client!.compose('new');
 		app.client!.updateDraft({ subject: 'Unsent thoughts' });
 		app.remove();
-		await until(closed);
+		await until(released);
 		expect(saved.map((draft) => draft.subject)).toEqual(['Unsent thoughts']);
 	});
 
 	it('keeps trying to save a draft it could not save, without holding up the next client', async () => {
-		const { transport, saved, closed } = testTransport({ failSaves: 2 });
+		const { transport, saved, released } = testTransport({ failSaves: 2 });
 		const app = await mount({ kind: 'transport', transport });
 		await app.client!.compose('new');
 		vi.useFakeTimers();
@@ -493,17 +532,17 @@ describe('<mail-app>', () => {
 			expect(app.client).not.toBe(first);
 			expect(app.client).not.toBeNull();
 			await vi.advanceTimersByTimeAsync(1_000);
-			expect([saved.length, closed()]).toEqual([0, false]);
+			expect([saved.length, released()]).toEqual([0, false]);
 			await vi.advanceTimersByTimeAsync(60_000);
 			expect(saved.map((draft) => draft.subject)).toEqual(['Unsent thoughts']);
-			expect(closed()).toBe(true);
+			expect(released()).toBe(true);
 		} finally {
 			vi.useRealTimers();
 		}
 	});
 
 	it('leaves what is typed for the next client alone while the last one tries again', async () => {
-		const { transport, closed } = testTransport({ failSaves: 2 });
+		const { transport, released } = testTransport({ failSaves: 2 });
 		const app = await mount({ kind: 'transport', transport });
 		await app.client!.compose('new');
 		vi.useFakeTimers();
@@ -513,7 +552,7 @@ describe('<mail-app>', () => {
 			await app.updateComplete;
 			const compose = await typeAddress(app, 'ada@example.com');
 			await vi.advanceTimersByTimeAsync(60_000);
-			expect(closed()).toBe(true);
+			expect(released()).toBe(true);
 			expect(state(app).compose?.draft.to).toEqual([]);
 			const field = inner<HTMLInputElement>(inner(compose, 'mail-recipients'), 'input')!;
 			expect(field.value).toBe('ada@example.com');
@@ -681,7 +720,7 @@ describe('<mail-app>', () => {
 			],
 		];
 		for (const [how, leave] of leaves) {
-			const { transport, saved, closed } = testTransport();
+			const { transport, saved, released } = testTransport();
 			const app = await mount({ kind: 'transport', transport });
 			await app.client!.compose('new');
 			app.client!.updateDraft({ subject: 'With notes' });
@@ -692,10 +731,10 @@ describe('<mail-app>', () => {
 				leave(app);
 				await vi.advanceTimersByTimeAsync(1_000);
 				// The client stays while the file is read, and its draft is saved with it.
-				expect(closed(), how).toBe(false);
+				expect(released(), how).toBe(false);
 				finish();
 				await vi.advanceTimersByTimeAsync(60_000);
-				expect(closed(), how).toBe(true);
+				expect(released(), how).toBe(true);
 				expect(
 					saved.at(-1)?.attachments.map((attachment) => attachment.name),
 					how,

@@ -142,8 +142,8 @@ export class MailApp extends MailElement {
 	override disconnectedCallback(): void {
 		this.removeEventListener('keydown', this.onKey);
 		// A move takes the element out and puts it back in one go: the client goes only if the
-		// element is still out of the page once that is done. Let go on a move, it would close the
-		// transport the host gave it, which the element then starts with again.
+		// element is still out of the page once that is done, so a move keeps what it shows (the open
+		// conversation, the compose window) instead of connecting again.
 		queueMicrotask(() => {
 			if (!this.isConnected) this.stop();
 		});

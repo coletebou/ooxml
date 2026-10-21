@@ -1,7 +1,8 @@
-// `createMailClient`: the framework-neutral mail client every UI binds to. It owns one transport
-// (memory, JMAP, ...) and exposes one immutable `MailState` plus plain actions, in the `getState` /
-// `subscribe` shape React (`useSyncExternalStore`), Vue, Solid, Svelte and Angular adopt in a few
-// lines. DOM-free: the transport, the stores and the timers are injected. New code.
+// `createMailClient`: the framework-neutral mail client every UI binds to. It works over one
+// transport (memory, JMAP, ...), which it closes when destroyed unless the host keeps it, and
+// exposes one immutable `MailState` plus plain actions, in the `getState` / `subscribe` shape React
+// (`useSyncExternalStore`), Vue, Solid, Svelte and Angular adopt in a few lines. DOM-free: the
+// transport, the stores and the timers are injected. New code.
 import { ClientCore } from './client-core';
 import { createCompose } from './client-compose';
 import { createFileActions } from './client-files';
@@ -112,7 +113,8 @@ export function createMailClient(options: MailClientOptions): MailClient {
 		destroy() {
 			list.stop();
 			core.destroyed = true;
-			core.transport.close();
+			// A transport the host keeps stays open for the next client the host gives it to.
+			if (options.closeTransport ?? true) core.transport.close();
 			core.notices.clear();
 		},
 	};

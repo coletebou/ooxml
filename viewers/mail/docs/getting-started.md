@@ -37,6 +37,10 @@ To use your own server, pass a JMAP connection (see [Connect a JMAP server](./jm
 <Mail config={{ kind: 'jmap', url: 'https://mail.example.com', auth: { type: 'bearer', token } }} />
 ```
 
+A `MailTransport` of your own goes in as the connection `{ kind: 'transport', transport }`. It
+stays yours: the app never closes it, so close it yourself once you are done with it (see
+[Architecture](./architecture#transports)).
+
 ## Build your own UI
 
 The raw hook gives you the client every binding wraps: one immutable state and plain actions.

@@ -165,6 +165,12 @@ export interface FileInput {
 
 export interface MailClientOptions {
 	transport: MailTransport;
+	/**
+	 * Close the transport when the client is destroyed. Default true; false for a transport the
+	 * host owns and may hand to another client: destroying the client then only stops it using the
+	 * transport, which stays open until the host closes it.
+	 */
+	closeTransport?: boolean;
 	contacts?: ContactStore;
 	calendar?: CalendarStore;
 	/** The words around quoted replies and forwards; English when omitted. */
@@ -264,5 +270,9 @@ export interface MailClient {
 	deleteEvent(id: string): Promise<void>;
 	importIcs(text: string, zone?: string): Promise<number>;
 	exportIcs(ids?: readonly string[]): string;
+	/**
+	 * Stop: no more changes from the transport, no more state or notices (answers still on their
+	 * way are dropped), and the transport closed unless `closeTransport` is false.
+	 */
 	destroy(): void;
 }

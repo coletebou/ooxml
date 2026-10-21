@@ -86,12 +86,15 @@ describe('config', () => {
 			await el.updateComplete;
 			const first = el.client;
 			expect(first).not.toBeNull();
+			const destroy = vi.spyOn(first!, 'destroy');
 			binding.update({});
 			await el.updateComplete;
-			// No connection is the demo mailbox: the host's mailbox is let go.
+			// No connection is the demo mailbox: the host's mailbox is let go, its transport left
+			// open for the host to close.
 			expect(el.config).toBeNull();
 			expect(el.client).not.toBe(first);
-			await vi.waitFor(() => expect(closed).toBe(true));
+			await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
+			expect(closed).toBe(false);
 		} finally {
 			binding.destroy();
 			el.remove();

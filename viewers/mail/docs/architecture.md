@@ -16,9 +16,15 @@ server: it renders the state and calls actions. That is the surface every bindin
 ## Transports
 
 A `MailTransport` is the seam to a server: `connect`, `mailboxes`, `query`, `summaries`, `message`,
-`update`, `destroy`, `saveDraft`, `send`, `upload`, `download`, `importMessage`, `watch`. Two ship:
-`createMemoryTransport()` (demos and tests) and `createJmapTransport()`. Others (an IMAP bridge,
-other web APIs) can be added without touching the client or the UI.
+`update`, `destroy`, `saveDraft`, `send`, `upload`, `download`, `importMessage`, `watch`, `close`.
+Two ship: `createMemoryTransport()` (demos and tests) and `createJmapTransport()`. Others (an IMAP
+bridge, other web APIs) can be added without touching the client or the UI.
+
+A transport of your own goes in as `config: { kind: 'transport', transport }`, and it stays yours to
+close. Whenever the app or a hook lets a client go (the element leaves the page, the connection or
+a store changes, the component unmounts), the client stops using the transport and leaves it open,
+so the next client can use it; close it yourself once you are done with it. The app closes only the
+transports it makes itself, for the demo mailbox and a JMAP connection.
 
 ## Threading
 

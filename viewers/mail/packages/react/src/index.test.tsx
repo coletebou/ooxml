@@ -126,9 +126,12 @@ describe('<Mail>', () => {
 			false,
 		]);
 		expect(client?.getState().status).toBe('ready');
+		const destroy = vi.spyOn(client!, 'destroy');
 		await act(async () => view.unmount());
-		await waitFor(closed);
-		expect(closed()).toBe(true);
+		// Unmounted, the element lets its client go; the transport stays the host's to close.
+		await waitFor(() => destroy.mock.calls.length > 0);
+		expect([destroy.mock.calls.length, closed()]).toEqual([1, false]);
+		destroy.mockRestore();
 	});
 });
 
@@ -204,9 +207,39 @@ describe('useMail', () => {
 		await act(async () => view.unmount());
 	});
 
+	it('keeps the transport it was given open for the client that replaces the last one', async () => {
+		const { transport, closed } = hostTransport();
+		const config: MailConnection = { kind: 'transport', transport };
+		const seen: (MailClient | null)[] = [];
+		function Probe({ options }: { options: MailOptions }): ReactElement {
+			seen.push(useMail(options).client);
+			return createElement('output');
+		}
+		const { root: view } = root();
+		const render = (options: MailOptions): Promise<void> =>
+			act(async () => view.render(createElement(Probe, { options })));
+		await render({ config, storage: null });
+		const first = seen.at(-1)!;
+		await waitFor(() => first.getState().status === 'ready');
+		const destroy = vi.spyOn(first, 'destroy');
+		// A new address book on the same transport: a new client, and the last one is let go.
+		await render({ config, storage: null, contacts: createMemoryContactStore() });
+		const client = seen.at(-1)!;
+		expect(client).not.toBe(first);
+		await waitFor(() => destroy.mock.calls.length > 0);
+		expect(destroy).toHaveBeenCalledOnce();
+		expect(closed()).toBe(false);
+		await waitFor(() => client.getState().status === 'ready');
+		expect(await client.compose('new')).toBe(true);
+		client.updateDraft({ to: [{ name: 'Ben', email: 'ben@example.com' }], subject: 'Still here' });
+		expect(await client.send()).toBe(true);
+		await act(async () => view.unmount());
+		destroy.mockRestore();
+	});
+
 	it('keeps one client, and the transport it was given open, through StrictMode', async () => {
 		// StrictMode runs the effect, its cleanup and the effect again: the client of the first run
-		// is the one kept, so the cleanup in between must not close the host's transport.
+		// is the one kept, not let go in between for a second one to connect again.
 		const { transport, closed } = hostTransport();
 		const options: MailOptions = { config: { kind: 'transport', transport } };
 		const seen = new Set<MailClient>();
@@ -222,8 +255,12 @@ describe('useMail', () => {
 		await waitFor(() => ['ready', 'error'].includes(container.textContent ?? ''));
 		await waitFor(() => false, 10, 5);
 		expect([container.textContent, closed(), seen.size]).toEqual(['ready', false, 1]);
+		const [client] = seen;
+		const destroy = vi.spyOn(client!, 'destroy');
 		await act(async () => view.unmount());
-		await waitFor(closed);
-		expect(closed()).toBe(true);
+		// Unmounted, the hook lets its client go; the transport stays the host's to close.
+		await waitFor(() => destroy.mock.calls.length > 0);
+		expect([destroy.mock.calls.length, closed()]).toEqual([1, false]);
+		destroy.mockRestore();
 	});
 });

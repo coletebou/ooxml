@@ -84,7 +84,8 @@ interface Leaving {
  * the calendar or the storage changes, and destroyed on unmount (StrictMode's replay of the effect
  * keeps it). Make the stores once (outside render, or in `useState`): a new one on every render
  * would make a new client each time. The quote wording may change freely; replies use the latest.
- * Returns `null` until mounted (and while `options` is `null`).
+ * A transport of your own (`kind: 'transport'`) stays open through all of this: close it yourself
+ * once you are done with it. Returns `null` until mounted (and while `options` is `null`).
  *
  *   const client = useMailClient({ config: { kind: 'jmap', url, auth } });
  *   const state = useMailState(client);
@@ -106,7 +107,7 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 		leaving.current = null;
 		if (!opts) return;
 		// StrictMode runs the cleanup and the effect again at once: the same options keep their
-		// client, whose release (closing the host's transport) is called off.
+		// client, whose release is called off, rather than connecting again with another.
 		const kept = last && sameMailOptions(last.options, opts) ? last : null;
 		kept?.keep();
 		const created =
