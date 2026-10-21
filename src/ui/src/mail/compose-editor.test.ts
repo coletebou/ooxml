@@ -121,6 +121,31 @@ describe('draftHtml', () => {
 		expect(answer.querySelector('img[alt="Logo"]')?.getAttribute('src')).toBeNull();
 	});
 
+	it("keeps the direction and language of the message body, its own or its html element's", () => {
+		// The editor takes only the content of a body, so they go on a block round it: a quote of a
+		// message written right to left stays right to left.
+		const rtl = '<html dir="rtl" lang="ar"><body><p>x</p></body></html>';
+		expect(draftHtml(message([rtl]), [])).toBe('<div dir="rtl" lang="ar"><p>x</p></div>');
+		// The body's own win over its html element's, as a browser reads them.
+		const own = '<html dir="rtl" lang="ar"><body dir="ltr"><p>x</p></body></html>';
+		expect(draftHtml(message([own]), [])).toBe('<div dir="ltr" lang="ar"><p>x</p></div>');
+		// A value stays in its attribute.
+		const odd = draftHtml(message(['<body dir=\'rtl" onclick="steal()\'><p>x</p></body>']), [])!;
+		expect(parsed(odd).querySelector('[onclick]')).toBeNull();
+		expect(parsed(odd).firstElementChild?.getAttribute('dir')).toBe('rtl" onclick="steal()');
+		// The quote of a reply has them, and so does what the editor shows of it.
+		const draft = composeDraft('reply', message([rtl]), {
+			identity: null,
+			me: [],
+			format: ENGLISH_QUOTE_FORMAT,
+			draftHtml,
+		});
+		for (const body of [parsed(draft.html!), shown(draft)]) {
+			const quoted = body.querySelector('blockquote[type="cite"] [dir]');
+			expect([quoted?.getAttribute('dir'), quoted?.getAttribute('lang')]).toEqual(['rtl', 'ar']);
+		}
+	});
+
 	it('cleans a body sent in one part as the editor does', () => {
 		const html = '<p>Hi <b onclick="steal()">there</b><img src="https://t.example/i.png"></p>';
 		const pictures = { cidUrls: new Map<string, string>(), refer: (markup: string) => markup };

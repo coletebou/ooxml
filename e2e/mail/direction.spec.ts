@@ -116,3 +116,20 @@ test('a plain-text message is shown paragraph by paragraph in the direction of i
 	expect(await sideOf(text, ARABIC)).toBe('right');
 	expect(await sideOf(text, 'Hello, world')).toBe('left');
 });
+
+test('a reply to a message written right to left quotes it right to left', async ({ page }) => {
+	await openDemo(page);
+	await importHtmlMail(page, [
+		{
+			subject: 'Quoted right to left',
+			html: `<html dir="rtl" lang="ar"><body><p>${ARABIC}</p></body></html>`,
+		},
+	]);
+	await openConversation(page, 'Quoted right to left');
+	await expect(message(page).locator('p')).toHaveText(ARABIC);
+	await page.keyboard.press('r');
+	const quote = page.locator('mail-compose .editor blockquote[type="cite"]');
+	await expect(quote).toContainText(ARABIC);
+	expect(await sideOf(quote, ARABIC)).toBe('right');
+	expect(await quote.locator('[lang="ar"]').count()).toBe(1);
+});

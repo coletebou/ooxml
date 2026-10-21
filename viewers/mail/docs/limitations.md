@@ -26,7 +26,7 @@ OpenMail is an early implementation. This page lists what it does not do, so not
 - **Rich text** uses the browser's editing commands; it is tested in Chromium. Quoted, pasted and
   dropped HTML, and a saved draft opened again, lose remote images (so composing never loads a
   tracker), style sheets (inline styles stay) and the styling of the message's own body, such as
-  its background: what is sent is what the editor shows.
+  its background (its direction and language stay): what is sent is what the editor shows.
 - **A send the server did not confirm** (it failed part way, said nothing of the submission, or
   sent no answer at all) is reported as possibly sent. Sent again unchanged from the same open app,
   the message is first checked with the server and goes out again only if the server shows no

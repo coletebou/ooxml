@@ -6,7 +6,7 @@
 // Plain text the browser inserts itself: it cannot load anything. New code.
 import type { Draft, DraftHtml } from 'ooxml-core/mail';
 import { cidUrlsOf } from './compose-pictures';
-import { sanitizeEmailHtml, sanitizeMessageHtml } from './sanitize';
+import { sanitizeEmailHtml, sanitizeMessageHtml, type SanitizedHtml } from './sanitize';
 
 /** What the editor keeps of the draft's own pictures in the HTML it takes (compose-pictures.ts). */
 export interface EditorPictures {
@@ -27,16 +27,32 @@ export function editorHtml(draft: Pick<Draft, 'html' | 'text'>, pictures: Editor
 }
 
 /**
+ * The cleaned body of a message, in a block with the direction and language its body has (its own,
+ * else its html element's) when it has either: the editor takes only the content of a body.
+ */
+function inOwnDirection({ body, htmlAttributes, bodyAttributes }: SanitizedHtml): string {
+	const attributes = (['dir', 'lang'] as const)
+		.map((name) => [name, bodyAttributes[name] ?? htmlAttributes[name]] as const)
+		.map(([name, value]) => (value === undefined ? '' : ` ${name}="${escapeHtml(value)}"`))
+		.join('');
+	return attributes ? `<div${attributes}>${body}</div>` : body;
+}
+
+/**
  * A message's HTML body as a draft holds it (`DraftHtml`): the quote of a reply or forward, or a
  * saved draft opened again. A body sent in several parts is cleaned part by part, as the reading
  * pane shows it, so the editor, which parses the draft's HTML as one text, gets every part. Remote
  * images and styles go, as the editor shows neither, and a `cid:` picture stays one only for a part
- * in `parts`. Null without HTML; where there is no DOM to clean it in, the HTML as sent.
+ * in `parts`; the direction and language of the body stay (`inOwnDirection`), so a quote of a
+ * message written right to left stays so. Null without HTML; where there is no DOM to clean it in,
+ * the HTML as sent.
  */
 export const draftHtml: DraftHtml = (message, parts) => {
 	if (!message.html) return null;
 	if (typeof DOMParser === 'undefined' || typeof document === 'undefined') return message.html;
-	return sanitizeMessageHtml(message, { allowRemote: false, cidUrls: cidUrlsOf(parts) }).body;
+	return inOwnDirection(
+		sanitizeMessageHtml(message, { allowRemote: false, cidUrls: cidUrlsOf(parts) }),
+	);
 };
 
 export function caretToStart(doc: Document, editor: HTMLElement): void {
