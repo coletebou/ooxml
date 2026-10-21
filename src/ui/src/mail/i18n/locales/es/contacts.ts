@@ -31,6 +31,7 @@ export const esContacts: Record<keyof typeof enContacts, string> = {
 	'contacts.typeOther': 'Otro',
 	'contacts.typeCell': 'Móvil',
 	'contacts.typeFax': 'Fax',
+	'contacts.typePager': 'Buscapersonas',
 	'contacts.nameGroup': 'Nombre',
 	'contacts.displayName': 'Nombre para mostrar',
 	'contacts.givenName': 'Nombre de pila',

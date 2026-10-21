@@ -31,6 +31,7 @@ export const zhCNContacts: Record<keyof typeof enContacts, string> = {
 	'contacts.typeOther': '其他',
 	'contacts.typeCell': '手机',
 	'contacts.typeFax': '传真',
+	'contacts.typePager': '寻呼机',
 	'contacts.nameGroup': '姓名',
 	'contacts.displayName': '显示名称',
 	'contacts.givenName': '名',

@@ -29,6 +29,7 @@ export const enContacts = {
 	'contacts.typeOther': 'Other',
 	'contacts.typeCell': 'Mobile',
 	'contacts.typeFax': 'Fax',
+	'contacts.typePager': 'Pager',
 	'contacts.nameGroup': 'Name',
 	'contacts.displayName': 'Display name',
 	'contacts.givenName': 'First name',

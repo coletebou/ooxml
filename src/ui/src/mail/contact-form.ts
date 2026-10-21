@@ -8,7 +8,8 @@ import type { MailI18n, MailKey } from './i18n/translator';
 /** A whole date (`YYYY-MM-DD`): the only birthday a date input can show. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_TYPES = ['', 'home', 'work', 'other'];
-const PHONE_TYPES = ['', 'cell', 'home', 'work', 'fax', 'other'];
+/** Every phone type the vCard reader recognises. */
+const PHONE_TYPES = ['', 'cell', 'home', 'work', 'fax', 'pager', 'other'];
 const TYPE_LABELS: Record<string, MailKey> = {
 	'': 'contacts.typeNone',
 	home: 'contacts.typeHome',
@@ -16,6 +17,7 @@ const TYPE_LABELS: Record<string, MailKey> = {
 	other: 'contacts.typeOther',
 	cell: 'contacts.typeCell',
 	fax: 'contacts.typeFax',
+	pager: 'contacts.typePager',
 };
 /** The parts of a postal address the form shows (not the PO box nor the extended line). */
 const SHOWN = ['street', 'locality', 'region', 'postalCode', 'country'] as const;
@@ -27,9 +29,11 @@ export interface ContactFormHandlers {
 	cancel(): void;
 }
 
+/** A type picker; a type the form has no option for is offered as it is, so saving keeps it. */
 function typeSelect(name: string, value: string, types: readonly string[], i18n: MailI18n) {
+	const options = types.includes(value) ? types : [...types, value];
 	return html`<select name=${name} aria-label=${i18n.t('contacts.type')}>
-		${types.map((type) => html`<option value=${type} ?selected=${type === value}>${i18n.t(TYPE_LABELS[type] ?? 'contacts.typeOther')}</option>`)}
+		${options.map((type) => html`<option value=${type} ?selected=${type === value}>${TYPE_LABELS[type] ? i18n.t(TYPE_LABELS[type]) : type}</option>`)}
 	</select>`;
 }
 

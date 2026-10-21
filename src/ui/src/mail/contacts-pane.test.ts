@@ -57,6 +57,28 @@ describe('<mail-contacts>', () => {
 		expect(seen.map((c) => c.addresses)).toEqual([[box]]);
 	});
 
+	it('keeps every phone and address label, including ones it has no option of its own for', async () => {
+		const phones = [
+			{ type: 'pager', number: '+1 555 0100' },
+			{ type: 'main', number: '+1 555 0101' },
+			{ type: 'cell', number: '+1 555 0102' },
+		];
+		const emails = [{ type: 'school', address: 'ada@example.com' }];
+		const el = await mount([contact('ada', 'Ada', { phones, emails })]);
+		const seen = saved(el);
+		await click(el, 'Edit');
+		const shown = (name: string) =>
+			el.shadowRoot!.querySelector<HTMLSelectElement>(`[name="${name}"]`)!.selectedOptions[0]!
+				.textContent;
+		expect([shown('phone-type-0'), shown('phone-type-1'), shown('email-type-0')]).toEqual([
+			'Pager',
+			'main',
+			'school',
+		]);
+		await click(el, 'Save');
+		expect(seen.map((c) => [c.phones, c.emails])).toEqual([[phones, emails]]);
+	});
+
 	it('drops an address whose shown parts were all cleared', async () => {
 		const home = place({ extended: 'Apt 4', street: 'Main St 1', locality: 'Springfield' });
 		const el = await mount([contact('ada', 'Ada', { addresses: [home] })]);
