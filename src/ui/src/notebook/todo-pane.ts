@@ -1,6 +1,7 @@
 // <notebook-todos>: every to-do tag in the notebook, grouped by section and page. Ticking a box
 // ticks the tag in the page's text (for everyone in the notebook); the text opens the page.
 import { html, nothing } from 'lit';
+import { live } from 'lit/directives/live.js';
 import type { NotebookState, TodoItem } from 'ooxml-core/notebook';
 import { controlStyles } from '../base';
 import { definer } from '../registry';
@@ -26,7 +27,7 @@ export class NotebookTodos extends NotebookElement {
 		return html`<li class=${item.done ? 'done' : ''}>
 			<input
 				type="checkbox"
-				.checked=${item.done}
+				.checked=${live(item.done)}
 				aria-label=${item.text || this.t('page.untitled')}
 				@change=${(e: Event) => this.fire('nb-todo', { item, done: (e.target as HTMLInputElement).checked })}
 			/>

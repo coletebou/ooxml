@@ -265,6 +265,20 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		}
 	}
 
+	/**
+	 * A new client for changed props (user, storage, sync settings). The current one saves its last
+	 * changes first; when the device refuses them it stays, so they are not lost with it (save-failed
+	 * says why) and the change applies once saving works.
+	 */
+	#restart(): void {
+		const current = this.#client;
+		if (!current) return this.#start();
+		void current.flush().then(
+			() => this.#client === current && this.#start(),
+			() => undefined,
+		);
+	}
+
 	#start(): void {
 		const config = this.#config();
 		const profile = readOfficeProfile();
@@ -346,7 +360,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		const restart = ['userId', 'userName', 'storageName', 'config', 'serverConfig'].some((k) =>
 			changed.has(k),
 		);
-		if ((restart || !this.#client) && this.isConnected) this.#start();
+		if ((restart || !this.#client) && this.isConnected) this.#restart();
 		// Also when a restart prop changed without a restart (an equal config, for example).
 		if (changed.has('locale')) this.#client?.setNames(notebookNames(this.locale));
 		if (changed.has('theme')) {

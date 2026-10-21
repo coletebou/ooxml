@@ -49,11 +49,23 @@ export async function rasterize(request: RasterRequest): Promise<ExportPicture |
 			}
 			return toPng(target.canvas, bounds.width, bounds.height);
 		}
-		const bitmap = await createImageBitmap(
-			new Blob([request.bytes.slice()], { type: request.mime }),
-		);
+		const blob = new Blob([request.bytes.slice()], { type: request.mime });
 		const target = surface(request.width, request.height);
 		if (!target) return null;
+		if (request.mime === 'image/svg+xml') {
+			// Chromium's createImageBitmap refuses SVG; an image element decodes it.
+			const url = URL.createObjectURL(blob);
+			try {
+				const image = new Image();
+				image.src = url;
+				await image.decode();
+				target.ctx.drawImage(image, 0, 0, request.width, request.height);
+			} finally {
+				URL.revokeObjectURL(url);
+			}
+			return toPng(target.canvas, request.width, request.height);
+		}
+		const bitmap = await createImageBitmap(blob);
 		target.ctx.drawImage(bitmap, 0, 0, request.width, request.height);
 		bitmap.close();
 		return toPng(target.canvas, request.width, request.height);

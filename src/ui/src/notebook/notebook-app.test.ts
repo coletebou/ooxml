@@ -264,9 +264,11 @@ describe('<notebook-app>', () => {
 	it('drops the previous profile from the screen when the storage changes', async () => {
 		app = await mount();
 		const before = app.state!.notebookId;
+		const old = app.client;
 		app.setAttribute('storage-name', `nb-test-${Math.random().toString(36).slice(2)}`);
-		await app.updateComplete;
-		// Nothing of the previous profile stays on screen while the next one loads.
+		// The old client saves its last changes first, then the new one takes over; from then on
+		// nothing of the previous profile stays on screen while the next one loads.
+		await until(() => app.client !== old);
 		expect(app.state?.notebookId ?? '').not.toBe(before);
 		await until(() => !!app.state?.page);
 		expect(app.state!.notebookId).not.toBe(before);

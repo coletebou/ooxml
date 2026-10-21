@@ -58,14 +58,16 @@ export function pageNeighbour(
 	if (at < 0) return null;
 	const level = pages[at]!.level;
 	// Step over the neighbour's subpages, so a page moves past a whole block.
+	// Only a sibling (same level, same parent) is a neighbour: a subpage never moves out of its
+	// parent page, and the first or last one has none in that direction.
 	if (direction < 0) {
 		let i = at - 1;
 		while (i >= 0 && pages[i]!.level > level) i--;
-		return i >= 0 ? pages[i]!.id : null;
+		return i >= 0 && pages[i]!.level === level ? pages[i]!.id : null;
 	}
 	let end = at + 1;
 	while (end < pages.length && pages[end]!.level > level) end++;
-	if (end >= pages.length) return null;
+	if (end >= pages.length || pages[end]!.level !== level) return null;
 	let next = end + 1;
 	while (next < pages.length && pages[next]!.level > pages[end]!.level) next++;
 	return pages[next]?.id;
