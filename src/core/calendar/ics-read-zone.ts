@@ -89,9 +89,10 @@ function readYearlyRule(value: string, onset: Wall): YearlyRule | undefined {
 	if (monthDays.length && monthDays.every((d) => Number.isInteger(d) && d >= 1 && d <= 31))
 		rule.monthDays = monthDays;
 	// A weekday alone means its first in the month; with BYSETPOS, the one it picks of them all.
-	if (rule.ordinal === undefined && rule.monthDays === undefined)
-		rule.monthDays =
-			rule.weekday === undefined ? [onset.day] : rule.setPos === undefined ? FIRST_WEEK : MONTH;
+	if (rule.ordinal === undefined && rule.monthDays === undefined) {
+		if (rule.weekday === undefined) rule.monthDays = [onset.day];
+		else rule.monthDays = rule.setPos === undefined ? FIRST_WEEK : MONTH;
+	}
 	const until = readDateValue(parts.get('UNTIL') ?? '');
 	if (until) rule.until = wallAsUtc(until.wall);
 	const count = Number(parts.get('COUNT'));
