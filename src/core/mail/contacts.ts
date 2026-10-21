@@ -166,6 +166,15 @@ export type ContactStore = RecordStore<Contact>;
 const clip = (value: unknown): string =>
 	typeof value === 'string' ? value.slice(0, MAX_CONTACT_FIELD_CHARS) : '';
 
+/**
+ * A kept vCard line, whole however long (a `PHOTO` holds a whole image, and a cut one is a broken
+ * one): one content line, never a card boundary, either of which would split the card on export.
+ */
+const keptLine = (value: unknown): string =>
+	typeof value === 'string' && !/[\r\n]/.test(value) && !/^(?:BEGIN|END)[;:]/i.test(value)
+		? value
+		: '';
+
 /** Re-validate a stored contact (storage is shared with other code and may be stale or edited). */
 export function sanitizeContact(raw: unknown): Contact | null {
 	if (!raw || typeof raw !== 'object') return null;
@@ -208,7 +217,9 @@ export function sanitizeContact(raw: unknown): Contact | null {
 		note: clip(value.note),
 		url: clip(value.url),
 		updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : 0,
-		extra: Array.isArray(value.extra) ? value.extra.map(clip).filter(Boolean).slice(0, 200) : [],
+		extra: Array.isArray(value.extra)
+			? value.extra.map(keptLine).filter(Boolean).slice(0, 200)
+			: [],
 	};
 }
 

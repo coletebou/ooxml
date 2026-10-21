@@ -140,6 +140,19 @@ describe('serializeVCards', () => {
 		expect(text.replace(/\r\n/g, '')).not.toContain('\n');
 		expect(parseVCards(text).contacts[0]).toEqual(contact);
 	});
+
+	it('writes a UID that is not a URI as text, and reads both forms back', () => {
+		const urn = 'urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6';
+		const text = serializeVCards([
+			{ ...emptyContact('contact-1', 0), name: 'Ada' },
+			{ ...emptyContact('a;b,c', 0), name: 'Grace' },
+			{ ...emptyContact(urn, 0), name: 'Mary' },
+		]);
+		expect(text).toContain('\r\nUID;VALUE=text:contact-1\r\n');
+		expect(text).toContain('\r\nUID;VALUE=text:a\\;b\\,c\r\n');
+		expect(text).toContain(`\r\nUID:${urn}\r\n`);
+		expect(parseVCards(text).contacts.map((c) => c.id)).toEqual(['contact-1', 'a;b,c', urn]);
+	});
 });
 
 describe('address book helpers', () => {

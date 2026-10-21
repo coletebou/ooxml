@@ -203,6 +203,12 @@ function foldLine(line: string): string {
 
 const typeParam = (type: string): string => (type ? `;TYPE=${type}` : '');
 
+/** A URI (RFC 3986: a scheme and a colon), printable ASCII without spaces or backslashes. */
+const URI = /^[a-z][a-z\d+.-]*:[\x21-\x5b\x5d-\x7e]+$/i;
+/** A `UID` is a URI unless marked as text (RFC 6350 6.7.6), and a bare id such as a UUID is not. */
+const uidLine = (id: string): string =>
+	URI.test(id) ? `UID:${id}` : `UID;VALUE=text:${escapeText(id)}`;
+
 function formatRev(ms: number): string {
 	return new Date(ms)
 		.toISOString()
@@ -214,7 +220,7 @@ function formatRev(ms: number): string {
 export function serializeVCards(contacts: readonly Contact[]): string {
 	const lines: string[] = [];
 	for (const contact of contacts) {
-		lines.push('BEGIN:VCARD', 'VERSION:4.0', `UID:${escapeText(contact.id)}`);
+		lines.push('BEGIN:VCARD', 'VERSION:4.0', uidLine(contact.id));
 		lines.push(
 			`FN:${escapeText(contact.name || [contact.givenName, contact.familyName].filter(Boolean).join(' '))}`,
 		);
