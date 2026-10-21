@@ -37,9 +37,20 @@ test('two tabs edit one notebook in real time with presence', async ({ context }
 	await expect(bob.locator('notebook-page .peer-tag')).toHaveText('Ada is here');
 
 	// Bob types into the same container; the text merges in both tabs.
-	await bob.locator('notebook-text .ProseMirror').click();
-	await bob.keyboard.press('ControlOrMeta+a');
-	await bob.keyboard.press('ArrowRight');
+	// Put Bob's cursor at the end of the text (keyboard selection shortcuts differ per platform).
+	await bob
+		.locator('notebook-text')
+		.first()
+		.evaluate((el) => {
+			const view = (
+				el as unknown as {
+					view: { state: any; dispatch: (tr: unknown) => void; focus: () => void };
+				}
+			).view;
+			const Selection = view.state.selection.constructor;
+			view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
+			view.focus();
+		});
 	await bob.keyboard.type(' and Bob');
 	await expect.poll(() => docText(ada)).toBe('Hello from Ada and Bob');
 	// Ada sees Bob's caret, labelled with his name, in the shared text.

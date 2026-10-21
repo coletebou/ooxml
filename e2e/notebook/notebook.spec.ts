@@ -25,6 +25,22 @@ async function typeOnCanvas(page: Page, text: string, at = { x: 160, y: 120 }): 
 	await page.keyboard.type(text);
 }
 
+/** Put the cursor at the end of the first text container (keys for that differ per platform). */
+const cursorToEnd = (page: Page) =>
+	page
+		.locator('notebook-text')
+		.first()
+		.evaluate((el) => {
+			const view = (
+				el as unknown as {
+					view: { state: any; dispatch: (tr: unknown) => void; focus: () => void };
+				}
+			).view;
+			const Selection = view.state.selection.constructor;
+			view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
+			view.focus();
+		});
+
 const ribbonTab = (page: Page, name: string) =>
 	page.getByRole('tab', { name, exact: true }).click();
 const command = (page: Page, id: string) =>
@@ -37,12 +53,15 @@ test('writes rich text on a page and keeps it after a reload', async ({ page }) 
 	await page.keyboard.press('ControlOrMeta+a');
 	await page.keyboard.press('ControlOrMeta+b');
 	await expect(page.locator('notebook-text strong')).toHaveText('Buy milk');
-	// ArrowRight collapses the selection to its end on every platform (End does not on macOS).
-	await page.keyboard.press('ArrowRight');
+	await cursorToEnd(page);
 	await page.keyboard.press('Enter');
 	await page.keyboard.type('[] Call the bakery');
 	await expect(page.locator('notebook-text .todo-box')).toHaveCount(1);
+	// Enter carries the to-do tag to the next line; Enter on that empty line drops it again.
 	await page.keyboard.press('Enter');
+	await expect(page.locator('notebook-text .todo-box')).toHaveCount(2);
+	await page.keyboard.press('Enter');
+	await expect(page.locator('notebook-text .todo-box')).toHaveCount(1);
 	await page.keyboard.type('* first');
 	await expect(page.locator('notebook-text ul li')).toHaveText('first');
 	await expect(page.locator('notebook-nav li.page')).toContainText('Weekly plan');
