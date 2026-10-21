@@ -21,6 +21,18 @@ const UNITS: Record<string, string> = {
 	MONTHLY: 'months',
 	YEARLY: 'years',
 };
+/** The rule parts read (or, for WKST, safely ignored); any other part refuses the rule. */
+const KNOWN_PARTS = new Set([
+	'FREQ',
+	'INTERVAL',
+	'COUNT',
+	'UNTIL',
+	'WKST',
+	'BYDAY',
+	'BYMONTHDAY',
+	'BYMONTH',
+	'BYSETPOS',
+]);
 
 /** The start's wall date in the event's zone. */
 export interface RuleStart {
@@ -50,15 +62,9 @@ export function readRule(value: string, start: RuleStart): ReadRule {
 		const eq = part.indexOf('=');
 		const key = part.slice(0, eq).trim().toUpperCase();
 		if (eq <= 0 || parts.has(key)) return { refused: `has an unreadable repeat rule (${value})` };
-		parts.set(
-			key,
-			key === 'UNTIL'
-				? part.slice(eq + 1).trim()
-				: part
-						.slice(eq + 1)
-						.trim()
-						.toUpperCase(),
-		);
+		const partValue = part.slice(eq + 1).trim();
+		// UNTIL is handed back as written (see `ReadRule`); the other values are keywords.
+		parts.set(key, key === 'UNTIL' ? partValue : partValue.toUpperCase());
 	}
 	const freq = parts.get('FREQ') ?? '';
 	const repeat = FREQS[freq];
@@ -79,21 +85,7 @@ export function readRule(value: string, start: RuleStart): ReadRule {
 	const bymonthday = parts.get('BYMONTHDAY');
 	const bymonth = parts.get('BYMONTH');
 	const bysetpos = parts.get('BYSETPOS');
-	for (const key of parts.keys())
-		if (
-			![
-				'FREQ',
-				'INTERVAL',
-				'COUNT',
-				'UNTIL',
-				'WKST',
-				'BYDAY',
-				'BYMONTHDAY',
-				'BYMONTH',
-				'BYSETPOS',
-			].includes(key)
-		)
-			return { refused: `uses ${key}` };
+	for (const key of parts.keys()) if (!KNOWN_PARTS.has(key)) return { refused: `uses ${key}` };
 	if (byday?.includes(',')) return { refused: `repeats on several days (BYDAY=${byday})` };
 	if (bymonthday?.includes(','))
 		return { refused: `repeats on several dates (BYMONTHDAY=${bymonthday})` };

@@ -1,8 +1,9 @@
 // Time-zone arithmetic on instants (UTC milliseconds) with the platform's IANA data, no library:
 // wall-clock parts of an instant in a zone, the instant of a wall-clock time in a zone (DST gaps
-// move forward, repeated hours take the first), and day starts and day steps that keep the local
-// time of day across daylight saving changes. Calendar code stores UTC and renders in a zone.
-// DOM-free. Moved from src/core/teams/time-zone.ts.
+// move forward; a repeated hour is the earlier instant in zones behind UTC and the later one in
+// zones ahead of it), and day starts and day steps that keep the local time of day across
+// daylight saving changes. Calendar code stores UTC and renders in a zone. DOM-free. Moved from
+// src/core/teams/time-zone.ts.
 
 export interface ZonedParts {
 	year: number;
@@ -98,8 +99,8 @@ export function zonedToUtc(wall: WallTime, zone: string): number {
 	const first = naive - offsetMinutes(naive, zone) * MINUTE_MS;
 	const second = naive - offsetMinutes(first, zone) * MINUTE_MS;
 	if (first === second) return first;
-	// Across a transition the two guesses differ: a gap has no answer (use the later offset), a
-	// repeated hour has two (the earlier instant).
+	// Near a transition the two guesses differ: keep the one whose clock shows the wanted hour (the
+	// earlier when both do), else the later one, which moves a time in a gap forward.
 	const exact = [first, second].filter((c) => zonedParts(c, zone).hour === (wall.hour ?? 0));
 	return exact.length ? Math.min(...exact) : Math.max(first, second);
 }

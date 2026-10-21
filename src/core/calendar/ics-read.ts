@@ -6,7 +6,13 @@
 // repeat rule, another component, an unknown zone) is listed once in `unsupported`, never dropped
 // silently. DOM-free. New code.
 import { type Component, readComponents } from './ics-lines';
-import { type EventDraft, type ReadContext, type ReadZone, readEvent } from './ics-read-event';
+import {
+	type EventDraft,
+	type ReadContext,
+	type ReadZone,
+	eventLabel,
+	readEvent,
+} from './ics-read-event';
 import { type Wall, wallAsUtc } from './ics-read-time';
 import { type FileZone, fileZoneToUtc, ianaZone, matchZone, readFileZone } from './ics-read-zone';
 import type { CalendarEvent, EventException } from './model';
@@ -67,8 +73,7 @@ function zoneResolver(
 	};
 }
 
-const label = (d: EventDraft): string =>
-	d.event.title.trim() ? `"${d.event.title.trim().slice(0, 60)}"` : 'An event';
+const label = (d: EventDraft): string => eventLabel(d.event.title);
 
 /** Who is on an event, for telling whether an occurrence changed it. */
 const people = (e: CalendarEvent): string =>

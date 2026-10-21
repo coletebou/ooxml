@@ -3,8 +3,8 @@
 // `NAME;PARAM=value:VALUE` split with quoted parameter values that may hold `:`, `;` and `,`
 // (RFC 6868 caret escapes decoded), and TEXT unescaping. Tolerant: a line that is not a content
 // line is counted and skipped, an END without its BEGIN is ignored and a component still open where
-// the text ends is closed there. Nothing here throws. vCard (RFC 6350) shares the line format.
-// DOM-free. New code.
+// the text ends is closed there. Nothing here throws. vCard (RFC 6350) shares the line format and
+// reads its lines through `splitContentLine` and `caretDecode`. DOM-free. New code.
 
 export interface ContentLine {
 	/** Upper case. */
@@ -59,13 +59,17 @@ function splitOutside(text: string, separator: string): string[] {
 }
 
 /** RFC 6868: `^n` is a line break, `^'` a double quote and `^^` a caret. */
-const caretDecode = (value: string): string =>
+export const caretDecode = (value: string): string =>
 	value.replace(/\^([n^'])/gu, (_, c: string) => (c === 'n' ? '\n' : c === "'" ? '"' : '^'));
 
-const NAME = /^[A-Za-z0-9-]+$/u;
-
-/** One unfolded line, or null when it is not `NAME[;PARAM=VALUE...]:VALUE`. */
-export function parseContentLine(line: string): ContentLine | null {
+/**
+ * `NAME;PARAM=value:VALUE` cut at its first colon outside quotes, the head split at the semicolons
+ * outside quotes, nothing trimmed or decoded (iCalendar and vCard read names and parameters
+ * differently); null when there is no such colon.
+ */
+export function splitContentLine(
+	line: string,
+): { name: string; params: string[]; value: string } | null {
 	let colon = -1;
 	let quoted = false;
 	for (let i = 0; i < line.length && colon < 0; i++) {
@@ -73,11 +77,20 @@ export function parseContentLine(line: string): ContentLine | null {
 		else if (line[i] === ':' && !quoted) colon = i;
 	}
 	if (colon < 0) return null;
-	const head = splitOutside(line.slice(0, colon), ';');
-	const name = (head.shift() ?? '').trim().toUpperCase();
+	const [name = '', ...params] = splitOutside(line.slice(0, colon), ';');
+	return { name, params, value: line.slice(colon + 1) };
+}
+
+const NAME = /^[A-Za-z0-9-]+$/u;
+
+/** One unfolded line, or null when it is not `NAME[;PARAM=VALUE...]:VALUE`. */
+export function parseContentLine(line: string): ContentLine | null {
+	const parts = splitContentLine(line);
+	if (!parts) return null;
+	const name = parts.name.trim().toUpperCase();
 	if (!NAME.test(name)) return null;
 	const params: Record<string, string[]> = {};
-	for (const part of head) {
+	for (const part of parts.params) {
 		const eq = part.indexOf('=');
 		const key = (eq < 0 ? part : part.slice(0, eq)).trim().toUpperCase();
 		if (!NAME.test(key)) continue;
@@ -90,7 +103,7 @@ export function parseContentLine(line: string): ContentLine | null {
 					);
 		params[key] = [...(params[key] ?? []), ...values];
 	}
-	return { name, params, value: line.slice(colon + 1) };
+	return { name, params, value: parts.value };
 }
 
 /** A TEXT value: `\n` (or `\N`) is a line break; `\\`, `\;`, `\,` and any other `\x` are `x`. */

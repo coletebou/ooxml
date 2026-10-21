@@ -86,7 +86,7 @@ silently.
   zone, whatever zone they were written from.
 - A local time in the hour a clock change repeats names two instants and the file cannot say
   which. `zonedToUtc` (moved unchanged from the `teams` area) takes the first in zones behind UTC
-  and the second in zones ahead of it, whatever its comment says; the same applies when reading.
+  and the second in zones ahead of it; the same applies when reading.
 - A zone matched from a VTIMEZONE is checked against the rules of the event's first year; a zone
   that changed its rules later may drift. The week views (moved unchanged) start every day of a
   week an hour late when the anchor's day or the week's first day has no midnight (zones that

@@ -154,7 +154,10 @@ export function fileZoneOffset(zone: FileZone, instant: number): number {
 	return offset;
 }
 
-/** The instant of a wall time in the file's zone; a gap moves forward, a repeated hour takes the first. */
+/**
+ * The instant of a wall time in the file's zone. A time in a gap moves forward; a repeated hour is
+ * the earlier instant in zones behind UTC and the later one in zones ahead of it, as `zonedToUtc`.
+ */
 export function fileZoneToUtc(zone: FileZone, wall: Wall): number {
 	const naive = wallAsUtc(wall);
 	const guess = naive - fileZoneOffset(zone, naive) * MINUTE_MS;
@@ -250,6 +253,7 @@ function spelled(zone: string): string {
 /** The IANA zone a TZID names, also behind a path prefix (`/mozilla.org/.../Europe/Berlin`). */
 export function ianaZone(tzid: string): string | null {
 	const name = tzid.trim();
+	// Widened: `isValidZone` is a type guard, which would narrow a `string` to `never` below.
 	const whole: unknown = name;
 	if (isValidZone(whole)) return spelled(whole);
 	if (!name.includes('/')) return null;

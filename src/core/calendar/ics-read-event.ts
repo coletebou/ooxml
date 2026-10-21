@@ -14,7 +14,7 @@ import type {
 	EventPerson,
 	RecurringSeries,
 } from './model';
-import { addDays, zonedToUtc } from './time-zone';
+import { MINUTE_MS, addDays, zonedToUtc } from './time-zone';
 
 /** How the times of a TZID are read: the zone a repeat keeps, and the instant of a wall time. */
 export interface ReadZone {
@@ -56,6 +56,10 @@ const text = (p: ContentLine | undefined): string | undefined =>
 	p ? unescapeText(p.value) : undefined;
 const param = (p: ContentLine, name: string): string | undefined =>
 	p.params[name]?.[0]?.trim().toUpperCase();
+
+/** How notes name an event: its quoted title (cut to 60 characters), else `An event`. */
+export const eventLabel = (title: string): string =>
+	title.trim() ? `"${title.trim().slice(0, 60)}"` : 'An event';
 
 /** A DATE or DATE-TIME value of a property (one item of a list when `value` is given). */
 function readTime(p: ContentLine | undefined, ctx: ReadContext, value = p?.value): Time | null {
@@ -160,8 +164,13 @@ function readReminder(c: Component, ctx: ReadContext): number | undefined {
 		const relative =
 			trigger && param(trigger, 'VALUE') !== 'DATE-TIME' && param(trigger, 'RELATED') !== 'END';
 		const d = relative ? readDuration(trigger.value) : null;
-		const total = d ? d.days * 1440 + d.ms / 60_000 : 0;
-		const minutes = d === null ? null : total === 0 ? 0 : d.sign === -1 ? total : -total;
+		let minutes: number | null = null;
+		if (d) {
+			const total = d.days * 1440 + d.ms / MINUTE_MS;
+			// Minutes before the start: `-PT15M` is 15 and a trigger after the start is negative (a zero
+			// stays 0, not -0).
+			minutes = d.sign === -1 || total === 0 ? total : -total;
+		}
 		if (minutes === null || minutes < 0)
 			ctx.note('Reminders at a set time, after the start or before the end are not imported');
 		else if (reminder === undefined) reminder = minutes;
@@ -223,7 +232,7 @@ const DEFAULTS: Record<string, string> = { TRANSP: 'OPAQUE', CLASS: 'PUBLIC', PR
 /** A VEVENT, or null (noted) when it has no start that can be read. */
 export function readEvent(c: Component, ctx: ReadContext): EventDraft | null {
 	const title = text(one(c, 'SUMMARY')) ?? '';
-	const label = title.trim() ? `"${title.trim().slice(0, 60)}"` : 'An event';
+	const label = eventLabel(title);
 	const start = readTime(one(c, 'DTSTART'), ctx);
 	if (!start) {
 		ctx.note(`${label} has no start that can be read and was skipped`);

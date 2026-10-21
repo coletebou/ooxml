@@ -5,9 +5,8 @@
 // extends forever. A zone whose rules differ from year to year (or that has one change only) gets
 // each change written out for those years instead. DOM-free. Moved from
 // src/core/teams/ics-timezone.ts.
-import { MINUTE_MS, offsetMinutes } from './time-zone';
+import { DAY_MS, MINUTE_MS, offsetMinutes } from './time-zone';
 
-const DAY = 86_400_000;
 const CHECKED_YEARS = 10;
 const DAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;
 
@@ -30,11 +29,11 @@ export function zoneTransitions(zone: string, year: number): ZoneTransition[] {
 	const begin = Date.UTC(year, 0, 1);
 	const end = Date.UTC(year + 1, 0, 1);
 	let before = offsetMinutes(begin, zone);
-	for (let day = begin; day < end; day += DAY) {
-		const after = offsetMinutes(day + DAY, zone);
+	for (let day = begin; day < end; day += DAY_MS) {
+		const after = offsetMinutes(day + DAY_MS, zone);
 		if (after === before) continue;
 		let lo = day;
-		let hi = day + DAY;
+		let hi = day + DAY_MS;
 		while (hi - lo > MINUTE_MS) {
 			const mid = Math.floor((lo + hi) / 2 / MINUTE_MS) * MINUTE_MS;
 			if (offsetMinutes(mid, zone) === before) lo = mid;

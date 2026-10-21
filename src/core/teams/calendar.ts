@@ -7,6 +7,7 @@ import {
 	type Occurrence as EventOccurrence,
 	REMINDER_LEAD_MS,
 	dueOccurrences,
+	occurrenceAt as eventOccurrenceAt,
 	occurrencesBetween as eventOccurrences,
 } from '../calendar/occurrences';
 import { layoutDay as layoutOccurrences } from '../calendar/layout';
@@ -57,8 +58,10 @@ export function occurrencesBetween(meeting: Meeting, from: number, to: number): 
 }
 
 /** The occurrence that starts exactly at `start` (as shown), or null. */
-export const occurrenceAt = (meeting: Meeting, start: number): Occurrence | null =>
-	occurrencesBetween(meeting, start, start + 1).find((o) => o.start === start) ?? null;
+export const occurrenceAt = (meeting: Meeting, start: number): Occurrence | null => {
+	const occurrence = eventOccurrenceAt(meeting, start);
+	return occurrence ? ofMeeting(occurrence) : null;
+};
 
 export type CalendarMode = 'workweek' | 'week' | 'day';
 
