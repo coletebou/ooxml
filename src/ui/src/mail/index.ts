@@ -33,6 +33,8 @@ export { applyMailProps, listenMailEvents, type MailProps } from './bind';
 export { release as releaseMailClient } from './app-client';
 export * from './store';
 export { previewKind, type PreviewKind } from './attachments';
+/** For a client made with `createMailClient`: quotes and reopened drafts keep every HTML part. */
+export { draftHtml } from './compose-editor';
 export {
 	commandFor,
 	controlOwnsKey,
@@ -45,6 +47,8 @@ export {
 	emailDocument,
 	linkify,
 	sanitizeEmailHtml,
+	sanitizeMessageHtml,
+	type MessageHtml,
 	type SanitizedHtml,
 	type SanitizeOptions,
 } from './sanitize';
