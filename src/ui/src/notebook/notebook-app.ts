@@ -434,7 +434,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			return html`<div class="empty">
 				<p>${this.t('app.empty')}</p>
 				<p>${this.t('app.emptyHint')}</p>
-				<office-ui-button command="create-notebook"
+				<office-ui-button
+					command="create-notebook"
 					variant="primary"
 					icon="plus"
 					label=${this.t('app.createNotebook')}
@@ -598,7 +599,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 						</button>`
 					: nothing
 			}
-			<office-ui-button command="notice-dismiss"
+			<office-ui-button
+				command="notice-dismiss"
 				size="small"
 				icon="close"
 				icon-only
@@ -618,5 +620,11 @@ export const defineNotebookApp = definer(
 		registerNotebookIcons();
 		return NotebookApp;
 	},
-	[definePresence, defineNotebookNav, defineNotebookPage, defineNotebookTodos, defineNotebookLinkDialog],
+	[
+		definePresence,
+		defineNotebookNav,
+		defineNotebookPage,
+		defineNotebookTodos,
+		defineNotebookLinkDialog,
+	],
 );

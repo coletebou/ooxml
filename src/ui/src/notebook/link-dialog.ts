@@ -81,13 +81,15 @@ export class NotebookLinkDialog extends NotebookElement {
 			</label>
 			${this.invalid ? html`<p class="error" role="alert">${this.t('link.invalid')}</p>` : nothing}
 			${value?.linked ? html`<office-ui-button command="link-remove" slot="footer" label=${this.t('link.remove')} @office-command=${() => this.fire('nb-link-remove', {})}></office-ui-button>` : nothing}
-			<office-ui-button command="link-ok"
+			<office-ui-button
+				command="link-ok"
 				slot="footer"
 				variant="primary"
 				label=${this.t('common.ok')}
 				@office-command=${() => this.#apply()}
 			></office-ui-button>
-			<office-ui-button command="link-cancel"
+			<office-ui-button
+				command="link-cancel"
 				slot="footer"
 				label=${this.t('common.cancel')}
 				@office-command=${() => this.fire('nb-link-cancel', {})}

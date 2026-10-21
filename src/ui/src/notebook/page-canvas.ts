@@ -374,7 +374,8 @@ export class NotebookPage extends NotebookElement {
 		if (!state || !page)
 			return html`<div class="none">
 				<p>${this.t('page.none')}</p>
-				<office-ui-button command="add-page"
+				<office-ui-button
+					command="add-page"
 					icon="plus"
 					label=${this.t('page.add')}
 					@office-command=${() => this.fire('nb-add-page', {})}
