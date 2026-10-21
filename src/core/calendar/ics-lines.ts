@@ -101,7 +101,10 @@ export function parseContentLine(line: string): ContentLine | null {
 				: splitOutside(part.slice(eq + 1), ',').map((v) =>
 						caretDecode(v.trim().replace(/^"([^"]*)"$/u, '$1')),
 					);
-		params[key] = [...(params[key] ?? []), ...values];
+		// Appended one by one: copying the values so far for each repeat of a parameter is quadratic,
+		// and spreading a long list into `push` can exceed the platform's limit on arguments.
+		const held = (params[key] ??= []);
+		for (const value of values) held.push(value);
 	}
 	return { name, params, value: parts.value };
 }

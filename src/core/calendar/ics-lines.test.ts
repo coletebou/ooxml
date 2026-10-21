@@ -40,6 +40,27 @@ describe('content lines', () => {
 		]);
 	});
 
+	it('keeps every value of a repeated parameter, in the order written', () => {
+		expect(parseContentLine('X-A;P=1;Q=x;P=2,3;p="4,5";P=:v')?.params).toEqual({
+			P: ['1', '2', '3', '4,5', ''],
+			Q: ['x'],
+		});
+	});
+
+	it('reads a line of a hundred thousand repeated parameters in linear time', () => {
+		const line = `SUMMARY${';X-P=a'.repeat(100_000)}:Stand-up`;
+		const text = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', line, 'END:VEVENT', 'END:VCALENDAR'];
+		const started = performance.now();
+		const tree = readComponents(text.join('\r\n'));
+		const elapsed = performance.now() - started;
+		const summary = tree.components[0]?.components[0]?.properties[0];
+		expect(summary?.value).toBe('Stand-up');
+		expect(summary?.params['X-P']).toHaveLength(100_000);
+		// Each repeat used to copy every value before it, five billion copies and many seconds; now
+		// it is milliseconds. Generous, so a loaded runner does not flake.
+		expect(elapsed).toBeLessThan(2000);
+	});
+
 	it('refuses lines that are not content lines', () => {
 		expect(parseContentLine('no colon here')).toBeNull();
 		expect(parseContentLine(':value')).toBeNull();
