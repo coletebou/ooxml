@@ -262,6 +262,29 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('says why it stays open while a file uploads, once for each action it refuses', async () => {
+		const { client, control, notices } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		control.uploads.holding = true;
+		const attaching = client.attach([file('late.txt'), file('later.txt')]);
+		const refused = [
+			await client.compose('new'),
+			await client.compose('reply', 'hello'),
+			await client.editDraft('old'),
+			await client.closeCompose(),
+		];
+		expect(refused).toEqual([false, false, false, false]);
+		const stillUploading: MailNotice = { kind: 'warning', action: 'upload', uploading: 2 };
+		expect(notices).toEqual(Array.from({ length: 4 }, () => stillUploading));
+		control.uploads.release();
+		await attaching;
+		// Once the files are in, the window closes, and nothing more is said.
+		expect(await client.closeCompose()).toBe(true);
+		expect(notices).toHaveLength(4);
+		client.destroy();
+	});
+
 	it('closes once a failed upload is over, without the file', async () => {
 		const { client, control, notices, drafts } = setup();
 		await until(client, (s) => s.status === 'ready');

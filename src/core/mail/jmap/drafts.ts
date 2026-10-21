@@ -6,8 +6,9 @@
 // not resolve references in an echo, or takes fewer calls in one request than that needs
 // (`maxCallsInRequest`), gets the clean-up as a second request instead, and with one call per
 // request the submission too. The copy a send made is destroyed only when it certainly did not go
-// out; when that is not known it stays, and sending the same message again first asks the server
-// whether it went out (RFC 8621 7.3), so it is never sent twice. New code.
+// out; when that is not known it stays, the send fails as `uncertain` rather than as not sent, and
+// sending the same message again first asks the server whether it went out (RFC 8621 7.3), so it
+// is never sent twice. New code.
 import { ANSWERED, DRAFT, FORWARDED, SEEN, type Draft, type Identity } from '../model';
 import { MailTransportError } from '../transport';
 import type { JmapClient } from './client';
@@ -69,6 +70,15 @@ function refused(result: JmapResult, call: JmapCall, creationId: string): boolea
 	const notCreated = result.all(call).find((response) => response[0] === call.name)?.[1].notCreated;
 	return isRecord(notCreated) && Object.hasOwn(notCreated, creationId);
 }
+
+/**
+ * A send that may have gone out, told as such: reported as not sent, it would be edited and sent
+ * again, a second message. `cause` is what the server answered, or how the request failed.
+ */
+const uncertain = (cause: unknown): MailTransportError =>
+	new MailTransportError('uncertain', 'The server did not say whether the message was sent.', {
+		cause,
+	});
 
 export function createDraftMethods(options: DraftOptions): DraftMethods {
 	const { client, mailboxes, nudge } = options;
@@ -255,17 +265,18 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 						.catch((error: unknown) => {
 							unsure.set(key, id);
 							nudge();
-							throw error;
+							throw uncertain(error);
 						});
 			try {
 				result.created(submission, 'send');
 			} catch (error) {
 				// Not sent for certain: drop the copy just made, so the saved draft is the only one
 				// again. When it may have gone out, the copy may be the only one there is: it stays.
-				if (refused(result, submission, 'send')) await quietly(() => tidy([id], {}));
+				const certain = refused(result, submission, 'send');
+				if (certain) await quietly(() => tidy([id], {}));
 				else unsure.set(key, id);
 				nudge();
-				throw error;
+				throw certain ? error : uncertain(error);
 			}
 			const { clean } = first.calls;
 			const later = { destroy: [] as string[], update: {} as Record<string, Patch> };

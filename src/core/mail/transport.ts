@@ -106,7 +106,11 @@ export interface MailTransport {
 	destroy(ids: readonly string[]): Promise<void>;
 	/** Saves `draft` in Drafts, replacing `draft.id` when set; returns the saved message's id. */
 	saveDraft(draft: Draft): Promise<{ id: string }>;
-	/** Sends `draft`, files it in Sent and removes the saved draft; returns the sent message's id. */
+	/**
+	 * Sends `draft`, files it in Sent and removes the saved draft; returns the sent message's id.
+	 * Fails with `uncertain`, not as not sent, when the server did not say whether it went out; the
+	 * same draft sent again first asks whether that send went out.
+	 */
 	send(draft: Draft): Promise<{ id: string }>;
 	upload(bytes: Uint8Array, type: string): Promise<UploadedBlob>;
 	download(blobId: string, options: { type: string; name: string }): Promise<Uint8Array>;
@@ -128,7 +132,9 @@ export type MailErrorCode =
 	| 'tooLarge'
 	| 'rateLimited'
 	| 'unsupported'
-	| 'server';
+	| 'server'
+	/** A send the server did not confirm, which may have gone out: not a failure to send. */
+	| 'uncertain';
 
 export class MailTransportError extends Error {
 	readonly code: MailErrorCode;

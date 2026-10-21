@@ -35,13 +35,14 @@ the bodies loaded so far, the `compose` window (draft, status, last save, upload
 `detach`, `saveDraft`, `send`, `discardDraft`, `closeCompose`, `download`, `exportEml`,
 `importEml`, `saveContact`, `deleteContact`, `importVCards`, `exportVCards`, `saveEvent`,
 `deleteEvent`, `importIcs`, `exportIcs`, `destroy`. What just happened arrives through `onNotice`
-(sent, moved with an `undo`, imported, an error code); the UI words it.
+(sent, moved with an `undo`, imported, a file still uploading, an error code); the UI words it.
 
 Changes are applied to the list at once and put back if the server refuses them. Drafts are saved
 a quiet moment after the last edit, never two saves at once, and a draft counts as saved only once
 the server has its latest edit. A draft that cannot be saved, or whose attachments are still uploading, keeps its window open with its edits:
 closing it, or opening another message, waits for a save that succeeds (`compose`, `editDraft` and
-`closeCompose` resolve `false` otherwise). Without a Trash folder, Delete reports `unsupported`
+`closeCompose` resolve `false` otherwise, and while a file is still uploading a warning notice says
+so). Without a Trash folder, Delete reports `unsupported`
 instead of destroying mail. Responses for a folder or search the person already left are dropped.
 
 ## Transports
@@ -49,7 +50,9 @@ instead of destroying mail. Responses for a folder or search the person already 
 `MailTransport` is the seam: `connect`, `mailboxes`, `createMailbox`, `renameMailbox`,
 `destroyMailbox`, `query`, `summaries`, `message`, `update`, `destroy`, `saveDraft`, `send`,
 `upload`, `download`, `importMessage`, `watch`, `close`. Failures are `MailTransportError` with a
-`code` (`unauthorized`, `network`, `overQuota`, ...), never a sentence the UI has to parse.
+`code` (`unauthorized`, `network`, `overQuota`, ...), never a sentence the UI has to parse. A send
+the server did not confirm fails as `uncertain`, not as not sent: the message may have gone out,
+and sending the same draft again first asks the server whether it did.
 
 - `createMemoryTransport({ account, identities, mailboxes, messages, latencyMs, loopback })`: a mail
   server in memory for demos and tests; a message sent to your own address arrives in the Inbox.

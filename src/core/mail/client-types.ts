@@ -133,7 +133,12 @@ export type MailNotice =
 	/** Cards a vCard import could not read. */
 	| { kind: 'warning'; action: 'contactsImported'; skipped: number }
 	/** What an iCalendar import could not represent, one line per problem. */
-	| { kind: 'warning'; action: 'eventsImported'; unsupported: readonly string[] };
+	| { kind: 'warning'; action: 'eventsImported'; unsupported: readonly string[] }
+	/**
+	 * The compose window stays open, and nothing opens in its place, while files are still uploading
+	 * into its draft (`compose`, `editDraft` and `closeCompose` resolve false).
+	 */
+	| { kind: 'warning'; action: 'upload'; uploading: number };
 
 export type MailAction =
 	| 'connect'
@@ -225,7 +230,8 @@ export interface MailClient {
 	/**
 	 * Open the compose window on a new message, or an answer to or forward of `emailId`. False when
 	 * it did not open: the message could not be read, or the open draft could not be saved (that
-	 * window stays open, its status saying why).
+	 * window stays open, its status saying why), or a file is still uploading into it (a notice
+	 * says so).
 	 */
 	compose(mode: ComposeMode, emailId?: string): Promise<boolean>;
 	/** Reopen a saved draft from Drafts in the compose window; false as for `compose`. */
@@ -243,7 +249,7 @@ export interface MailClient {
 	/**
 	 * Close the compose window once the server holds its last edit, saving a draft that has anything
 	 * in it. A draft that cannot be saved keeps the window open, its status saying why, and the
-	 * result is false; so does a draft whose attachments are still uploading.
+	 * result is false; so does a draft whose attachments are still uploading, with a notice.
 	 */
 	closeCompose(): Promise<boolean>;
 	download(attachment: MailAttachment): Promise<Uint8Array>;

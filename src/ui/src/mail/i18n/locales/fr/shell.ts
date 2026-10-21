@@ -50,6 +50,10 @@ export const frShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsUnsupported.other':
 		"{count} parties du fichier de calendrier n'ont pas pu être importées telles quelles.",
 	'notice.undone': 'Action annulée.',
+	'notice.stillUploading.one':
+		"Un fichier est encore en cours d'envoi. Réessayez une fois qu'il sera dans le message.",
+	'notice.stillUploading.other':
+		"{count} fichiers sont encore en cours d'envoi. Réessayez une fois qu'ils seront dans le message.",
 
 	'error.unauthorized': "Le serveur n'a pas accepté votre connexion.",
 	'error.forbidden': "Vous n'avez pas l'autorisation de faire cela.",
@@ -61,6 +65,8 @@ export const frShell: Record<keyof typeof enShell, string> = {
 	'error.rateLimited': 'Trop de demandes. Réessayez dans un instant.',
 	'error.unsupported': 'Le serveur ne prend pas cela en charge.',
 	'error.server': 'Une erreur est survenue sur le serveur.',
+	'error.uncertain':
+		"Le serveur n'a pas indiqué si ce message a été envoyé. Regardez dans Envoyés avant de le modifier. Renvoyé sans modification, il ne partira qu'une seule fois.",
 
 	'size.bytes': '{size} octets',
 	'size.kb': '{size} Ko',

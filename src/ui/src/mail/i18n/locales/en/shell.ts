@@ -48,6 +48,9 @@ export const enShell = {
 	'notice.eventsUnsupported.other':
 		'{count} parts of the calendar file could not be imported as written.',
 	'notice.undone': 'Undone.',
+	'notice.stillUploading.one': 'A file is still uploading. Try again once it is in the message.',
+	'notice.stillUploading.other':
+		'{count} files are still uploading. Try again once they are in the message.',
 
 	'error.unauthorized': 'The server did not accept your sign-in.',
 	'error.forbidden': 'You do not have permission to do that.',
@@ -59,6 +62,8 @@ export const enShell = {
 	'error.rateLimited': 'Too many requests. Try again in a moment.',
 	'error.unsupported': 'The server does not support that.',
 	'error.server': 'Something went wrong on the server.',
+	'error.uncertain':
+		'The server did not say whether this message was sent. Look in Sent before you change it; sent again unchanged, it goes out only once.',
 
 	'size.bytes': '{size} bytes',
 	'size.kb': '{size} KB',

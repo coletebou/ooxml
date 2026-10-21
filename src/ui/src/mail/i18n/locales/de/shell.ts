@@ -50,6 +50,10 @@ export const deShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsUnsupported.other':
 		'{count} Teile der Kalenderdatei konnten nicht wie geschrieben importiert werden.',
 	'notice.undone': 'Rückgängig gemacht.',
+	'notice.stillUploading.one':
+		'Eine Datei wird noch hochgeladen. Versuchen Sie es erneut, sobald sie in der Nachricht ist.',
+	'notice.stillUploading.other':
+		'{count} Dateien werden noch hochgeladen. Versuchen Sie es erneut, sobald sie in der Nachricht sind.',
 
 	'error.unauthorized': 'Der Server hat Ihre Anmeldung nicht akzeptiert.',
 	'error.forbidden': 'Dazu fehlt Ihnen die Berechtigung.',
@@ -61,6 +65,8 @@ export const deShell: Record<keyof typeof enShell, string> = {
 	'error.rateLimited': 'Zu viele Anfragen. Versuchen Sie es gleich noch einmal.',
 	'error.unsupported': 'Der Server unterstützt das nicht.',
 	'error.server': 'Auf dem Server ist ein Fehler aufgetreten.',
+	'error.uncertain':
+		'Der Server hat nicht mitgeteilt, ob diese Nachricht gesendet wurde. Sehen Sie im Ordner Gesendet nach, bevor Sie sie ändern. Wenn Sie sie unverändert erneut senden, wird sie nur einmal verschickt.',
 
 	'size.bytes': '{size} Byte',
 	'size.kb': '{size} KB',

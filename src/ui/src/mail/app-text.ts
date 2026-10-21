@@ -22,6 +22,7 @@ const ERRORS: Record<MailErrorCode, MailKey> = {
 	rateLimited: 'error.rateLimited',
 	unsupported: 'error.unsupported',
 	server: 'error.server',
+	uncertain: 'error.uncertain',
 };
 
 /** A transport error code as a sentence. */
@@ -32,10 +33,12 @@ export function errorText(code: MailErrorCode, i18n: MailI18n): string {
 /** What a notice says. */
 export function noticeText(notice: MailNotice, i18n: MailI18n): string {
 	if (notice.kind === 'error') return errorText(notice.code, i18n);
-	if (notice.kind === 'warning')
+	if (notice.kind === 'warning') {
+		if (notice.action === 'upload') return i18n.tn('notice.stillUploading', notice.uploading);
 		return notice.action === 'contactsImported'
 			? i18n.tn('notice.contactsSkipped', notice.skipped)
 			: i18n.tn('notice.eventsUnsupported', notice.unsupported.length);
+	}
 	switch (notice.action) {
 		case 'sent':
 			return i18n.t('notice.sent');

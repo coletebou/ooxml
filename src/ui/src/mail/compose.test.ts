@@ -312,4 +312,13 @@ describe('<mail-compose>', () => {
 			['mail-draft-send', { session: 1 }],
 		]);
 	});
+
+	it('says a send the server did not confirm may have gone out, not that it failed', async () => {
+		const el = await mount({ ...composeState(), status: 'error', error: 'uncertain' });
+		const status = el.shadowRoot!.querySelector('.status')!;
+		expect(status.textContent).toBe(
+			'The server did not say whether this message was sent. Look in Sent before you change it; sent again unchanged, it goes out only once.',
+		);
+		expect(status.classList.contains('error')).toBe(true);
+	});
 });

@@ -122,8 +122,9 @@ export function createCompose(core: ClientCore): ComposeActions {
 
 	/**
 	 * Closes the window once the server holds its last edit; a draft it cannot save stays open, and
-	 * so does one with a file still uploading (the file joins the draft once it is up). One whose
-	 * message is on its way closes once it is sent, and stays open with its error if that fails.
+	 * so does one with a file still uploading (the file joins the draft once it is up), with a notice
+	 * saying so. One whose message is on its way closes once it is sent, and stays open with its
+	 * error if that fails.
 	 */
 	const close = async (): Promise<boolean> => {
 		for (;;) {
@@ -140,7 +141,11 @@ export function createCompose(core: ClientCore): ComposeActions {
 			}
 		}
 		// Closing now would leave the file out: `attach` finds no window to add it to.
-		if (compose()?.uploading) return false;
+		const uploading = compose()?.uploading ?? 0;
+		if (uploading) {
+			core.notice({ kind: 'warning', action: 'upload', uploading });
+			return false;
+		}
 		autosave.cancel();
 		core.patch({ compose: null });
 		return true;

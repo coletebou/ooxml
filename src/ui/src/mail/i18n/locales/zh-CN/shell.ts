@@ -48,6 +48,8 @@ export const zhCNShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsUnsupported.one': '日历文件中有 {count} 处内容无法按原样导入。',
 	'notice.eventsUnsupported.other': '日历文件中有 {count} 处内容无法按原样导入。',
 	'notice.undone': '已撤销。',
+	'notice.stillUploading.one': '有一个文件仍在上传。请等文件添加到邮件中后再试。',
+	'notice.stillUploading.other': '有 {count} 个文件仍在上传。请等文件添加到邮件中后再试。',
 
 	'error.unauthorized': '服务器未接受你的登录。',
 	'error.forbidden': '你没有执行此操作的权限。',
@@ -59,6 +61,8 @@ export const zhCNShell: Record<keyof typeof enShell, string> = {
 	'error.rateLimited': '请求过多。请稍后重试。',
 	'error.unsupported': '服务器不支持此操作。',
 	'error.server': '服务器出错。',
+	'error.uncertain':
+		'服务器未告知这封邮件是否已发送。修改前请先查看已发送文件夹；不做修改直接再次发送，只会发出一次。',
 
 	'size.bytes': '{size} 字节',
 	'size.kb': '{size} KB',

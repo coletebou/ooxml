@@ -50,6 +50,10 @@ export const esShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsUnsupported.other':
 		'{count} partes del archivo de calendario no se pudieron importar tal como están escritas.',
 	'notice.undone': 'Deshecho.',
+	'notice.stillUploading.one':
+		'Todavía se está subiendo un archivo. Vuelve a intentarlo cuando esté en el mensaje.',
+	'notice.stillUploading.other':
+		'Todavía se están subiendo {count} archivos. Vuelve a intentarlo cuando estén en el mensaje.',
 
 	'error.unauthorized': 'El servidor no aceptó tu inicio de sesión.',
 	'error.forbidden': 'No tienes permiso para hacer eso.',
@@ -61,6 +65,8 @@ export const esShell: Record<keyof typeof enShell, string> = {
 	'error.rateLimited': 'Demasiadas solicitudes. Inténtalo de nuevo en un momento.',
 	'error.unsupported': 'El servidor no admite esa operación.',
 	'error.server': 'Se produjo un error en el servidor.',
+	'error.uncertain':
+		'El servidor no indicó si este mensaje se envió. Mira en Enviados antes de cambiarlo; si lo vuelves a enviar sin cambios, solo saldrá una vez.',
 
 	'size.bytes': '{size} bytes',
 	'size.kb': '{size} KB',

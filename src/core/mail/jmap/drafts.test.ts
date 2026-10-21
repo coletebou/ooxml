@@ -237,15 +237,22 @@ describe('send', () => {
 
 	it('keeps the copy it made when the server may have sent it before failing', async () => {
 		const { server, transport, store } = mail();
-		// RFC 8620 3.6.2: some of what the call asked for happened, the submission perhaps.
+		// RFC 8620 3.6.2: some of what the call asked for happened, the submission perhaps. That is
+		// what the error says, not that the send failed; the server's own answer is its cause.
 		server.on('EmailSubmission/set', (_args, call) => [
 			['error', { type: 'serverPartialFail' }, call.id],
 		]);
-		expect(await failure(transport.send(reply))).toMatchObject({ type: 'serverPartialFail' });
+		expect(await failure(transport.send(reply))).toMatchObject({
+			code: 'uncertain',
+			cause: { type: 'serverPartialFail' },
+		});
 		// No answer for the submission at all says no more.
 		const silent = mail();
 		silent.server.on('EmailSubmission/set', () => []);
-		expect(await failure(silent.transport.send(reply))).toMatchObject({ code: 'server' });
+		expect(await failure(silent.transport.send(reply))).toMatchObject({
+			code: 'uncertain',
+			cause: { code: 'server' },
+		});
 		for (const { server: each, store: kept } of [{ server, store }, silent]) {
 			expect(kept.emails.has('E1')).toBe(true);
 			expect(kept.emails.has('old-draft')).toBe(true);
@@ -257,7 +264,7 @@ describe('send', () => {
 		const { server, transport, store } = mail();
 		// The server sent it, then failed: whether it went out cannot be told from the answer.
 		store.failSubmission = 'after';
-		expect(await failure(transport.send(reply))).toMatchObject({ type: 'serverPartialFail' });
+		expect(await failure(transport.send(reply))).toMatchObject({ code: 'uncertain' });
 		store.failSubmission = null;
 		// The same message again: the server is asked first, and the first send is finished instead.
 		expect(await transport.send(reply)).toEqual({ id: 'E1' });
@@ -275,7 +282,7 @@ describe('send', () => {
 	it('sends the message again when the server says the uncertain send did not go out', async () => {
 		const { transport, store } = mail();
 		store.failSubmission = 'before';
-		expect(await failure(transport.send(reply))).toMatchObject({ type: 'serverPartialFail' });
+		expect(await failure(transport.send(reply))).toMatchObject({ code: 'uncertain' });
 		store.failSubmission = null;
 		// No submission and still a draft: the copy is a stray, and the message goes out once.
 		expect(await transport.send(reply)).toEqual({ id: 'E2' });
@@ -376,7 +383,10 @@ describe('send', () => {
 			(request) => request.body?.includes('EmailSubmission/set') ?? false,
 			() => Promise.reject(new TypeError('Failed to fetch')),
 		);
-		expect(await failure(transport.send(reply))).toMatchObject({ code: 'network' });
+		expect(await failure(transport.send(reply))).toMatchObject({
+			code: 'uncertain',
+			cause: { code: 'network' },
+		});
 		// Whether it went out is not known: the copy stays, and nothing else is changed.
 		expect(store.emails.has('E1')).toBe(true);
 		expect(store.emails.has('old-draft')).toBe(true);
