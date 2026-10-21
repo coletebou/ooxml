@@ -44,8 +44,9 @@ describe('sanitizeEmailHtml', () => {
 		expect(result.blocked).toBe(4);
 		expect(result.body).not.toContain('t.example');
 		expect(result.body).toContain('alt="logo"');
-		expect(result.css).not.toMatch(/@import|evil\.example|t\.example/);
-		expect(result.css).toContain('background:none');
+		expect(result.sheets).toHaveLength(1);
+		expect(result.sheets[0]).not.toMatch(/@import|evil\.example|t\.example/);
+		expect(result.sheets[0]).toContain('background:none');
 	});
 
 	it('loads remote resources once the person allows them', () => {
@@ -82,7 +83,7 @@ describe('sanitizeEmailHtml', () => {
 	it('cannot be broken out of the style element', () => {
 		const result = clean('<style>p{color:red}</style><p>x</p>');
 		const doc = emailDocument(
-			{ ...result, css: '</style><script>alert(1)</script>' },
+			{ ...result, sheets: ['</style><script>alert(1)</script>'] },
 			false,
 			STYLE,
 		);
@@ -98,7 +99,7 @@ describe('sanitizeEmailHtml', () => {
 		];
 		for (const css of payloads) {
 			const doc = new DOMParser().parseFromString(
-				emailDocument({ css, body: '<p>x</p>' }, false, STYLE),
+				emailDocument({ sheets: [css], body: '<p>x</p>' }, false, STYLE),
 				'text/html',
 			);
 			expect(doc.querySelector('meta[http-equiv="refresh"]'), css).toBeNull();
@@ -113,7 +114,7 @@ describe('sanitizeEmailHtml', () => {
 		// `<` stays a comment, so nothing it holds turns into CSS.
 		const css = 'p::after{content:"</style></p>"}a{color:red}</*url(https://t.example/p)*/';
 		const doc = new DOMParser().parseFromString(
-			emailDocument({ css, body: '' }, false, STYLE),
+			emailDocument({ sheets: [css], body: '' }, false, STYLE),
 			'text/html',
 		);
 		expect(doc.querySelectorAll('style')[1]!.textContent).toBe(
@@ -140,6 +141,15 @@ describe('sanitizeEmailHtml', () => {
 		expect(shown).toEqual(expect.arrayContaining(['foo4%foo1@bar.net', '50%off@x', 'a%41@x']));
 	});
 
+	it('keeps the rules of each style element to itself', () => {
+		// Each is a sheet of its own, closed at its end: what one leaves open cannot take in the
+		// next one's rules.
+		const { sheets } = clean(
+			'<style>p{color:red</style><style>q{color:green}/* note</style><style>b{color:blue}</style><p>x</p>',
+		);
+		expect(sheets).toEqual(['p{color:red}', 'q{color:green}/* note*/', 'b{color:blue}']);
+	});
+
 	it('names the cid parts the body and its styles load, found or not', () => {
 		const { cids } = clean(
 			'<style>p{background:url(cid:Back@X)}</style><p>x</p><img src="cid:logo@x"><a href="cid:file@x">file</a>',
@@ -161,11 +171,11 @@ describe('sanitizeEmailHtml', () => {
 		const css =
 			'a{background:image-set("cid:logo@x" 1x)}b{background:url(data:image/png;base64,AAAA)}c{background:image-set("https://t.example/c.png" 1x)}';
 		const html = `<style>${css}</style><p>x</p>`;
-		expect(sanitizeEmailHtml(html, { allowRemote: false, cidUrls }).css).toBe(
+		expect(sanitizeEmailHtml(html, { allowRemote: false, cidUrls }).sheets).toEqual([
 			'a{background:image-set("blob:http://localhost/1" 1x)}b{background:url("data:image/png;base64,AAAA")}c{background:none}',
-		);
+		]);
 		const allowed = sanitizeEmailHtml(html, { allowRemote: true, cidUrls });
-		expect(allowed.css).toContain('c{background:image-set("https://t.example/c.png" 1x)}');
+		expect(allowed.sheets[0]).toContain('c{background:image-set("https://t.example/c.png" 1x)}');
 		expect(allowed.blocked).toBe(0);
 	});
 
@@ -334,7 +344,13 @@ describe('sanitizeMessageHtml', () => {
 		];
 		const result = sanitizeMessageHtml({ html: htmlParts.join(''), htmlParts }, options);
 		expect(result.body).toBe('<p>a</p><b>b</b>');
-		expect(result.css).toBe('p{color:red}\nb{background:none}');
+		expect(result.sheets).toEqual(['p{color:red}', 'b{background:none}']);
+		// What the styles of one part leave open never takes in those of the next.
+		const open = ['<style>p::after{content:"a\\</style><p>a</p>', '<style>b{color:blue}</style>'];
+		expect(sanitizeMessageHtml({ html: open.join(''), htmlParts: open }, options).sheets).toEqual([
+			'p::after{content:"a"}',
+			'b{color:blue}',
+		]);
 	});
 
 	it('adds up what each part blocked and names the cid parts of all of them', () => {
@@ -376,6 +392,23 @@ describe('emailDocument', () => {
 		expect(blocked).not.toContain('https:');
 		expect(blocked).toContain('<base target="_blank">');
 		expect(emailDocument(content, true, STYLE)).toContain('img-src data: blob: https: http:;');
+	});
+
+	it('writes each sheet in a style element of its own that it cannot leave', () => {
+		// The end of one sheet and the start of the next would make an end tag between them.
+		const sheets = ['p{color:red}<', '/style><b>x</b>', '</sty', 'le><b>y</b>'];
+		const doc = new DOMParser().parseFromString(
+			emailDocument({ sheets, body: '<p>x</p>' }, false, STYLE),
+			'text/html',
+		);
+		expect([...doc.querySelectorAll('style')].slice(1).map((style) => style.textContent)).toEqual([
+			'p{color:red}<',
+			'/style><b>x</b>',
+			'<\\/sty',
+			'le><b>y</b>',
+		]);
+		expect(doc.querySelectorAll('b')).toHaveLength(0);
+		expect(doc.body.innerHTML).toBe('<p>x</p>');
 	});
 });
 

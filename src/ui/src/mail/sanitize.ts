@@ -17,8 +17,13 @@ export interface SanitizeOptions {
 }
 
 export interface SanitizedHtml {
-	/** The message's own styles, cleaned. */
-	css: string;
+	/**
+	 * The message's own style sheets, cleaned: one per `<style>` element, in order (a body sent in
+	 * several parts gives those of each part in turn). A frame writes each in a `<style>` of its own
+	 * (`emailDocument`), so a browser reads each on its own and what one leaves unfinished at its
+	 * end, such as a selector without its block, cannot reach into the next.
+	 */
+	sheets: readonly string[];
 	/** The body markup, cleaned. */
 	body: string;
 	/** Remote resources that were blocked. */
@@ -150,11 +155,11 @@ function instance(): ReturnType<typeof DOMPurify> {
 export function sanitizeEmailHtml(html: string, options: SanitizeOptions): SanitizedHtml {
 	const purify = instance();
 	if (typeof purify.sanitize !== 'function' || typeof DOMParser === 'undefined')
-		return { css: '', body: '', blocked: 0, cids: [] };
+		return { sheets: [], body: '', blocked: 0, cids: [] };
 	pass = { options, blocked: 0, cids: new Set() };
 	try {
 		const parsed = new DOMParser().parseFromString(html, 'text/html');
-		const css = [...parsed.querySelectorAll('style')].map((style) =>
+		const sheets = [...parsed.querySelectorAll('style')].map((style) =>
 			cleanCss(style.textContent ?? ''),
 		);
 		const body = purify.sanitize(parsed.body.innerHTML, {
@@ -165,7 +170,7 @@ export function sanitizeEmailHtml(html: string, options: SanitizeOptions): Sanit
 			ADD_ATTR: ['target'],
 			ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
 		});
-		return { css: css.join('\n'), body, blocked: pass.blocked, cids: [...pass.cids] };
+		return { sheets, body, blocked: pass.blocked, cids: [...pass.cids] };
 	} finally {
 		pass = null;
 	}
@@ -181,23 +186,24 @@ export interface MessageHtml {
 /**
  * A message's HTML body cleaned as `sanitizeEmailHtml` cleans one text, part by part when it was
  * sent in several, as RFC 8621 asks: read as one text, a part that ends in an open comment or tag
- * would take in the parts after it. The styles and bodies are joined in order, what each part
- * blocked is added up and the `cid`s they load are merged.
+ * would take in the parts after it. The bodies are joined in order and the style sheets kept in
+ * order, each apart; what each part blocked is added up and the `cid`s they load are merged.
  */
 export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptions): SanitizedHtml {
 	const parts = message.htmlParts?.length ? message.htmlParts : [message.html ?? ''];
-	const css: string[] = [];
+	const sheets: string[] = [];
 	const cids = new Set<string>();
 	let body = '';
 	let blocked = 0;
 	for (const part of parts) {
 		const clean = sanitizeEmailHtml(part, options);
-		if (clean.css) css.push(clean.css);
+		// One at a time: a message may hold more style elements than a call takes arguments.
+		for (const sheet of clean.sheets) sheets.push(sheet);
 		body += clean.body;
 		blocked += clean.blocked;
 		for (const cid of clean.cids) cids.add(cid);
 	}
-	return { css: css.join('\n'), body, blocked, cids: [...cids] };
+	return { sheets, body, blocked, cids: [...cids] };
 }
 
 /** Colours and type of the frame, read from the host's tokens (the frame cannot see them). */
@@ -213,12 +219,13 @@ export interface FrameStyle {
 /**
  * The frame's whole document: a CSP that allows inline styles and, only when `allowRemote`, remote
  * images and fonts; links open in a new tab. Message HTML is written for a light page, so it is
- * shown on paper colours in every theme. The message's styles cannot end their element early: an
- * end tag starts `</s`, and each one there becomes `<\/s`, the same `/` to CSS. Nothing else is
- * touched, so a comment opened right after a `<` stays a comment.
+ * shown on paper colours in every theme. Each of the message's style sheets is written in a
+ * `<style>` of its own, as the message had them, so a browser reads each on its own. A sheet cannot
+ * end its element early: an end tag starts `</s`, and each one there becomes `<\/s`, the same `/`
+ * to CSS. Nothing else is touched, so a comment opened right after a `<` stays a comment.
  */
 export function emailDocument(
-	content: Pick<SanitizedHtml, 'css' | 'body'>,
+	content: Pick<SanitizedHtml, 'sheets' | 'body'>,
 	allowRemote: boolean,
 	style: FrameStyle,
 ): string {
@@ -234,7 +241,10 @@ export function emailDocument(
 		"base-uri 'none'",
 	].join('; ');
 	const base = `html{color-scheme:light}body{margin:0;padding:.75em;font-family:${style.font};font-size:${style.fontSize};color:${style.color};background:${style.background};overflow-wrap:anywhere}a{color:${style.link}}img{max-width:100%;height:auto}blockquote{margin:0 0 0 .5em;padding-left:.75em;border-left:.2em solid ${style.quote}}pre{white-space:pre-wrap}`;
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${base}</style><style>${content.css.replace(/<\/(?=s)/gi, '<\\/')}</style></head><body>${content.body}</body></html>`;
+	const sheets = content.sheets.map(
+		(sheet) => `<style>${sheet.replace(/<\/(?=s)/gi, '<\\/')}</style>`,
+	);
+	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${base}</style>${sheets.join('')}</head><body>${content.body}</body></html>`;
 }
 
 export interface TextSegment {

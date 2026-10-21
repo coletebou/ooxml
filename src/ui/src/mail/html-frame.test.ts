@@ -37,13 +37,25 @@ describe('<mail-html-frame>', () => {
 		expect(blocked).toEqual([2]);
 	});
 
+	it('writes each style sheet of a message in a style element of its own', async () => {
+		// Read as one sheet, a selector left without its block would take in the next sheet's rule.
+		const sheets = (doc: Document) =>
+			[...doc.querySelectorAll('style')].slice(1).map((style) => style.textContent);
+		const html = '<style>p</style><style>b{color:blue}</style>';
+		expect(sheets((await show(html)).doc)).toEqual(['p', 'b{color:blue}']);
+		const htmlParts = ['<style>p</style><p>a</p>', '<style>b{color:blue}</style><b>b</b>'];
+		expect(sheets((await show(htmlParts.join(''), htmlParts)).doc)).toEqual(['p', 'b{color:blue}']);
+	});
+
 	it('shows a body in one part as before', async () => {
 		const html =
 			'<style>p{color:red}</style><p>Hi<!-- note --><img src="https://t.example/a.png"></p>';
 		const { doc, blocked } = await show(html);
 		const content = sanitizeEmailHtml(html, { allowRemote: false, cidUrls: new Map() });
 		expect(doc.body.innerHTML).toBe(content.body);
-		expect(doc.querySelectorAll('style')[1]!.textContent).toBe(content.css);
+		expect([...doc.querySelectorAll('style')].slice(1).map((style) => style.textContent)).toEqual(
+			content.sheets,
+		);
 		expect(blocked).toEqual([content.blocked]);
 	});
 });

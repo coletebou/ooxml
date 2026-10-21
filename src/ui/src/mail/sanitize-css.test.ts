@@ -54,9 +54,10 @@ describe('rewriteCss', () => {
 		])
 			expect(loads(`a{background:${value}}`).out, value).toBe('a{background:none}');
 		expect(loads('a{background:src(var(--u))}').out).toBe('a{background:none}');
-		// Left open, a function runs to the end with the rule's `}` inside it, as in a browser.
+		// Left open, a function runs to the end with the rule's `}` inside it, as in a browser; the
+		// end then closes the rule too.
 		expect(loads('a{background:image-set("https://t.example/a.png" 1x}').out).toBe(
-			'a{background:none',
+			'a{background:none}',
 		);
 	});
 
@@ -89,6 +90,45 @@ describe('rewriteCss', () => {
 		expect(rewriteCss('a{b:image-set(linear-gradient(red, blue) 1x type("image/png"))}', cid)).toBe(
 			'a{b:image-set(linear-gradient(red, blue) 1x type("image/png"))}',
 		);
+	});
+
+	// The output closes what the end of its input leaves open, as the end does in a browser, so CSS
+	// written after it (by a host that joins a message's sheets, say) is read on its own.
+	it('closes the blocks the end of its input leaves open', () => {
+		expect(loads('p{color:red').out).toBe('p{color:red}');
+		expect(loads('@media x{p{color:red').out).toBe('@media x{p{color:red}}');
+		expect(loads('a[title').out).toBe('a[title]');
+		// A backslash at the end is U+FFFD to a browser; left as it is, it would escape the `}`.
+		expect(loads('p{color:red\\').out).toBe('p{color:red\uFFFD}');
+		expect(loads('p{color:red\\\\').out).toBe('p{color:red\\\\}');
+	});
+
+	it('closes a comment or a string the end of its input leaves open', () => {
+		expect(loads('p{color:red}/* note').out).toBe('p{color:red}/* note*/');
+		expect(loads("p::after{content:'open").out).toBe("p::after{content:'open'}");
+		// A lone backslash at the end is nothing to a browser, but before a newline written after it
+		// it would carry the string on to the next line. An escaped backslash stays.
+		expect(loads('p::after{content:"open\\').out).toBe('p::after{content:"open"}');
+		expect(loads('p::after{content:"open\\\\').out).toBe('p::after{content:"open\\\\"}');
+	});
+
+	it('closes a function the end of its input leaves open, still checking its URLs', () => {
+		const cid = (url: string): string => url.replace('cid:', 'blob:');
+		expect(rewriteCss('a{b:image-set("cid:a" 1x', cid)).toBe('a{b:image-set("blob:a" 1x)}');
+		expect(rewriteCss('a{b:url("cid:a"', cid)).toBe('a{b:url("blob:a")}');
+		expect(loads('a{b:image-set(calc("https://t.example/a.png"')).toEqual({
+			urls: ['https://t.example/a.png'],
+			out: 'a{b:none}',
+		});
+	});
+
+	it('drops an @import the end of its input leaves open', () => {
+		expect(loads('p{color:red;@import "https://t.example/a.css')).toEqual({
+			urls: [],
+			out: 'p{color:red;}',
+		});
+		expect(loads('p{}@import url(https://t.example/a.css) screen').out).toBe('p{}');
+		expect(loads('p{}@import (').out).toBe('p{}');
 	});
 
 	it('resolves nothing it drops anyway', () => {

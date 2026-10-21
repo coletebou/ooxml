@@ -1,7 +1,8 @@
 // What `cleanCss` writes, read back the way a browser reads it: whatever goes in, nothing that comes
 // out loads a resource while remote content is off (only `data:image/` URLs stay) or imports a
-// stylesheet. The reader is its own implementation of the CSS Syntax 3 tokenizer (section 4), not
-// the sanitiser's scanner, so a misreading the two shared would still show.
+// stylesheet, or leaves open what would take in CSS written after it. The reader is its own
+// implementation of the CSS Syntax 3 tokenizer (section 4), not the sanitiser's scanner, so a
+// misreading the two shared would still show.
 import { cleanCss } from './sanitize';
 
 type Token =
@@ -197,6 +198,23 @@ function loads(css: string): string[] {
 	return found;
 }
 
+/**
+ * Whether a browser reads the CSS after `css`, on a line of its own, as it reads it alone: no comment
+ * or string of `css` takes it in, and no block or function of `css` holds it.
+ */
+function readsAfter(css: string): boolean {
+	const tokens = tokenize(`${css}\n@after`);
+	const last = tokens.pop();
+	if (last?.type !== 'at-keyword' || last.value !== 'after') return false;
+	const open: string[] = [];
+	for (const token of tokens) {
+		if (token.type === 'function') open.push(')');
+		else if (token.type === 'open') open.push(CLOSER[token.value]!);
+		else if (token.type === 'close' && open.at(-1) === token.value) open.pop();
+	}
+	return !open.length;
+}
+
 /** A seeded generator (mulberry32), so a failure replays the same way. */
 function random(seed: number): () => number {
 	let state = seed;
@@ -215,6 +233,20 @@ function leaks(inputs: Iterable<string>): { css: string; cleaned: string; loads:
 		const cleaned = cleanCss(css);
 		const loaded = loads(cleaned);
 		if (loaded.length) found.push({ css, cleaned, loads: loaded });
+	}
+	return found;
+}
+
+/**
+ * The inputs among `inputs` whose cleaned CSS is not finished: it leaves open what would take in
+ * the CSS after it, or cleaning it again changes it.
+ */
+function unfinished(inputs: Iterable<string>): { css: string; cleaned: string; again: string }[] {
+	const found = [];
+	for (const css of inputs) {
+		const cleaned = cleanCss(css);
+		const again = cleanCss(cleaned);
+		if (!readsAfter(cleaned) || again !== cleaned) found.push({ css, cleaned, again });
 	}
 	return found;
 }
@@ -307,6 +339,12 @@ describe('cleanCss output, read as a browser reads it', () => {
 			['b:image-set(type("https://t.example/p") 1x);b:url(data:image/png,x)', []],
 		];
 		for (const [css, loaded] of cases) expect(loads(css), css).toEqual(loaded);
+		// It also finds what would take in the CSS after it. A newline ends a string, unless a
+		// backslash before it carries the string on, but it does not end a url token.
+		for (const open of ['p{color:red', 'p{color:red}/* note', 'b:calc(1px', 'b:"x\\', 'b:url(x'])
+			expect(readsAfter(open), open).toBe(false);
+		for (const closed of ['p{color:red}', 'b:"x', 'b:"x\\\\"', 'b:x\\'])
+			expect(readsAfter(closed), closed).toBe(true);
 	});
 
 	it('loads nothing when what loads is cut anywhere by something removed', () => {
@@ -315,5 +353,10 @@ describe('cleanCss output, read as a browser reads it', () => {
 
 	it('loads nothing for random mixes of what it removes and what is around it', () => {
 		expect(leaks(soup(0x5eed, 20_000)).slice(0, 5)).toEqual([]);
+	});
+
+	it('leaves nothing open for the CSS after it, nor anything to clean again', () => {
+		expect(unfinished(splitLoads()).slice(0, 5)).toEqual([]);
+		expect(unfinished(soup(0x5eed, 20_000)).slice(0, 5)).toEqual([]);
 	});
 });

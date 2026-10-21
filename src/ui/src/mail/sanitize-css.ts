@@ -10,7 +10,19 @@
 // `type()`, a MIME type, is not a URL there. Strings anywhere else are text (`content: "url(x)"`)
 // and stay. What is dropped or replaced never lets the text on its two sides join into a token
 // this scan did not see (`u@import;rl(x)` must not become `url(x)`): a comment goes between them
-// wherever they could run together. New code.
+// wherever they could run together. What the end of the input leaves open (a comment, a string, a
+// function, a block) is closed in the output too, so CSS written after it is read on its own. The
+// tokens are read in sanitize-css-tokens.ts. New code.
+import {
+	closedString,
+	isNameChar,
+	isSpace,
+	quote,
+	readName,
+	readString,
+	readUrl,
+	startsEscape,
+} from './sanitize-css-tokens';
 
 /** The URL to load for `url`, or '' to block it. */
 export type ResolveUrl = (url: string) => string;
@@ -51,103 +63,6 @@ interface Frame {
 	/** Image frames: a URL in it was blocked, or it holds a value that cannot be checked. */
 	blocked: boolean;
 }
-
-const isSpace = (char: string): boolean => char === ' ' || char === '\t' || char === '\n';
-const isHex = (char: string): boolean => /^[\da-f]$/i.test(char);
-/** A letter, a digit, `-`, `_` or anything beyond ASCII. */
-const isNameChar = (char: string): boolean => /^[\w-]$/.test(char) || char >= '\u0080';
-const isNonPrintable = (char: string): boolean => /^[\0-\b\v\x0e-\x1f\x7f]$/.test(char);
-/** A backslash that starts an escape: not the last character, nor one before a newline. */
-const startsEscape = (css: string, at: number): boolean =>
-	css.charAt(at) === '\\' && at + 1 < css.length && css.charAt(at + 1) !== '\n';
-
-/** The character the escape at `at` (a backslash) stands for, and where the escape ends. */
-function readEscape(css: string, at: number): [string, number] {
-	let end = at + 1;
-	while (end - at <= 6 && isHex(css.charAt(end))) end++;
-	if (end === at + 1) return [css.charAt(end) || '\uFFFD', end + 1];
-	const code = Number.parseInt(css.slice(at + 1, end), 16);
-	if (isSpace(css.charAt(end))) end++;
-	const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
-	return [valid ? String.fromCodePoint(code) : '\uFFFD', end];
-}
-
-/** The name at `at`, escapes decoded and ASCII letters in lower case, and where it ends. */
-function readName(css: string, at: number): [string, number] {
-	let name = '';
-	let end = at;
-	for (;;) {
-		if (isNameChar(css.charAt(end))) name += css.charAt(end++);
-		else if (startsEscape(css, end)) {
-			const [char, next] = readEscape(css, end);
-			name += char;
-			end = next;
-		} else return [name.replace(/[A-Z]/g, (char) => char.toLowerCase()), end];
-	}
-}
-
-/** The string at `at` (a quote): its value, null when a newline cuts it short, and its end. */
-function readString(css: string, at: number): [string | null, number] {
-	const quote = css.charAt(at);
-	let value = '';
-	let end = at + 1;
-	while (end < css.length) {
-		const char = css.charAt(end);
-		if (char === quote) return [value, end + 1];
-		if (char === '\n') return [null, end];
-		if (char !== '\\') {
-			value += char;
-			end++;
-		} else if (css.charAt(end + 1) === '\n') end += 2;
-		else if (end + 1 >= css.length) end++;
-		else {
-			const [escaped, next] = readEscape(css, end);
-			value += escaped;
-			end = next;
-		}
-	}
-	return [value, end];
-}
-
-/** The end of a malformed url token: after its `)`, escapes skipped. */
-function skipBadUrl(css: string, at: number): number {
-	let end = at;
-	while (end < css.length && css.charAt(end) !== ')')
-		end = startsEscape(css, end) ? readEscape(css, end)[1] : end + 1;
-	return Math.min(end + 1, css.length);
-}
-
-/** The url token whose text starts at `at` (after `url(`): its URL, null when malformed, its end. */
-function readUrl(css: string, at: number): [string | null, number] {
-	let end = at;
-	while (isSpace(css.charAt(end))) end++;
-	let value = '';
-	while (end < css.length) {
-		const char = css.charAt(end);
-		if (char === ')') return [value, end + 1];
-		if (isSpace(char)) {
-			while (isSpace(css.charAt(end))) end++;
-			if (end >= css.length || css.charAt(end) === ')')
-				return [value, Math.min(end + 1, css.length)];
-			return [null, skipBadUrl(css, end)];
-		}
-		if (char === '"' || char === "'" || char === '(' || isNonPrintable(char))
-			return [null, skipBadUrl(css, end)];
-		if (char !== '\\') {
-			value += char;
-			end++;
-		} else if (startsEscape(css, end)) {
-			const [escaped, next] = readEscape(css, end);
-			value += escaped;
-			end = next;
-		} else return [null, skipBadUrl(css, end)];
-	}
-	return [value, end];
-}
-
-/** A URL as a CSS string. */
-const quote = (url: string): string =>
-	`"${url.replace(/["\\\0-\x1f\x7f]/g, (char) => (char === '"' || char === '\\' ? `\\${char}` : `\\${char.charCodeAt(0).toString(16)} `))}"`;
 
 /**
  * Whether `next` written right after the piece `last` could read as other tokens than the two do
@@ -234,6 +149,17 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		if (frame.kind === 'url') writeUrl(frame.url);
 		else none();
 	};
+	/**
+	 * Close the innermost frame as its closing bracket does. An `@import` in it ends there, and so
+	 * does one whose block it is.
+	 */
+	const close = (): void => {
+		if (drop && stack.length === drop.depth) endDrop();
+		const frame = stack.pop()!;
+		out.push(frame.close);
+		finish(frame);
+		if (drop && frame.close === '}' && stack.length === drop.depth) endDrop();
+	};
 
 	let at = 0;
 	while (at < css.length) {
@@ -242,10 +168,12 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		let end = at + 1;
 		let text: string | null = null;
 		if (char === '/' && css.charAt(at + 1) === '*') {
-			const close = css.indexOf('*/', at + 2);
-			end = close < 0 ? css.length : close + 2;
+			const commentEnd = css.indexOf('*/', at + 2);
+			end = commentEnd < 0 ? css.length : commentEnd + 2;
+			// Left open by the end of the input, it is closed there (see the end of the scan).
+			if (commentEnd < 0) text = `${css.slice(at)}*/`;
 		} else if (char === '"' || char === "'") {
-			const [value, stringEnd] = readString(css, at);
+			const [value, stringEnd, open] = readString(css, at);
 			end = stringEnd;
 			const top = stack.at(-1);
 			const owner = image();
@@ -255,6 +183,8 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 				if (target) text = quote(target);
 				else owner.blocked = true;
 			}
+			// Left open by the end of the input, it is closed there too, unless it was replaced.
+			if (open) text ??= closedString(css.slice(at, end), char);
 		} else if (char === '@') {
 			const [name, nameEnd] = readName(css, at + 1);
 			end = nameEnd;
@@ -296,11 +226,7 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 			block();
 			stack.push({ close: closer, kind: 'other', start: out.length, url: null, blocked: false });
 		} else if (char === stack.at(-1)?.close) {
-			if (drop && stack.length === drop.depth) endDrop();
-			const frame = stack.pop()!;
-			out.push(char);
-			finish(frame);
-			if (drop && char === '}' && stack.length === drop.depth) endDrop();
+			close();
 			at = end;
 			continue;
 		} else if (char === ';' && drop && stack.length === drop.depth) {
@@ -311,11 +237,12 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		out.push(text ?? css.slice(at, end));
 		at = end;
 	}
-	// The end closes whatever is still open, as it does in a browser.
-	while (stack.length) {
-		if (drop && stack.length === drop.depth) endDrop();
-		finish(stack.pop()!);
-	}
+	// The end closes whatever is still open, as it does in a browser, and the output says so: CSS
+	// written after it must not be read as part of it. A backslash that ends the input is read as
+	// U+FFFD there; written before the closers, it would escape the first of them instead, so that
+	// character takes its place.
+	if (out.at(-1) === '\\') out[out.length - 1] = '\uFFFD';
+	while (stack.length) close();
 	endDrop();
 	return joined(out);
 }
