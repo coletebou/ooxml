@@ -124,6 +124,16 @@
 			"import": "./dist/teams/index.mjs",
 			"require": "./dist/teams/index.cjs"
 		},
+		"./notebook": {
+			"types": "./dist/notebook/index.d.ts",
+			"import": "./dist/notebook/index.mjs",
+			"require": "./dist/notebook/index.cjs"
+		},
+		"./notebook/editor": {
+			"types": "./dist/notebook/editor/index.d.ts",
+			"import": "./dist/notebook/editor/index.mjs",
+			"require": "./dist/notebook/editor/index.cjs"
+		},
 		"./docx": {
 			"types": "./dist/docx/index.d.ts",
 			"import": "./dist/docx/index.mjs",
@@ -270,8 +280,10 @@
 		"prosemirror-collab": "^1.3.1",
 		"prosemirror-commands": "^1.7.2",
 		"prosemirror-history": "^1.5.1",
+		"prosemirror-inputrules": "^1.5.1",
 		"prosemirror-keymap": "^1.2.3",
 		"prosemirror-model": "^1.25.12",
+		"prosemirror-schema-list": "^1.5.1",
 		"prosemirror-state": "^1.4.4",
 		"prosemirror-transform": "^1.12.2",
 		"prosemirror-view": "^1.42.6",
