@@ -59,17 +59,12 @@ export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise
 	const counts = [snapshot.sections, snapshot.pages, snapshot.containers, snapshot.strokes];
 	if (counts.some((list) => list.length > MAX_ITEMS))
 		throw new NotebookArchiveError('This notebook holds more items than an archive takes');
-	const media = snapshot.containers.reduce((sum, c) => sum + (c.bytes?.length ?? 0), 0);
-	// The manifest (with every text box's content) counts against the same size.
-	const written = JSON.stringify(snapshot.containers.map((c) => c.content ?? null)).length;
-	if (media + written > MAX_ARCHIVE_BYTES)
-		throw new NotebookArchiveError('This notebook is larger than an archive takes');
 	if (snapshot.containers.some((c) => c.overLimit))
 		throw new NotebookArchiveError('A text box holds more text than an archive takes');
-	const zip = new JSZip();
+	const files: { name: string; bytes: Uint8Array }[] = [];
 	const containers = snapshot.containers.map(({ container, content, bytes }) => {
 		const media = bytes ? mediaName(container) : undefined;
-		if (media && bytes) zip.file(media, bytes);
+		if (media && bytes) files.push({ name: media, bytes });
 		return { ...container, ...(content ? { content } : {}), ...(media ? { media } : {}) };
 	});
 	const manifest = {
@@ -81,7 +76,14 @@ export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise
 		containers,
 		ink: snapshot.strokes,
 	};
-	zip.file(MANIFEST, JSON.stringify(manifest));
+	// What an import inflates: the manifest as written and every media entry.
+	const json = JSON.stringify(manifest);
+	const media = files.reduce((sum, f) => sum + f.bytes.length, 0);
+	if (new TextEncoder().encode(json).length + media > MAX_ARCHIVE_BYTES)
+		throw new NotebookArchiveError('This notebook is larger than an archive takes');
+	const zip = new JSZip();
+	for (const file of files) zip.file(file.name, file.bytes);
+	zip.file(MANIFEST, json);
 	return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 

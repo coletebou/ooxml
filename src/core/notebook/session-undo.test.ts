@@ -74,4 +74,41 @@ describe('notebook undo', () => {
 		expect(box.get('x')).toBe(10);
 		expect(content.toString()).toContain('theirs');
 	});
+
+	it("still undoes moving a box with text, and keeps a page with a collaborator's box on it", () => {
+		const doc = new Y.Doc();
+		const boxes = doc.getMap('notebook:containers');
+		const pages = doc.getMap('notebook:pages');
+		const undo = new Y.UndoManager([boxes, pages], {
+			trackedOrigins: new Set(['local']),
+			deleteFilter: keepFilled,
+			captureTimeout: 0,
+		});
+		const box = new Y.Map();
+		const content = new Y.XmlFragment();
+		doc.transact(() => {
+			boxes.set('c1', box);
+			box.set('x', 10);
+			box.set('content', content);
+			const p = new Y.XmlElement('paragraph');
+			content.insert(0, [p]);
+			p.insert(0, [new Y.XmlText('mine')]);
+		}, 'remote');
+		doc.transact(() => box.set('x', 50), 'local');
+		undo.undo();
+		expect(box.get('x')).toBe(10);
+		const page = new Y.Map();
+		doc.transact(() => {
+			pages.set('p9', page);
+			page.set('title', 'Mine');
+		}, 'local');
+		doc.transact(() => {
+			const theirs = new Y.Map();
+			boxes.set('c2', theirs);
+			theirs.set('page', 'p9');
+		}, 'remote');
+		undo.undo();
+		expect(pages.has('p9')).toBe(true);
+		expect(page.get('title')).toBe('Mine');
+	});
 });

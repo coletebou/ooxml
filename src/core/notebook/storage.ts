@@ -31,3 +31,19 @@ export function createMemoryStorage(): NotebookStorage & { readonly keys: () => 
 		keys: () => [...data.keys()],
 	};
 }
+
+// Copies of what closed notebooks and lists could not save, for this tab's life: per storage (its
+// id, else the object) and key.
+const byId = new Map<string, Map<string, Uint8Array>>();
+const byObject = new WeakMap<NotebookStorage, Map<string, Uint8Array>>();
+/** This tab's copies of what a storage refused (notebooks, the list), by key. */
+export function tabCopies(storage: NotebookStorage): Map<string, Uint8Array> {
+	if (storage.id !== undefined) {
+		let map = byId.get(storage.id);
+		if (!map) byId.set(storage.id, (map = new Map()));
+		return map;
+	}
+	let map = byObject.get(storage);
+	if (!map) byObject.set(storage, (map = new Map()));
+	return map;
+}

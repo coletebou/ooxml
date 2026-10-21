@@ -229,6 +229,8 @@ describe('notebook archive', () => {
 			id: 'c1',
 			pageId: 'p1',
 			kind: 'file',
+			name: 'a.bin',
+			mime: 'application/octet-stream',
 			x: 0,
 			y: 0,
 			width: 1,

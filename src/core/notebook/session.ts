@@ -6,8 +6,14 @@
 import * as Y from 'yjs';
 import { type CollabSession, createCollabSession } from '../collab/session';
 import { transportProvider } from '../collab/transport-provider';
-import { type NotebookStorage, notebookKey } from './storage';
-import { NOTEBOOK_ORIGIN, NOTEBOOK_SEED_ORIGIN, type NotebookTypes, notebookTypes } from './schema';
+import { type NotebookStorage, notebookKey, tabCopies as rescued } from './storage';
+import {
+	NOTEBOOK_ORIGIN,
+	NOTEBOOK_SEED_ORIGIN,
+	type NotebookTypes,
+	notebookTypes,
+	NOTEBOOK_MAPS,
+} from './schema';
 import type { NotebookEditContext } from './structure';
 import {
 	type NotebookSyncConfig,
@@ -188,24 +194,42 @@ const PROTECTED = new Set(['paragraph', 'heading', 'list_item', 'bullet_list', '
  * undo does, so undoing a new paragraph keeps the text a collaborator typed into it.
  */
 export function keepFilled(item: Y.Item): boolean {
-	// The fields of a text box that is kept (it holds a collaborator's text) are kept with it, or it
-	// would stay without its page and place and no longer be read.
+	// A field first set with a box, page or section that is kept stays with it (or it would be kept
+	// without its page and place); later changes to it (a move, a resize) undo as usual.
 	const parent = item.parent;
-	if (parent instanceof Y.Map) {
-		const content = parent.get('content');
-		if (content instanceof Y.XmlFragment && hasText(content)) return false;
-	}
+	if (parent instanceof Y.Map && item.parentSub !== null && item.left === null && kept(parent))
+		return false;
 	if (!(item.content instanceof Y.ContentType)) return true;
 	const type = item.content.type;
-	// A text box (and its text) that still holds something (a collaborator's) is kept as well.
+	if (type instanceof Y.Map) return !kept(type);
 	if (type instanceof Y.XmlFragment && !(type instanceof Y.XmlElement)) return !hasText(type);
-	if (type instanceof Y.Map) {
-		const content = type.get('content');
-		return !(content instanceof Y.XmlFragment) || !hasText(content);
-	}
 	if (type instanceof Y.XmlText) return type.length === 0;
 	if (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName)) return !hasText(type);
 	return true;
+}
+
+/** A text box holding text, a page with boxes or ink on it, a section with pages: undo keeps it. */
+function kept(map: Y.Map<unknown>): boolean {
+	const content = map.get('content');
+	if (content instanceof Y.XmlFragment) return hasText(content);
+	const doc = map.doc;
+	const key = map._item?.parentSub;
+	if (!doc || !key) return false;
+	const owner = map._item?.parent;
+	const uses = (name: string, field: string): boolean => {
+		for (const value of doc.getMap(name).values()) {
+			const at =
+				value instanceof Y.Map
+					? value.get(field)
+					: (value as Record<string, unknown> | null)?.[field];
+			if (at === key) return true;
+		}
+		return false;
+	};
+	if (owner === doc.getMap(NOTEBOOK_MAPS.pages))
+		return uses(NOTEBOOK_MAPS.containers, 'page') || uses(NOTEBOOK_MAPS.ink, 'page');
+	if (owner === doc.getMap(NOTEBOOK_MAPS.sections)) return uses(NOTEBOOK_MAPS.pages, 'section');
+	return false;
 }
 
 function hasText(fragment: Y.XmlFragment | Y.XmlElement): boolean {
@@ -216,19 +240,4 @@ function hasText(fragment: Y.XmlFragment | Y.XmlElement): boolean {
 		if (item instanceof Y.XmlElement) stack.push(...item.toArray());
 	}
 	return false;
-}
-
-// Copies of what closed notebooks could not save, for this tab's life: per storage (its id, else
-// the object) and notebook key.
-const byId = new Map<string, Map<string, Uint8Array>>();
-const byObject = new WeakMap<NotebookStorage, Map<string, Uint8Array>>();
-function rescued(storage: NotebookStorage): Map<string, Uint8Array> {
-	if (storage.id !== undefined) {
-		let map = byId.get(storage.id);
-		if (!map) byId.set(storage.id, (map = new Map()));
-		return map;
-	}
-	let map = byObject.get(storage);
-	if (!map) byObject.set(storage, (map = new Map()));
-	return map;
 }

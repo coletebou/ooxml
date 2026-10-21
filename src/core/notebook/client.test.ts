@@ -455,6 +455,22 @@ describe('notebook client fourth review round', () => {
 });
 
 describe('notebook client keeps what it could not save', () => {
+	it('keeps a notebook made while saves fail listed for the next client on that storage', async () => {
+		const { storage, control } = flaky();
+		const named = { ...storage, id: `db-${Math.random().toString(36).slice(2)}` };
+		const first = start(named, createChannelHub());
+		await first.whenReady();
+		await settle();
+		control.fail = true;
+		const made = await first.createNotebook({ name: 'Made offline' });
+		await first.destroy();
+		control.fail = false;
+		const second = start({ ...named }, createChannelHub());
+		await second.whenReady();
+		await settle();
+		expect(second.getState().notebooks.map((n) => n.id)).toContain(made);
+	});
+
 	it('brings back changes a closed client could not save, for the next client on that storage', async () => {
 		const { storage, control } = flaky();
 		const named = { ...storage, id: `db-${Math.random().toString(36).slice(2)}` };

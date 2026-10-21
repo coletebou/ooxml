@@ -9,7 +9,7 @@ import type { BroadcastChannelConstructor } from '../collab/broadcast-transport'
 import { type CollabSession, createCollabSession } from '../collab/session';
 import { transportProvider } from '../collab/transport-provider';
 import { type RegistryEntry, readRegistry, unregisterNotebook } from './registry';
-import { type NotebookStorage, REGISTRY_KEY, notebookKey } from './storage';
+import { type NotebookStorage, REGISTRY_KEY, notebookKey, tabCopies } from './storage';
 import { registryRoomId } from './sync';
 
 const REGISTRY_STORAGE_ORIGIN = Symbol('ooxml-core:notebook:registry-storage');
@@ -62,6 +62,7 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 			.then(
 				() => {
 					failed = null;
+					if (storage) tabCopies(storage).delete(REGISTRY_KEY);
 					options.onSaved?.();
 				},
 				(error: unknown) => {
@@ -99,6 +100,8 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 			try {
 				const bytes = await storage?.load(REGISTRY_KEY);
 				if (bytes?.length) Y.applyUpdate(doc, bytes, REGISTRY_STORAGE_ORIGIN);
+				const kept = storage && tabCopies(storage).get(REGISTRY_KEY);
+				if (kept) Y.applyUpdate(doc, kept);
 			} catch (error) {
 				readFailed = true;
 				failed = error;
@@ -132,6 +135,8 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 			if (destroyed) return;
 			destroyed = true;
 			await save();
+			// The device refused the list's last save: the tab keeps a copy for the next client.
+			if (failed && storage) tabCopies(storage).set(REGISTRY_KEY, Y.encodeStateAsUpdate(doc));
 			session?.destroy();
 			doc.destroy();
 		},
