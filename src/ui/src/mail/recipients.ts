@@ -77,6 +77,12 @@ export class MailRecipients extends MailElement {
 	}
 
 	private keydown(event: KeyboardEvent): void {
+		// Keys an input method is composing with are its own. A modified Enter or Tab is the app's:
+		// Ctrl/Cmd+Enter sends (the app turns what is typed into recipients first) and Shift+Tab
+		// moves the focus back.
+		if (event.isComposing) return;
+		const modified = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey;
+		if (modified && (event.key === 'Enter' || event.key === 'Tab')) return;
 		const suggestions = this.suggestions;
 		if (event.key === 'ArrowDown' && suggestions.length) {
 			event.preventDefault();
