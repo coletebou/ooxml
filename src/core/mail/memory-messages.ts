@@ -1,7 +1,7 @@
 // The message records the memory transport keeps, and how a seed, a draft or an imported `.eml`
 // becomes one. Separate from the transport so the rules (counts, previews, thread ids) are testable
 // on their own. New code.
-import { readEmail, toMailMessage, type OutgoingAttachment } from './mime';
+import { readEmail, toMailMessage, writeEmail, type OutgoingAttachment } from './mime';
 import { hasListedFile } from './mime/message';
 import {
 	DRAFT,
@@ -247,5 +247,36 @@ export function messageFromRaw(
 			size: bytes.length,
 		},
 		blobIdOf,
+	);
+}
+
+/**
+ * A stored message as raw RFC 5322 bytes (its `.eml`), written from what is kept of it; one with no
+ * From is written from `account`. A draft keeps its Bcc, as a client's own copy does.
+ */
+export function messageBytes(target: MailMessage, blobs: BlobStore, account: string): Uint8Array {
+	return writeEmail(
+		{
+			from: target.from[0] ?? { name: '', email: account },
+			to: target.to,
+			cc: target.cc,
+			bcc: target.bcc,
+			replyTo: target.replyTo,
+			subject: target.subject,
+			text: target.text ?? '',
+			...(target.html ? { html: target.html } : {}),
+			attachments: target.attachments.map((attachment) => ({
+				name: attachment.name,
+				type: attachment.type,
+				bytes: blobs.get(attachment.blobId)?.bytes ?? new Uint8Array(),
+				...(attachment.cid ? { cid: attachment.cid } : {}),
+				inline: attachment.disposition === 'inline',
+			})),
+			...(target.messageId[0] ? { messageId: target.messageId[0] } : {}),
+			inReplyTo: target.inReplyTo,
+			references: target.references,
+			date: target.sentAt ?? target.receivedAt,
+		},
+		{ includeBcc: target.keywords[DRAFT] === true },
 	);
 }
