@@ -115,4 +115,25 @@ describe('<mail-html-frame>', () => {
 		fonts.dispatchEvent(new Event('loadingdone'));
 		await vi.waitFor(() => expect(frame.style.height).toBe('140px'));
 	});
+
+	it('fits the frame again when a details element of its message opens or closes', async () => {
+		// An own property of the frame's document, which goes with the frame: nothing shared.
+		let height = 100;
+		const { frame, doc } = await loaded((doc) => {
+			Object.defineProperty(doc.documentElement, 'scrollHeight', {
+				configurable: true,
+				get: () => height,
+			});
+		});
+		doc.body.innerHTML = '<details><summary>More</summary><p>What it holds</p></details>';
+		await vi.waitFor(() => expect(frame.style.height).toBe('100px'));
+		// Opened, it shows what it holds; closed, it hides it again. Its toggle event does not bubble.
+		const details = doc.querySelector('details')!;
+		height = 160;
+		details.open = true;
+		await vi.waitFor(() => expect(frame.style.height).toBe('160px'));
+		height = 100;
+		details.open = false;
+		await vi.waitFor(() => expect(frame.style.height).toBe('100px'));
+	});
 });

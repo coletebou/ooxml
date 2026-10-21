@@ -57,3 +57,24 @@ test('a message frame is as tall as its message, whatever it showed before or it
 	await page.waitForTimeout(1000);
 	expect(await height()).toBe(settled);
 });
+
+test('a message frame grows and shrinks with a details element the reader opens and closes', async ({
+	page,
+}) => {
+	await openDemo(page);
+	await importHtmlMail(page, [
+		{
+			subject: 'Details frame',
+			html: '<details><summary>More</summary><div style="height:600px">What it holds</div></details>',
+		},
+	]);
+	await openConversation(page, 'Details frame');
+	const frame = page.locator('mail-reading-pane mail-html-frame iframe').first();
+	const height = async (): Promise<number> => (await frame.boundingBox())?.height ?? 0;
+	await expect.poll(height).toBeLessThan(120);
+	const summary = page.frameLocator('mail-reading-pane mail-html-frame iframe').locator('summary');
+	await summary.click();
+	await expect.poll(height).toBeGreaterThan(600);
+	await summary.click();
+	await expect.poll(height).toBeLessThan(120);
+});

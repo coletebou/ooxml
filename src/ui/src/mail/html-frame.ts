@@ -83,12 +83,13 @@ export class MailHtmlFrame extends MailElement {
 		const frame = this.frame;
 		const doc = frame?.contentDocument;
 		if (!frame || !doc) return;
-		// The frame is as tall as its message. The content runs no script, so it only changes height
-		// when an image or a web font loads or the frame's width changes (the text reflows): the frame
-		// element is observed, not the body inside it, and the height is written on the next frame and
-		// only when it changed, so the observer never sees its own write within one frame (a resize
-		// loop). The height is measured apart from the one the frame has (`contentHeight`), so a write
-		// of it never makes the next measurement taller.
+		// The frame is as tall as its message. The content runs no script, so its height changes when
+		// an image or a web font loads, when a `<details>` is opened or closed, and when the frame's
+		// width changes (the text reflows); a style that changes it by itself (an animation, `:hover`)
+		// is not followed. The frame element is observed, not the body inside it, and the height is
+		// written on the next frame and only when it changed, so the observer never sees its own write
+		// within one frame (a resize loop). The height is measured apart from the one the frame has
+		// (`contentHeight`), so a write of it never makes the next measurement taller.
 		let pending = 0;
 		const fit = (): void => {
 			cancelAnimationFrame(pending);
@@ -103,6 +104,9 @@ export class MailHtmlFrame extends MailElement {
 		// later (a style for another width) arrives after it and sets the text again. A document
 		// another message has replaced by then is not measured (`contentHeight`).
 		doc.fonts?.addEventListener('loadingdone', fit);
+		// A `<details>` shows or hides what it holds; its `toggle` does not bubble, so it is caught on
+		// its way down.
+		doc.addEventListener('toggle', fit, true);
 		this.resize?.disconnect();
 		if (typeof ResizeObserver !== 'undefined') {
 			this.resize = new ResizeObserver(fit);
