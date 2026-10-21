@@ -69,14 +69,21 @@ function quoteText(text: string): string {
 
 /**
  * The address a draft is written from: the identity's own, or for a `*@domain` identity the
- * address of that domain the original was written to (To, then Cc, then Bcc). A wildcard is never
- * an address to write from, so without such an original there is none (RFC 8621 section 6).
+ * address of that domain the original was written to (To, then Cc, then Bcc), else, for a message
+ * the person `sent`, the one it was written from (RFC 8621 section 6 lets such an identity send
+ * from any address of the domain). A wildcard is never an address to write from, so without such
+ * an original there is none.
  */
-function sender(identity: Identity | null, source: MailMessage | null): MailAddress | undefined {
+function sender(
+	identity: Identity | null,
+	source: MailMessage | null,
+	sent: boolean,
+): MailAddress | undefined {
 	if (!identity) return undefined;
 	if (!isWildcardAddress(identity.email)) return { name: identity.name, email: identity.email };
-	const recipients = source ? [...source.to, ...source.cc, ...source.bcc] : [];
-	const covered = recipients.find((address) => identityCovers(identity, address.email));
+	const own = source && sent ? source.from : [];
+	const addresses = source ? [...source.to, ...source.cc, ...source.bcc, ...own] : [];
+	const covered = addresses.find((address) => identityCovers(identity, address.email));
 	return covered ? { name: identity.name, email: covered.email } : undefined;
 }
 
@@ -122,6 +129,13 @@ export interface ComposeOptions {
 	format: QuoteFormat;
 	/** The original's HTML as the quote holds it; without it, the HTML as sent (`DraftHtml`). */
 	draftHtml?: DraftHtml;
+	/**
+	 * The original is a message the person sent, as the client knows from its folder (Sent). Only
+	 * then is its From one of their addresses, which a `*@domain` identity answers from when the
+	 * original was written to no address of that domain. A received message's From never is: one
+	 * from a colleague at that domain is theirs.
+	 */
+	sent?: boolean;
 }
 
 /**
@@ -133,7 +147,7 @@ export function composeDraft(
 	source: MailMessage | null,
 	options: ComposeOptions,
 ): Draft {
-	const from = sender(options.identity, mode === 'new' ? null : source);
+	const from = sender(options.identity, mode === 'new' ? null : source, options.sent === true);
 	const base: Draft = {
 		...(options.identity ? { identityId: options.identity.id } : {}),
 		...(from ? { from } : {}),

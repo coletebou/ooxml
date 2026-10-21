@@ -14,7 +14,7 @@ const file = (name: string): FileInput => ({
 	bytes: new TextEncoder().encode(name),
 });
 
-/** A memory server whose draft saves can fail or be held back, as its uploads and reads can. */
+/** A memory server whose saves, sends and uploads can fail or be held back, as its reads can. */
 function setup() {
 	const memory = createMemoryTransport({
 		now: () => T0,
@@ -32,12 +32,15 @@ function setup() {
 		],
 	});
 	const saves = createGate();
+	const sends = createGate();
 	const uploads = createGate();
 	const reads = createGate();
 	const control = {
 		failure: null as MailTransportError | null,
+		sendFailure: null as MailTransportError | null,
 		uploadFailure: null as MailTransportError | null,
 		saves,
+		sends,
 		uploads,
 		reads,
 	};
@@ -47,6 +50,11 @@ function setup() {
 			await saves.pass();
 			if (control.failure) throw control.failure;
 			return memory.saveDraft(draft);
+		},
+		async send(draft) {
+			await sends.pass();
+			if (control.sendFailure) throw control.sendFailure;
+			return memory.send(draft);
 		},
 		async upload(bytes, type) {
 			await uploads.pass();
@@ -319,6 +327,82 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('gives way to another message only once the one on its way is sent', async () => {
+		const { client, control, sent } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'On its way' });
+		await client.saveDraft();
+		const { session } = client.getState().compose!;
+		control.sends.holding = true;
+		const sending = client.send();
+		const opening = client.compose('new');
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		// Nothing takes the place of a window whose message is on its way.
+		expect(client.getState().compose).toMatchObject({ session, status: 'sending' });
+		control.sends.release();
+		expect(await sending).toBe(true);
+		expect(await opening).toBe(true);
+		client.updateDraft({ subject: 'Next', text: 'Not saved yet' });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(client.getState().compose).toMatchObject({
+			status: 'editing',
+			draft: { subject: 'Next', text: 'Not saved yet' },
+		});
+		expect((await sent()).map((message) => message.subject)).toEqual(['On its way']);
+		client.destroy();
+	});
+
+	it('sends once when Send is pressed twice while its draft saves', async () => {
+		const { client, control, sent } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Once' });
+		control.saves.holding = true;
+		const saving = client.saveDraft();
+		const first = client.send();
+		const second = client.send();
+		control.saves.release();
+		await saving;
+		expect([await first, await second]).toEqual([true, false]);
+		expect((await sent()).map((message) => message.subject)).toEqual(['Once']);
+		client.destroy();
+	});
+
+	it('keeps a message on its way sending while it is edited, and the edits when it fails', async () => {
+		const { client, control, notices, drafts, sent } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Offline', text: 'First words' });
+		await client.saveDraft();
+		const [saved] = await drafts();
+		control.sends.holding = true;
+		control.sendFailure = new MailTransportError('network', 'Offline.');
+		const sending = client.send();
+		client.updateDraft({ text: 'First words, and more' });
+		// Still on its way: Send stays off, nothing saves over it, Discard and Close wait.
+		expect(client.getState().compose).toMatchObject({ status: 'sending' });
+		expect(await client.send()).toBe(false);
+		await client.saveDraft();
+		await client.discardDraft();
+		const closing = client.closeCompose();
+		expect(client.getState().compose?.draft.text).toBe('First words, and more');
+		expect((await drafts()).map((draft) => draft.id)).toEqual([saved!.id]);
+		control.sends.release();
+		expect([await sending, await closing]).toEqual([false, false]);
+		expect(client.getState().compose).toMatchObject({
+			status: 'error',
+			error: 'network',
+			draft: { text: 'First words, and more' },
+		});
+		expect(notices).toContainEqual({ kind: 'error', action: 'send', code: 'network' });
+		expect(await sent()).toEqual([]);
+		// Closed now, it saves the edit made while it was on its way.
+		expect(await client.closeCompose()).toBe(true);
+		expect((await drafts()).map((draft) => draft.text)).toEqual(['First words, and more']);
+		client.destroy();
+	});
+
 	it('saves a draft that holds only formatted text', async () => {
 		const { client, drafts } = setup();
 		await until(client, (s) => s.status === 'ready');
@@ -529,6 +613,60 @@ describe('the compose window', () => {
 		expect(saved?.from).toEqual([{ name: 'Sales', email: 'desk@example.net' }]);
 		expect(await client.editDraft(saved!.id)).toBe(true);
 		expect(client.getState().compose?.draft).toMatchObject(answer);
+		client.destroy();
+	});
+
+	it('answers a message sent from an address a wildcard identity covers as that address', async () => {
+		const sales = { name: 'Sales', email: 'sales@example.net' };
+		const { client } = plain({
+			identities: [
+				identityOf('own', 'You', me.email),
+				identityOf('desk', 'Sales', '*@example.net'),
+			],
+			messages: [
+				{
+					id: 'quote',
+					mailboxId: 'sent',
+					from: sales,
+					to: [ada],
+					subject: 'Quote',
+					receivedAt: T0,
+				},
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.compose('reply', 'quote')).toBe(true);
+		// The person's own message: answered as it was sent, to whom it was sent.
+		expect(client.getState().compose?.draft).toMatchObject({
+			identityId: 'desk',
+			from: sales,
+			to: [ada],
+		});
+		client.destroy();
+	});
+
+	it('answers a received message from an address a wildcard identity covers as received', async () => {
+		const alice = { name: 'Alice', email: 'alice@example.net' };
+		const list = { name: 'Team', email: 'list@other.org' };
+		const { client } = plain({
+			identities: [identityOf('desk', 'Sales', '*@example.net')],
+			messages: [
+				{
+					id: 'post',
+					mailboxId: 'inbox',
+					from: alice,
+					to: [list],
+					subject: 'Plan',
+					receivedAt: T0,
+				},
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.compose('reply', 'post')).toBe(true);
+		// A colleague's message, not the person's own: never written as them, and answered to them.
+		const draft = client.getState().compose?.draft;
+		expect(draft).toMatchObject({ identityId: 'desk', to: [alice] });
+		expect(draft).not.toHaveProperty('from');
 		client.destroy();
 	});
 

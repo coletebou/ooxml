@@ -179,6 +179,41 @@ describe('composeDraft', () => {
 		const elsewhere = message({ to: [{ name: 'Ben', email: 'ben@example.org' }], cc: [] });
 		expect(composeDraft('reply', elsewhere, options)).not.toHaveProperty('from');
 	});
+	it('answers a message the person sent from an address a wildcard identity covers as sent', () => {
+		const options = { identity: wildcard, me: [{ name: 'Sales', email: '*@example.net' }], format };
+		const mine = message({
+			from: [{ name: 'Sales', email: 'Sales@Example.net' }],
+			to: [{ name: 'Ben', email: 'ben@example.org' }],
+			cc: [{ name: 'Cy', email: 'cy@example.com' }],
+		});
+		// The person's own message: written from the address it was sent from, to its recipients.
+		const reply = composeDraft('reply', mine, { ...options, sent: true });
+		expect(reply.from).toEqual({ name: 'Sales', email: 'Sales@Example.net' });
+		expect(reply.to.map((a) => a.email)).toEqual(['ben@example.org']);
+		const all = composeDraft('replyAll', mine, { ...options, sent: true });
+		expect([all.to, all.cc].map((list) => list.map((a) => a.email))).toEqual([
+			['ben@example.org'],
+			['cy@example.com'],
+		]);
+		// Written to an address of the domain too, it is answered from that one, as one received.
+		const toDesk = message({ from: mine.from, to: [{ name: 'Desk', email: 'desk@example.net' }] });
+		const answer = composeDraft('reply', toDesk, { ...options, sent: true });
+		expect([answer.from?.email, answer.to.map((a) => a.email)]).toEqual([
+			'desk@example.net',
+			['Sales@Example.net'],
+		]);
+	});
+	it('never answers a received message as the address of the domain it came from', () => {
+		const options = { identity: wildcard, me: [{ name: 'Sales', email: '*@example.net' }], format };
+		const alice = { name: 'Alice', email: 'alice@example.net' };
+		const received = message({ from: [alice], to: [{ name: 'Team', email: 'list@other.org' }] });
+		// A colleague's message to a list: no address of the domain to write from, and answered to them.
+		for (const mode of ['reply', 'replyAll'] as const) {
+			const draft = composeDraft(mode, received, options);
+			expect(draft).not.toHaveProperty('from');
+			expect(draft.to.map((a) => a.email)[0]).toBe('alice@example.net');
+		}
+	});
 	it('escapes quoted text that looks like markup', () => {
 		const draft = composeDraft('reply', message({ text: '<script>x</script>' }), {
 			identity,

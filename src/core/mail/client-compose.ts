@@ -1,7 +1,8 @@
 // The compose window's actions: open a new message, a reply, a reply all or a forward; edit it;
 // attach files; save the draft automatically after a quiet moment (never two saves at once); send;
 // discard. Only edits the server has saved count as saved, and a window whose draft cannot be
-// saved, or that has a file still uploading, stays open rather than losing it. New code.
+// saved, or that has a file still uploading, stays open rather than losing it. A window whose
+// message is on its way gives way to nothing until it is sent. New code.
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
 import {
@@ -49,6 +50,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 	let timer: unknown;
 	let saving: Promise<MailErrorCode | null> | undefined;
 	let again = false;
+	/** The send under way, resolving to whether the message went. */
+	let sending: Promise<boolean> | undefined;
 	let session = 0;
 	/** Edits made in the open window, and how many of them the server's copy holds (-1: none). */
 	let edits = 0;
@@ -69,6 +72,15 @@ export function createCompose(core: ClientCore): ComposeActions {
 		return !!current && saved !== edits && (!!current.draft.id || !isEmptyDraft(current.draft));
 	};
 	const identities = (): readonly Identity[] => core.state.identities;
+	/**
+	 * True when the person sent `message`: it is filed in Sent, as the list knows it now (a body
+	 * read before keeps the folders it had then).
+	 */
+	const isSent = (message: MailMessage): boolean => {
+		const sent = core.mailboxByRole('sent');
+		const boxes = core.emails.get(message.id)?.mailboxIds ?? message.mailboxIds;
+		return !!sent && boxes.includes(sent.id);
+	};
 	/** A message to answer or edit, whole: a body the reading pane holds cut short is read again. */
 	const source = async (emailId: string): Promise<MailMessage> => {
 		const cached = core.bodies.get(emailId);
@@ -81,7 +93,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 	/** Saves the open draft once if it has unsaved edits; resolves to the error, if it failed. */
 	const saveOnce = async (): Promise<MailErrorCode | null> => {
 		const current = compose();
-		if (!current || !unsaved()) return null;
+		// Nothing is saved over a message on its way: what was edited meanwhile saves if it fails.
+		if (!current || !unsaved() || sending) return null;
 		const revision = edits;
 		setCompose({ status: 'saving' });
 		try {
@@ -137,11 +150,45 @@ export function createCompose(core: ClientCore): ComposeActions {
 		timer = core.later(() => void save(), core.options.draftSaveMs ?? DEFAULT_SAVE_MS);
 	};
 
-	/** Shows an edit of the open draft and saves it after a quiet moment. */
+	/**
+	 * Shows an edit of the open draft and saves it after a quiet moment. An edit made while the
+	 * message is on its way is not in it: the window stays sending (Send off, nothing saved over
+	 * the message), closes once it is sent, and keeps the edit, to save, if the send fails.
+	 */
 	const edit = (draft: Draft): void => {
 		edits++;
+		if (sending) {
+			setCompose({ draft });
+			return;
+		}
 		setCompose({ draft, status: 'editing' });
 		schedule();
+	};
+
+	/**
+	 * Sends the draft of `open`, the window shown: it closes once the message is sent, and shows the
+	 * error if that fails, saving what was edited meanwhile. Nothing replaces it until then (`close`
+	 * waits), so the window is still this one; that is checked all the same before it is changed.
+	 */
+	const deliver = async (open: ComposeState): Promise<boolean> => {
+		const revision = edits;
+		core.cancel(timer);
+		timer = undefined;
+		setCompose({ status: 'sending', error: null });
+		const own = (): boolean => compose()?.session === open.session;
+		try {
+			await core.transport.send(open.draft);
+		} catch (error) {
+			if (own()) {
+				setCompose({ status: 'error', error: errorCode(error) });
+				if (edits !== revision) schedule();
+			}
+			core.fail('send', error);
+			return false;
+		}
+		if (own()) core.patch({ compose: null });
+		core.notice({ kind: 'done', action: 'sent', count: 1 });
+		return true;
 	};
 
 	const start = (draft: Draft, mode: ComposeState['mode']): void => {
@@ -162,11 +209,17 @@ export function createCompose(core: ClientCore): ComposeActions {
 
 	/**
 	 * Closes the window once the server holds its last edit; a draft it cannot save stays open, and
-	 * so does one with a file still uploading (the file joins the draft once it is up).
+	 * so does one with a file still uploading (the file joins the draft once it is up). One whose
+	 * message is on its way closes once it is sent, and stays open with its error if that fails.
 	 */
 	const close = async (): Promise<boolean> => {
-		if (!compose()) return true;
-		while (unsaved()) {
+		for (;;) {
+			if (!compose()) return true;
+			if (sending) {
+				if (!(await sending)) return false;
+				continue;
+			}
+			if (!unsaved()) break;
 			const error = await save();
 			if (error) {
 				core.notice({ kind: 'error', action: 'save', code: error });
@@ -186,13 +239,18 @@ export function createCompose(core: ClientCore): ComposeActions {
 			try {
 				const original = emailId ? await source(emailId) : null;
 				const me = identities().map((identity) => ({ name: identity.name, email: identity.email }));
-				// For an answer, the identity the original was sent to; else the first.
-				const recipients = original ? [...original.to, ...original.cc, ...original.bcc] : [];
+				const sent = !!original && isSent(original);
+				// For an answer, the identity the original was sent to, else for a message the person
+				// sent the one it was sent from; else the first.
+				const addresses = original
+					? [...original.to, ...original.cc, ...original.bcc, ...(sent ? original.from : [])]
+					: [];
 				const { draftHtml } = core.options;
 				const draft = composeDraft(mode, original, {
-					identity: identityFor(identities(), recipients) ?? identities()[0] ?? null,
+					identity: identityFor(identities(), addresses) ?? identities()[0] ?? null,
 					me,
 					format: core.options.quoteFormat ?? ENGLISH_QUOTE_FORMAT,
+					sent,
 					...(draftHtml ? { draftHtml } : {}),
 				});
 				if (!(await close())) return false;
@@ -266,7 +324,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 		async send() {
 			const current = compose();
 			// Not while a file uploads: it would be left out, with no window left to add it to.
-			if (!current || current.status === 'sending' || current.uploading) return false;
+			if (!current || sending || current.uploading) return false;
 			const recipients = draftRecipients(current.draft);
 			if (!recipients.length || recipients.some((r) => !ADDRESS.test(r.email))) {
 				setCompose({ status: 'error', error: 'invalid' });
@@ -275,28 +333,27 @@ export function createCompose(core: ClientCore): ComposeActions {
 			core.cancel(timer);
 			if (saving) await saving;
 			const latest = compose();
-			if (!latest) return false;
+			// Given way to another window meanwhile, which was not asked to send, or sent already by a
+			// Send pressed while the same save finished.
+			if (!latest || latest.session !== current.session || sending) return false;
 			if (latest.uploading) {
 				// A file added while the last save finished: not yet either, and the edits keep saving.
 				if (unsaved()) schedule();
 				return false;
 			}
-			setCompose({ status: 'sending', error: null });
+			sending = deliver(latest);
 			try {
-				await core.transport.send(latest.draft);
-				core.patch({ compose: null });
-				core.notice({ kind: 'done', action: 'sent', count: 1 });
-				return true;
-			} catch (error) {
-				setCompose({ status: 'error', error: errorCode(error) });
-				core.fail('send', error);
-				return false;
+				return await sending;
+			} finally {
+				sending = undefined;
 			}
 		},
 		async discardDraft() {
 			const current = compose();
 			core.cancel(timer);
 			if (saving) await saving;
+			// A message on its way is no draft any more; one whose send fails stays open to decide on.
+			if (sending) return;
 			const id = compose()?.draft.id ?? current?.draft.id;
 			core.patch({ compose: null });
 			if (!id) return;
