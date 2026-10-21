@@ -1,13 +1,41 @@
 // The Mail view of <mail-app>: the top bar (new message, search), the list toolbar, and the folder
 // pane, message list and reading pane, with every child event turned into a client action.
 import { html, nothing } from 'lit';
-import type { MailAttachment, MailClient, MailMessage, MailState } from 'ooxml-core/mail';
+import type { Identity, MailAttachment, MailClient, MailState } from 'ooxml-core/mail';
 import { runCommand } from './app-commands';
 import { readFiles } from './attachments';
 import { icon } from './icons';
 import { folderLabel } from './labels';
 import type { MailApp } from './mail-app';
 import { downloadBytes } from './object-urls';
+import type { InlineUrls } from './reading-pane';
+
+/**
+ * How each app finds the pictures of a message: one function per app, so the reading pane keeps it
+ * and a change of the app's state that the pane does not show (a row selected in the list) does
+ * not draw it again.
+ */
+const pictureFinders = new WeakMap<MailApp, InlineUrls>();
+/** The person's own addresses: one list per list of identities, kept for the same reason. */
+const ownAddresses = new WeakMap<readonly Identity[], readonly string[]>();
+
+function pictureFinder(app: MailApp): InlineUrls {
+	let find = pictureFinders.get(app);
+	if (!find) {
+		find = (message) => app.inlineUrls(message);
+		pictureFinders.set(app, find);
+	}
+	return find;
+}
+
+function addressesOf(identities: readonly Identity[]): readonly string[] {
+	let addresses = ownAddresses.get(identities);
+	if (!addresses) {
+		addresses = identities.map((identity) => identity.email);
+		ownAddresses.set(identities, addresses);
+	}
+	return addresses;
+}
 
 function topbar(app: MailApp, mail: MailClient, state: MailState) {
 	const i18n = app.i18nFor();
@@ -123,7 +151,6 @@ export function mailView(app: MailApp, mail: MailClient, state: MailState) {
 	const current = state.mailboxes.find((m) => m.id === state.mailboxId);
 	const role = current?.role ?? null;
 	const showRecipients = role === 'sent' || role === 'drafts';
-	const me = state.identities.map((identity) => identity.email);
 	const i18n = app.i18nFor();
 	const listLabel = current ? folderLabel(current, i18n) : i18n.t('app.mail');
 	return html`${topbar(app, mail, state)}
@@ -170,8 +197,8 @@ export function mailView(app: MailApp, mail: MailClient, state: MailState) {
 			<mail-reading-pane
 				.conversation=${state.open}
 				.mailboxes=${state.mailboxes}
-				.me=${me}
-				.inlineUrls=${(message: MailMessage) => app.inlineUrls(message)}
+				.me=${addressesOf(state.identities)}
+				.inlineUrls=${pictureFinder(app)}
 				@mail-action=${(e: CustomEvent<{ action: string; id: string }>) => app.readingAction(e.detail.action, e.detail.id)}
 				@mail-move=${(e: CustomEvent<{ mailboxId: string; ids: string[] }>) => void mail.moveTo(e.detail.mailboxId, e.detail.ids)}
 				@mail-reply=${(e: CustomEvent<{ emailId: string; mode: 'reply' | 'replyAll' | 'forward' }>) => void mail.compose(e.detail.mode, e.detail.emailId)}
