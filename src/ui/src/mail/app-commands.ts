@@ -2,7 +2,6 @@
 // conversations, else the open one, else the one under the list cursor; after a conversation that
 // was open is archived, deleted or moved to junk, the next one opens (auto-advance).
 import { newestEmail, type MailClient } from 'ooxml-core/mail';
-import type { MailCompose } from './compose';
 import type { MailCommand } from './keyboard';
 import type { MailApp } from './mail-app';
 
@@ -119,9 +118,9 @@ export function runCommand(app: MailApp, mail: MailClient, command: MailCommand)
 		}
 		case 'send':
 			if (!state.compose) return false;
-			// Files the window is still reading are not in the draft yet: Send waits, as its button does.
-			if (!app.renderRoot.querySelector<MailCompose>('mail-compose')?.readingFiles)
-				void mail.send();
+			// The app's client sends once the files the window is still reading are in the draft, and
+			// not at all if the draft gives way to another meanwhile (`committingClient`).
+			void mail.send();
 			return true;
 		case 'help':
 			app.dialog = 'shortcuts';
