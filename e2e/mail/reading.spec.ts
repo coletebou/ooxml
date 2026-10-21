@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openConversation, openDemo } from './helpers';
+import { importHtmlMail, openConversation, openDemo } from './helpers';
 
 test('a conversation opens oldest first with the newest message expanded', async ({ page }) => {
 	await openDemo(page);
@@ -45,4 +45,37 @@ test('an inline cid image shows from the message itself', async ({ page }) => {
 		/^data:image\/svg\+xml;base64,/,
 	);
 	await expect(page.locator('mail-reading-pane .remote')).toHaveCount(0);
+});
+
+test('an image map area opens its page in a new tab without an opener, as a link does', async ({
+	page,
+	context,
+}) => {
+	await context.route('https://elsewhere.example/**', (route) =>
+		route.fulfill({ contentType: 'text/html', body: '<p>Elsewhere</p>' }),
+	);
+	await openDemo(page);
+	// One area asks for the opener, the other for the message's own frame.
+	const png =
+		'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+	await importHtmlMail(page, [
+		{
+			subject: 'Image map',
+			html: `<img usemap="#m" width="200" src="data:image/png;base64,${png}" alt="Map"><map name="m"><area shape="rect" coords="0,0,99,9999" href="https://elsewhere.example/a" rel="opener" target="_blank"><area shape="rect" coords="100,0,9999,9999" href="https://elsewhere.example/b" target="_self"></map>`,
+		},
+	]);
+	await openConversation(page, 'Image map');
+	const frame = page.frameLocator('mail-html-frame iframe');
+	for (const x of [50, 150]) {
+		const [tab] = await Promise.all([
+			context.waitForEvent('page'),
+			frame.locator('img').click({ position: { x, y: 20 } }),
+		]);
+		await tab.waitForLoadState();
+		await expect(tab.locator('p')).toHaveText('Elsewhere');
+		expect(await tab.evaluate(() => window.opener === null), `x ${x}`).toBe(true);
+		await tab.close();
+	}
+	// The message is still shown where it was.
+	await expect(frame.locator('img[alt="Map"]')).toBeVisible();
 });

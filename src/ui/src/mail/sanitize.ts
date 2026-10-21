@@ -1,10 +1,11 @@
 // Making a message's HTML safe to show. DOMPurify removes scripts, forms, frames, event handlers and
 // `javascript:` links; remote resources (images, backgrounds, every URL in CSS, `@import`) are
 // blocked until the person allows them, and counted so the reading pane can say so; `cid:` images
-// point at the message's own attachments; every link opens in a new tab without an opener. The
-// result is then shown in a sandboxed frame without scripts and with a Content-Security-Policy
-// (`emailDocument`), so a sanitiser miss still cannot run code or fetch anything there. Compose puts
-// the same HTML into the page itself, where no such policy applies, so the sanitiser must not miss.
+// point at the message's own attachments; every link (an image map's areas too) opens in a new tab
+// without an opener. The result is then shown in a sandboxed frame without scripts and with a
+// Content-Security-Policy (`emailDocument`), so a sanitiser miss still cannot run code or fetch
+// anything there. Compose puts the same HTML into the page itself, where no such policy applies, so
+// the sanitiser must not miss.
 // A body sent in several parts is cleaned part by part (`sanitizeMessageHtml`). New code.
 import DOMPurify from 'dompurify';
 import { rewriteCss } from './sanitize-css';
@@ -136,7 +137,9 @@ function instance(): ReturnType<typeof DOMPurify> {
 	});
 	purifier.addHook('afterSanitizeAttributes', (node) => {
 		const el = node as Element;
-		if (el.tagName === 'A') {
+		// Whatever follows its `href` on a click, a link or an area of an image map, opens a new tab
+		// without an opener or a referrer, whatever `target` and `rel` the message gave it.
+		if (el.tagName === 'A' || el.hasAttribute('href')) {
 			el.setAttribute('target', '_blank');
 			el.setAttribute('rel', 'noopener noreferrer');
 		}

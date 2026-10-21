@@ -80,6 +80,22 @@ describe('sanitizeEmailHtml', () => {
 		expect(body).toContain('mailto:ada@example.com');
 	});
 
+	it('opens every link a click follows in a new tab without an opener, image map areas too', () => {
+		// The area covers the picture: with `rel="opener"` the page it opens could send this tab to
+		// another address, and `target="_self"` would show that page in place of the message.
+		const { body } = clean(
+			'<img usemap="#m" src="data:image/png;base64,iVBORw0KGgo="><map name="m"><area shape="rect" coords="0,0,9999,9999" href="https://attacker.example/" rel="opener" target="_self"></map><a href="https://example.com/" rel="opener" target="_top">x</a><math href="https://attacker.example/"><mi>m</mi></math><svg><a href="https://attacker.example/"><text>s</text></a></svg>',
+		);
+		const links = [
+			...new DOMParser().parseFromString(body, 'text/html').querySelectorAll('[href]'),
+		];
+		expect(links.map((link) => link.tagName)).toEqual(['AREA', 'A']);
+		for (const link of links) {
+			expect(link.getAttribute('target'), link.tagName).toBe('_blank');
+			expect(link.getAttribute('rel'), link.tagName).toBe('noopener noreferrer');
+		}
+	});
+
 	it('cannot be broken out of the style element', () => {
 		const result = clean('<style>p{color:red}</style><p>x</p>');
 		const doc = emailDocument(

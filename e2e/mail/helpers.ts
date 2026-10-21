@@ -28,3 +28,34 @@ export async function selectFolder(page: Page, name: string): Promise<void> {
 	await page.locator('mail-folder-pane .folder', { hasText: name }).click();
 	await expect(currentFolder(page)).toContainText(name);
 }
+
+/**
+ * Import HTML messages from Ada as `.eml` files, as a person does with the import button; each
+ * becomes a conversation of its own, in the Inbox.
+ */
+export async function importHtmlMail(
+	page: Page,
+	messages: readonly { subject: string; html: string }[],
+): Promise<void> {
+	await page.locator('mail-app input[type="file"][accept=".eml,message/rfc822"]').setInputFiles(
+		messages.map(({ subject, html }, i) => ({
+			name: `message-${i + 1}.eml`,
+			mimeType: 'message/rfc822',
+			buffer: Buffer.from(
+				[
+					'From: Ada <ada@example.com>',
+					'To: You <you@example.com>',
+					`Subject: ${subject}`,
+					`Message-ID: <imported-${i + 1}-${Date.now()}@example.com>`,
+					`Date: ${new Date().toUTCString()}`,
+					'MIME-Version: 1.0',
+					'Content-Type: text/html; charset=utf-8',
+					'',
+					html,
+					'',
+				].join('\r\n'),
+			),
+		})),
+	);
+	for (const { subject } of messages) await expect(row(page, subject)).toHaveCount(1);
+}
