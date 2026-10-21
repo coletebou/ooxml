@@ -108,7 +108,10 @@ the host owns and gives to the next client (`ooxml-ui/mail`'s `createMail` does 
 - **Search** (`search.ts`): `parseSearch` reads `from:`, `to:`, `subject:`, `body:`,
   `has:attachment`, `is:unread`, `is:read`, `is:flagged`, `before:`, `after:` and free text; the
   memory transport matches with `matchesQuery`, the JMAP client sends an `Email/query` filter. An
-  HTML body sent in several parts (`htmlParts`) is read part by part, for search as for previews.
+  HTML body sent in several parts (`htmlParts`) is read part by part, for search as for previews,
+  its character references decoded as HTML reads them (`decodeHtmlCharacterReferences` of
+  `ooxml-core/text`: every named one, and numeric ones with the HTML Standard's replacements) and
+  a no-break space read as a space.
 - **Compose** (`compose.ts`): recipients of a reply and reply all (never yourself), `Re:` and `Fwd:`
   subjects, `In-Reply-To` and `References` (RFC 5322 section 3.6.4), quoting with words the UI
   supplies (`QuoteFormat`), so they are localised. The HTML a quote or a reopened draft holds comes

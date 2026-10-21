@@ -2,6 +2,7 @@
 // parsed into a `MailQuery`, and the matcher the memory transport runs. The JMAP client sends the
 // same query to the server as an `Email/query` filter instead. New code.
 import { stripHtmlTags } from '../collab/validation';
+import { decodeHtmlCharacterReferences } from '../text/html-character-references';
 import { FLAGGED, SEEN, type EmailSummary, type MailAddress } from './model';
 import type { MailQuery } from './transport';
 
@@ -110,28 +111,11 @@ export function dropScriptsAndStyles(html: string): string {
 	}
 }
 
-const ENTITIES: Record<string, string> = {
-	amp: '&',
-	lt: '<',
-	gt: '>',
-	quot: '"',
-	apos: "'",
-	nbsp: ' ',
-};
-
-/** Decode the named entities above and numeric ones; anything else is left as written. */
-export function decodeEntities(text: string): string {
-	return text.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]{2,6});/gi, (whole, code: string) => {
-		if (code[0] !== '#') return ENTITIES[code.toLowerCase()] ?? whole;
-		const value =
-			code[1] === 'x' || code[1] === 'X'
-				? Number.parseInt(code.slice(2), 16)
-				: Number(code.slice(1));
-		return value > 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff)
-			? String.fromCodePoint(value)
-			: whole;
-	});
-}
+/**
+ * The character references of `text` decoded as HTML reads them in an attribute value
+ * (`decodeHtmlCharacterReferences` of the `text` area): every named and numeric one.
+ */
+export const decodeEntities: (text: string) => string = decodeHtmlCharacterReferences;
 
 /**
  * Where a line ends in HTML: a line break or rule, or the end of a paragraph, block or row. A tag's
@@ -139,9 +123,13 @@ export function decodeEntities(text: string): string {
  */
 const LINE_END = /<(?:br|hr)\b[^<>]*>|<\/(?:p|div|li|h[1-6]|blockquote|pre|tr)\s*>/gi;
 
-/** The text of HTML: no scripts, styles or tags, a line per paragraph or block, entities decoded. */
+/**
+ * The text of HTML: no scripts, styles or tags, a line per paragraph or block, character references
+ * decoded, and a no-break space, written or referenced, a space, as a text has it.
+ */
 export function htmlText(html: string): string {
-	return decodeEntities(stripHtmlTags(dropScriptsAndStyles(html).replace(LINE_END, '\n')));
+	const text = stripHtmlTags(dropScriptsAndStyles(html).replace(LINE_END, '\n'));
+	return decodeEntities(text).replace(/\u00a0/g, ' ');
 }
 
 /** A message's HTML body: as one text, and the parts it was sent in when there were several. */

@@ -89,8 +89,9 @@ describe('body text', () => {
 		expect(dropScriptsAndStyles('a<script>x</script>b<STYLE>y</style>c<script>never closed')).toBe(
 			'a b c ',
 		);
+		// A reference to no character reads as the replacement character, as HTML has it.
 		expect(decodeEntities('&amp; &lt;b&gt; &#65;&#x42; &bogus; &#0;')).toBe(
-			'& <b> AB &bogus; &#0;',
+			'& <b> AB &bogus; \ufffd',
 		);
 		expect(bodyText({ html: '<p>Hello&nbsp;<b>you</b></p><script>bad()</script>' }).trim()).toBe(
 			'Hello you',
@@ -100,6 +101,16 @@ describe('body text', () => {
 		// `İ` lower-cases to two code units (Unicode SpecialCasing), which must not shift the cut.
 		expect(dropScriptsAndStyles('İ<style>x</style>AB')).toBe('İ AB');
 		expect(dropScriptsAndStyles('İİ<SCRIPT>x</SCRIPT>tail<Style>y</STYLE>')).toBe('İİ tail ');
+	});
+	it('shows and finds the words of an HTML-only message whatever references write them', () => {
+		const email = {
+			...summary('e'),
+			html: '<p>Caf&eacute; &amp; cr&egrave;me br&ucirc;l&eacute;e &#150; &#x2603;</p>',
+		};
+		expect(bodyText(email).trim()).toBe('Café & crème brûlée – ☃');
+		expect(matchesQuery(email, { body: 'café brûlée' })).toBe(true);
+		// A no-break space, written or referenced, is a space in the text of HTML.
+		expect(bodyText({ html: '<p>a&nbsp;b\u00a0c&#160;d</p>' }).trim()).toBe('a b c d');
 	});
 	it('ends a line at each block, so the words of two lines never run together', () => {
 		const html =
