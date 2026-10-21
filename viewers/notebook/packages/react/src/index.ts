@@ -70,6 +70,16 @@ export const Notebook = forwardRef<NotebookApp | null, NotebookProps & { classNa
 	},
 );
 
+// A storage object is told apart by identity: another one means another client.
+const identities = new WeakMap<object, number>();
+let lastIdentity = 0;
+function identity(value: object | undefined): number {
+	if (!value) return 0;
+	let id = identities.get(value);
+	if (id === undefined) identities.set(value, (id = ++lastIdentity));
+	return id;
+}
+
 /**
  * The raw hook: a core client for `options`, recreated when the user, sync settings, storage or
  * scope change and destroyed (after saving) on unmount. Returns `null` until mounted (and while
@@ -81,7 +91,13 @@ export const Notebook = forwardRef<NotebookApp | null, NotebookProps & { classNa
 export function useNotebookClient(options: CreateNotebookOptions | null): NotebookClient | null {
 	const [client, setClient] = useState<NotebookClient | null>(null);
 	const key = options
-		? JSON.stringify([options.user, options.config, options.storageName, options.scope])
+		? JSON.stringify([
+				options.user,
+				options.config,
+				options.storageName,
+				options.scope,
+				identity(options.storage),
+			])
 		: '';
 	const latest = useRef(options);
 	latest.current = options;

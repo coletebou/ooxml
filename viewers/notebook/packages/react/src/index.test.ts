@@ -123,4 +123,47 @@ describe('useNotebook', () => {
 		expect(destroy).toHaveBeenCalledOnce();
 		await destroy.mock.results[0]?.value;
 	});
+
+	it('makes a new client for another storage and renames new items on a language change', async () => {
+		const memory = () => {
+			const data = new Map<string, Uint8Array>();
+			return {
+				load: async (key: string) => data.get(key) ?? null,
+				save: async (key: string, bytes: Uint8Array) => void data.set(key, bytes),
+				remove: async (key: string) => void data.delete(key),
+			};
+		};
+		const seen: { client: NotebookClient | null; state: NotebookState | null } = {
+			client: null,
+			state: null,
+		};
+		function Probe(props: { options: CreateNotebookOptions }) {
+			const notebook = useNotebook(props.options);
+			seen.client = notebook.client;
+			seen.state = notebook.state;
+			const status = notebook.state?.ready ? 'ready' : 'opening';
+			return createElement('output', null, `${status}:${props.options.locale ?? ''}`);
+		}
+		const base = { user: { id: 'u-ada', name: 'Ada' }, storageName: unique('react-storage') };
+		const first = { ...base, storage: memory() };
+		const { container, root } = mount();
+		root.render(createElement(Probe, { options: first }));
+		await vi.waitFor(() => expect(container.textContent).toBe('ready:'), { timeout: 10_000 });
+		const before = seen.client;
+		const second = { ...base, storage: memory() };
+		root.render(createElement(Probe, { options: second }));
+		await vi.waitFor(() => expect(seen.client && seen.client !== before).toBe(true));
+		await vi.waitFor(() => expect(seen.state?.ready).toBe(true), { timeout: 10_000 });
+		const current = seen.client!;
+		// Same storage, another language: the client stays and names what comes next in German.
+		root.render(createElement(Probe, { options: { ...second, locale: 'de' } }));
+		await vi.waitFor(() => expect(container.textContent).toBe('ready:de'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(seen.client).toBe(current);
+		seen.client!.createSection();
+		await vi.waitFor(() =>
+			expect(seen.state?.sections.map((section) => section.name)).toContain('Neuer Abschnitt 2'),
+		);
+		root.unmount();
+	});
 });
