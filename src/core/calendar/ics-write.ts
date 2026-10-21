@@ -209,6 +209,12 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 	const at = { ...event, zone };
 	const time = (name: string, ms: number): string =>
 		event.allDay ? `${name};VALUE=DATE:${icsDate(ms, zone)}` : icsDateTime(name, ms, zone);
+	// DTEND must be later than DTSTART (RFC 5545 3.8.2.2). Without it, a timed event ends where it
+	// starts and an all-day one lasts its day (3.6.1), which is what the reader takes it for.
+	const dtend = (start: number, end: number): string[] =>
+		(event.allDay ? icsDate(end, zone) > icsDate(start, zone) : end > start)
+			? [time('DTEND', end)]
+			: [];
 	const uid = `UID:${icsEscape(event.uid ?? `${event.id}@${options.uidDomain}`)}`;
 	const status = `STATUS:${event.cancelled ? 'CANCELLED' : 'CONFIRMED'}`;
 	const people = peopleLines(event, options);
@@ -230,7 +236,7 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 		uid,
 		stamp,
 		time('DTSTART', event.start),
-		time('DTEND', event.end),
+		...dtend(event.start, event.end),
 		...body(event.title, event.description),
 		...icsRecurrence(at),
 		status,
@@ -245,7 +251,7 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 				stamp,
 				time('RECURRENCE-ID', e.originalStart),
 				time('DTSTART', start),
-				time('DTEND', e.end ?? occurrenceEnd(at, start)),
+				...dtend(start, e.end ?? occurrenceEnd(at, start)),
 				...body(title, e.description ?? event.description),
 				status,
 				...alarm(title),

@@ -248,6 +248,35 @@ describe('eventsToIcs', () => {
 		expect(noted).toContain('DESCRIPTION:Bring notes');
 	});
 
+	it('leaves DTEND out where the end is not after the start, which RFC 5545 forbids', () => {
+		const hasEnd = (lines: string[]): boolean => lines.some((l) => l.startsWith('DTEND'));
+		// A timed event without length ends where it starts: no DTEND says so (RFC 5545 3.6.1).
+		const out = lines([
+			event({
+				end: at(10, 15),
+				repeat: 'weekly',
+				count: 4,
+				exceptions: [
+					{ originalStart: at(10, 22), cancelled: false, title: 'Same time' },
+					{
+						originalStart: at(10, 29),
+						cancelled: false,
+						start: at(10, 29, 14),
+						end: at(10, 29, 14),
+					},
+					{ originalStart: at(11, 5), cancelled: false, start: at(11, 5, 14), end: at(11, 5, 15) },
+				],
+			}),
+		]);
+		expect([0, 1, 2].map((n) => hasEnd(vevent(out, n)))).toEqual([false, false, false]);
+		expect(vevent(out, 3)).toContain('DTEND;TZID=America/New_York:20261105T150000');
+		expect(hasEnd(vevent(lines([event()])))).toBe(true);
+		// An all-day end on its start's date: no DTEND is the one day such an event lasts.
+		const day = vevent(lines([event({ allDay: true, start: at(10, 15, 0), end: at(10, 15, 12) })]));
+		expect(day).toContain('DTSTART;VALUE=DATE:20261015');
+		expect(hasEnd(day)).toBe(false);
+	});
+
 	it('keeps an imported UID and writes an unknown zone as UTC', () => {
 		expect(lines([event({ uid: 'abc-123@other.example' })])).toContain('UID:abc-123@other.example');
 		const out = lines([event({ zone: 'Mars/Olympus' })]);
