@@ -68,9 +68,9 @@ export interface JmapGate {
 export interface JmapHttp {
 	readonly redact: Redact;
 	/**
-	 * One authenticated exchange, its redirects checked hop by hop: `read` consumes the response
-	 * (`landed`: where it came from, and whether the credentials went there); failures become
-	 * `JmapError`s.
+	 * One authenticated exchange, its address and its redirects checked hop by hop: `read`
+	 * consumes the response (`landed`: where it came from, and whether the credentials went
+	 * there); failures become `JmapError`s.
 	 */
 	exchange<T>(
 		url: string,

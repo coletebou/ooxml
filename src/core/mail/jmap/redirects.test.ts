@@ -1,6 +1,7 @@
 import type { Draft } from '../model';
 import { createJmapClient } from './client';
 import { createJmapHttp } from './http';
+import { followRedirects, type Hop } from './redirects';
 import { createFakeServer, json, type Recorded } from './test-support/fake-server';
 import { installMailStore } from './test-support/mail-store';
 import { AUTH, failure, setup, TOKEN } from './test-support/setup';
@@ -215,5 +216,64 @@ describe('a redirect a browser hides, found out once the request reached the ser
 		expect(uploads.modes).toEqual([`manual ${UPLOAD}`, `follow ${UPLOAD}`]);
 		await uploads.transport.upload(file, 'image/png');
 		expect(uploads.modes.slice(2)).toEqual([`follow ${UPLOAD}`]);
+	});
+});
+
+describe('the address an exchange starts at', () => {
+	const post = {
+		method: 'POST' as const,
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ using: [], methodCalls: [['Core/echo', { hello: true }, '0']] }),
+	};
+	const read = (response: Response): Promise<unknown> => response.json();
+
+	it('is refused before anything is sent when credentials may not go there', async () => {
+		const server = createFakeServer();
+		const http = createJmapHttp({ auth: AUTH, fetch: server.fetch });
+		expect(await failure(http.exchange(PLAIN, post, 'The JMAP request', read))).toMatchObject({
+			code: 'invalid',
+		});
+		const events = 'http://jmap.example.com/eventsource/';
+		expect(
+			await failure(http.open(events, { method: 'GET' }, 'The push connection')),
+		).toMatchObject({ code: 'invalid' });
+		// Built with the URL API, so the fake credentials never sit in the source as a literal address.
+		const withCredentials = new URL(API);
+		withCredentials.username = 'john';
+		withCredentials.password = 'hunter2';
+		const error = await failure(
+			http.exchange(withCredentials.href, post, 'The JMAP request', read),
+		);
+		expect(error).toMatchObject({ code: 'invalid' });
+		expect(error.message).not.toContain('hunter2');
+		expect(server.requests).toEqual([]);
+	});
+
+	it('is refused too once fetch follows the redirects itself', async () => {
+		const sent: string[] = [];
+		const send = async (hop: Hop): Promise<Response> => {
+			sent.push(hop.url);
+			return echoed();
+		};
+		const hop: Hop = { ...post, url: PLAIN, credentials: true };
+		const mode = { hidden: true };
+		expect(await failure(followRedirects(hop, send, mode, 'The JMAP request'))).toMatchObject({
+			code: 'invalid',
+		});
+		expect(sent).toEqual([]);
+	});
+
+	it('still goes over https, and over plain http to a loopback host', async () => {
+		const server = createFakeServer();
+		const local = ['http://localhost:8080/api/', 'http://127.0.0.1:8080/api/', 'http://[::1]/api/'];
+		server.route((request) => request.url === API || local.includes(request.url), echoed);
+		const http = createJmapHttp({ auth: AUTH, fetch: server.fetch });
+		for (const url of [API, ...local])
+			expect(await http.exchange(url, post, 'The JMAP request', read)).toMatchObject({
+				methodResponses: [['Core/echo', { hello: true }, '0']],
+			});
+		expect(server.requests.map((request) => [request.url, request.headers.authorization])).toEqual(
+			[API, ...local].map((url) => [url, `Bearer ${TOKEN}`]),
+		);
 	});
 });

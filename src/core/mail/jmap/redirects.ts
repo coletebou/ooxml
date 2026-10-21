@@ -1,5 +1,6 @@
 // Where the JMAP client's requests may go, and the redirects they follow on the way. Credentials
-// and request bodies go over https only (plain http to a loopback host, for development). Where the
+// and request bodies go over https only (plain http to a loopback host, for development): the
+// address a request starts at is checked before anything is sent, whoever asked for it. Where the
 // platform hands redirects back (`redirect: 'manual'`, as server-side fetch does), each hop is
 // checked before it is taken: a 307 or 308 from https to plain http would send a draft or a file
 // in clear, `Authorization` or not, and a chain through plain http that comes back to https would
@@ -116,12 +117,13 @@ function landedAt(response: Response, hop: Hop): Landed {
 }
 
 /**
- * Sends `first` and follows the redirects that answer it. Where the platform hands them back, each
- * one is checked before it is followed and refused unless it points where credentials may go
- * (`isSafeUrl`), `MAX_REDIRECTS` at most; where it hides them, `mode.hidden` is set and fetch
- * follows them from then on, so later requests do not ask twice. The request that found that out
- * reached the server, which may have acted on it (a 303 after a POST points at its result): it is
- * sent again only when it is a GET or `repeatable`, and fails otherwise.
+ * Sends `first` and follows the redirects that answer it. `first` is refused before it is sent
+ * unless it goes where credentials may go (`isSafeUrl`); where the platform hands the redirects
+ * back, each one is checked the same way before it is followed, `MAX_REDIRECTS` at most; where it
+ * hides them, `mode.hidden` is set and fetch follows them from then on, so later requests do not
+ * ask twice. The request that found that out reached the server, which may have acted on it (a 303
+ * after a POST points at its result): it is sent again only when it is a GET or `repeatable`, and
+ * fails otherwise.
  */
 export async function followRedirects(
 	first: Hop,
@@ -129,6 +131,11 @@ export async function followRedirects(
 	mode: RedirectMode,
 	what: string,
 ): Promise<{ response: Response; landed: Landed }> {
+	if (!isSafeUrl(first.url))
+		throw new MailTransportError(
+			'invalid',
+			`${what} may not go to that address (https, or http on localhost).`,
+		);
 	let hop = first;
 	for (let hops = 0; !mode.hidden;) {
 		const response = await send(hop, 'manual');
