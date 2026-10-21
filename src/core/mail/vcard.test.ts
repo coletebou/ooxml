@@ -97,6 +97,76 @@ describe('parseVCards', () => {
 		expect(contacts[1]!.id).toMatch(/^vcard-[0-9a-f]{16}$/);
 	});
 
+	it('keeps every website, note, title, organization and name of a card that has several', () => {
+		// RFC 6350 allows any number of each (FN at least one): the first that says something fills
+		// the contact, and each other is kept as read.
+		const text = [
+			'BEGIN:VCARD',
+			'VERSION:4.0',
+			'UID:many',
+			'FN:Ada Lovelace',
+			'FN;LANGUAGE=fr:Ada Lovelace, comtesse',
+			'URL;TYPE=home:https://ada.example',
+			'URL;TYPE=work:https://work.example/ada',
+			'NOTE:',
+			'NOTE:First note',
+			'NOTE:Second note',
+			'TITLE:Countess',
+			'TITLE:Analyst',
+			'ORG:;',
+			'ORG:Analytical Society;Engines',
+			'ORG:Royal Society',
+			'END:VCARD',
+		].join('\r\n');
+		const [card] = parseVCards(text).contacts;
+		expect(card).toMatchObject({
+			name: 'Ada Lovelace',
+			url: 'https://ada.example',
+			note: 'First note',
+			title: 'Countess',
+			organization: 'Analytical Society',
+			organizationUnits: ['Engines'],
+		});
+		expect(card!.extra).toEqual([
+			'FN;LANGUAGE=fr:Ada Lovelace, comtesse',
+			'URL;TYPE=work:https://work.example/ada',
+			'NOTE:Second note',
+			'TITLE:Analyst',
+			'ORG:Royal Society',
+		]);
+		// Written out and read again, nothing is lost and nothing changes places.
+		expect(parseVCards(serializeVCards([card!])).contacts).toEqual([card]);
+	});
+
+	it('reads a quoted-printable soft line break as the line after it, white space included', () => {
+		const card = (version: string, ...lines: string[]): string =>
+			['BEGIN:VCARD', `VERSION:${version}`, 'UID:qp', ...lines, 'END:VCARD'].join('\r\n');
+		// RFC 2045 6.7 (5): an `=` ending the line goes, and the next line follows as it is.
+		const [legacy] = parseVCards(
+			card('2.1', 'NOTE;ENCODING=QUOTED-PRINTABLE:hello=', ' world, and=', '=0D=0Aon'),
+		).contacts;
+		expect(legacy?.note).toBe('hello world, and\r\non');
+		// Only a quoted-printable value breaks that way, whatever the text of another one says.
+		const [plain] = parseVCards(
+			card('3.0', 'NOTE:set ENCODING=QUOTED-PRINTABLE and end with =', 'TEL:+1 555 0100'),
+		).contacts;
+		expect(plain).toMatchObject({
+			note: 'set ENCODING=QUOTED-PRINTABLE and end with =',
+			phones: [{ type: '', number: '+1 555 0100' }],
+		});
+		// A last line that ends in `=` does not take the end of its card with it.
+		const { contacts, skipped } = parseVCards(card('2.1', 'NOTE;ENCODING=QUOTED-PRINTABLE:a=3D='));
+		expect([contacts[0]?.note, skipped]).toEqual(['a==', 0]);
+	});
+
+	it('reads back the quoted-printable lines it keeps, folded the vCard 4.0 way', () => {
+		// 4.0 folds with a space after any character: here right after the `=` of `=41`.
+		const kept = `X-NOTE;ENCODING=QUOTED-PRINTABLE:${'a'.repeat(41)}=41b`;
+		const text = serializeVCards([{ ...emptyContact('u-1', 0), name: 'Ada', extra: [kept] }]);
+		expect(text).toContain(`${'a'.repeat(41)}=\r\n 41b`);
+		expect(parseVCards(text).contacts[0]?.extra).toEqual([kept]);
+	});
+
 	it('counts what it cannot read instead of dropping it silently', () => {
 		const { contacts, skipped } = parseVCards(
 			'garbage\nBEGIN:VCARD\nFN:Half\nBEGIN:VCARD\nFN:Whole\nEND:VCARD\nEND:VCARD\nBEGIN:VCARD\nFN:Open',

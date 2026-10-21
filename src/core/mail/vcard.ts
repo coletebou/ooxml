@@ -1,7 +1,8 @@
 // vCard (RFC 6350) import and export for the address book. Reads vCard 4.0, 3.0 and the common
 // 2.1 forms (bare TYPE parameters, quoted-printable values), writes 4.0. Properties the contact
-// model does not edit are kept verbatim in `Contact.extra`, so an import then export keeps them
-// (an inline 3.0 or 2.1 photo, logo, sound or key written as 4.0 has it, `vcard-legacy.ts`).
+// model does not edit, and a second website, note, title, organization or name of a card, are kept
+// verbatim in `Contact.extra`, so an import then export keeps them (an inline 3.0 or 2.1 photo,
+// logo, sound or key written as 4.0 has it, `vcard-legacy.ts`).
 // New code.
 import { sha256 } from '../digest/sha256';
 import { emptyContact, type Contact, type ContactAddress } from './contacts';
@@ -62,12 +63,27 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 	const phones: Contact['phones'][number][] = [];
 	const addresses: ContactAddress[] = [];
 	const extra: string[] = [];
+	const filled = new Set<string>();
+	/**
+	 * Whether this property fills its field: FN, ORG, TITLE, NOTE and URL may each appear any number
+	 * of times (RFC 6350 sections 6.2.1, 6.6.1, 6.6.4, 6.7.2 and 6.7.8), and the contact holds one of
+	 * each. The first that says something fills it; every later one is kept as read, after the field
+	 * on export, so it reads back the same. One that says nothing is not kept.
+	 */
+	const fills = (property: Property, says: boolean): boolean => {
+		if (filled.has(property.name)) {
+			extra.push(property.raw);
+			return false;
+		}
+		if (says) filled.add(property.name);
+		return says;
+	};
 	for (const property of properties) {
 		const value = decodeValue(property);
 		const text = unescapeText(value);
 		switch (property.name) {
 			case 'FN':
-				contact.name = text;
+				if (fills(property, text.trim() !== '')) contact.name = text;
 				break;
 			case 'N': {
 				const [family = '', given = '', additional = '', prefix = '', suffix = ''] = splitUnescaped(
@@ -114,18 +130,21 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 			}
 			case 'ORG': {
 				const [name = '', ...units] = splitUnescaped(value, ';').map(unescapeText);
-				contact.organization = name;
-				contact.organizationUnits = units.filter(Boolean);
+				const says = [name, ...units].some((part) => part.trim() !== '');
+				if (fills(property, says)) {
+					contact.organization = name;
+					contact.organizationUnits = units.filter(Boolean);
+				}
 				break;
 			}
 			case 'TITLE':
-				contact.title = text;
+				if (fills(property, text.trim() !== '')) contact.title = text;
 				break;
 			case 'NOTE':
-				contact.note = text;
+				if (fills(property, text.trim() !== '')) contact.note = text;
 				break;
 			case 'URL':
-				contact.url = text;
+				if (fills(property, text.trim() !== '')) contact.url = text;
 				break;
 			case 'UID':
 				if (text.trim()) contact.id = text.trim();

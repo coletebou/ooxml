@@ -13,7 +13,23 @@ export interface Property {
 	raw: string;
 }
 
-/** Join folded lines (CRLF or LF followed by a space or tab), and 2.1 quoted-printable soft breaks. */
+/** Whether a property's value is quoted-printable (`ENCODING=QUOTED-PRINTABLE`, vCard 2.1). */
+export const isQuotedPrintable = (property: Property): boolean =>
+	property.params.ENCODING?.[0]?.toUpperCase() === 'QUOTED-PRINTABLE';
+
+/** Versions that fold with a space after any character, an `=` included (RFC 6350 3.2). */
+const FOLD_ANYWHERE = new Set(['3.0', '4.0']);
+/** A line that begins or ends a card, which no value runs on into. */
+const CARD_EDGE = /^(?:BEGIN|END):VCARD\s*$/i;
+
+/**
+ * Join folded lines (CRLF or LF followed by a space or tab, which goes) and quoted-printable soft
+ * breaks. An `=` that ends a line of a quoted-printable value is a soft break (RFC 2045 6.7, rule
+ * 5): the `=` goes and the next line follows as it is, leading white space included, as vCard 2.1
+ * writes it. A card that says it is 3.0 or 4.0 folds with a space after any character, so there a
+ * next line that starts with one is a fold. Whether a value is quoted-printable is read from its
+ * parameters, once per property, never from its text.
+ */
 export function unfold(text: string): string[] {
 	// A byte order mark (files saved by some editors) would otherwise hide the first BEGIN line.
 	const lines = text
@@ -21,12 +37,24 @@ export function unfold(text: string): string[] {
 		.replace(/\r\n?/g, '\n')
 		.split('\n');
 	const out: string[] = [];
+	/** The VERSION of the card being read, empty until it says. */
+	let version = '';
+	let quoted = false;
+	let soft = false;
 	for (const line of lines) {
 		const last = out.length - 1;
-		if ((line.startsWith(' ') || line.startsWith('\t')) && last >= 0) out[last] += line.slice(1);
-		else if (last >= 0 && /ENCODING=QUOTED-PRINTABLE/i.test(out[last]!) && out[last]!.endsWith('='))
+		const folded = line.startsWith(' ') || line.startsWith('\t');
+		if (soft && (!folded || !FOLD_ANYWHERE.has(version)) && !CARD_EDGE.test(line))
 			out[last] = out[last]!.slice(0, -1) + line;
-		else out.push(line);
+		else if (folded && last >= 0) out[last] += line.slice(1);
+		else {
+			const property = parseLine(line);
+			if (property?.name === 'VERSION') version = property.value.trim();
+			else if (property?.name === 'BEGIN') version = '';
+			quoted = property !== null && isQuotedPrintable(property);
+			out.push(line);
+		}
+		soft = quoted && line.endsWith('=');
 	}
 	return out.filter((line) => line.trim() !== '');
 }
@@ -79,8 +107,7 @@ export const unescapeText = (value: string): string =>
 	value.replace(/\\([\\,;nN])/g, (_, c: string) => (c === 'n' || c === 'N' ? '\n' : c));
 
 export function decodeValue(property: Property): string {
-	const encoding = property.params.ENCODING?.[0]?.toUpperCase();
-	if (encoding !== 'QUOTED-PRINTABLE') return property.value;
+	if (!isQuotedPrintable(property)) return property.value;
 	const bytes: number[] = [];
 	const text = property.value;
 	for (let i = 0; i < text.length; i++) {
