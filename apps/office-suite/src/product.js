@@ -1,5 +1,10 @@
-import { $, apps, badge } from './ui.js';
+import { $, apps, badge, suiteApps, teamsApp } from './ui.js';
 export const product = document.body.dataset.product || '';
+/**
+ * The file kind this page is limited to: a standalone editor's own kind, or '' in the suite and in
+ * Teams and Notebook, which open documents of every kind.
+ */
+export const productKind = apps.some((a) => a.id === product) ? product : '';
 export const suiteBase = new URL(
 	document.querySelector('meta[name="ooxml-root"]')?.content || './',
 	location.href,
@@ -10,6 +15,7 @@ export const productPaths = {
 	pptx: 'powerpoint',
 	vsdx: 'visio',
 	teams: 'teams',
+	notebook: 'notebook',
 };
 export function workspaceUrl(type, id) {
 	const url = new URL(
@@ -39,21 +45,19 @@ export function mountProduct() {
 	if (!product) {
 		const links = document.createElement('details');
 		links.className = 'standalone-links';
-		links.innerHTML = `<summary>Open apps separately</summary>${Object.entries(productPaths)
-			.map(
-				([id, path]) =>
-					`<a href="${new URL(`apps/${path}/`, suiteBase)}">${apps.find((a) => a.id === id)?.name ?? 'Teams'}</a>`,
-			)
+		links.innerHTML = `<summary>Open apps separately</summary>${suiteApps
+			.map((a) => `<a href="${new URL(`apps/${productPaths[a.id]}/`, suiteBase)}">${a.name}</a>`)
 			.join('')}`;
 		$('app-launcher').append(links);
 		return;
 	}
-	const app = apps.find((a) => a.id === product) ?? { name: 'Teams', id: 'teams' };
+	const app = suiteApps.find((a) => a.id === product) ?? teamsApp;
 	const brand = document.querySelector('.brand');
 	brand.innerHTML = `${badge(product)}<strong>${app.name}</strong>`;
 	brand.setAttribute('aria-label', `${app.name} home`);
-	for (const button of $('rail').querySelectorAll('[data-app], [data-teams]'))
-		button.hidden = (button.dataset.app || 'teams') !== product;
+	// Teams and Notebook buttons name their app in data-view, the editors in data-app.
+	for (const button of $('rail').querySelectorAll('[data-app], [data-teams], [data-notebook]'))
+		button.hidden = (button.dataset.app || button.dataset.view) !== product;
 	$('app-launcher').innerHTML =
-		`<div class="launcher-heading"><h2>Your apps</h2></div><div class="launcher-grid"><a href="${new URL('?suite', suiteBase)}">OOXML Office</a>${[...apps, { id: 'teams', name: 'Teams' }].map((a) => `<a href="${new URL(`apps/${productPaths[a.id]}/`, suiteBase)}">${badge(a.id)}<span>${a.name}</span></a>`).join('')}</div>`;
+		`<div class="launcher-heading"><h2>Your apps</h2></div><div class="launcher-grid"><a href="${new URL('?suite', suiteBase)}">OOXML Office</a>${suiteApps.map((a) => `<a href="${new URL(`apps/${productPaths[a.id]}/`, suiteBase)}">${badge(a.id)}<span>${a.name}</span></a>`).join('')}</div>`;
 }

@@ -54,6 +54,7 @@ test('the chooser opens bundled preview apps while the full site opens product s
 			['pptx', 'pptx', 'powerpoint'],
 			['vsdx', 'visio', 'visio'],
 			['teams', 'teams', 'teams'],
+			['notebook', 'notebook', 'notebook'],
 			['docs', 'docs', null],
 		]) {
 			click({ target: { closest: () => ({ dataset: { start: id } }) } });

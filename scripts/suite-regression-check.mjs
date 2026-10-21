@@ -169,13 +169,14 @@ try {
 		'/apps/powerpoint/',
 		'/apps/visio/',
 		'/apps/teams/',
+		'/apps/notebook/',
 	]) {
 		const response = await context.request.get(base + path + 'manifest.webmanifest');
 		assert(response.ok());
 		const manifest = await response.json();
 		ids.add(new URL(manifest.id, base + path).href);
 	}
-	assert.equal(ids.size, 6);
+	assert.equal(ids.size, 7);
 	await context.setOffline(true);
 	for (const [slug, kind] of [
 		['word', 'docx'],
@@ -183,12 +184,15 @@ try {
 		['powerpoint', 'pptx'],
 		['visio', 'vsdx'],
 		['teams', 'teams'],
+		['notebook', 'notebook'],
 	]) {
 		await page.goto(base + '/apps/' + slug + '/');
 		await expect(page.locator('body')).toHaveAttribute('data-product', kind);
 		await expect(page.locator('.workspace-sidebar')).toBeHidden();
 		if (kind === 'teams')
 			await expect(page.locator('office-ui-chat-composer textarea')).toBeVisible();
+		else if (kind === 'notebook')
+			await expect(page.locator('notebook-app').getByText('New Section 1')).toBeVisible();
 		else {
 			await page.locator(`[data-create=${kind}]`).click();
 			const editor = { pptx: '.pptxv', vsdx: 'visio-viewer' }[kind] ?? `${kind}-editor`;
@@ -241,7 +245,7 @@ try {
 	await fresh.close();
 	assert.deepEqual(errors, []);
 	console.log(
-		'Start chooser asks on every visit, opens product sites and asks again on reload; apps have create buttons. PWA: six distinct manifests; all standalone pages and suite reopen offline; Word/Excel/PowerPoint/Visio create offline.',
+		'Start chooser asks on every visit, opens product sites and asks again on reload; apps have create buttons. PWA: seven distinct manifests; all standalone pages and suite reopen offline; Word/Excel/PowerPoint/Visio create offline.',
 	);
 } finally {
 	await browser.close();

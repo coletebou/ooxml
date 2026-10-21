@@ -153,6 +153,13 @@
 		linear-gradient(var(--blue), var(--blue)) center / 9px 1px no-repeat,
 		linear-gradient(var(--blue), var(--blue)) center / 1px 9px no-repeat;
 }
+/* "Open a file" closes the grid and fills what its row has left, so no cell stays empty. */
+#create-row > [data-import]:nth-child(3n + 1) {
+	grid-column: 1 / -1;
+}
+#create-row > [data-import]:nth-child(3n + 2) {
+	grid-column: span 2;
+}
 
 /* Library */
 .library-section {

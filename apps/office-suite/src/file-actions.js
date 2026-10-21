@@ -6,6 +6,7 @@ export function mountFileActions({
 	sessions,
 	refresh,
 	closeTeams,
+	closeNotebook,
 	active,
 	activate,
 	home,
@@ -101,13 +102,21 @@ export function mountFileActions({
 			item('Remove from workspace…', () => remove(id)),
 		]);
 	}
+	/** The close action of the Teams or Notebook tab an event is on, if it is on one. */
+	const closeApp = (event) =>
+		event.target.closest('[data-teams]')
+			? closeTeams
+			: event.target.closest('[data-notebook]')
+				? closeNotebook
+				: null;
 	$('tabs').addEventListener('mousedown', (event) => {
 		if (event.button === 1 && event.target.closest('.file-tab')) event.preventDefault();
 	});
 	$('tabs').addEventListener('auxclick', (event) => {
-		if (event.button === 1 && event.target.closest('[data-teams]')) {
+		const close = closeApp(event);
+		if (event.button === 1 && close) {
 			event.preventDefault();
-			closeTeams();
+			close();
 			return;
 		}
 		const tab = event.target.closest('.file-tab');
@@ -116,8 +125,9 @@ export function mountFileActions({
 		task(() => closeTabs([tab.querySelector('[data-open]').dataset.open]));
 	});
 	$('tabs').addEventListener('contextmenu', (event) => {
-		if (event.target.closest('[data-teams]')) {
-			contextMenu(event, [{ label: 'Close', run: closeTeams, error: notify }]);
+		const close = closeApp(event);
+		if (close) {
+			contextMenu(event, [{ label: 'Close', run: close, error: notify }]);
 			return;
 		}
 		const tab = event.target.closest('.file-tab');

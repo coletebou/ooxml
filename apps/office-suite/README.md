@@ -2,7 +2,7 @@
 
 # OOXML Office
 
-**Word, Excel, PowerPoint, Visio and OpenTeams in one local-first workspace, in the browser or on the desktop.**
+**Word, Excel, PowerPoint, Visio, OpenTeams and OpenNotebook in one local-first workspace, in the browser or on the desktop.**
 
 [**Open the app**](https://christophervr.github.io/ooxml/) &nbsp;&middot;&nbsp;
 [**Suite overview**](../../.github/README.md#ooxml-office-the-whole-suite-in-one-app) &nbsp;&middot;&nbsp;
@@ -20,7 +20,7 @@ The deployable Office application workspace (`ooxml-office`), shared by the inte
 The first visit asks where to start:
 
 - **OOXML Office**: every app in one workspace, opening on **Chat**: ask questions about your files, or ask for a document, workbook or deck and open what it drafts in its editor. The shared library, a tab per open document, the app launcher and search sit beside it, and **Ask AI** opens the same chat next to any open document. See [the assistant](../../docs/suite-integration.md) for providers, the offline preview and what it may change. It opens in dark mode; Appearance in the account menu switches it.
-- **One product on its own**: [Word](../../viewers/docx#readme), [Excel](../../viewers/xlsx#readme), [PowerPoint](../../viewers/pptx#readme), [Visio](../../viewers/visio#readme) or [Teams](../../viewers/teams#readme), each on its own site with its documentation and framework demos.
+- **One product on its own**: [Word](../../viewers/docx#readme), [Excel](../../viewers/xlsx#readme), [PowerPoint](../../viewers/pptx#readme), [Visio](../../viewers/visio#readme), [Teams](../../viewers/teams#readme) or [Notebook](../../viewers/notebook#readme), each on its own site with its documentation and framework demos.
 - **Documentation**: the hub at [`/ooxml/docs/`](https://christophervr.github.io/ooxml/docs/) (`site/docs/`), one page that links every manual: the apps, `ooxml-core`, `ooxml-ui`, the MCP server, the suite and the desktop build.
 
 In the browser the sidebar's Resources group links to the documentation and reopens the chooser; an installed app hides the group, since it has no browser chrome to come back through. The look of every page on the site follows [the pages design system](../../docs/pages-design.md).
@@ -35,6 +35,6 @@ bun run build:suite
 bun run preview:suite
 ```
 
-Output: `suite-dist/`. The root installs Office; `apps/word/`, `apps/excel/`, `apps/powerpoint/`, `apps/visio/` and `apps/teams/` each install independently. They share local profiles and documents when served from the same origin. Installation is available from the account menu or the browser's install command.
+Output: `suite-dist/`. The root installs Office; `apps/word/`, `apps/excel/`, `apps/powerpoint/`, `apps/visio/`, `apps/teams/` and `apps/notebook/` each install independently. They share local profiles and documents when served from the same origin. Installation is available from the account menu or the browser's install command.
 
 See [integration and limitations](../../docs/suite-integration.md) and [desktop packaging](../../desktop/README.md). This is a private application package, not an npm-published library. Cloud identity, cloud drive and document coauthoring are separate integration work.
