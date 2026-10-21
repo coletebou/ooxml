@@ -285,9 +285,16 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			this.editor = null;
 			this.formats = null;
 		}
+		// The new client starts either way: a host that turns the sync server off, or switches the
+		// profile, must not keep the old one. What the device refused is kept in the tab and saved by
+		// the next client on that storage; the notice says it was not saved.
 		void current.flush().then(
 			() => this.#client === current && this.#start(),
-			() => profile && this.#client === current && this.#start(),
+			() => {
+				if (this.#client !== current) return;
+				this.#start();
+				this.notify(this.t('notice.save-failed'));
+			},
 		);
 	}
 
@@ -559,12 +566,13 @@ export class NotebookApp extends NotebookElement implements AppHost {
 
 	protected override render() {
 		const s = this.state;
+		// Memory-only notebooks are said first, in either mode: the list of them lives on the device.
 		const status = !s?.notebook
 			? 'closed'
-			: s.mode !== 'local'
-				? s.status
-				: !s.persistent
-					? 'memory'
+			: !s.persistent
+				? 'memory'
+				: s.mode !== 'local'
+					? s.status
 					: s.unsaved
 						? 'unsaved'
 						: 'local';
