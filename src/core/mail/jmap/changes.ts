@@ -2,11 +2,12 @@
 // `/changes` calls that move them forward and the `MailChange`s they produce. A state is taken from
 // the first `/get` that shows one, or from the `oldState` of a write that comes first, and then
 // only from `/changes`, so no change between two states is skipped (the write's own included); a
-// `/get` with a newer state, a push or a poll asks for what happened in between. New code.
+// `/get` with a newer state, a push or a poll asks for what happened in between. Each type is asked
+// in a call of its own, as many to a request as the server takes. New code.
 import type { MailChange } from '../transport';
 import type { JmapClient } from './client';
 import { strings } from './convert';
-import type { JmapCall, JmapResult } from './request';
+import type { JmapCall, JmapRequestBuilder, JmapResult } from './request';
 import type { JmapResponse } from './types';
 
 export type TrackedType = 'Mailbox' | 'Email';
@@ -46,6 +47,24 @@ interface Collected {
 	reset: Set<TrackedType>;
 }
 
+/**
+ * One call per item, as many in a request as the server takes (`maxCallsInRequest`, which may be
+ * one), the requests one after another.
+ */
+function oneEach<T>(
+	client: JmapClient,
+	items: readonly T[],
+	add: (builder: JmapRequestBuilder, accountId: string, item: T) => JmapCall,
+	read: (result: JmapResult, call: JmapCall, item: T) => void,
+): Promise<void> {
+	return client.batch(
+		items,
+		() => 1,
+		(builder, accountId, chunk) => add(builder, accountId, chunk[0]!),
+		(result, call, chunk) => read(result, call, chunk[0]!),
+	);
+}
+
 function collect(into: Collected, type: TrackedType, args: Record<string, unknown>): void {
 	const created = strings(args.created);
 	const updated = strings(args.updated);
@@ -78,40 +97,39 @@ export function createChangeTracker(
 	 * `type/get` with no ids: the current state, cheaply. A state learnt meanwhile (a write's
 	 * `oldState`) is kept unless `replace`: it may be older, which only means more changes to fetch.
 	 */
-	const baseline = async (types: readonly TrackedType[], replace = false): Promise<void> => {
-		if (!types.length) return;
-		const { result, calls } = await client.request((builder, accountId) =>
-			types.map((type) => [type, builder.call(`${type}/get`, { accountId, ids: [] })] as const),
+	const baseline = (types: readonly TrackedType[], replace = false): Promise<void> =>
+		oneEach(
+			client,
+			types,
+			(builder, accountId, type) => builder.call(`${type}/get`, { accountId, ids: [] }),
+			(result, call, type) => {
+				const state = result.get(call).state;
+				if (typeof state === 'string' && (replace || !states.has(type))) states.set(type, state);
+			},
 		);
-		for (const [type, call] of calls) {
-			const state = result.get(call).state;
-			if (typeof state === 'string' && (replace || !states.has(type))) states.set(type, state);
-		}
-	};
 
+	/** One type's page of `/changes`: what it reports, the state it reached, and if there is more. */
 	const readPage = (
 		result: JmapResult,
-		calls: readonly (readonly [TrackedType, JmapCall])[],
+		call: JmapCall,
+		type: TrackedType,
 		into: Collected,
 		reached: Map<TrackedType, string>,
-	): Map<TrackedType, string> => {
-		const more = new Map<TrackedType, string>();
-		for (const [type, call] of calls) {
-			if (result.error(call)?.type === 'cannotCalculateChanges') {
-				into.reset.add(type);
-				continue;
-			}
-			const args = result.get(call);
-			const next = typeof args.newState === 'string' ? args.newState : '';
-			if (!next) {
-				into.reset.add(type);
-				continue;
-			}
-			collect(into, type, args);
-			reached.set(type, next);
-			if (args.hasMoreChanges === true) more.set(type, next);
+		more: Map<TrackedType, string>,
+	): void => {
+		if (result.error(call)?.type === 'cannotCalculateChanges') {
+			into.reset.add(type);
+			return;
 		}
-		return more;
+		const args = result.get(call);
+		const next = typeof args.newState === 'string' ? args.newState : '';
+		if (!next) {
+			into.reset.add(type);
+			return;
+		}
+		collect(into, type, args);
+		reached.set(type, next);
+		if (args.hasMoreChanges === true) more.set(type, next);
 	};
 
 	const syncOnce = async (types: ReadonlySet<TrackedType>): Promise<void> => {
@@ -135,14 +153,15 @@ export function createChangeTracker(
 					for (const type of todo.keys()) into.reset.add(type);
 					break;
 				}
-				const since = todo;
-				const { result, calls } = await client.request((builder, accountId) =>
-					[...since].map(
-						([type, state]) =>
-							[type, builder.call(`${type}/changes`, { accountId, sinceState: state })] as const,
-					),
+				const more = new Map<TrackedType, string>();
+				await oneEach(
+					client,
+					[...todo],
+					(builder, accountId, [type, state]) =>
+						builder.call(`${type}/changes`, { accountId, sinceState: state }),
+					(result, call, [type]) => readPage(result, call, type, into, reached, more),
 				);
-				todo = readPage(result, calls, into, reached);
+				todo = more;
 			}
 			// Take the current state before anyone reloads, so nothing after it is missed.
 			await baseline([...into.reset], true);

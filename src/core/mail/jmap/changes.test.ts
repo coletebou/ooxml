@@ -18,10 +18,12 @@ const noChanges = (sinceState: unknown, newState = sinceState) => ({
 });
 const names = (calls: JmapInvocation[]) => calls.map(([name]) => name);
 
-function polled() {
+/** A polled transport; `maxCalls` the calls its server takes in one request, if it says. */
+function polled(maxCalls?: number) {
 	const clock = createClock();
 	const context = setup({ clock, push: 'poll' });
 	const { server } = context;
+	if (maxCalls !== undefined) server.limitCalls(maxCalls);
 	const state = { email: 'E1' };
 	server.on('Email/get', () => ({ state: state.email, list: [], notFound: [] }));
 	server.on('Mailbox/changes', (args) => noChanges(args.sinceState));
@@ -135,6 +137,28 @@ describe('watch with polling', () => {
 		await until(() => changes.length === 1);
 		expect(server.argsOf('Email/changes')).toHaveLength(MAX_CHANGE_PAGES);
 		expect(changes).toEqual([{ type: 'reset' }]);
+	});
+
+	it('asks for each type in a request of its own when a request takes one call', async () => {
+		const { server, clock, changes } = polled(1);
+		await until(() => server.calls().length === 2);
+		server.on('Email/changes', () => payload(email.changes.response));
+		await clock.advance(60_000);
+		await until(() => changes.length === 1);
+		expect(server.apiRequests().map((request) => names(request.methodCalls))).toEqual([
+			['Mailbox/get'],
+			['Email/get'],
+			['Mailbox/changes'],
+			['Email/changes'],
+		]);
+		expect(changes).toEqual([
+			{
+				type: 'emails',
+				created: ['Me8de6c9f6de198239b982ea2'],
+				updated: ['Ma783e5cdf5f2deffbc97930a'],
+				destroyed: ['M9bd17497e2a99cb345fc1d0a'],
+			},
+		]);
 	});
 
 	it('keeps polling after a failed poll', async () => {

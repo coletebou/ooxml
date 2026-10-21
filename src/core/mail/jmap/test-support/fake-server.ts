@@ -1,9 +1,10 @@
 // A fake JMAP server for the transport tests: a `fetch` that serves the session, runs method calls
 // (resolving result references as RFC 8620 3.7 says, with `Core/echo` built in), takes uploads,
-// serves downloads, holds event source streams open and follows redirects the way a server-side
-// or a browser fetch does, recording every request. Nothing touches the network.
+// serves downloads, holds event source streams open and follows redirects the way a server-side or
+// a browser fetch does, and keeps to a limit of calls in one request when asked to, recording every
+// request. Nothing touches the network.
 import fixture from '../__fixtures__/rfc8620-session.json';
-import { SUBMISSION, isRecord, type JmapInvocation, type JmapRequest } from '../types';
+import { CORE, SUBMISSION, isRecord, type JmapInvocation, type JmapRequest } from '../types';
 
 export interface Recorded {
 	method: string;
@@ -52,6 +53,11 @@ export interface FakeServer {
 	): void;
 	/** Answers requests for `from` with a redirect (302 unless `status` says) to `location`. */
 	redirect(from: string, location: string, status?: number): void;
+	/**
+	 * Says in the session that it takes at most `max` calls in one request, and refuses a request
+	 * with more with the `limit` problem of RFC 8620 3.6.1, as a server that keeps to it does.
+	 */
+	limitCalls(max: number): void;
 	apiRequests(): JmapRequest[];
 	/** Every method call posted, in order. */
 	calls(): JmapInvocation[];
@@ -325,6 +331,21 @@ export function createFakeServer(
 			server.route(
 				(request) => request.url === from,
 				() => new Response(null, { status, headers: { Location: location } }),
+			);
+		},
+		limitCalls(max) {
+			const capabilities = server.session.capabilities as Record<string, Record<string, unknown>>;
+			capabilities[CORE]!.maxCallsInRequest = max;
+			const calls = (request: Recorded): number =>
+				(JSON.parse(request.body ?? '{}') as Partial<JmapRequest>).methodCalls?.length ?? 0;
+			server.route(
+				(request) =>
+					request.method === 'POST' && request.url === endpoint('apiUrl') && calls(request) > max,
+				() =>
+					json(
+						{ type: 'urn:ietf:params:jmap:error:limit', limit: 'maxCallsInRequest', status: 400 },
+						400,
+					),
 			);
 		},
 		apiRequests: () =>
