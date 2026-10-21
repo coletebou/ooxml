@@ -315,15 +315,15 @@ describe('<mail-compose>', () => {
 		const ada = [{ name: '', email: 'ada@example.com' }];
 		await type(el, fields(el)[0]!, 'ada@example.com');
 		el.shadowRoot!.querySelector<HTMLButtonElement>('header button')!.click();
-		// Each hand-over names the compose session of the draft it is for.
+		// Each change and hand-over names the compose session of the draft it is for.
 		expect(seen.splice(0)).toEqual([
-			['mail-draft-change', { patch: { to: ada } }],
+			['mail-draft-change', { patch: { to: ada }, session: 1 }],
 			['mail-draft-close', { session: 1 }],
 		]);
 		await type(el, fields(el)[0]!, 'ada@example.com');
 		el.shadowRoot!.querySelector<HTMLButtonElement>('.send')!.click();
 		expect(seen).toEqual([
-			['mail-draft-change', { patch: { to: ada } }],
+			['mail-draft-change', { patch: { to: ada }, session: 1 }],
 			['mail-draft-send', { session: 1 }],
 		]);
 	});
@@ -365,6 +365,36 @@ describe('<mail-compose>', () => {
 			['ada@example.com'],
 			['bob@example.com'],
 			['ada@example.com', 'bob@example.com'],
+		]);
+	});
+
+	it('names the draft each change is for, also one made once the window left the page', async () => {
+		const notes = { blobId: 'b1', name: 'notes.txt', type: 'text/plain', size: 2 };
+		const el = await mount(composeState({ attachments: [notes] }));
+		// jsdom has no innerText.
+		Object.defineProperty(editor(el), 'innerText', { get: () => editor(el).textContent });
+		const seen = record(el, 'mail-draft-change', 'mail-draft-detach');
+		const subject = el.shadowRoot!.querySelector<HTMLInputElement>('.subject')!;
+		subject.value = 'Plans';
+		subject.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+		editor(el).textContent = 'See you';
+		editor(el).dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+		el.shadowRoot!.querySelector<HTMLButtonElement>('.files button')!.click();
+		const to = fields(el)[0]!;
+		await type(el, to, 'carol@example.com');
+		// The field is left, and the window taken out of the page (its draft thrown away), before the
+		// field's own commit, which comes a moment later.
+		input(to).dispatchEvent(new Event('blur'));
+		el.remove();
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		expect(seen).toEqual([
+			['mail-draft-change', { patch: { subject: 'Plans' }, session: 1 }],
+			['mail-draft-change', { patch: { html: 'See you', text: 'See you' }, session: 1 }],
+			['mail-draft-detach', { blobId: 'b1', session: 1 }],
+			[
+				'mail-draft-change',
+				{ patch: { to: [{ name: '', email: 'carol@example.com' }] }, session: 1 },
+			],
 		]);
 	});
 

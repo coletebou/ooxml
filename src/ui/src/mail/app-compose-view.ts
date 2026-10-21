@@ -1,7 +1,8 @@
 // The compose layer of <mail-app>: the compose window over the app, with each of its events turned
-// into a client action. A hand-over names the compose session it is for, and one for a draft that
-// gave way to another since is dropped, so a late read or a late Close never acts on the next one.
-// The window reads the pictures its draft shows through the client.
+// into a client action. Each event names the compose session it is for, and one for a draft that
+// gave way to another since is dropped, so a late read, a late Close or an address its field
+// commits once the window has gone never acts on the next draft. The window reads the pictures its
+// draft shows through the client.
 import { html, nothing } from 'lit';
 import type { DraftAttachment, MailClient, MailState } from 'ooxml-core/mail';
 import type { DownloadPart } from './compose-pictures';
@@ -34,7 +35,7 @@ function partReader(mail: MailClient): DownloadPart {
 
 export function composeView(mail: MailClient, state: MailState) {
 	if (!state.compose) return nothing;
-	/** Run `action` for a hand-over of the open draft; one of a draft that gave way is dropped. */
+	/** Run `action` for an event of the open draft; one for a draft that gave way is dropped. */
 	const current =
 		<T extends { session: number }>(action: (detail: T) => unknown) =>
 		(e: CustomEvent<T>): void => {
@@ -46,9 +47,9 @@ export function composeView(mail: MailClient, state: MailState) {
 			.identities=${state.identities}
 			.contacts=${state.contacts}
 			.download=${partReader(mail)}
-			@mail-draft-change=${(e: CustomEvent<{ patch: Patch }>) => mail.updateDraft(e.detail.patch)}
+			@mail-draft-change=${current((detail: { session: number; patch: Patch }) => mail.updateDraft(detail.patch))}
 			@mail-draft-attach=${current((detail: { session: number; files: Files }) => mail.attach(detail.files))}
-			@mail-draft-detach=${(e: CustomEvent<{ blobId: string }>) => mail.detach(e.detail.blobId)}
+			@mail-draft-detach=${current((detail: { session: number; blobId: string }) => mail.detach(detail.blobId))}
 			@mail-draft-send=${current(() => mail.send())}
 			@mail-draft-discard=${current(() => mail.discardDraft())}
 			@mail-draft-close=${current(() => mail.closeCompose())}

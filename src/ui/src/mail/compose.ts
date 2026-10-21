@@ -5,7 +5,8 @@
 // still being typed is part of the draft before the window closes or sends (`commitRecipients()`).
 // Picked files are read for the draft they were added to (`compose-files.ts`): Send stays off while
 // they are read, Close (and the app's own hand-overs, `filesRead()`) waits for them, and Discard
-// drops them. Each hand-over names its session.
+// drops them. Each edit and each hand-over names its session: an edit can come once its draft has
+// gone (an address field commits what it holds a moment after it is left), and is dropped then.
 // The pictures the draft's HTML shows by `cid:` show from the bytes `download` reads, and the HTML
 // handed back always refers to them by `cid:` (`compose-pictures.ts`).
 import { html, nothing, type PropertyValues } from 'lit';
@@ -178,8 +179,16 @@ export class MailCompose extends MailElement {
 		this.pictures.mark();
 	}
 
+	/** Change the draft of the session the window shows, which the change names. */
 	private change(patch: Patch): void {
-		this.emit('mail-draft-change', { patch });
+		const session = this.compose?.session;
+		if (session !== undefined) this.emit('mail-draft-change', { patch, session });
+	}
+
+	/** Take a file out of the draft of the session the window shows, which the event names. */
+	private detach(blobId: string): void {
+		const session = this.compose?.session;
+		if (session !== undefined) this.emit('mail-draft-detach', { blobId, session });
 	}
 
 	/** Turn the addresses still being typed into recipients (a draft change), so nothing is lost. */
@@ -320,7 +329,7 @@ export class MailCompose extends MailElement {
 				@dragstart=${() => (this.moving = true)}
 				@dragend=${() => (this.moving = false)}
 			></div>
-			${fileList(listedFiles(draft.attachments, this.pictures.shown), this.i18n, (blobId) => this.emit('mail-draft-detach', { blobId }))}
+			${fileList(listedFiles(draft.attachments, this.pictures.shown), this.i18n, (blobId) => this.detach(blobId))}
 			${composeFooter(compose, this.readingFiles, this.i18n, this.footer)}
 		</section>`;
 	}
