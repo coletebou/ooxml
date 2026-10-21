@@ -240,23 +240,26 @@ function readCalendars(
 		if (isValidZone(options.zone)) floating = options.zone;
 		else note(`The zone "${options.zone}" is unknown: floating times and dates were read in UTC`);
 	}
-	const files = new Map<string, FileZone>();
-	for (const calendar of roots) {
+	// A TZID names a VTIMEZONE of its own calendar (RFC 5545 3.6.5): two calendars in one file may
+	// each define a zone by the same name, so each is read with its own zones.
+	const read = roots.map((calendar) => {
 		for (const p of calendar.properties)
 			if (!CALENDAR.has(p.name)) note(`${p.name} is not imported`);
 			else if (p.name === 'CALSCALE' && p.value.trim().toUpperCase() !== 'GREGORIAN')
 				note(`CALSCALE:${p.value.trim()} is not supported; dates were read as Gregorian`);
+		const files = new Map<string, FileZone>();
 		for (const c of calendar.components) {
 			if (c.name !== 'VTIMEZONE') continue;
 			const zone = readFileZone(c);
 			if (zone) files.set(zone.tzid, zone);
 			else note('A VTIMEZONE could not be read');
 		}
-	}
-	const ctx: ReadContext = { floating, zone: zoneResolver(files, floating, note), note };
+		const ctx: ReadContext = { floating, zone: zoneResolver(files, floating, note), note };
+		return { calendar, ctx };
+	});
 	const drafts: EventDraft[] = [];
 	const skipped = new Map<string, number>();
-	for (const calendar of roots)
+	for (const { calendar, ctx } of read)
 		for (const c of calendar.components) {
 			if (c.name === 'VTIMEZONE') continue;
 			if (c.name !== 'VEVENT') {

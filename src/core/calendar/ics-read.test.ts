@@ -1075,3 +1075,36 @@ describe('the ids of imported events in a calendar', () => {
 		expect(held.events.get('r')).toEqual({ ...mine, id: 'r' });
 	});
 });
+
+describe('the time zones of a file that holds several calendars', () => {
+	it("reads each calendar's times in the zone it defines, whatever the next one names the same", () => {
+		// A TZID names a VTIMEZONE of its own calendar (RFC 5545 3.6.5): two calendars of one file may
+		// each define a zone by one name, and neither changes the other's times.
+		const custom = (offset: string): string[] => [
+			'BEGIN:VTIMEZONE',
+			'TZID:Office Time',
+			'BEGIN:STANDARD',
+			`TZOFFSETFROM:${offset}`,
+			`TZOFFSETTO:${offset}`,
+			'DTSTART:19700101T000000',
+			'END:STANDARD',
+			'END:VTIMEZONE',
+		];
+		const event = (uid: string): string[] =>
+			vevent(
+				`UID:${uid}`,
+				'DTSTAMP:20261001T000000Z',
+				'DTSTART;TZID=Office Time:20261021T090000',
+				'DTEND;TZID=Office Time:20261021T100000',
+				`SUMMARY:${uid}`,
+			);
+		const file =
+			calendar(...custom('+0100'), ...event('first')) +
+			calendar(...custom('+0200'), ...event('second'));
+		const { events } = parseIcs(file);
+		expect(events.map((e) => [e.title, new Date(e.start).toISOString()])).toEqual([
+			['first', '2026-10-21T08:00:00.000Z'],
+			['second', '2026-10-21T07:00:00.000Z'],
+		]);
+	});
+});
