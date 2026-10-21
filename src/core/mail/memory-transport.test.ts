@@ -180,6 +180,34 @@ describe('createMemoryTransport', () => {
 		).toEqual([...numbers.map((n) => `f${n}`), 'Created folder']);
 	});
 
+	it('keeps a saved draft whose old id is the one it would hand out next', async () => {
+		// A draft whose copy is gone (deleted meanwhile, or from before a reload) still carries its
+		// id; a fresh transport numbers its first draft `d1` too.
+		const transport = createMemoryTransport();
+		const draft = { to: [], cc: [], bcc: [], subject: 'Kept', text: 'Body', attachments: [] };
+		const { id } = await transport.saveDraft({ ...draft, id: 'd1' });
+		expect(id).not.toBe('d1');
+		expect(await transport.message(id)).toMatchObject({ subject: 'Kept', text: 'Body' });
+		expect((await transport.query({ mailboxId: 'drafts' })).ids).toEqual([id]);
+		// The same for the copy a send files in Sent: its first is `s1`.
+		const fresh = createMemoryTransport();
+		const sent = await fresh.send({ ...draft, to: [me], id: 's1' });
+		expect((await fresh.message(sent.id)).subject).toBe('Kept');
+		expect((await fresh.query({ mailboxId: 'sent' })).ids).toEqual([sent.id]);
+	});
+
+	it('sends a message to yourself where there is no Inbox once, into Sent', async () => {
+		const transport = createMemoryTransport({
+			mailboxes: DEFAULT_MAILBOXES.filter((mailbox) => mailbox.role !== 'inbox'),
+		});
+		const draft = { to: [me], cc: [], bcc: [], subject: 'Note', text: 'Hi', attachments: [] };
+		const { id } = await transport.saveDraft(draft);
+		await transport.send({ ...draft, id });
+		expect((await transport.query({ mailboxId: 'sent' })).total).toBe(1);
+		expect((await transport.query({ mailboxId: 'drafts' })).total).toBe(0);
+		expect((await transport.query({})).total).toBe(1);
+	});
+
 	it('serves the demo seed, thousands of messages included', async () => {
 		const seed = createDemoSeed({ now: Date.UTC(2026, 9, 20, 12), bulk: 3000 });
 		const transport = createMemoryTransport(seed);

@@ -1,7 +1,7 @@
 // Saving drafts and sending in a memory transport: a draft is kept in Drafts in place of the one
-// it replaces, a sent message in Sent (and in the Inbox too when it is addressed to the person, so
-// a demo can mail itself), and the message it answers or forwards is marked so. Split from
-// `memory-transport.ts`. New code.
+// it replaces, a sent message in Sent (and in the Inbox too, when there is one, if it is addressed
+// to the person, so a demo can mail itself), and the message it answers or forwards is marked so.
+// Split from `memory-transport.ts`. New code.
 import { draftRecipients } from './compose';
 import { messageFromDraft } from './memory-messages';
 import type { MemoryState } from './memory-state';
@@ -23,6 +23,12 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 	/** Removes the saved draft that a save or a send replaces; returns its id for the change feed. */
 	const dropDraft = (draft: Draft): string[] =>
 		draft.id && messages.delete(draft.id) ? [draft.id] : [];
+	/**
+	 * A new id for what `draft` becomes: never one stored, and never the draft's own, which may be
+	 * gone already (deleted, or from before a reload): `dropDraft` would take the new copy with it.
+	 */
+	const newId = (prefix: string, draft: Draft): string =>
+		state.nextId(prefix, { has: (id) => messages.has(id) || id === draft.id });
 	const addKeyword = (id: string | undefined, keyword: string): void => {
 		const target = id ? messages.get(id) : undefined;
 		if (target) messages.set(id!, { ...target, keywords: { ...target.keywords, [keyword]: true } });
@@ -32,7 +38,7 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 		async saveDraft(draft) {
 			await state.settle();
 			const from = senderOf(draft);
-			const id = state.nextId('d', messages);
+			const id = newId('d', draft);
 			messages.set(
 				id,
 				messageFromDraft(draft, id, {
@@ -52,9 +58,16 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 			if (!recipients.length)
 				throw new MailTransportError('invalid', 'The message has no recipients.');
 			const from = senderOf(draft);
-			const id = state.nextId('s', messages);
+			// Every folder it needs is found before anything is stored, so a send that fails stores
+			// nothing. A message to the person's own address arrives in the Inbox too, when there is one.
+			const sentBox = state.byRole('sent');
+			const toSelf = recipients.some((address) => state.own.has(address.email.toLowerCase()));
+			const inbox = toSelf
+				? [...state.mailboxes.values()].find((mailbox) => mailbox.role === 'inbox')
+				: undefined;
+			const id = newId('s', draft);
 			const sent = messageFromDraft(draft, id, {
-				mailboxId: state.byRole('sent').id,
+				mailboxId: sentBox.id,
 				sent: true,
 				now: state.now(),
 				from,
@@ -62,13 +75,13 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 			});
 			messages.set(id, sent);
 			const created = [id];
-			if (recipients.some((address) => state.own.has(address.email.toLowerCase()))) {
-				const copy = state.nextId('m', messages);
+			if (inbox) {
+				const copy = newId('m', draft);
 				messages.set(copy, {
 					...sent,
 					id: copy,
 					blobId: `${copy}-raw`,
-					mailboxIds: [state.byRole('inbox').id],
+					mailboxIds: [inbox.id],
 					keywords: {},
 					bcc: [],
 				});
