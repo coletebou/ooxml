@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createJmapTransport, createMemoryTransport, type MailMessage } from 'ooxml-core/mail';
 import type { MailHtmlFrame } from './html-frame';
-import { defineMailReadingPane, type MailReadingPane } from './reading-pane';
+import { defineMailReadingPane, type InlineUrls, type MailReadingPane } from './reading-pane';
 
 beforeAll(() => defineMailReadingPane());
 afterEach(() => document.body.replaceChildren());
@@ -112,9 +112,32 @@ async function fromJmap(email: Record<string, unknown>): Promise<MailMessage> {
 	}
 }
 
-/** What the reading pane shows of `message`: its frame, the text there, and the blocked note. */
-async function read(message: MailMessage) {
+/** An HTML body that shows a picture of its own (`cid:`), and that picture. */
+const PICTURE = [
+	'Subject: Picture',
+	'Content-Type: multipart/related; boundary=b',
+	'',
+	'--b',
+	'Content-Type: text/html',
+	'',
+	'<p>Logo<img src="cid:logo@x"></p>',
+	'--b',
+	'Content-Type: image/png',
+	'Content-ID: <logo@x>',
+	'Content-Transfer-Encoding: base64',
+	'',
+	'iVBORw0KGgo=',
+	'--b--',
+	'',
+].join('\r\n');
+
+/**
+ * What the reading pane shows of `message`, its pictures found by `inlineUrls` when given: the
+ * pane, its frame, the text there, and the blocked note.
+ */
+async function read(message: MailMessage, inlineUrls?: InlineUrls) {
 	const pane = document.createElement('mail-reading-pane') as MailReadingPane;
+	if (inlineUrls) pane.inlineUrls = inlineUrls;
 	pane.conversation = {
 		id: message.id,
 		subject: message.subject,
@@ -128,9 +151,27 @@ async function read(message: MailMessage) {
 	await pane.updateComplete;
 	const srcdoc = frame.shadowRoot!.querySelector('iframe')!.srcdoc;
 	return {
+		pane,
 		frame,
 		text: new DOMParser().parseFromString(srcdoc, 'text/html').body.textContent,
 		note: pane.shadowRoot!.querySelector('.remote span')?.textContent ?? null,
+	};
+}
+
+/**
+ * The count of each `mail-remote-blocked` from here on: a frame sends one each time it cleans its
+ * message and writes it again, which reloads it.
+ */
+function frameWrites(): { counts: number[]; stop(): void } {
+	const counts: number[] = [];
+	const count = (event: Event): void => {
+		counts.push((event as CustomEvent<{ count: number }>).detail.count);
+	};
+	// The pane stops the event at the frame, so it is counted on its way there.
+	document.addEventListener('mail-remote-blocked', count, { capture: true });
+	return {
+		counts,
+		stop: () => document.removeEventListener('mail-remote-blocked', count, { capture: true }),
 	};
 }
 
@@ -155,5 +196,151 @@ describe('<mail-reading-pane>', () => {
 		const { frame, text, note } = await read(one);
 		expect([frame.html, frame.htmlParts, text]).toEqual([one.html, null, 'One']);
 		expect(note).toBe('Blocked 1 remote image or style to protect your privacy.');
+	});
+
+	it('writes a message without pictures into its frame once, however often the pane draws', async () => {
+		const writes = frameWrites();
+		try {
+			const { pane, frame, note } = await read(
+				await imported(
+					'Subject: One\r\nContent-Type: text/html\r\n\r\n<p>One<img src="https://t.example/a.png"></p>',
+				),
+			);
+			expect(note).toBe('Blocked 1 remote image or style to protect your privacy.');
+			// A change elsewhere, such as new folder counts, draws the pane again.
+			pane.mailboxes = [];
+			await pane.updateComplete;
+			await frame.updateComplete;
+			expect(writes.counts).toEqual([1]);
+		} finally {
+			writes.stop();
+		}
+	});
+
+	it('writes a message with pictures again only once they are found', async () => {
+		const writes = frameWrites();
+		try {
+			let found: (urls: ReadonlyMap<string, string>) => void = () => {};
+			const { pane, frame } = await read(
+				await imported(PICTURE),
+				() => new Promise((resolve) => (found = resolve)),
+			);
+			// Until its pictures are found, drawing the pane again does not write the message again.
+			pane.mailboxes = [];
+			await pane.updateComplete;
+			await frame.updateComplete;
+			expect(writes.counts).toEqual([0]);
+			found(new Map([['logo@x', 'data:image/png;base64,AAAA']]));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await pane.updateComplete;
+			await frame.updateComplete;
+			expect(writes.counts).toEqual([0, 0]);
+			expect(frame.shadowRoot!.querySelector('iframe')!.srcdoc).toContain(
+				'src="data:image/png;base64,AAAA"',
+			);
+		} finally {
+			writes.stop();
+		}
+	});
+
+	it('opens a conversation whose message shows a picture in one update', async () => {
+		const message = await imported(PICTURE);
+		const pane = document.createElement('mail-reading-pane') as MailReadingPane;
+		// Never found: only what opening the conversation takes is counted.
+		pane.inlineUrls = () => new Promise(() => {});
+		const updates = vi.spyOn(pane as unknown as { update(changed: unknown): void }, 'update');
+		try {
+			pane.conversation = {
+				id: message.id,
+				subject: message.subject,
+				messages: [{ summary: message, depth: 0, message, error: null }],
+			};
+			document.body.append(pane);
+			await pane.updateComplete;
+			await pane.shadowRoot!.querySelector<MailHtmlFrame>('mail-html-frame')!.updateComplete;
+			await pane.updateComplete;
+			expect(updates).toHaveBeenCalledTimes(1);
+		} finally {
+			updates.mockRestore();
+		}
+	});
+
+	it('keeps the pictures found for a conversation out of the one opened since', async () => {
+		let found: (urls: ReadonlyMap<string, string>) => void = () => {};
+		const message = await imported(PICTURE);
+		const { pane } = await read(message, () => new Promise((resolve) => (found = resolve)));
+		const other = {
+			...(await imported('Subject: Other\r\nContent-Type: text/html\r\n\r\n<p>Other</p>')),
+			id: 'other',
+		};
+		pane.conversation = {
+			id: other.id,
+			subject: other.subject,
+			messages: [{ summary: other, depth: 0, message: other, error: null }],
+		};
+		await pane.updateComplete;
+		found(new Map([['logo@x', 'data:image/png;base64,AAAA']]));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await pane.updateComplete;
+		expect([...pane.inline.keys()]).toEqual([]);
+	});
+
+	it('sends what its toolbar does with the open conversation', async () => {
+		const { pane } = await read(
+			await imported('Subject: One\r\nContent-Type: text/html\r\n\r\n<p>One</p>'),
+		);
+		const id = pane.conversation!.id;
+		pane.mailboxes = [
+			{
+				id: 'f1',
+				name: 'Projects',
+				parentId: null,
+				role: null,
+				sortOrder: 0,
+				totalEmails: 0,
+				unreadEmails: 0,
+				depth: 1,
+			},
+		];
+		await pane.updateComplete;
+		const sent: unknown[] = [];
+		for (const type of ['mail-action', 'mail-move'])
+			pane.addEventListener(type, (event) => sent.push([type, (event as CustomEvent).detail]));
+		const toolbar = pane.shadowRoot!.querySelector('[role="toolbar"]')!;
+		const labels = () =>
+			[...toolbar.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'));
+		expect(toolbar.getAttribute('aria-label')).toBe('Conversation actions');
+		expect(labels()).toEqual([
+			'Back to the list',
+			'Archive',
+			'Delete',
+			'Move to Junk',
+			'Mark as unread',
+			'Flag',
+		]);
+		for (const button of toolbar.querySelectorAll('button')) button.click();
+		const select = toolbar.querySelector('select')!;
+		expect([...select.options].map((option) => option.textContent)).toEqual([
+			'Move to...',
+			'\u00a0\u00a0Projects',
+		]);
+		select.value = 'f1';
+		select.dispatchEvent(new Event('change'));
+		expect(select.value).toBe('');
+		expect(sent).toEqual([
+			...['close', 'archive', 'delete', 'junk', 'unread', 'flag'].map((action) => [
+				'mail-action',
+				{ action, id },
+			]),
+			['mail-move', { mailboxId: 'f1', ids: [id] }],
+		]);
+		// A flagged message makes the flag button take the flag off.
+		const [view] = pane.conversation!.messages;
+		pane.conversation = {
+			...pane.conversation!,
+			messages: [{ ...view!, summary: { ...view!.summary, keywords: { $flagged: true } } }],
+		};
+		await pane.updateComplete;
+		expect(labels().at(-1)).toBe('Remove the flag');
 	});
 });

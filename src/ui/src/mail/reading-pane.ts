@@ -20,11 +20,17 @@ import { defineOnce, MailElement, mailStyles } from './base';
 import { fullDate, hueOf, initials, names } from './format';
 import { defineMailHtmlFrame } from './html-frame';
 import { icon } from './icons';
-import { folderLabel } from './labels';
+import { conversationToolbar } from './reading-toolbar';
 import { linkify } from './sanitize';
 import css from './reading-pane.css?raw';
 
 export type InlineUrls = (message: MailMessage) => Promise<ReadonlyMap<string, string>>;
+
+/**
+ * The pictures of a message that has none, or whose pictures are still being found: always this
+ * one map, as a new empty one would have the frame clean and write its message again.
+ */
+const NO_PICTURES: ReadonlyMap<string, string> = new Map();
 
 export class MailReadingPane extends MailElement {
 	/** Focus the first action of the toolbar (Back on a narrow app), where reading starts. */
@@ -84,17 +90,18 @@ export class MailReadingPane extends MailElement {
 			this.blocked = new Map();
 			this.inline = new Map();
 		}
-	}
-
-	protected override updated(): void {
+		// The pictures of each loaded message that shows some, looked up once per message. Started
+		// here rather than once drawn, so the placeholder is part of this update, not another one.
+		const opened = this.conversation?.id;
 		for (const view of this.conversation?.messages ?? []) {
 			const message = view.message;
 			if (!message?.html || this.inline.has(message.id)) continue;
 			if (!message.attachments.some((a) => a.cid)) continue;
 			const id = message.id;
-			this.inline = new Map(this.inline).set(id, new Map<string, string>());
+			this.inline = new Map(this.inline).set(id, NO_PICTURES);
 			void this.inlineUrls(message).then((urls) => {
-				this.inline = new Map(this.inline).set(id, urls);
+				// Dropped when another conversation opened meanwhile: they are not its pictures.
+				if (this.conversation?.id === opened) this.inline = new Map(this.inline).set(id, urls);
 			});
 		}
 	}
@@ -135,11 +142,12 @@ export class MailReadingPane extends MailElement {
 					.html=${message.html}
 					.htmlParts=${message.htmlParts ?? null}
 					.allowRemote=${this.allowed.has(id)}
-					.cidUrls=${this.inline.get(id) ?? new Map()}
+					.cidUrls=${this.inline.get(id) ?? NO_PICTURES}
 					.label=${this.t('reading.bodyLabel', { subject: message.subject })}
 					@mail-remote-blocked=${(e: CustomEvent<{ count: number }>) => {
 						e.stopPropagation();
-						if (this.blocked.get(id) !== e.detail.count)
+						// None stored reads as none blocked: a message that blocks nothing needs no update.
+						if ((this.blocked.get(id) ?? 0) !== e.detail.count)
 							this.blocked = new Map(this.blocked).set(id, e.detail.count);
 					}}
 				></mail-html-frame>`
@@ -256,32 +264,11 @@ export class MailReadingPane extends MailElement {
 	}
 
 	private toolbar(conversation: OpenConversationView) {
-		const act = (action: string) => () => this.emit('mail-action', { action, id: conversation.id });
-		const button = (action: string, glyph: string, label: string) =>
-			html`<button type="button" aria-label=${label} title=${label} @click=${act(action)}
-				>${icon(glyph)}</button
-			>`;
-		const flagged = conversation.messages.some((m) => m.summary.keywords[FLAGGED]);
-		return html`<div class="toolbar" role="toolbar" aria-label=${this.t('reading.actions')}>
-			${button('close', 'chevronLeft', this.t('reading.back'))}
-			${button('archive', 'mail-archive', this.t('action.archive'))}
-			${button('delete', 'trash', this.t('action.delete'))}
-			${button('junk', 'mail-junk', this.t('action.junk'))}
-			${button('unread', 'mail-envelope', this.t('action.markUnread'))}
-			${button('flag', 'mail-flag', this.t(flagged ? 'action.unflag' : 'action.flag'))}
-			<select
-				aria-label=${this.t('action.moveTo')}
-				@change=${(e: Event) => {
-					const select = e.currentTarget as HTMLSelectElement;
-					if (select.value)
-						this.emit('mail-move', { mailboxId: select.value, ids: [conversation.id] });
-					select.value = '';
-				}}
-			>
-				<option value="">${this.t('action.moveTo')}</option>
-				${this.mailboxes.map((m) => html`<option value=${m.id}>${'\u00a0'.repeat(m.depth * 2)}${folderLabel(m, this.i18n)}</option>`)}
-			</select>
-		</div>`;
+		const id = conversation.id;
+		return conversationToolbar(conversation, this.mailboxes, this.i18n, {
+			act: (action) => this.emit('mail-action', { action, id }),
+			move: (mailboxId) => this.emit('mail-move', { mailboxId, ids: [id] }),
+		});
 	}
 
 	protected override render() {
