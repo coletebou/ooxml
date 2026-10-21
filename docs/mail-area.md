@@ -37,7 +37,9 @@ the bodies loaded so far, the `compose` window (draft, status, last save, upload
 `deleteEvent`, `importIcs`, `exportIcs`, `destroy`. What just happened arrives through `onNotice`
 (sent, moved with an `undo`, imported, a file still uploading, an error code); the UI words it.
 
-Changes are applied to the list at once and put back if the server refuses them. Drafts are saved
+Changes are applied to the list at once and put back for the messages the server refuses them for;
+a move it made for some of them keeps its notice and undo for those. The list is read page after
+page, as a server may send fewer messages than it is asked for (RFC 8620 5.5). Drafts are saved
 a quiet moment after the last edit, never two saves at once, and a draft counts as saved only once
 the server has its latest edit. A draft that cannot be saved, or whose attachments are still uploading, keeps its window open with its edits:
 closing it, or opening another message, waits for a save that succeeds (`compose`, `editDraft` and
@@ -51,9 +53,10 @@ instead of destroying mail. Responses for a folder or search the person already 
 `MailTransport` is the seam: `connect`, `mailboxes`, `createMailbox`, `renameMailbox`,
 `destroyMailbox`, `query`, `summaries`, `message`, `update`, `destroy`, `saveDraft`, `send`,
 `upload`, `download`, `importMessage`, `watch`, `close`. Failures are `MailTransportError` with a
-`code` (`unauthorized`, `network`, `overQuota`, ...), never a sentence the UI has to parse. A send
-the server did not confirm fails as `uncertain`, not as not sent: the message may have gone out,
-and sending the same draft again first asks the server whether it did.
+`code` (`unauthorized`, `network`, `overQuota`, ...), never a sentence the UI has to parse; an
+`update` that changed only some of the messages fails with a `PartialUpdateError` naming those. A
+send the server did not confirm fails as `uncertain`, not as not sent: the message may have gone
+out, and sending the same draft again first asks the server whether it did.
 
 - `createMemoryTransport({ account, identities, mailboxes, messages, latencyMs, loopback })`: a mail
   server in memory for demos and tests; a message sent to your own address arrives in the Inbox.
@@ -67,14 +70,16 @@ and sending the same draft again first asks the server whether it did.
   logged, persisted, put in a URL or an error message. They and request bodies go over https only
   (plain http to a loopback host), redirects included: where the platform hands redirects back,
   every request checks each hop before following it and refuses one to plain http; a browser,
-  which hides them, blocks that hop itself as mixed content. After an `uncertain` send it keeps
-  the copy it made, in memory: the same draft sent again first asks the server whether that copy
-  went out (RFC 8621 7.3), sends nothing while the server cannot be asked, and sends it again only
-  when the server says it did not, or has neither the copy nor a submission of it any more. A
-  reload forgets the copy, and a changed draft is a new message. A request the server refused as
-  a whole (HTTP 4xx, RFC 8620 3.6) sent nothing and fails with its own error; one that creates
-  and submits the message at once and gets no answer at all fails as that failure, with no copy
-  known to ask about.
+  which hides them, blocks that hop itself as mixed content. Every message it sends gets a
+  Message-ID of its own (RFC 8621 4.6). After an `uncertain` send it keeps the copy it made, in
+  memory, or that Message-ID when the request that creates and submits the message at once got no
+  answer at all: the same draft sent again first finds that copy (an `Email/query` for the
+  Message-ID, RFC 8621 4.4.1) and asks the server whether it went out (7.3), sends nothing while
+  the server cannot be asked, and sends it again only when the server says it did not, has
+  neither the copy nor a submission of it any more (the search finds no copy), or cannot search by
+  header field (`unsupportedFilter`), so it can never say. A reload forgets the copy, and a changed
+  draft is a new message. A request the server refused as a whole (HTTP 4xx, RFC 8620 3.6) sent
+  nothing and fails with its own error.
 
 ## Messages
 
@@ -82,7 +87,8 @@ and sending the same draft again first asks the server whether it did.
   words, RFC 2045 and RFC 2231 parameters, quoted-printable, base64, multipart, `message/rfc822`;
   `readEmail` classifies body parts as RFC 8621 section 4.1.4 does, `writeEmail` builds
   `multipart/alternative`, `related` and `mixed`. `.eml` import and export are these two
-  (`eml.ts`). Malformed input never throws.
+  (`eml.ts`). Malformed input never throws; base64 padded in the middle, however often, is decoded
+  in one pass into one array.
 - **Threading** (`threading.ts`): the REFERENCES algorithm of RFC 5256 over `Message-ID`,
   `References` and `In-Reply-To`, then the base subject (`subject.ts`, RFC 5256 section 2.1 plus the
   common translated reply markers). Iterative throughout, so a chain thousands deep cannot overflow
@@ -103,7 +109,8 @@ and sending the same draft again first asks the server whether it did.
 `contacts.ts` is the address book model (every vCard structured component) and its helpers;
 `vcard.ts` reads vCard 4.0, 3.0 and the common 2.1 forms and writes 4.0, keeping every property it
 does not edit verbatim (an inline 3.0 or 2.1 photo, logo, sound or key is written as the 4.0 `data:`
-URI, `vcard-legacy.ts`). A card without a UID gets an id from a hash of its content, the same
+URI, and a quoted-printable 2.1 value as the text it encodes, `vcard-legacy.ts`). A card without a
+UID gets an id from a hash of its content, the same
 wherever it stands in a file, and two copies of it are one contact. `record-store.ts` keeps
 contacts and events in memory, optionally persisted to a `Storage`-like object and re-validated
 when read back. `calendar-store.ts` stores the shared `CalendarEvent`.
