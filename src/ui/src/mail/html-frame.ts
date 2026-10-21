@@ -1,8 +1,10 @@
 // <mail-html-frame>: one message's HTML body, sanitised (sanitize.ts, part by part when it was
 // sent in several) and shown in a sandboxed frame: no scripts (`allow-scripts` is never granted),
 // no forms, no top navigation, and a Content-Security-Policy that blocks remote loads until
-// `allowRemote`. The frame is same-origin only so the host can size it to its content and route
-// `mailto:` links (an image map's areas too) to compose. New code.
+// `allowRemote`. The frame is same-origin only so the host can size it to its content, route
+// `mailto:` links (an image map's areas too) to compose, and hear the keys pressed in it: a key
+// stays in the frame's document, so each one the message does not act on itself goes on as a
+// `keydown` of the element, where the app's shortcuts hear it. New code.
 import { html, type PropertyValues } from 'lit';
 import { OFFICE_TOKENS, type OfficeToken } from '../tokens';
 import { defineOnce, MailElement, mailStyles } from './base';
@@ -10,6 +12,32 @@ import { emailDocument, sanitizeMessageHtml, type FrameStyle } from './sanitize'
 import css from './html-frame.css?raw';
 
 const SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
+
+/**
+ * The keys a message's document acts on itself, with any modifier: the arrows, Space, Page Up and
+ * Down, Home and End scroll it, Tab moves the focus through its links, and Enter follows one or
+ * opens a `<details>`. Ctrl/Cmd+A, which selects its text, is its own too; Ctrl/Cmd+Enter (send)
+ * is not.
+ */
+const DOCUMENT_KEYS = new Set([
+	' ',
+	'Enter',
+	'Tab',
+	'ArrowUp',
+	'ArrowDown',
+	'ArrowLeft',
+	'ArrowRight',
+	'Home',
+	'End',
+	'PageUp',
+	'PageDown',
+]);
+
+function documentOwns(event: KeyboardEvent): boolean {
+	const chord = event.ctrlKey || event.metaKey;
+	if (chord && event.key === 'Enter') return false;
+	return DOCUMENT_KEYS.has(event.key) || (chord && event.key.toLowerCase() === 'a');
+}
 
 export class MailHtmlFrame extends MailElement {
 	static override styles = mailStyles(css);
@@ -120,6 +148,26 @@ export class MailHtmlFrame extends MailElement {
 			event.preventDefault();
 			this.emit('mail-mailto', { href });
 		});
+		doc.addEventListener('keydown', (event) => this.handOn(event));
+	}
+
+	/** A key pressed in the message, as a `keydown` of the element; one a shortcut takes stays there. */
+	private handOn(event: KeyboardEvent): void {
+		if (event.defaultPrevented || event.isComposing || documentOwns(event)) return;
+		const copy = new KeyboardEvent('keydown', {
+			key: event.key,
+			code: event.code,
+			location: event.location,
+			repeat: event.repeat,
+			ctrlKey: event.ctrlKey,
+			shiftKey: event.shiftKey,
+			altKey: event.altKey,
+			metaKey: event.metaKey,
+			bubbles: true,
+			composed: true,
+			cancelable: true,
+		});
+		if (!this.dispatchEvent(copy)) event.preventDefault();
 	}
 
 	/**

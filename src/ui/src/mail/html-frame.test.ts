@@ -98,6 +98,43 @@ describe('<mail-html-frame>', () => {
 		expect(followed).toEqual([false, false]);
 	});
 
+	it('hands a key pressed in its message on, but one the message acts on itself', async () => {
+		const { element, doc } = await loaded();
+		doc.body.innerHTML = '<p>Hello</p><a href="https://example.com/">a link</a>';
+		const heard: [string, boolean, boolean][] = [];
+		element.addEventListener('keydown', (event) => {
+			heard.push([event.key, event.ctrlKey, event.composed]);
+			// A shortcut takes this one.
+			if (event.key === 'r') event.preventDefault();
+		});
+		const press = (key: string, init: KeyboardEventInit = {}): boolean => {
+			const event = new doc.defaultView!.KeyboardEvent('keydown', {
+				key,
+				bubbles: true,
+				cancelable: true,
+				...init,
+			});
+			doc.querySelector('p')!.dispatchEvent(event);
+			return event.defaultPrevented;
+		};
+		expect([press('r'), press('e'), press('Escape'), press('Enter', { ctrlKey: true })]).toEqual([
+			true,
+			false,
+			false,
+			false,
+		]);
+		// Scrolling it, moving the focus in it, following its link and selecting its text stay its own.
+		for (const key of ['ArrowDown', ' ', 'PageDown', 'End', 'Enter', 'Tab']) press(key);
+		press('a', { ctrlKey: true });
+		press('A', { metaKey: true, shiftKey: true });
+		expect(heard).toEqual([
+			['r', false, true],
+			['e', false, true],
+			['Escape', false, true],
+			['Enter', true, true],
+		]);
+	});
+
 	it('fits the frame again when a web font arrives after its message has loaded', async () => {
 		// Both are own properties of the frame's document, which goes with the frame: nothing shared.
 		let height = 100;

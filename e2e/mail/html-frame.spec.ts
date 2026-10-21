@@ -78,3 +78,28 @@ test('a message frame grows and shrinks with a details element the reader opens 
 	await summary.click();
 	await expect.poll(height).toBeLessThan(120);
 });
+
+test('the shortcuts work with the focus in an HTML message, which keeps its own keys', async ({
+	page,
+}) => {
+	await openDemo(page);
+	await openConversation(page, 'This week: offline-first apps');
+	const frame = page.frameLocator('mail-reading-pane mail-html-frame iframe');
+	await frame.locator('h1').click();
+	// The focus is in the message's own document now.
+	expect(await frame.locator('body').evaluate((body) => body.ownerDocument.hasFocus())).toBe(true);
+	// Its own keys: Ctrl/Cmd+A selects its text, not every conversation, and the arrows scroll it
+	// rather than open the next conversation.
+	await page.keyboard.press('ControlOrMeta+a');
+	expect(
+		await frame.locator('body').evaluate((body) => body.ownerDocument.getSelection()?.toString()),
+	).toContain('Example Weekly');
+	await expect(page.locator('mail-app .selected-count')).toHaveCount(0);
+	await page.keyboard.press('ArrowDown');
+	await expect(page.locator('mail-reading-pane h2')).toHaveText('This week: offline-first apps');
+	// A shortcut: r answers the open message.
+	await page.keyboard.press('r');
+	await expect(page.locator('mail-compose').getByPlaceholder('Subject')).toHaveValue(
+		'Re: This week: offline-first apps',
+	);
+});
