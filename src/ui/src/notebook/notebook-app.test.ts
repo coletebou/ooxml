@@ -196,6 +196,18 @@ describe('<notebook-app>', () => {
 		expect([pasted.x, pasted.y]).toEqual([48, 100 + 96 + 24]);
 	});
 
+	it('says so when a notebook export fails', async () => {
+		app = await mount();
+		const failing = vi
+			.spyOn(app.client!, 'exportNotebook')
+			.mockRejectedValue(new Error('disk full'));
+		const { exportNotebook } = await import('./app-actions');
+		await exportNotebook(app);
+		await app.updateComplete;
+		expect(shadowText(app)).toContain('The export failed.');
+		failing.mockRestore();
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;

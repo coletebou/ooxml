@@ -166,9 +166,13 @@ export async function exportPage(app: AppHost): Promise<void> {
 export async function exportNotebook(app: AppHost): Promise<void> {
 	const client = app.client;
 	if (!client || !app.state?.notebook) return;
-	const file = await client.exportNotebook();
-	save(app, file, 'archive');
-	app.notify(app.tr('notice.exported', { name: file.fileName }));
+	try {
+		const file = await client.exportNotebook();
+		save(app, file, 'archive');
+		app.notify(app.tr('notice.exported', { name: file.fileName }));
+	} catch {
+		app.notify(app.tr('notice.export-failed'));
+	}
 }
 
 export async function importArchive(app: AppHost, file: File): Promise<void> {
