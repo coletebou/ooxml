@@ -247,10 +247,15 @@ export function movePage(
 		const destination = sectionPages(readPages(ctx.types), target.sectionId).filter(
 			(p) => !block.some((b) => b.id === p.id),
 		);
+		// Landing before a deeper page would make that page (never moved) a subpage of the block:
+		// the block goes past the rest of that page's subpages instead.
+		const level = Math.max(0, (block[0]?.level ?? 0) + shift);
+		let at = target.beforeId ? destination.findIndex((p) => p.id === target.beforeId) : -1;
+		if (at >= 0) while (at < destination.length && destination[at]!.level > level) at++;
 		place(
 			destination.map((p) => pageOrdered(ctx, p)),
 			block.map((p) => pageOrdered(ctx, p)),
-			target.beforeId,
+			at >= 0 ? destination[at]?.id : target.beforeId,
 		);
 	});
 	return true;

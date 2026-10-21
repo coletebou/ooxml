@@ -60,7 +60,9 @@ export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise
 	if (counts.some((list) => list.length > MAX_ITEMS))
 		throw new NotebookArchiveError('This notebook holds more items than an archive takes');
 	const media = snapshot.containers.reduce((sum, c) => sum + (c.bytes?.length ?? 0), 0);
-	if (media > MAX_ARCHIVE_BYTES)
+	// The manifest (with every text box's content) counts against the same size.
+	const written = JSON.stringify(snapshot.containers.map((c) => c.content ?? null)).length;
+	if (media + written > MAX_ARCHIVE_BYTES)
 		throw new NotebookArchiveError('This notebook is larger than an archive takes');
 	if (snapshot.containers.some((c) => c.overLimit))
 		throw new NotebookArchiveError('A text box holds more text than an archive takes');

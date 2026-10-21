@@ -188,4 +188,14 @@ describe('notebook structure', () => {
 		movePage(ctx, a2, { sectionId: s, beforeId: a1 });
 		expect(titles(ctx, s)).toEqual(['0:A', '1:A2', '1:A1']);
 	});
+
+	it("does not move a page into another page's subpages", () => {
+		const ctx = context();
+		const s = addSection(ctx, { name: 'S' });
+		const a = addPage(ctx, { sectionId: s, title: 'A' });
+		const a1 = addPage(ctx, { sectionId: s, title: 'A1', afterId: a, level: 1 });
+		const b = addPage(ctx, { sectionId: s, title: 'B', afterId: a1, level: 0 });
+		movePage(ctx, b, { sectionId: s, beforeId: a1 });
+		expect(titles(ctx, s)).toEqual(['0:A', '1:A1', '0:B']);
+	});
 });

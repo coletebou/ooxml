@@ -197,6 +197,14 @@ describe('rich text in the y-prosemirror encoding', () => {
 		).toBe(text);
 	});
 
+	it('writes at most a bounded number of nodes, however many breaks an archive holds', () => {
+		const f = fragment();
+		const breaks = Array.from({ length: 300_000 }, () => ({ type: 'hard_break' }));
+		writeRichText(f, [{ type: 'paragraph', attrs: { todo: null }, content: breaks }]);
+		const p = f.get(0) as Y.XmlElement;
+		expect(p.length).toBeLessThanOrEqual(100_000);
+	});
+
 	it('turns pasted plain text into paragraphs', () => {
 		const blocks = richTextFromPlain('a\r\n\r\nb');
 		expect(blocks).toHaveLength(3);

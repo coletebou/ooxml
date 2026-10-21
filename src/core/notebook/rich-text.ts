@@ -31,6 +31,8 @@ export interface RichNode {
 const MAX_TEXT = MAX_TEXT_LENGTH;
 // A deeper document (only a hostile one, as the editor stops at MAX_LIST_LEVELS) is cut there.
 const MAX_DEPTH = MAX_ELEMENT_DEPTH;
+/** Nodes one text box's document is written with at most (an archive's, a paste's). */
+const MAX_NODES = 100_000;
 const LEAVES = new Set(['hard_break']);
 const CONTAINERS = new Set(['bullet_list', 'ordered_list', 'list_item']);
 
@@ -139,7 +141,7 @@ const childrenOf = (node: RichNode): RichNode[] =>
 	Array.isArray(node.content) ? node.content.filter(isNode) : [];
 
 /** A text run or a leaf rebuilt from its valid parts only (text a string, marks objects). */
-function inlineNode(node: RichNode, budget: { chars: number }): RichNode | null {
+function inlineNode(node: RichNode, budget: { chars: number; nodes: number }): RichNode | null {
 	if (LEAVES.has(node.type)) return { type: node.type };
 	if (typeof node.text !== 'string' || !node.text) return null;
 	const text = node.text.slice(0, Math.max(0, budget.chars));
@@ -156,7 +158,7 @@ function inlineNode(node: RichNode, budget: { chars: number }): RichNode | null 
 function normaliseBlocks(
 	input: readonly RichNode[],
 	depth = 0,
-	budget = { chars: MAX_TEXT },
+	budget = { chars: MAX_TEXT, nodes: MAX_NODES },
 ): RichNode[] {
 	if (depth > MAX_DEPTH) return [];
 	const nodes = unwrapUnknown(input);
@@ -167,6 +169,8 @@ function normaliseBlocks(
 		inline = [];
 	};
 	for (const node of nodes) {
+		// Each node costs one: millions of line breaks or empty paragraphs cost no text, but memory.
+		if (--budget.nodes < 0) break;
 		if (node.type === 'text' || LEAVES.has(node.type)) {
 			const leaf = inlineNode(node, budget);
 			if (leaf) inline.push(leaf);
@@ -184,6 +188,7 @@ function normaliseBlocks(
 		else if (node.type === 'paragraph' || node.type === 'heading') {
 			const content = childrenOf(node)
 				.filter((c) => c.type === 'text' || LEAVES.has(c.type))
+				.filter(() => --budget.nodes >= 0)
 				.map((c) => inlineNode(c, budget))
 				.filter(isNode);
 			out.push(

@@ -184,7 +184,23 @@ const PROTECTED = new Set(['paragraph', 'heading']);
 export function keepFilled(item: Y.Item): boolean {
 	if (!(item.content instanceof Y.ContentType)) return true;
 	const type = item.content.type;
+	// A text box (and its text) that still holds something (a collaborator's) is kept as well.
+	if (type instanceof Y.XmlFragment && !(type instanceof Y.XmlElement)) return !hasText(type);
+	if (type instanceof Y.Map) {
+		const content = type.get('content');
+		return !(content instanceof Y.XmlFragment) || !hasText(content);
+	}
 	const kept =
 		type instanceof Y.XmlText || (type instanceof Y.XmlElement && PROTECTED.has(type.nodeName));
 	return !kept || type.length === 0;
+}
+
+function hasText(fragment: Y.XmlFragment): boolean {
+	const stack: unknown[] = fragment.toArray();
+	while (stack.length) {
+		const item = stack.pop();
+		if (item instanceof Y.XmlText && item.length) return true;
+		if (item instanceof Y.XmlElement) stack.push(...item.toArray());
+	}
+	return false;
 }
