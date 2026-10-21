@@ -82,14 +82,18 @@ function containsAll(haystack: string, needle: string | undefined): boolean {
 /**
  * Remove `<script>` and `<style>` elements with their contents in one linear pass (a lazy regex
  * with a back reference goes quadratic on many unclosed tags). An unclosed one runs to the end.
+ * The next opener of each kind is looked for again only once the scan has passed it, so a kind
+ * that is not there is searched for once, not once per element of the other kind.
  */
 export function dropScriptsAndStyles(html: string): string {
 	const lower = html.toLowerCase();
 	let out = '';
 	let at = 0;
+	let script = lower.indexOf('<script');
+	let style = lower.indexOf('<style');
 	for (;;) {
-		const script = lower.indexOf('<script', at);
-		const style = lower.indexOf('<style', at);
+		if (script >= 0 && script < at) script = lower.indexOf('<script', at);
+		if (style >= 0 && style < at) style = lower.indexOf('<style', at);
 		const start = script < 0 ? style : style < 0 ? script : Math.min(script, style);
 		if (start < 0) return out + html.slice(at);
 		const tag = start === script ? '</script' : '</style';

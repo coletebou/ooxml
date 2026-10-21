@@ -79,4 +79,11 @@ describe('body text', () => {
 		dropScriptsAndStyles('<script'.repeat(50_000));
 		expect(performance.now() - started).toBeLessThan(2000);
 	});
+	it('stays linear on many closed blocks of one kind and none of the other', () => {
+		for (const block of ['<script>x</script>', '<style>x</style>']) {
+			const started = performance.now();
+			expect(dropScriptsAndStyles(`a${block.repeat(50_000)}b`)).toBe(`a${' '.repeat(50_000)}b`);
+			expect(performance.now() - started).toBeLessThan(2000);
+		}
+	});
 });
