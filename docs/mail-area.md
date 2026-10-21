@@ -58,6 +58,12 @@ instead of destroying mail. Responses for a folder or search the person already 
 send the server did not confirm fails as `uncertain`, not as not sent: the message may have gone
 out, and sending the same draft again first asks the server whether it did.
 
+`destroy` stops a client: it no longer watches its transport, drops the answers still on their way,
+fires none of its timers (a draft change waiting for its save stays unsaved), and closes the
+transport. `createMailClient({ closeTransport: false })` leaves the transport open instead, for one
+the host owns and gives to the next client (`ooxml-ui/mail`'s `createMail` does so for a
+`kind: 'transport'` connection).
+
 - `createMemoryTransport({ account, identities, mailboxes, messages, latencyMs, loopback })`: a mail
   server in memory for demos and tests; a message sent to your own address arrives in the Inbox.
 - `createJmapTransport({ url, auth, fetch?, push? })`: JMAP (RFC 8620 core, RFC 8621 mail). Session
