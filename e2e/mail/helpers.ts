@@ -4,7 +4,7 @@ import { expect, type Page } from '@playwright/test';
 
 export async function openDemo(page: Page, query = ''): Promise<void> {
 	await page.goto(`/${query}`);
-	await expect(page.locator('mail-app')).toBeVisible();
+	await expect(page.locator('mail-app')).toBeVisible({ timeout: 30_000 });
 	// The demo mailbox is ready once the first conversations are listed.
 	await expect(page.locator('mail-message-list .row').first()).toBeVisible({ timeout: 30_000 });
 }
