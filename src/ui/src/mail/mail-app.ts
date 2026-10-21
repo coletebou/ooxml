@@ -26,6 +26,7 @@ import { defineMailFolderPane } from './folder-pane';
 import { icon } from './icons';
 import { InlineImages } from './inline-images';
 import { commandFor, controlOwnsKey, isTyping } from './keyboard';
+import { mailtoDraft } from './mailto';
 import { defineMailMessageList } from './message-list';
 import { FocusReturn, focusFirst } from './modal';
 import { downloadBytes } from './object-urls';
@@ -110,7 +111,8 @@ export class MailApp extends MailElement {
 
 	/**
 	 * The core client behind this element, for hosts that want the raw actions: there from the
-	 * element's first update in the page (`await el.updateComplete`) until it leaves the page.
+	 * element's first update in the page (`await el.updateComplete`) until it leaves the page (moved
+	 * within it, it keeps the same one).
 	 */
 	get client(): MailClient | null {
 		return this.mail;
@@ -129,13 +131,19 @@ export class MailApp extends MailElement {
 		this.addEventListener('keydown', this.onKey);
 		// The client starts with the next update (`willUpdate`), once the host has set what it sets
 		// along with connecting the element: a framework that defines or adds it, then sets `config`,
-		// gets that connection and never the demo mailbox first. Back in a page, it starts again.
+		// gets that connection and never the demo mailbox first. Back in a page it left, it starts
+		// again; moved within one, it still has its client.
 		if (!this.mail) this.requestUpdate();
 	}
 
 	override disconnectedCallback(): void {
 		this.removeEventListener('keydown', this.onKey);
-		this.stop();
+		// A move takes the element out and puts it back in one go: the client goes only if the
+		// element is still out of the page once that is done. Let go on a move, it would close the
+		// transport the host gave it, which the element then starts with again.
+		queueMicrotask(() => {
+			if (!this.isConnected) this.stop();
+		});
 		super.disconnectedCallback();
 	}
 
@@ -147,7 +155,7 @@ export class MailApp extends MailElement {
 			if (this.isConnected) this.start();
 		} else if (changed.has('config') && !sameMailConnection(this.config, this.startedWith)) {
 			this.stop();
-			this.start();
+			if (this.isConnected) this.start();
 		}
 		if (changed.has('theme')) {
 			if (this.theme === 'light' || this.theme === 'dark')
@@ -299,25 +307,11 @@ export class MailApp extends MailElement {
 	/** A `mailto:` link: a new message to its address, subject and body (RFC 6068). */
 	async mailto(href: string): Promise<void> {
 		const mail = this.mail;
-		if (!mail) return;
-		let url: URL;
-		try {
-			url = new URL(href);
-		} catch {
-			return;
-		}
-		const to = decodeURIComponent(url.pathname)
-			.split(',')
-			.map((email) => email.trim())
-			.filter(Boolean)
-			.map((email) => ({ name: '', email }));
+		const draft = mailtoDraft(href);
+		if (!mail || !draft) return;
 		// False: the open draft could not be saved, so it stays open and must keep its fields.
 		if (!(await mail.compose('new'))) return;
-		mail.updateDraft({
-			to,
-			subject: url.searchParams.get('subject') ?? '',
-			text: url.searchParams.get('body') ?? '',
-		});
+		mail.updateDraft(draft);
 	}
 
 	/** The URLs of the pictures a message's HTML body shows in place, by `cid` (lower case). */

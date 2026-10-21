@@ -89,3 +89,37 @@ test('a forward shows the picture its message shows and sends it as the same par
 	expect(sent).toMatch(/<img [^>]*src="cid:logo@northwind"/);
 	expect(sent).not.toMatch(/data:|blob:/);
 });
+
+test('attach files and import from the keyboard', async ({ page }) => {
+	await openDemo(page);
+	await page.getByRole('button', { name: 'New message' }).click();
+	const compose = page.locator('mail-compose');
+	// Tab reaches Attach files after Send, and Enter or Space opens the file picker.
+	await compose.getByRole('button', { name: 'Send' }).focus();
+	await page.keyboard.press('Tab');
+	await expect(compose.getByRole('button', { name: 'Attach files' })).toBeFocused();
+	const picked = page.waitForEvent('filechooser');
+	await page.keyboard.press('Enter');
+	await (
+		await picked
+	).setFiles({
+		name: 'notes.txt',
+		mimeType: 'text/plain',
+		buffer: Buffer.from('Notes'),
+	});
+	await expect(compose.locator('.files')).toContainText('notes.txt');
+	const again = page.waitForEvent('filechooser');
+	await page.keyboard.press(' ');
+	expect((await again).isMultiple()).toBe(true);
+	await compose.getByRole('button', { name: 'Discard' }).click();
+	// The same for .eml files in the list toolbar and vCard files in Contacts.
+	const importer = async (name: string) => {
+		await page.getByRole('button', { name, exact: true }).focus();
+		const chooser = page.waitForEvent('filechooser');
+		await page.keyboard.press('Enter');
+		await chooser;
+	};
+	await importer('Import .eml files');
+	await page.locator('mail-app .rail').getByRole('button', { name: 'Contacts' }).click();
+	await importer('Import vCard files');
+});

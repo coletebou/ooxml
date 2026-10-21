@@ -261,11 +261,40 @@ describe('<mail-app>', () => {
 		await early.updateComplete;
 		expect(started).toEqual([after, before]);
 		expect([app.client, early.client]).not.toContain(null);
-		// Taken out and put back, it starts again with the connection it has.
+		// Taken out and put back in one go (a move), it keeps its client.
+		const client = app.client;
 		app.remove();
 		document.body.append(app);
 		await app.updateComplete;
+		expect(app.client).toBe(client);
+		// Taken out for longer, then put back, it starts again with the connection it has.
+		app.remove();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(app.client).toBeNull();
+		document.body.append(app);
+		await app.updateComplete;
 		expect(started).toEqual([after, before, after]);
+	});
+
+	it('keeps its client, its draft and the transport it was given when moved in the page', async () => {
+		const { transport, closed } = testTransport();
+		const app = await mount({ kind: 'transport', transport });
+		const client = app.client!;
+		await client.compose('new');
+		client.updateDraft({ subject: 'Moved along' });
+		const box = document.createElement('div');
+		document.body.append(box);
+		// A move takes it out and puts it back in one go (a host or a framework reordering the page).
+		box.append(app);
+		await app.updateComplete;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(app.client).toBe(client);
+		expect(closed()).toBe(false);
+		expect(state(app).compose?.draft.subject).toBe('Moved along');
+		// Taken out for good, it lets them go as before.
+		box.remove();
+		await until(closed);
+		expect(app.client).toBeNull();
 	});
 
 	it('defines and shows the calendar and contacts views on its own', async () => {
@@ -309,6 +338,21 @@ describe('<mail-app>', () => {
 		});
 		app.dispatchEvent(again);
 		expect(again.defaultPrevented).toBe(true);
+		await until(() => !state(app).conversations.some((c) => c.id === id));
+	});
+
+	it('archives with e pressed on the checkbox that selected the conversation', async () => {
+		const app = await mount();
+		const list = inner<Updating>(app, 'mail-message-list')!;
+		await list.updateComplete;
+		const id = state(app).conversations[0]!.id;
+		const box = list.shadowRoot!.querySelector<HTMLInputElement>('.row input[type="checkbox"]')!;
+		box.focus();
+		box.click();
+		expect(state(app).selection).toEqual([id]);
+		const archive = key('e');
+		box.dispatchEvent(archive);
+		expect(archive.defaultPrevented).toBe(true);
 		await until(() => !state(app).conversations.some((c) => c.id === id));
 	});
 
@@ -621,6 +665,44 @@ describe('<mail-app>', () => {
 		expect(state(app).compose?.draft).toMatchObject(kept);
 		// A draft that cannot be saved would keep the removed app trying in the background.
 		await app.client!.discardDraft();
+	});
+
+	it('shows the body a mailto: link starts its message with', async () => {
+		const app = await mount();
+		await app.mailto('mailto:bob@example.com?subject=Hi&body=See%20you%20there');
+		await until(() => state(app).compose?.draft.text === 'See you there');
+		await app.updateComplete;
+		const compose = inner<Updating>(app, 'mail-compose')!;
+		await compose.updateComplete;
+		expect(inner(compose, '.editor')!.textContent).toBe('See you there');
+	});
+
+	it('starts a message from a link whose address holds a broken escape, as it is written', async () => {
+		const app = await mount();
+		// A sender's link: `%zz` decodes to nothing, so that address stays as written, the others not.
+		await app.mailto('mailto:%zz@example.com,b%6Fb@example.com?subject=Hi');
+		expect(state(app).compose?.draft).toMatchObject({
+			to: [
+				{ name: '', email: '%zz@example.com' },
+				{ name: '', email: 'bob@example.com' },
+			],
+			subject: 'Hi',
+		});
+	});
+
+	it('opens the .eml file picker from an Import button the keyboard reaches', async () => {
+		const app = await mount();
+		const importer = inner<HTMLButtonElement>(
+			app,
+			'.list-toolbar button[aria-label="Import .eml files"]',
+		);
+		expect(importer?.tabIndex).toBe(0);
+		const picker = inner<HTMLInputElement>(app, '.list-toolbar input[type="file"]')!;
+		const opened = vi.fn();
+		picker.addEventListener('click', opened);
+		importer!.click();
+		expect(opened).toHaveBeenCalledOnce();
+		expect([picker.hidden, picker.accept]).toEqual([true, '.eml,message/rfc822']);
 	});
 
 	it('names the rail and New message buttons whatever labels the layout shows', async () => {

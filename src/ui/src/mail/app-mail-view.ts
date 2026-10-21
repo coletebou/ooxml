@@ -130,20 +130,26 @@ function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
 			/>
 			<span>${i18n.t('app.threaded')}</span>
 		</label>
-		<label class="icon-button" title=${i18n.t('app.importEml')}>
-			${icon('mail-import')}<span class="sr-only">${i18n.t('app.importEml')}</span>
-			<input
-				type="file"
-				accept=".eml,message/rfc822"
-				multiple
-				hidden
-				@change=${async (e: Event) => {
-					const input = e.currentTarget as HTMLInputElement;
-					await mail.importEml(await readFiles(input.files));
-					input.value = '';
-				}}
-			/>
-		</label>
+		<button
+			type="button"
+			class="icon-button"
+			aria-label=${i18n.t('app.importEml')}
+			title=${i18n.t('app.importEml')}
+			@click=${() => app.renderRoot.querySelector<HTMLInputElement>('.list-toolbar input.file')?.click()}
+			>${icon('mail-import')}</button
+		>
+		<input
+			class="file"
+			type="file"
+			accept=".eml,message/rfc822"
+			multiple
+			hidden
+			@change=${async (e: Event) => {
+				const input = e.currentTarget as HTMLInputElement;
+				await mail.importEml(await readFiles(input.files));
+				input.value = '';
+			}}
+		/>
 	</div>`;
 }
 
