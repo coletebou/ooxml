@@ -72,11 +72,11 @@ export function parseLine(line: string): Property | null {
 		// vCard 2.1 writes bare types: `TEL;WORK;VOICE:...`.
 		const key = (eq < 0 ? 'TYPE' : part.slice(0, eq)).toUpperCase();
 		const raw = eq < 0 ? part : part.slice(eq + 1);
-		const values = raw.match(/"[^"]*"|[^,]+/g) ?? [];
-		params[key] = [
-			...(params[key] ?? []),
-			...values.map((v) => caretDecode(v.replace(/^"|"$/g, ''))),
-		];
+		// Appended one by one, as the iCalendar reader does, so a line that repeats a parameter
+		// thousands of times is still read in linear time.
+		const held = (params[key] ??= []);
+		for (const v of raw.match(/"[^"]*"|[^,]+/g) ?? [])
+			held.push(caretDecode(v.replace(/^"|"$/g, '')));
 	}
 	return { name, params, value: parts.value, raw: line };
 }
