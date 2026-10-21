@@ -123,6 +123,47 @@ describe('rich text in the y-prosemirror encoding', () => {
 		expect(plainText(sample)).toBe('Plan\nBuy milk\nsite\none\ndeep');
 	});
 
+	it('writes any shape an archive holds without throwing, keeping only the valid parts', () => {
+		let deep: unknown = { type: 'paragraph', content: [{ type: 'text', text: 'too deep' }] };
+		for (let i = 0; i < 5000; i++)
+			deep = { type: 'bullet_list', content: [{ type: 'list_item', content: [deep] }] };
+		const hostile = [
+			{ type: 'paragraph', content: 'not a list' },
+			{ type: 'heading', content: { type: 'text', text: 'an object' } },
+			{
+				type: 'bullet_list',
+				content: [
+					null,
+					7,
+					'item',
+					{
+						type: 'list_item',
+						content: [{ type: 'paragraph', content: [null, { type: 'text', text: 'kept' }] }],
+					},
+				],
+			},
+			{
+				type: 'paragraph',
+				content: [
+					{ type: 'text', text: 5 },
+					{ type: 'text', text: 'marks as text, ', marks: 'bold' },
+					{ type: 'text', text: 'bold', marks: [null, 3, { type: 'bold' }] },
+					{ type: 'hard_break', content: 'x' },
+				],
+			},
+			deep,
+		] as unknown as RichNode[];
+		const f = fragment();
+		expect(() => writeRichText(f, hostile)).not.toThrow();
+		const read = readRichText(f);
+		// Two emptied blocks, the list item, the paragraph (its break ends a line), and the deepest
+		// list item the depth limit keeps, emptied.
+		expect(plainText(read)).toBe('\n\nkept\nmarks as text, bold\n\n');
+		expect(JSON.stringify(read)).not.toContain('too deep');
+		const runs = read.flatMap((b) => b.content ?? []);
+		expect(runs.find((r) => r.text === 'bold')?.marks).toEqual([{ type: 'bold' }]);
+	});
+
 	it('turns pasted plain text into paragraphs', () => {
 		const blocks = richTextFromPlain('a\r\n\r\nb');
 		expect(blocks).toHaveLength(3);

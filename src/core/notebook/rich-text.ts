@@ -127,8 +127,31 @@ function unwrapUnknown(nodes: readonly RichNode[], depth = 0): RichNode[] {
 	);
 }
 
-/** Wrap stray inline content into paragraphs and drop empty lists, so blocks are well formed. */
-function normaliseBlocks(input: readonly RichNode[]): RichNode[] {
+/** An object with a string `type`: the shape both nodes and marks need before anything else. */
+const isTyped = <T extends { type: string }>(value: unknown): value is T =>
+	!!value && typeof value === 'object' && typeof (value as { type?: unknown }).type === 'string';
+const isNode = (value: unknown): value is RichNode => isTyped<RichNode>(value);
+
+/** A node's children, whatever an archive or a caller put there: only node objects are kept. */
+const childrenOf = (node: RichNode): RichNode[] =>
+	Array.isArray(node.content) ? node.content.filter(isNode) : [];
+
+/** A text run or a leaf rebuilt from its valid parts only (text a string, marks objects). */
+function inlineNode(node: RichNode): RichNode | null {
+	if (LEAVES.has(node.type)) return { type: node.type };
+	if (typeof node.text !== 'string' || !node.text) return null;
+	const marks = Array.isArray(node.marks) ? node.marks.filter((m) => isTyped<RichMark>(m)) : [];
+	return marks.length
+		? { type: 'text', text: node.text, marks }
+		: { type: 'text', text: node.text };
+}
+
+/**
+ * Wrap stray inline content into paragraphs and drop empty lists, so blocks are well formed. The
+ * input may come from an archive, so any shape is accepted and lists nest at most `MAX_DEPTH` deep.
+ */
+function normaliseBlocks(input: readonly RichNode[], depth = 0): RichNode[] {
+	if (depth > MAX_DEPTH) return [];
 	const nodes = unwrapUnknown(input);
 	const out: RichNode[] = [];
 	let inline: RichNode[] = [];
@@ -138,19 +161,23 @@ function normaliseBlocks(input: readonly RichNode[]): RichNode[] {
 	};
 	for (const node of nodes) {
 		if (node.type === 'text' || LEAVES.has(node.type)) {
-			inline.push(node);
+			const leaf = inlineNode(node);
+			if (leaf) inline.push(leaf);
 			continue;
 		}
 		flush();
 		if (node.type === 'bullet_list' || node.type === 'ordered_list') {
-			const items = (node.content ?? [])
+			const items = childrenOf(node)
 				.filter((c) => c.type === 'list_item')
-				.map((c) => ({ ...c, content: normaliseBlocks(c.content ?? []) }))
+				.map((c) => ({ ...c, content: normaliseBlocks(childrenOf(c), depth + 1) }))
 				.map((c) => (c.content.length ? c : { ...c, content: [emptyParagraph()] }));
 			if (items.length) out.push({ ...node, content: items });
-		} else if (node.type === 'list_item') out.push(...normaliseBlocks(node.content ?? []));
+		} else if (node.type === 'list_item') out.push(...normaliseBlocks(childrenOf(node), depth + 1));
 		else if (node.type === 'paragraph' || node.type === 'heading') {
-			const content = (node.content ?? []).filter((c) => c.type === 'text' || LEAVES.has(c.type));
+			const content = childrenOf(node)
+				.filter((c) => c.type === 'text' || LEAVES.has(c.type))
+				.map(inlineNode)
+				.filter(isNode);
 			out.push(
 				content.length ? { ...node, content } : { type: node.type, attrs: node.attrs ?? {} },
 			);
