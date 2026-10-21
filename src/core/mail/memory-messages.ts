@@ -2,6 +2,7 @@
 // becomes one. Separate from the transport so the rules (counts, previews, thread ids) are testable
 // on their own. New code.
 import { readEmail, toMailMessage, type OutgoingAttachment } from './mime';
+import { hasListedFile } from './mime/message';
 import {
 	DRAFT,
 	FLAGGED,
@@ -101,9 +102,12 @@ export function withCounts(
 	}));
 }
 
-/** True when a message carries a file to list: a part not inline, or one without a Content-ID. */
-const hasFile = (attachments: readonly MailAttachment[]): boolean =>
-	attachments.some((a) => a.disposition === 'attachment' || !a.cid);
+/**
+ * True when a message carries a file to list: a part that is not an image its HTML shows in place,
+ * as the reading pane lists them (`hasListedFile`).
+ */
+const hasFile = (attachments: readonly MailAttachment[], html: string | undefined): boolean =>
+	hasListedFile(attachments, html ? [html] : []);
 
 function attachmentsOf(
 	id: string,
@@ -158,7 +162,7 @@ export function messageFromSeed(seed: SeedMessage, id: string, blobs: BlobStore)
 		replyTo: [...(seed.replyTo ?? [])],
 		subject: seed.subject,
 		preview: preview(seed),
-		hasAttachment: hasFile(attachments),
+		hasAttachment: hasFile(attachments, seed.html),
 		text: seed.text ?? null,
 		html: seed.html ?? null,
 		attachments,
@@ -210,7 +214,7 @@ export function messageFromDraft(
 		replyTo: [],
 		subject: draft.subject,
 		preview: preview(draft),
-		hasAttachment: hasFile(attachments),
+		hasAttachment: hasFile(attachments, draft.html),
 		text: draft.text,
 		html: draft.html ?? null,
 		attachments,

@@ -71,10 +71,28 @@ function pictureCids(parts: readonly string[]): Set<string> {
 	return cids;
 }
 
+/** What tells a picture the body shows from a file: a part's type, disposition and Content-ID. */
+type PartKind = Pick<ParsedAttachment, 'cid' | 'disposition' | 'type'>;
+
 /** An image the HTML body shows itself: not an attachment, and a picture there by its `cid:`. */
-function isEmbeddedImage(attachment: ParsedAttachment, shown: ReadonlySet<string>): boolean {
+function isEmbeddedImage(attachment: PartKind, shown: ReadonlySet<string>): boolean {
 	if (!attachment.cid || attachment.disposition === 'attachment') return false;
 	return attachment.type.startsWith('image/') && shown.has(attachment.cid.toLowerCase());
+}
+
+/**
+ * True when a message has a file the reading pane lists: a part that is not an image its HTML
+ * body (`htmlParts`, the HTML part by part) shows in place as a picture. What `hasAttachment` is,
+ * for a message read from its source and for one a store builds.
+ */
+export function hasListedFile(
+	attachments: readonly PartKind[],
+	htmlParts: readonly string[],
+): boolean {
+	const shown = attachments.some((attachment) => attachment.cid)
+		? pictureCids(htmlParts)
+		: new Set<string>();
+	return attachments.some((attachment) => !isEmbeddedImage(attachment, shown));
 }
 
 /**
@@ -90,9 +108,6 @@ export function toMailMessage(
 	blobIdOf: (partId: string) => string,
 ): MailMessage {
 	const { text, html, htmlParts } = parsed;
-	const shown = parsed.attachments.some((attachment) => attachment.cid)
-		? pictureCids(htmlParts ?? (html ? [html] : []))
-		: new Set<string>();
 	return {
 		id: meta.id,
 		threadId: meta.threadId,
@@ -112,7 +127,7 @@ export function toMailMessage(
 		replyTo: parsed.replyTo,
 		subject: parsed.subject,
 		preview: previewText(bodyText({ text, html, htmlParts })),
-		hasAttachment: parsed.attachments.some((attachment) => !isEmbeddedImage(attachment, shown)),
+		hasAttachment: hasListedFile(parsed.attachments, htmlParts ?? (html ? [html] : [])),
 		text,
 		html,
 		...htmlPartsOf(htmlParts),
