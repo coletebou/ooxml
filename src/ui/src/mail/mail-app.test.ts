@@ -46,13 +46,14 @@ const key = (name: string, init: KeyboardEventInit = {}) =>
 
 /**
  * The demo mailbox through a transport that, like the JMAP one, abandons the requests still running
- * when it is closed, and that records what it saved and sent.
+ * when it is closed, and that records what it saved and sent. Its first `failSaves` saves fail.
  */
-function testTransport(options: { failSaves?: boolean } = {}) {
+function testTransport(options: { failSaves?: number } = {}) {
 	const base = createMemoryTransport(createDemoSeed({ now: Date.UTC(2026, 9, 20) }));
 	const saved: Draft[] = [];
 	const sent: Draft[] = [];
 	let closed = false;
+	let failSaves = options.failSaves ?? 0;
 	const request = async (): Promise<void> => {
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		if (closed) throw new MailTransportError('network', 'The transport is closed.');
@@ -61,7 +62,7 @@ function testTransport(options: { failSaves?: boolean } = {}) {
 		...base,
 		async saveDraft(draft) {
 			await request();
-			if (options.failSaves) throw new MailTransportError('server', 'Saving failed.');
+			if (failSaves-- > 0) throw new MailTransportError('server', 'Saving failed.');
 			saved.push(draft);
 			return base.saveDraft(draft);
 		},
@@ -236,6 +237,49 @@ describe('<mail-app>', () => {
 		expect(saved.map((draft) => draft.subject)).toEqual(['Unsent thoughts']);
 	});
 
+	it('keeps trying to save a draft it could not save, without holding up the next client', async () => {
+		const { transport, saved, closed } = testTransport({ failSaves: 2 });
+		const app = await mount({ kind: 'transport', transport });
+		await app.client!.compose('new');
+		vi.useFakeTimers();
+		try {
+			app.client!.updateDraft({ subject: 'Unsent thoughts' });
+			const first = app.client;
+			app.config = { kind: 'demo', seed: { now: Date.UTC(2026, 9, 20) } };
+			await app.updateComplete;
+			// The new connection is up at once while the old client tries again in the background.
+			expect(app.client).not.toBe(first);
+			expect(app.client).not.toBeNull();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect([saved.length, closed()]).toEqual([0, false]);
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(saved.map((draft) => draft.subject)).toEqual(['Unsent thoughts']);
+			expect(closed()).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('leaves what is typed for the next client alone while the last one tries again', async () => {
+		const { transport, closed } = testTransport({ failSaves: 2 });
+		const app = await mount({ kind: 'transport', transport });
+		await app.client!.compose('new');
+		vi.useFakeTimers();
+		try {
+			app.client!.updateDraft({ subject: 'Unsent thoughts' });
+			app.config = { kind: 'demo', seed: { now: Date.UTC(2026, 9, 20) } };
+			await app.updateComplete;
+			const compose = await typeAddress(app, 'ada@example.com');
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(closed()).toBe(true);
+			expect(state(app).compose?.draft.to).toEqual([]);
+			const field = inner<HTMLInputElement>(inner(compose, 'mail-recipients'), 'input')!;
+			expect(field.value).toBe('ada@example.com');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('leaves Enter on a button to the button and opens from the list', async () => {
 		const app = await mount();
 		const [first, second] = state(app).conversations;
@@ -280,7 +324,7 @@ describe('<mail-app>', () => {
 	});
 
 	it('keeps a draft it could not save when a link or a contact starts a new one', async () => {
-		const { transport } = testTransport({ failSaves: true });
+		const { transport } = testTransport({ failSaves: Infinity });
 		const app = await mount({ kind: 'transport', transport });
 		const kept = { subject: 'Kept', to: [{ name: '', email: 'ada@example.com' }] };
 		await app.client!.compose('new');
@@ -301,6 +345,8 @@ describe('<mail-app>', () => {
 		expect(await compose.mock.results[0]!.value).toBe(false);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(state(app).compose?.draft).toMatchObject(kept);
+		// A draft that cannot be saved would keep the removed app trying in the background.
+		await app.client!.discardDraft();
 	});
 
 	it('names the rail and New message buttons whatever labels the layout shows', async () => {

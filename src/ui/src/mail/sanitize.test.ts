@@ -138,6 +138,9 @@ describe('cleanCss', () => {
 			['background:url("https://t.example/a.png', 'background:none'],
 			['background:\\75 rl(https://t.example/a.png)', 'background:none'],
 			['background:U\\52L( "https://t.example/a.png" )', 'background:none'],
+			// `<!--` is a token of its own, so the name after it is a function of its own.
+			['background:<!--url(https://t.example/a.png)', 'background:<!--none'],
+			['background:<!--image-set("https://t.example/a.png" 1x)', 'background:<!--none'],
 			[
 				'--u:"https://t.example/a.png";background:image-set(var(--u) 1x)',
 				'--u:"https://t.example/a.png";background:none',
@@ -152,6 +155,76 @@ describe('cleanCss', () => {
 		expect(cleanCss('@import url(https://t.example/a.css) screen;p{color:red}')).toBe(
 			'p{color:red}',
 		);
+	});
+
+	it('never lets the text on either side of what it removes join into a resource', () => {
+		// Joined, each pair reads as a new token the first pass never saw: `url(`, `\75 ` (u),
+		// a comment that turns the string after it into CSS, or an @import.
+		const cases: [css: string, cleaned: string][] = [
+			[
+				'background:u@import;rl(https://t.example/pixel)',
+				'background:u/**/rl(https://t.example/pixel)',
+			],
+			[
+				'background:\\7@import;5 rl(https://t.example/pixel)',
+				'background:\\7/**/5 rl(https://t.example/pixel)',
+			],
+			[
+				'background:\\75 @import;rl(https://t.example/pixel)',
+				'background:\\75 /**/rl(https://t.example/pixel)',
+			],
+			[
+				'background:u@import;\\72 l(https://t.example/pixel)',
+				'background:u/**/\\72 l(https://t.example/pixel)',
+			],
+			[
+				'background:url@import;(https://t.example/pixel)',
+				'background:url/**/(https://t.example/pixel)',
+			],
+			[
+				'background:image@import;-set("https://t.example/a.png" 1x)',
+				'background:image/**/-set("https://t.example/a.png" 1x)',
+			],
+			[
+				'background:s@import x;rc("https://t.example/a.png")',
+				'background:s/**/rc("https://t.example/a.png")',
+			],
+			[
+				'background:u@import;@import;rl(https://t.example/pixel)',
+				'background:u/**/rl(https://t.example/pixel)',
+			],
+			[
+				'color:red/@import;*"*/;background:url(https://t.example/pixel);x:"',
+				'color:red//**/*"*/;background:url(https://t.example/pixel);x:"',
+			],
+			[
+				'@@import;import "https://t.example/a.css";p{color:red}',
+				'@/**/import "https://t.example/a.css";p{color:red}',
+			],
+			[
+				'@\\69@import;mport "https://t.example/a.css";p{color:red}',
+				'@\\69/**/mport "https://t.example/a.css";p{color:red}',
+			],
+			['margin:1@import;0px', 'margin:1/**/0px'],
+			// What replaces a blocked function never runs on into the name or block after it.
+			[
+				'background:image-set("https://t.example/a.png" 1x)rl(https://t.example/pixel)',
+				'background:none/**/rl(https://t.example/pixel)',
+			],
+			['background:url(https://t.example/a.png)(x)', 'background:none/**/(x)'],
+		];
+		for (const [css, cleaned] of cases) expect(cleanCss(css), css).toBe(cleaned);
+	});
+
+	it('adds nothing where the text around a removal cannot join', () => {
+		const cases: [css: string, cleaned: string][] = [
+			['p{color:red}@import "https://t.example/a.css";p{}', 'p{color:red}p{}'],
+			['p{}\n@import "https://t.example/a.css";\np{}', 'p{}\n\np{}'],
+			['p{color:red;@import "https://t.example/a.css";}', 'p{color:red;}'],
+			['background:url(https://t.example/a.png) no-repeat', 'background:none no-repeat'],
+			['background:url(https://t.example/a.png),red', 'background:none,red'],
+		];
+		for (const [css, cleaned] of cases) expect(cleanCss(css), css).toBe(cleaned);
 	});
 });
 

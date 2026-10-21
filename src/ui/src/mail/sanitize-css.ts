@@ -1,14 +1,25 @@
 // The CSS half of the message sanitiser (sanitize.ts): every place CSS loads a resource from, found
-// the way a browser's tokenizer finds it (CSS Syntax 3), so an escaped name (`\75 rl(`), quotes or
-// parentheses inside a URL, a URL of any length and a function left open at the end all count.
-// Each URL goes through `resolve`, and a blocked one (an empty result) becomes `none`: the URL of
-// `url()` and `src()`, and the strings of the image functions (`image-set()`, `image()`,
-// `cross-fade()` and their prefixed forms). An image function holding something that can still turn
-// into a URL (`var()`, `attr()`, `if()`, ...) becomes `none` too, and `@import` is always dropped.
-// Strings anywhere else are text (`content: "url(x)"`) and stay. New code.
+// the way a browser's tokenizer finds it (CSS Syntax 3), so an escaped name (`\75 rl(`), a name
+// right after `<!--`, quotes or parentheses inside a URL, a URL of any length and a function left
+// open at the end all count. Each URL goes through `resolve`, and a blocked one (an empty result)
+// becomes `none`: the URL of `url()` and `src()`, and the strings of the image functions
+// (`image-set()`, `image()`, `cross-fade()` and their prefixed forms). An image function holding
+// something that can still turn into a URL (`var()`, `attr()`, `if()`, ...) becomes `none` too, and
+// `@import` is always dropped. Strings anywhere else are text (`content: "url(x)"`) and stay. What
+// is dropped or replaced never lets the text on its two sides join into a token this scan did not
+// see (`u@import;rl(x)` must not become `url(x)`): a comment goes between them wherever they could
+// run together. New code.
 
 /** The URL to load for `url`, or '' to block it. */
 export type ResolveUrl = (url: string) => string;
+
+/** Where text was dropped or replaced: the pieces on its two sides must not join. */
+const CUT = Symbol('cut');
+type Piece = string | typeof CUT;
+/** A piece after which nothing joins: whitespace, punctuation or a comment. */
+const ENDS_CLEANLY = /^[ \t\n()[\]{};,:]$|^\/\*/;
+/** A name with no escape, not starting like a number: only a name character, `\` or `(` joins it. */
+const PLAIN_NAME = /^[a-z_][\w-]*$/i;
 
 /** The functions whose string arguments are URLs (CSS Images 4). */
 const IMAGE_FUNCTIONS = new Set([
@@ -133,11 +144,42 @@ function readUrl(css: string, at: number): [string | null, number] {
 const quote = (url: string): string =>
 	`"${url.replace(/["\\\0-\x1f\x7f]/g, (char) => (char === '"' || char === '\\' ? `\\${char}` : `\\${char.charCodeAt(0).toString(16)} `))}"`;
 
+/**
+ * Whether `next` written right after the piece `last` could read as other tokens than the two do
+ * apart: a name, an escape or a number running on (`u` and `rl(`, `\7` and `5`), a name becoming a
+ * function (`url` and `(`), `/` and `*` opening a comment, `@` and `import` an at-rule. A closing
+ * bracket, `;` or `,` joins nothing before it (no piece ends in an unfinished backslash).
+ */
+function joins(last: string, next: string): boolean {
+	const first = next.charAt(0);
+	if (!last || ')]};,'.includes(first) || ENDS_CLEANLY.test(last)) return false;
+	if (PLAIN_NAME.test(last)) return isNameChar(first) || first === '\\' || first === '(';
+	return true;
+}
+
+/** The pieces as text, with a comment (the one thing no token runs across) where a cut joins. */
+function joined(pieces: readonly Piece[]): string {
+	let css = '';
+	let last = '';
+	let cut = false;
+	for (const piece of pieces) {
+		if (piece === CUT) {
+			cut = true;
+			continue;
+		}
+		if (cut && joins(last, piece)) css += '/**/';
+		css += piece;
+		last = piece;
+		cut = false;
+	}
+	return css;
+}
+
 /** `input` with every resource it loads resolved, and `@import` dropped (see above). */
 export function rewriteCss(input: string, resolve: ResolveUrl): string {
 	// The tokenizer's preprocessing: one kind of newline, no NUL.
 	const css = input.replace(/\r\n?|\f/g, '\n').replaceAll('\0', '\uFFFD');
-	const out: string[] = [];
+	const out: Piece[] = [];
 	const stack: Frame[] = [];
 	/** The `@import` being dropped: where it starts in the output and how deep it is. */
 	let drop: { start: number; depth: number } | null = null;
@@ -152,13 +194,20 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		if (frame) frame.blocked = true;
 	};
 	const resolved = (url: string | null): string => (url && !drop && !urlFrames ? resolve(url) : '');
-	const urlText = (url: string | null): string => {
+	/** `none` for what is blocked (and the image function around it), cut off from what follows. */
+	const none = (): void => {
+		block();
+		out.push('none', CUT);
+	};
+	const writeUrl = (url: string | null): void => {
 		const target = resolved(url);
-		if (!target) block();
-		return target ? `url(${quote(target)})` : 'none';
+		if (target) out.push(`url(${quote(target)})`);
+		else none();
 	};
 	const endDrop = (): void => {
-		if (drop) out.length = drop.start;
+		if (!drop) return;
+		out.length = drop.start;
+		out.push(CUT);
 		drop = null;
 	};
 	/** Close a frame: a url frame becomes its URL, a blocked image frame `none`. */
@@ -166,8 +215,8 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		if (frame.kind === 'url') urlFrames--;
 		if (frame.kind === 'other' || (frame.kind === 'image' && !frame.blocked)) return;
 		out.length = frame.start;
-		out.push(frame.kind === 'url' ? urlText(frame.url) : 'none');
-		if (frame.kind === 'image') block();
+		if (frame.kind === 'url') writeUrl(frame.url);
+		else none();
 	};
 
 	let at = 0;
@@ -193,6 +242,9 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 			const [name, nameEnd] = readName(css, at + 1);
 			end = nameEnd;
 			if (name === 'import' && !drop) drop = { start: out.length, depth: stack.length };
+		} else if (char === '<' && css.startsWith('!--', at + 1)) {
+			// `<!--` is one token, so a name right after it starts on its own (`<!--url(`).
+			end = at + 4;
 		} else if (isNameChar(char) || startsEscape(css, at)) {
 			const [name, nameEnd] = readName(css, at);
 			end = nameEnd;
@@ -203,8 +255,9 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 				const quoted = css.charAt(after) === '"' || css.charAt(after) === "'";
 				if (name === 'url' && !quoted) {
 					const [url, urlEnd] = readUrl(css, end + 1);
-					text = urlText(url);
-					end = urlEnd;
+					writeUrl(url);
+					at = urlEnd;
+					continue;
 				} else {
 					const kind =
 						name === 'url' || name === 'src'
@@ -243,5 +296,5 @@ export function rewriteCss(input: string, resolve: ResolveUrl): string {
 		finish(stack.pop()!);
 	}
 	endDrop();
-	return out.join('');
+	return joined(out);
 }

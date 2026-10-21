@@ -21,6 +21,8 @@ OpenMail is an early implementation. This page lists what it does not do, so not
 - **Threads are per folder**: a reply you sent shows in Sent, not inside the Inbox conversation.
 - **Rich text** uses the browser's editing commands; it is tested in Chromium. Quoted and pasted
   HTML loses remote images, so composing never loads a tracker.
+- **Unsaved drafts when the app goes away**: if the app is removed while a draft cannot be saved
+  (offline, over quota), it keeps trying for about a minute; after that the unsaved edits are lost.
 - **No rules, signatures, S/MIME or OpenPGP**, no `.msg` or `.pst` import, no offline cache of the
   mailbox.
 - **One binding**: React. Vue, Angular, Svelte, Solid and vanilla follow.

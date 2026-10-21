@@ -161,9 +161,13 @@ export class MailApp extends MailElement {
 			...(this.config ? { config: this.config } : {}),
 			quoteFormat: quoteFormat(() => this.i18n),
 		});
-		this.mail = committingClient(client, () =>
-			this.renderRoot.querySelector<MailCompose>('mail-compose')?.commitRecipients(),
-		);
+		// Only while the window shows this client's draft: once released, a client trying again to
+		// save in the background must not commit what is being typed for the next one.
+		const mail = committingClient(client, () => {
+			if (this.mail === mail)
+				this.renderRoot.querySelector<MailCompose>('mail-compose')?.commitRecipients();
+		});
+		this.mail = mail;
 		this.state = client.getState();
 		let ready = false;
 		this.stops = [
@@ -181,6 +185,8 @@ export class MailApp extends MailElement {
 	private stop(): void {
 		for (const stop of this.stops) stop();
 		this.stops = [];
+		// Released while still current, so its first try commits what the window holds; any later
+		// tries run in the background, and a new connection or remount never waits for them.
 		if (this.mail) void release(this.mail);
 		this.mail = null;
 		for (const url of this.objectUrls) URL.revokeObjectURL(url);
