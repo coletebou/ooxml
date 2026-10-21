@@ -14,7 +14,11 @@ const CHANGE_DELAY_MS = 30;
 export interface ListLoader {
 	connect(): Promise<void>;
 	loadMailboxes(): Promise<void>;
-	loadList(): Promise<void>;
+	/**
+	 * Run the list's folder or search again; with `refetch` (an explicit refresh), fetch the cached
+	 * summaries again too, since a change the server did not push shows only then.
+	 */
+	loadList(options?: { refetch?: boolean }): Promise<void>;
 	/** Raise how many messages the list holds and load them. */
 	loadMore(): Promise<void>;
 	/** Fetch summaries again for ids that changed on the server. */
@@ -45,13 +49,14 @@ export function createListLoader(core: ClientCore): ListLoader {
 		}
 	};
 
-	const loadList = async (): Promise<void> => {
+	const loadList = async (options: { refetch?: boolean } = {}): Promise<void> => {
 		const mine = ++generation;
 		core.patch({ loading: true });
 		try {
 			const result = await core.transport.query(query(), { position: 0, limit });
 			if (mine !== generation || core.destroyed) return;
-			await fetchSummaries(result.ids.filter((id) => !core.emails.has(id)));
+			const ids = options.refetch ? result.ids : result.ids.filter((id) => !core.emails.has(id));
+			await fetchSummaries(ids);
 			if (mine !== generation || core.destroyed) return;
 			core.listIds = [...result.ids];
 			core.patch({ loading: false, total: result.total });
@@ -60,7 +65,10 @@ export function createListLoader(core: ClientCore): ListLoader {
 			if (mine !== generation) return;
 			core.patch({ loading: false });
 			core.fail('load', error);
+			return;
 		}
+		// A message that joined the open conversation (a reply that just arrived) needs its body.
+		if (core.openId) await core.loadBodies(core.openId, false);
 	};
 
 	const loadMailboxes = async (): Promise<void> => {
@@ -105,7 +113,7 @@ export function createListLoader(core: ClientCore): ListLoader {
 			for (const id of change.updated) updated.add(id);
 		}
 		if (changes.some((change) => change.type === 'emails')) {
-			jobs.push(refreshEmails([...updated]).then(loadList));
+			jobs.push(refreshEmails([...updated]).then(() => loadList()));
 		}
 		await Promise.all(jobs);
 	};

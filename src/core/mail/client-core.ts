@@ -1,7 +1,8 @@
 // The mail client's internal state holder, shared by the modules that implement its actions
 // (`client.ts`, `client-mutations.ts`, `client-compose.ts`, `client-files.ts`, `client-people.ts`).
-// It owns the caches (summaries, loaded bodies), rebuilds the derived state when they change and
-// coalesces notifications per tick, like the Teams client. Not exported from the area. New code.
+// It owns the caches (summaries, loaded bodies) and fetches the bodies the open conversation needs,
+// rebuilds the derived state when they change and coalesces notifications per tick, like the Teams
+// client. Not exported from the area. New code.
 import { Emitter } from '../collab/emitter';
 import type { MailAction, MailClientOptions, MailNotice, MailState, Targets } from './client-types';
 import { conversationView, mailboxViews, openConversationView } from './client-views';
@@ -130,6 +131,39 @@ export class ClientCore {
 		this.bodies.set(message.id, message);
 		this.bodyErrors.delete(message.id);
 		while (this.bodies.size > BODY_CACHE) this.bodies.delete(this.bodies.keys().next().value!);
+	}
+
+	/** Show the open conversation as the caches hold it now. */
+	showOpen(): void {
+		const open = this.openId ? this.conversationsById.get(this.openId) : undefined;
+		this.patch({ open: open ? openConversationView(open, this.bodies, this.bodyErrors) : null });
+	}
+
+	/**
+	 * Fetch the bodies conversation `id` lacks, showing each as it arrives; with `retry`, also those
+	 * that failed before. Resolves to the ids of its messages whose bodies are loaded.
+	 */
+	async loadBodies(id: string, retry: boolean): Promise<Set<string>> {
+		const loaded = new Set<string>();
+		const conversation = this.conversationsById.get(id);
+		if (!conversation) return loaded;
+		await Promise.all(
+			conversation.entries.map(async ({ email }) => {
+				if (this.bodies.has(email.id)) {
+					loaded.add(email.id);
+					return;
+				}
+				if (!retry && this.bodyErrors.has(email.id)) return;
+				try {
+					this.keepBody(await this.transport.message(email.id));
+					loaded.add(email.id);
+				} catch (error) {
+					this.bodyErrors.set(email.id, errorCode(error));
+				}
+				if (this.openId === id) this.showOpen();
+			}),
+		);
+		return loaded;
 	}
 
 	/** Re-thread the list and refresh every view derived from it. */

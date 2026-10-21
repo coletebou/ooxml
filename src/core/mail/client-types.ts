@@ -206,7 +206,10 @@ export interface MailClient {
 	moveTo(mailboxId: string, ids?: Targets): Promise<void>;
 	archive(ids?: Targets): Promise<void>;
 	markJunk(ids?: Targets): Promise<void>;
-	/** To Trash; messages already in Trash are deleted for good. */
+	/**
+	 * To Trash. Deleted in Trash, a message only there is deleted for good; one also filed in another
+	 * folder leaves Trash and stays in that folder.
+	 */
 	remove(ids?: Targets): Promise<void>;
 	createMailbox(name: string, parentId?: string | null): Promise<void>;
 	renameMailbox(id: string, name: string): Promise<void>;

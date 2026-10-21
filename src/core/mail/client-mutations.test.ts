@@ -70,4 +70,24 @@ describe('moving and deleting', () => {
 		expect((await transport.message('a')).mailboxIds).toEqual(['projects']);
 		client.destroy();
 	});
+
+	it('takes a message out of Trash that is filed elsewhere too, without destroying it', async () => {
+		const transport = server([...DEFAULT_MAILBOXES, { id: 'projects', name: 'Projects' }]);
+		await transport.update({ a: { mailboxIds: { projects: true } } });
+		const { client, notices } = await connect(transport);
+		await client.remove(['a']);
+		expect([...(await transport.message('a')).mailboxIds].sort()).toEqual(['projects', 'trash']);
+		await client.selectMailbox('trash');
+		expect(client.getState().conversations.map((c) => c.id)).toEqual(['a']);
+		notices.length = 0;
+		await client.remove(['a']);
+		// It stays in the folder it was never deleted from.
+		expect((await transport.message('a')).mailboxIds).toEqual(['projects']);
+		expect(client.getState().conversations).toEqual([]);
+		expect(notices).toMatchObject([{ kind: 'done', action: 'deleted', count: 1 }]);
+		await undoOf(notices)();
+		expect([...(await transport.message('a')).mailboxIds].sort()).toEqual(['projects', 'trash']);
+		expect(client.getState().conversations.map((c) => c.id)).toEqual(['a']);
+		client.destroy();
+	});
 });

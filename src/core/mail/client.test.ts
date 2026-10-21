@@ -4,6 +4,7 @@ import { createMemoryContactStore } from './contacts';
 import { createMemoryTransport, type MemoryTransport } from './memory-transport';
 import type { SeedMessage } from './memory-messages';
 import { until } from './test-support/client';
+import { MailTransportError, type MailTransport } from './transport';
 
 const T0 = Date.UTC(2026, 0, 5, 9, 0, 0);
 const ada = { name: 'Ada', email: 'ada@example.com' };
@@ -98,6 +99,70 @@ describe('createMailClient', () => {
 		expect(open.messages.map((m) => m.message?.text)).toEqual(['First', 'Second']);
 		expect(client.getState().conversations[0]!.unread).toBe(0);
 		expect((await transport.message('r2')).keywords.$seen).toBe(true);
+		client.destroy();
+	});
+
+	it('leaves a message unread when its body cannot be read', async () => {
+		const memory = createMemoryTransport({ messages: seed(), now: () => T0 + 3_600_000 });
+		const transport: MailTransport = {
+			...memory,
+			message: async (id) => {
+				if (id === 'r2') throw new MailTransportError('server', 'Unavailable.');
+				return memory.message(id);
+			},
+		};
+		const client = createMailClient({ transport });
+		await until(client, (s) => s.conversations.length > 0);
+		await client.open('r1');
+		expect(client.getState().open?.messages.map((m) => [m.message?.text ?? null, m.error])).toEqual(
+			[
+				['First', null],
+				[null, 'server'],
+			],
+		);
+		expect((await memory.message('r1')).keywords.$seen).toBe(true);
+		expect((await memory.message('r2')).keywords.$seen).toBeUndefined();
+		client.destroy();
+	});
+
+	it('loads the body of a reply that arrives while its conversation is open', async () => {
+		const { client, transport } = setup();
+		await until(client, (s) => s.conversations.length > 0);
+		await client.open('r1');
+		transport.deliver({
+			id: 'r3',
+			mailboxId: 'inbox',
+			from: ada,
+			to: [me],
+			subject: 'Re: Plan',
+			text: 'Third',
+			messageId: 'r3@x',
+			inReplyTo: ['r2@x'],
+			references: ['r1@x', 'r2@x'],
+			receivedAt: T0 + 120_000,
+		});
+		const state = await until(
+			client,
+			(s) => s.open?.messages.length === 3 && s.open.messages.every((m) => m.message !== null),
+		);
+		expect(state.open?.messages.map((m) => m.message?.text)).toEqual(['First', 'Second', 'Third']);
+		client.destroy();
+	});
+
+	it('shows changes made elsewhere on refresh, when the server pushes none', async () => {
+		const memory = createMemoryTransport({ messages: seed(), now: () => T0 + 3_600_000 });
+		// No push: the client learns what changed only when it asks.
+		const transport: MailTransport = { ...memory, watch: () => () => undefined };
+		const client = createMailClient({ transport });
+		await until(client, (s) => s.conversations.length > 0);
+		await memory.update({
+			o1: { keywords: { $flagged: true } },
+			r1: { keywords: { $seen: true } },
+		});
+		await client.refresh();
+		const rows = client.getState().conversations;
+		expect(rows.find((c) => c.id === 'o1')?.flagged).toBe(true);
+		expect(rows.find((c) => c.id === 'r1')?.unread).toBe(1);
 		client.destroy();
 	});
 

@@ -20,7 +20,13 @@ type Mutations = Pick<
 	| 'createMailbox'
 	| 'renameMailbox'
 	| 'deleteMailbox'
->;
+> & {
+	/**
+	 * Mark exactly these messages read. Unlike `markRead`, an id is never taken for the
+	 * conversation it starts (a conversation's id is its first message's).
+	 */
+	markSeen(emailIds: readonly string[]): Promise<void>;
+};
 
 const withKeyword = (email: EmailSummary, keyword: string, on: boolean): EmailSummary => {
 	const keywords: Record<string, true> = { ...email.keywords };
@@ -30,10 +36,15 @@ const withKeyword = (email: EmailSummary, keyword: string, on: boolean): EmailSu
 };
 
 export function createMutations(core: ClientCore, list: ListLoader): Mutations {
-	const setKeyword = async (keyword: string, on: boolean, ids: Targets): Promise<void> => {
-		const targets = core
-			.emailIdsOf(ids)
-			.filter((id) => (core.emails.get(id)?.keywords[keyword] === true) !== on);
+	/** Sets `keyword` on the messages `emailIds` (resolved already, see `emailIdsOf`). */
+	const setKeyword = async (
+		keyword: string,
+		on: boolean,
+		emailIds: readonly string[],
+	): Promise<void> => {
+		const targets = emailIds.filter(
+			(id) => (core.emails.get(id)?.keywords[keyword] === true) !== on,
+		);
 		if (!targets.length) return;
 		const revert = core.applyLocal(targets, (email) => withKeyword(email, keyword, on));
 		try {
@@ -107,12 +118,12 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		core.rebuild();
 	};
 
-	const move = async (
-		mailboxId: string,
-		ids: Targets,
+	/** Applies folder `patches` at once and then on the server, with a notice that undoes them. */
+	const commit = async (
+		patches: Record<string, EmailPatch>,
 		action: 'moved' | 'archived' | 'junk' | 'deleted',
+		target?: string,
 	): Promise<void> => {
-		const patches = movePatches(core.emailIdsOf(ids), mailboxId);
 		const count = Object.keys(patches).length;
 		if (!count) return;
 		const restore = restorePatches(patches);
@@ -127,7 +138,6 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 			core.fail('move', error);
 			return;
 		}
-		const target = core.mailboxes.find((mailbox) => mailbox.id === mailboxId)?.name;
 		const notice: MailNotice = {
 			kind: 'done',
 			action,
@@ -148,6 +158,17 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 		};
 		core.notice(notice);
 	};
+
+	const move = (
+		mailboxId: string,
+		ids: Targets,
+		action: 'moved' | 'archived' | 'junk' | 'deleted',
+	): Promise<void> =>
+		commit(
+			movePatches(core.emailIdsOf(ids), mailboxId),
+			action,
+			core.mailboxes.find((mailbox) => mailbox.id === mailboxId)?.name,
+		);
 
 	const moveToRole = async (
 		role: MailboxRole,
@@ -172,13 +193,14 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 	};
 
 	return {
-		markRead: (read, ids) => setKeyword(SEEN, read, ids),
+		markSeen: (emailIds) => setKeyword(SEEN, true, emailIds),
+		markRead: (read, ids) => setKeyword(SEEN, read, core.emailIdsOf(ids)),
 		toggleRead: (ids) => {
 			const targets = core.emailIdsOf(ids);
 			const anyUnread = targets.some((id) => !core.emails.get(id)?.keywords[SEEN]);
 			return setKeyword(SEEN, anyUnread, targets);
 		},
-		setFlagged: (flagged, ids) => setKeyword(FLAGGED, flagged, ids),
+		setFlagged: (flagged, ids) => setKeyword(FLAGGED, flagged, core.emailIdsOf(ids)),
 		toggleFlagged: (ids) => {
 			const targets = core.emailIdsOf(ids);
 			const anyFlagged = targets.some((id) => core.emails.get(id)?.keywords[FLAGGED]);
@@ -196,12 +218,21 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 				core.fail('delete', new MailTransportError('unsupported', 'No trash folder.'));
 				return;
 			}
+			const boxesOf = (id: string): readonly string[] => core.emails.get(id)?.mailboxIds ?? [];
 			const inTrash = targets.filter((id) => {
-				const boxes = core.emails.get(id)?.mailboxIds ?? [];
+				const boxes = boxesOf(id);
 				return boxes.length === 1 && boxes[0] === trash.id;
 			});
-			const elsewhere = targets.filter((id) => !inTrash.includes(id));
-			if (elsewhere.length) await move(trash.id, elsewhere, 'deleted');
+			// Deleted in Trash, a message filed in another folder too only leaves Trash: it stays in
+			// the folders it was never deleted from. Only what is in Trash alone goes for good.
+			const leaving =
+				core.listMailboxId() === trash.id
+					? targets.filter((id) => !inTrash.includes(id) && boxesOf(id).includes(trash.id))
+					: [];
+			const toTrash = targets.filter((id) => !inTrash.includes(id) && !leaving.includes(id));
+			const patches = movePatches(toTrash, trash.id);
+			for (const id of leaving) patches[id] = { mailboxIds: { [trash.id]: false } };
+			await commit(patches, 'deleted', trash.name);
 			if (!inTrash.length) return;
 			core.listIds = core.listIds.filter((id) => !inTrash.includes(id));
 			core.rebuild();

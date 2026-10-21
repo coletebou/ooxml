@@ -2,50 +2,29 @@
 // (memory, JMAP, ...) and exposes one immutable `MailState` plus plain actions, in the `getState` /
 // `subscribe` shape React (`useSyncExternalStore`), Vue, Solid, Svelte and Angular adopt in a few
 // lines. DOM-free: the transport, the stores and the timers are injected. New code.
-import { ClientCore, errorCode } from './client-core';
+import { ClientCore } from './client-core';
 import { createCompose } from './client-compose';
 import { createFileActions } from './client-files';
 import { createListLoader } from './client-list';
 import { createMutations } from './client-mutations';
 import { createPeople } from './client-people';
 import type { MailClient, MailClientOptions } from './client-types';
-import { openConversationView, rangeBetween } from './client-views';
+import { rangeBetween } from './client-views';
 import { SEEN } from './model';
 
 export function createMailClient(options: MailClientOptions): MailClient {
 	const core = new ClientCore(options);
 	const list = createListLoader(core);
 	const { load: loadPeople, ...people } = createPeople(core);
+	const { markSeen, ...mutations } = createMutations(core, list);
 	const order = (): string[] => core.state.conversations.map((c) => c.id);
-
-	const showOpen = (): void => {
-		const open = core.openId ? core.conversationsById.get(core.openId) : undefined;
-		core.patch({ open: open ? openConversationView(open, core.bodies, core.bodyErrors) : null });
-	};
-
-	const loadBodies = async (id: string): Promise<void> => {
-		const conversation = core.conversationsById.get(id);
-		if (!conversation) return;
-		await Promise.all(
-			conversation.entries
-				.filter((entry) => !core.bodies.has(entry.email.id))
-				.map(async ({ email }) => {
-					try {
-						core.keepBody(await core.transport.message(email.id));
-					} catch (error) {
-						core.bodyErrors.set(email.id, errorCode(error));
-					}
-					if (core.openId === id) showOpen();
-				}),
-		);
-	};
 
 	const client: MailClient = {
 		getState: () => core.state,
 		subscribe: (listener) => core.subscribe(listener),
 		onNotice: (listener) => core.notices.on('notice', listener),
 		async refresh() {
-			await Promise.all([list.loadMailboxes(), list.loadList(), loadPeople()]);
+			await Promise.all([list.loadMailboxes(), list.loadList({ refetch: true }), loadPeople()]);
 		},
 		async selectMailbox(id) {
 			if (!core.mailboxes.some((mailbox) => mailbox.id === id)) return;
@@ -106,21 +85,22 @@ export function createMailClient(options: MailClientOptions): MailClient {
 			if (!core.conversationsById.has(id)) return;
 			core.openId = id;
 			core.patch({ focusedId: id });
-			showOpen();
-			await loadBodies(id);
+			core.showOpen();
+			const loaded = await core.loadBodies(id, true);
 			const conversation = core.conversationsById.get(id);
 			if (core.openId === id && conversation && (options.markReadOnOpen ?? true)) {
+				// Only what could be read: a message whose body did not load stays unread.
 				const unread = conversation.entries
-					.filter((e) => !e.email.keywords[SEEN])
+					.filter((e) => !e.email.keywords[SEEN] && loaded.has(e.email.id))
 					.map((e) => e.email.id);
-				if (unread.length) await client.markRead(true, unread);
+				if (unread.length) await markSeen(unread);
 			}
 		},
 		close() {
 			core.openId = null;
 			core.patch({ open: null });
 		},
-		...createMutations(core, list),
+		...mutations,
 		...createCompose(core),
 		...createFileActions(core, list),
 		...people,
