@@ -26,6 +26,7 @@ export default defineConfig({
 		'docx/load/index': 'docx/load/index.ts',
 		'docx/ui/index': 'docx/ui/index.ts',
 		'collab/index': 'collab/index.ts',
+		'calendar/index': 'calendar/index.ts',
 		'teams/index': 'teams/index.ts',
 		'visio/index': 'visio/index.ts',
 		'visio/ui/index': 'visio/ui/index.ts',

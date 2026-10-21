@@ -4,6 +4,7 @@
 // are re-validated when read back. Any member can read the shared document, so the attendee list
 // scopes who sees a meeting in their calendar, not who could read the row. DOM-free. New code.
 import * as Y from 'yjs';
+import type { Repeat } from '../calendar/model';
 import { createIdGenerator } from '../collab/identity';
 import { type ChatMember, isChatUserId, sanitizeMembers } from './chats';
 import { sanitizeChannelName, sanitizeMessageText } from './model';
@@ -26,7 +27,8 @@ import { isValidZone, localZone, zonedParts } from './time-zone';
 
 export type { MeetingException, OccurrencePatch } from './meeting-exceptions';
 
-export type MeetingRepeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+/** The calendar area's repeats (`Repeat` in `ooxml-core/calendar`). */
+export type MeetingRepeat = Repeat;
 export const MEETING_REPEATS: readonly MeetingRepeat[] = [
 	'none',
 	'daily',

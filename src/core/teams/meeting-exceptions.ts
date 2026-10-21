@@ -1,27 +1,14 @@
 // Exceptions to a repeating meeting: one occurrence cancelled, or changed (a new time, title or
 // details). Each is keyed by the occurrence's original start, which is what iCalendar calls
 // RECURRENCE-ID. Stored in the meeting row as a nested map so edits to different occurrences merge.
-// Values are re-validated when read back. DOM-free. New code.
+// Values are re-validated when read back. The two types are the calendar area's (`EventException`
+// and `OccurrencePatch` in `ooxml-core/calendar`). DOM-free. New code.
 import * as Y from 'yjs';
+import type { EventException, OccurrencePatch } from '../calendar/model';
 import { sanitizeChannelName, sanitizeMessageText } from './model';
 
-export interface MeetingException {
-	/** UTC start the occurrence would have had without the exception. */
-	originalStart: number;
-	cancelled: boolean;
-	/** Overrides for a changed occurrence. */
-	start?: number;
-	end?: number;
-	title?: string;
-	description?: string;
-}
-
-export interface OccurrencePatch {
-	start?: number;
-	end?: number;
-	title?: string;
-	description?: string;
-}
+export type MeetingException = EventException;
+export type { OccurrencePatch } from '../calendar/model';
 
 export const MAX_EXCEPTIONS = 400;
 const MAX_SPAN = 24 * 3_600_000;
