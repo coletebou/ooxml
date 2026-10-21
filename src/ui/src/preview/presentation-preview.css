@@ -18,7 +18,7 @@ button {
 	font: inherit;
 	color: inherit;
 	padding: var(--office-space-2);
-	border: var(--office-border-width) solid var(--office-teams-divider);
+	border: var(--office-border-width) solid var(--office-border);
 	border-radius: var(--office-radius-md);
 	background: var(--office-background);
 	cursor: pointer;
@@ -33,7 +33,7 @@ details {
 	margin: 0;
 }
 .hint {
-	color: var(--office-teams-text-subtle);
+	color: var(--office-muted-foreground);
 }
 .stage {
 	overflow: hidden;

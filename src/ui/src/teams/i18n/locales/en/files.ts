@@ -72,21 +72,6 @@ export const enFiles = {
 	'preview.title': 'Content preview',
 	'preview.waitSave': 'Wait for the workbook copy to finish saving or cancel the save.',
 
-	'pptx.badSize': 'The presentation has an invalid slide size',
-	'pptx.canvas': 'Slide navigation canvas',
-	'pptx.hidden': '(hidden)',
-	'pptx.navigation': 'Slide navigation',
-	'pptx.next': 'Next slide',
-	'pptx.noSlides': 'The presentation has no slides',
-	'pptx.notes': 'Speaker notes',
-	'pptx.previous': 'Previous slide',
-	'pptx.readingView':
-		'Reading view. Animation, transitions and editing are unavailable. Layout and fonts may differ from PowerPoint.',
-	'pptx.slide': 'Slide {n}',
-	'pptx.slideOf': 'Slide {n} of {total}',
-	'pptx.slideText': 'Slide text',
-	'pptx.warnings': 'Compatibility warnings',
-
 	'tab.openDocument': 'Open document',
 	'tab.openFailed': 'Could not open the tab',
 	'tab.opening': 'Opening tab...',

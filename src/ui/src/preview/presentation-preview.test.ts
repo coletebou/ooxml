@@ -1,7 +1,7 @@
 import {
 	defineTeamsPresentationPreview,
 	type TeamsPresentationPreview,
-} from './presentation-preview';
+} from '../teams/app/presentation-preview';
 
 const engine = vi.hoisted(() => ({
 	load: vi.fn(),
