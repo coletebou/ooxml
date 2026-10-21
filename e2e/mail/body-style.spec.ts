@@ -1,7 +1,7 @@
 // An HTML message is shown on the styling of its own body: its style, the colours its attributes
 // give it and its picture, cleaned and blocked as they are anywhere else in a message.
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { importHtmlMail, openConversation, openDemo, row } from './helpers';
+import { emlHeader, importEml, importHtmlMail, openConversation, openDemo } from './helpers';
 
 /** A one-pixel PNG, for the picture a body is shown on. */
 const PIXEL =
@@ -131,25 +131,12 @@ test('a message sent in several HTML parts is styled as its parts read as one do
 		'<html><body bgcolor="#000000" text="#ffffff"><p>First part</p></body></html>',
 		'<html><body bgcolor="#ffffff" text="#000000" link="#ffcc00"><p>Second part and <a href="https://example.com/">a link</a></p></body></html>',
 	];
-	const raw = [
-		'From: Ada <ada@example.com>',
-		'To: You <you@example.com>',
-		'Subject: Body in parts',
-		`Message-ID: <body-parts-${Date.now()}@example.com>`,
-		`Date: ${new Date().toUTCString()}`,
-		'MIME-Version: 1.0',
-		'Content-Type: multipart/mixed; boundary=part',
-		'',
+	await importEml(page, 'Body in parts', [
+		...emlHeader('Body in parts', 'multipart/mixed; boundary=part'),
 		...parts.flatMap((part) => ['--part', 'Content-Type: text/html; charset=utf-8', '', part]),
 		'--part--',
 		'',
-	];
-	await page.locator('mail-app input[type="file"][accept=".eml,message/rfc822"]').setInputFiles({
-		name: 'parts.eml',
-		mimeType: 'message/rfc822',
-		buffer: Buffer.from(raw.join('\r\n')),
-	});
-	await expect(row(page, 'Body in parts')).toHaveCount(1);
+	]);
 	await openConversation(page, 'Body in parts');
 	await expect(message(page).locator('p')).toHaveCount(2);
 	expect(await shownWith(page, 'body', 'background-color')).toBe('rgb(0, 0, 0)');

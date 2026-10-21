@@ -13,17 +13,26 @@ const STYLE = {
 const clean = (html: string, allowRemote = false, cidUrls?: Map<string, string>) =>
 	sanitizeEmailHtml(html, { allowRemote, ...(cidUrls ? { cidUrls } : {}) });
 
-/** The frame's document for a message, cleaned, and the attributes its body has there. */
+/** The attributes of `element`, by name. */
+const attributesOf = (element: Element): Record<string, string> =>
+	Object.fromEntries([...element.attributes].map(({ name, value }) => [name, value]));
+
+/**
+ * The frame's document for a message, cleaned, and the attributes its body (`attributes`) and its
+ * html element (`root`) have there.
+ */
 function frame(html: string, allowRemote = false, cidUrls?: Map<string, string>) {
 	const content = clean(html, allowRemote, cidUrls);
 	const doc = new DOMParser().parseFromString(
 		emailDocument(content, allowRemote, STYLE),
 		'text/html',
 	);
-	const attributes = Object.fromEntries(
-		[...doc.body.attributes].map(({ name, value }) => [name, value]),
-	);
-	return { content, doc, attributes };
+	return {
+		content,
+		doc,
+		attributes: attributesOf(doc.body),
+		root: attributesOf(doc.documentElement),
+	};
 }
 
 /**
@@ -292,6 +301,38 @@ describe('sanitizeEmailHtml', () => {
 		expect(ending.doc.body.innerHTML).toBe('<p>x</p>');
 	});
 
+	it('keeps the direction and language of the message and of its body', () => {
+		// Without them a message written right to left is shown left to right, and a screen reader
+		// reads it in the wrong language.
+		const message = frame(
+			'<html dir="rtl" lang="ar"><body dir="auto" lang="he"><p>x</p></body></html>',
+		);
+		expect(message.content.htmlAttributes).toEqual({ dir: 'rtl', lang: 'ar' });
+		expect(message.root).toEqual({ dir: 'rtl', lang: 'ar' });
+		expect(message.attributes).toEqual({ dir: 'auto', lang: 'he' });
+		// A message that gives neither is shown as before.
+		expect(frame('<p>x</p>').root).toEqual({});
+	});
+
+	it('keeps what styles the html element of the message, cleaned as on every element', () => {
+		const html =
+			'<html style="background:url(https://t.example/a.png);color:#333" class="m" id="note" onload="steal()" manifest="https://t.example/m" xmlns="http://www.w3.org/1999/xhtml"><p>x</p></html>';
+		// Its style, class and id, as an element of its body keeps them; nothing else it names.
+		const blocked = frame(html);
+		expect(blocked.root).toEqual({ style: 'background:none;color:#333', class: 'm', id: 'note' });
+		expect(blocked.content.blocked).toBe(1);
+		const allowed = frame(html, true);
+		expect(allowed.root).toEqual({
+			style: 'background:url("https://t.example/a.png");color:#333',
+			class: 'm',
+			id: 'note',
+		});
+		expect(allowed.content.blocked).toBe(0);
+		// What is unsafe goes as it does anywhere: an id that names a property of the document, a
+		// value that would end the attribute's element.
+		expect(frame('<html id="cookie" lang="en</style><b>x</b>"><p>x</p></html>').root).toEqual({});
+	});
+
 	it('stays fast on hostile CSS', () => {
 		const started = performance.now();
 		cleanCss('url('.repeat(50_000));
@@ -505,6 +546,19 @@ describe('sanitizeMessageHtml', () => {
 		});
 	});
 
+	it('gives the message the direction and language its parts read as one document give it', () => {
+		// As for the body, a parser gives the html element the attributes of a later `<html>` tag only
+		// where it has none of its own.
+		const htmlParts = [
+			'<html dir="rtl"><body lang="ar"><p>a</p>',
+			'<html dir="ltr" lang="en"><body dir="ltr" lang="fr"><p>b</p>',
+		];
+		// (jsdom's parser replaces them instead, so a browser test compares with a browser's parse.)
+		const result = sanitizeMessageHtml({ html: htmlParts.join(''), htmlParts }, options);
+		expect(result.htmlAttributes).toEqual({ dir: 'rtl', lang: 'en' });
+		expect(result.bodyAttributes).toEqual({ lang: 'ar', dir: 'ltr' });
+	});
+
 	it('cleans a body in one part as sanitizeEmailHtml does', () => {
 		const html =
 			'<style>p{background:url(https://t.example/p.png)}</style><p>Hi<img src="cid:logo@x"><img src="https://t.example/i.png"></p>';
@@ -563,5 +617,36 @@ describe('emailDocument', () => {
 			Object.fromEntries([...doc.body.attributes].map(({ name, value }) => [name, value])),
 		).toEqual({ style: 'font-family:"A&B"', class: '"><b>x</b>', bgcolor: '#000' });
 		expect(doc.body.innerHTML).toBe('<p>x</p>');
+	});
+
+	it('gives its html element the attributes of the message html element, and no other', () => {
+		const htmlAttributes = {
+			dir: 'rtl',
+			lang: 'ar',
+			style: 'font-family:"A&B"',
+			class: '"><b>x</b>',
+			onload: 'steal()',
+		};
+		const doc = new DOMParser().parseFromString(
+			emailDocument({ sheets: [], body: '<p>x</p>', htmlAttributes }, false, STYLE),
+			'text/html',
+		);
+		expect(attributesOf(doc.documentElement)).toEqual({
+			dir: 'rtl',
+			lang: 'ar',
+			style: 'font-family:"A&B"',
+			class: '"><b>x</b>',
+		});
+		expect(doc.head.querySelector('meta[http-equiv="Content-Security-Policy"]')).not.toBeNull();
+		expect(doc.body.innerHTML).toBe('<p>x</p>');
+	});
+
+	it('names no side of the page in its own rules, so they follow the direction of the message', () => {
+		// The bar of a quote is on the side its lines start on: the right, written right to left.
+		const own = frame('<blockquote>x</blockquote>').doc.querySelector('style')?.textContent ?? '';
+		expect(own).not.toMatch(/\b(?:left|right)\b/);
+		expect(own).toContain(
+			'blockquote{margin:0;margin-inline-start:.5em;padding-inline-start:.75em;',
+		);
 	});
 });

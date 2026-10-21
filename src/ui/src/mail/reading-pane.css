@@ -153,6 +153,9 @@ time,
 .text {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+	/* Plain text says nothing of its direction: each paragraph takes it from its own text, as in
+	   pre[dir=auto]. */
+	unicode-bidi: plaintext;
 	line-height: var(--office-line-height);
 	font-size: var(--office-font-size-md);
 }

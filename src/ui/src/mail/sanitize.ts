@@ -2,13 +2,21 @@
 // `javascript:` links; remote resources (images, backgrounds, every URL in CSS, `@import`) are
 // blocked until the person allows them, and counted so the reading pane can say so; `cid:` images
 // point at the message's own attachments; every link (an image map's areas too) opens in a new tab
-// without an opener; what styles the body itself is cleaned the same way. The result is then shown
-// in a sandboxed frame without scripts and with a Content-Security-Policy (email-document.ts), so a
-// sanitiser miss still cannot run code or fetch anything there. Compose puts the same HTML into the
-// page itself, where no such policy applies, so the sanitiser must not miss.
+// without an opener; what styles the html element and the body themselves, and the direction and
+// language they give, is cleaned the same way. The result is then shown in a sandboxed frame
+// without scripts and with a Content-Security-Policy (email-document.ts), so a sanitiser miss still
+// cannot run code or fetch anything there. Compose puts the same HTML into the page itself, where
+// no such policy applies, so the sanitiser must not miss.
 // A body sent in several parts is cleaned part by part (`sanitizeMessageHtml`). New code.
 import DOMPurify from 'dompurify';
-import { BODY_ATTRIBUTES, type BodyAttribute, type BodyAttributes } from './email-document';
+import {
+	BODY_ATTRIBUTES,
+	HTML_ATTRIBUTES,
+	type BodyAttribute,
+	type BodyAttributes,
+	type HtmlAttribute,
+	type HtmlAttributes,
+} from './email-document';
 import { rewriteCss } from './sanitize-css';
 
 export { emailDocument, type FrameStyle } from './email-document';
@@ -30,6 +38,12 @@ export interface SanitizedHtml {
 	sheets: readonly string[];
 	/** The body markup, cleaned. */
 	body: string;
+	/**
+	 * The attributes of the message's `<html>` element (`HTML_ATTRIBUTES`), cleaned as those of
+	 * every element are: the direction and language of the whole message among them. The frame's
+	 * html element takes them (`emailDocument`).
+	 */
+	htmlAttributes: HtmlAttributes;
 	/**
 	 * The attributes that style the message's own `<body>` (`BODY_ATTRIBUTES`), cleaned as those of
 	 * every element are. The frame's body takes them (`emailDocument`), so the message is shown on
@@ -176,18 +190,26 @@ function instance(): ReturnType<typeof DOMPurify> {
 	return purifier;
 }
 
+/** The attributes of the html element and the body an earlier part of a message gave. */
+type Taken = Record<'html' | 'body', Set<string>>;
+
 /**
- * The attributes that style the message's own `<body>`, cleaned as those of every element are: the
- * body, without its content, goes through the same DOMPurify pass, so its style goes through
- * `cleanCss`, its picture through `resourceUrl` (blocked and counted as anywhere else) and what is
- * unsafe goes as it does anywhere. A colour the legacy colour rules find none in (empty or
- * `transparent`) goes too, so that the frame's own stays (`emailDocument`). One named in `taken`
- * (given by an earlier part of the message) is left out, and this body's own are added to it.
+ * The attributes named in `names` of the message's own `<html>` or `<body>`, cleaned as those of
+ * every element are: they go, on a body without content, through the same DOMPurify pass, so a
+ * style goes through `cleanCss`, a picture through `resourceUrl` (blocked and counted as anywhere
+ * else) and what is unsafe goes as it does anywhere. A colour the legacy colour rules find none in
+ * (empty or `transparent`) goes too, so that the frame's own stays (`emailDocument`). One named in
+ * `taken` (given by an earlier part of the message) is left out, and this element's own are added
+ * to it.
  */
-function cleanBodyAttributes(body: HTMLElement, taken: Set<string>): BodyAttributes {
-	const stand = body.ownerDocument.createElement('body');
-	for (const name of BODY_ATTRIBUTES) {
-		const value = body.getAttribute(name);
+function cleanAttributes<Name extends string>(
+	element: Element,
+	names: readonly Name[],
+	taken: Set<string>,
+): Partial<Record<Name, string>> {
+	const stand = element.ownerDocument.createElement('body');
+	for (const name of names) {
+		const value = element.getAttribute(name);
 		if (value === null || taken.has(name)) continue;
 		taken.add(name);
 		stand.setAttribute(name, value);
@@ -198,8 +220,8 @@ function cleanBodyAttributes(body: HTMLElement, taken: Set<string>): BodyAttribu
 		ADD_ATTR: [...PURIFY.ADD_ATTR, ...BODY_ONLY],
 		RETURN_DOM: true,
 	}) as Element;
-	const kept: Partial<Record<BodyAttribute, string>> = {};
-	for (const name of BODY_ATTRIBUTES) {
+	const kept: Partial<Record<Name, string>> = {};
+	for (const name of names) {
 		const value = clean.getAttribute(name);
 		if (value !== null && !(BODY_COLOURS.has(name) && /^(?:transparent)?$/i.test(value)))
 			kept[name] = value;
@@ -207,25 +229,30 @@ function cleanBodyAttributes(body: HTMLElement, taken: Set<string>): BodyAttribu
 	return kept;
 }
 
-/** The message's `<style>` blocks (head and body), its body and what styles the body, cleaned. */
+/**
+ * The message's `<style>` blocks (head and body), its body, and what styles its html element and
+ * its body, cleaned.
+ */
 export function sanitizeEmailHtml(html: string, options: SanitizeOptions): SanitizedHtml {
-	return cleanText(html, options, new Set());
+	return cleanText(html, options, { html: new Set(), body: new Set() });
 }
 
-/** `sanitizeEmailHtml` without the body attributes named in `taken` (`cleanBodyAttributes`). */
-function cleanText(html: string, options: SanitizeOptions, taken: Set<string>): SanitizedHtml {
+/** `sanitizeEmailHtml` without the attributes named in `taken` (`cleanAttributes`). */
+function cleanText(html: string, options: SanitizeOptions, taken: Taken): SanitizedHtml {
 	const purify = instance();
 	if (typeof purify.sanitize !== 'function' || typeof DOMParser === 'undefined')
-		return { sheets: [], body: '', bodyAttributes: {}, blocked: 0, cids: [] };
+		return { sheets: [], body: '', htmlAttributes: {}, bodyAttributes: {}, blocked: 0, cids: [] };
 	pass = { options, blocked: 0, cids: new Set() };
 	try {
 		const parsed = new DOMParser().parseFromString(html, 'text/html');
 		const sheets = [...parsed.querySelectorAll('style')].map((style) =>
 			cleanCss(style.textContent ?? ''),
 		);
-		const bodyAttributes = cleanBodyAttributes(parsed.body, taken);
+		const htmlAttributes = cleanAttributes(parsed.documentElement, HTML_ATTRIBUTES, taken.html);
+		const bodyAttributes = cleanAttributes(parsed.body, BODY_ATTRIBUTES, taken.body);
 		const body = purify.sanitize(parsed.body.innerHTML, PURIFY);
-		return { sheets, body, bodyAttributes, blocked: pass.blocked, cids: [...pass.cids] };
+		const { blocked, cids } = pass;
+		return { sheets, body, htmlAttributes, bodyAttributes, blocked, cids: [...cids] };
 	} finally {
 		pass = null;
 	}
@@ -243,15 +270,17 @@ export interface MessageHtml {
  * sent in several, as RFC 8621 asks: read as one text, a part that ends in an open comment or tag
  * would take in the parts after it. The bodies are joined in order and the style sheets kept in
  * order, each apart; what each part blocked is added up and the `cid`s they load are merged. The
- * body is styled as the parts read as one document would style it: a parser gives a body the
- * attributes of a later `<body>` tag only where it has none of its own, so the first part whose
- * body has an attribute gives it, and one a later part cannot give is neither cleaned nor counted.
+ * html element and the body are styled as the parts read as one document would style them: a
+ * parser gives each the attributes of a later `<html>` or `<body>` tag only where it has none of
+ * its own, so the first part that gives one of them an attribute gives it, and one a later part
+ * cannot give is neither cleaned nor counted.
  */
 export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptions): SanitizedHtml {
 	const parts = message.htmlParts?.length ? message.htmlParts : [message.html ?? ''];
 	const sheets: string[] = [];
+	const htmlAttributes: Partial<Record<HtmlAttribute, string>> = {};
 	const bodyAttributes: Partial<Record<BodyAttribute, string>> = {};
-	const taken = new Set<string>();
+	const taken: Taken = { html: new Set(), body: new Set() };
 	const cids = new Set<string>();
 	let body = '';
 	let blocked = 0;
@@ -260,9 +289,10 @@ export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptio
 		// One at a time: a message may hold more style elements than a call takes arguments.
 		for (const sheet of clean.sheets) sheets.push(sheet);
 		body += clean.body;
+		Object.assign(htmlAttributes, clean.htmlAttributes);
 		Object.assign(bodyAttributes, clean.bodyAttributes);
 		blocked += clean.blocked;
 		for (const cid of clean.cids) cids.add(cid);
 	}
-	return { sheets, body, bodyAttributes, blocked, cids: [...cids] };
+	return { sheets, body, htmlAttributes, bodyAttributes, blocked, cids: [...cids] };
 }

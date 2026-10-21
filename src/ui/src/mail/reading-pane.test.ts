@@ -203,6 +203,25 @@ describe('<mail-reading-pane>', () => {
 		expect(note).toBe('Blocked 1 remote image or style to protect your privacy.');
 	});
 
+	it('shows a plain-text body in the direction of its own text, as a browser shows pre text', async () => {
+		// Plain text says nothing of its direction: each paragraph takes it from its text
+		// (`unicode-bidi: plaintext` in the pane's style), as `<pre dir="auto">` does.
+		const message = await imported(
+			'Subject: Text\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n\u0645\u0631\u062d\u0628\u0627\r\nHello\r\n',
+		);
+		const pane = document.createElement('mail-reading-pane') as MailReadingPane;
+		pane.conversation = {
+			id: message.id,
+			subject: message.subject,
+			messages: [{ summary: message, depth: 0, message, error: null }],
+		};
+		document.body.append(pane);
+		await pane.updateComplete;
+		const text = pane.shadowRoot!.querySelector('.text')!;
+		expect(text.textContent).toContain('Hello');
+		expect(text.getAttribute('dir')).toBe('auto');
+	});
+
 	it('writes a message without pictures into its frame once, however often the pane draws', async () => {
 		const writes = frameWrites();
 		try {

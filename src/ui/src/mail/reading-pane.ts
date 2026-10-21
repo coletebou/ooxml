@@ -155,7 +155,7 @@ export class MailReadingPane extends MailElement {
 							this.blocked = new Map(this.blocked).set(id, e.detail.count);
 					}}
 				></mail-html-frame>`
-			: html`<div class="text"
+			: html`<div class="text" dir="auto"
 					>${linkify(message.text ?? '').map((part) =>
 						part.href
 							? html`<a
