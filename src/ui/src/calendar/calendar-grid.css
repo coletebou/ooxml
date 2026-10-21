@@ -1,0 +1,246 @@
+/* The calendar view the product UIs share (calendar-grid.ts): the bar, the time grid and the month
+   grid. Colours go through private helpers that default to the shared tokens; a product's own sheet,
+   loaded after this one, sets them to its look (Teams uses its brand, dividers and subtle text). */
+:host {
+	--_hour: 4em;
+	--_line: var(--office-border);
+	--_brand: var(--office-accent);
+	--_brand-hover: var(--office-accent-hover);
+	--_brand-subtle: color-mix(in srgb, var(--office-accent) 10%, var(--office-background));
+	--_brand-foreground: var(--office-accent-foreground);
+	--_subtle: var(--office-muted-foreground);
+	--_mine: var(--office-popover);
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+	background: var(--office-background);
+}
+.bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--office-space-2);
+	padding: var(--office-space-3) var(--office-space-4);
+	border-block-end: var(--office-border-width) solid var(--_line);
+}
+.range {
+	/* A product may give the heading a row of its own (`--_range-basis: 100%`) on a phone. */
+	flex: 1 1 var(--_range-basis, 12em);
+	margin: 0;
+	font-size: var(--office-font-size-lg);
+}
+button {
+	padding: var(--office-space-2) var(--office-space-3);
+	border: var(--office-border-width) solid var(--_line);
+	border-radius: var(--office-radius-md);
+	background: var(--office-background);
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+button:hover {
+	background: var(--office-selected);
+}
+.step {
+	display: grid;
+	place-items: center;
+	padding: var(--office-space-2);
+}
+.modes {
+	display: inline-flex;
+	border: var(--office-border-width) solid var(--_line);
+	border-radius: var(--office-radius-md);
+	overflow: hidden;
+}
+.modes button {
+	border: 0;
+	border-radius: 0;
+}
+.modes button[aria-pressed='true'] {
+	background: var(--_brand-subtle);
+	color: var(--_brand);
+	font-weight: var(--office-font-weight-bold);
+}
+.new {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--office-space-2);
+	border-color: transparent;
+	background: var(--_brand);
+	color: var(--_brand-foreground);
+}
+.new:hover {
+	background: var(--_brand-hover);
+}
+
+/* ---- time grid: day, work week, week ----------------------------------------------------- */
+.scroller {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+}
+.grid {
+	display: grid;
+	grid-template-columns: 4em repeat(var(--cols), minmax(0, 1fr));
+	grid-template-rows: auto auto;
+	min-width: 0;
+}
+.corner,
+.head {
+	position: sticky;
+	inset-block-start: 0;
+	z-index: 3;
+	background: var(--office-background);
+	border-block-end: var(--office-border-width) solid var(--_line);
+}
+.corner {
+	display: flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+}
+.head {
+	display: grid;
+	justify-items: center;
+	padding: var(--office-space-2) 0;
+	border-inline-start: var(--office-border-width) solid var(--_line);
+}
+.dow {
+	color: var(--_subtle);
+	font-size: var(--office-font-size-sm);
+}
+.dom {
+	display: grid;
+	place-items: center;
+	min-width: 1.8em;
+	height: 1.8em;
+	border-radius: var(--office-radius-full);
+	font-size: var(--office-font-size-lg);
+}
+.head[data-today='true'] .dom {
+	background: var(--_brand);
+	color: var(--_brand-foreground);
+}
+.allday,
+.allday-label {
+	font-size: var(--office-font-size-xs);
+}
+.allday {
+	display: grid;
+	gap: var(--office-space-0);
+	justify-self: stretch;
+	min-width: 0;
+	padding: var(--office-space-1) var(--office-space-1) 0;
+}
+.allday-label {
+	padding: var(--office-space-1);
+	color: var(--_subtle);
+	text-align: end;
+}
+.hours {
+	display: grid;
+	grid-template-rows: repeat(24, var(--_hour));
+}
+.hours span {
+	white-space: nowrap;
+	padding-inline-end: var(--office-space-2);
+	color: var(--_subtle);
+	font-size: var(--office-font-size-xs);
+	text-align: end;
+	transform: translateY(-0.6em);
+}
+.column {
+	position: relative;
+	height: calc(24 * var(--_hour));
+	border-inline-start: var(--office-border-width) solid var(--_line);
+	background-image: linear-gradient(
+		to bottom,
+		var(--_line) var(--office-border-width),
+		transparent var(--office-border-width)
+	);
+	background-size: 100% var(--_hour);
+}
+.column[data-today='true'] {
+	background-color: var(--_brand-subtle);
+}
+.event {
+	position: absolute;
+	inset-block-start: calc(var(--top) * 1%);
+	inset-inline-start: calc(var(--col) / var(--span) * 100%);
+	box-sizing: border-box;
+	width: calc(100% / var(--span));
+	height: calc(var(--height) * 1%);
+	min-height: 1.6em;
+	display: grid;
+	align-content: start;
+	padding: var(--office-space-1) var(--office-space-2);
+	overflow: hidden;
+	border: var(--office-border-width) solid var(--_brand);
+	border-inline-start-width: var(--office-border-width-thick);
+	border-radius: var(--office-radius);
+	background: var(--office-popover);
+	text-align: start;
+	z-index: 1;
+}
+.event[data-mine='true'] {
+	background: var(--_mine);
+}
+.event[data-live='true'],
+.chip[data-live='true'] {
+	border-color: var(--office-call-live);
+}
+.event-title {
+	overflow: hidden;
+	font-weight: var(--office-font-weight-bold);
+	font-size: var(--office-font-size-sm);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.event[data-short='true'] {
+	align-content: center;
+	padding-block: 0;
+}
+.event[data-short='true'] .event-time {
+	display: none;
+}
+.event-time {
+	overflow: hidden;
+	color: var(--_subtle);
+	font-size: var(--office-font-size-xs);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.now {
+	position: absolute;
+	inset-block-start: calc(var(--top) * 1%);
+	inset-inline: 0;
+	z-index: 2;
+	height: var(--office-border-width-thick);
+	background: var(--office-danger);
+	pointer-events: none;
+}
+.now::before {
+	content: '';
+	position: absolute;
+	inset-inline-start: calc(-1 * var(--office-space-1));
+	inset-block-start: calc(-1 * var(--office-space-1));
+	width: var(--office-space-2);
+	height: var(--office-space-2);
+	border-radius: var(--office-radius-full);
+	background: var(--office-danger);
+}
+
+@media (max-width: 40em) {
+	:host {
+		--_hour: 4em;
+	}
+	.grid {
+		grid-template-columns: 3.8em repeat(var(--cols), minmax(0, 1fr));
+	}
+	.bar button {
+		min-height: 2.75em;
+	}
+	.modes button {
+		padding-inline: var(--office-space-2);
+	}
+}
