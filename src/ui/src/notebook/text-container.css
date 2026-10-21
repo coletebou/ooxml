@@ -87,7 +87,7 @@
 }
 
 /* To-do tags: a checkbox widget before the line. */
-.ProseMirror [data-todo] {
+.ProseMirror [data-todo]:not(.todo-box) {
 	position: relative;
 	padding-inline-start: 1.6em;
 }

@@ -278,6 +278,13 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		// Another storage is another profile: its notebooks must not stay on screen, so it switches
 		// even when the last save failed (the save-failed notice said so).
 		const profile = this.storageName !== this.#storageName;
+		if (profile) {
+			// Off the screen at once: its notebooks are not shown while its last save completes.
+			for (const off of this.#off.splice(0)) off();
+			this.state = null;
+			this.editor = null;
+			this.formats = null;
+		}
 		void current.flush().then(
 			() => this.#client === current && this.#start(),
 			() => profile && this.#client === current && this.#start(),

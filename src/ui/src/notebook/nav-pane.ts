@@ -4,6 +4,7 @@
 // deletes, Alt+Arrow moves an item, the context-menu key opens its menu; items also drag. Every
 // change is an event the app turns into a client action.
 import { html, nothing } from 'lit';
+import { repeat } from 'lit/directives/repeat.js';
 import { classMap } from 'lit/directives/class-map.js';
 import type { NotebookState, PageView, SearchHit, SectionView } from 'ooxml-core/notebook';
 import { controlStyles } from '../base';
@@ -62,7 +63,11 @@ export class NotebookNav extends NotebookElement {
 		let stop = s.sectionId;
 		while (stop && !shown.has(stop)) stop = parent.get(stop) ?? '';
 		stop ||= visible[0]?.id ?? '';
-		return visible.map((x) => this.#section(x, s.sectionId, x.id === stop));
+		return repeat(
+			visible,
+			(x) => x.id,
+			(x) => this.#section(x, s.sectionId, x.id === stop),
+		);
 	}
 
 	#visibleSections(sections: readonly SectionView[]): SectionView[] {
@@ -302,7 +307,11 @@ export class NotebookNav extends NotebookElement {
 					${glyph('plus')}<span>${this.t('nav.addPage')}</span>
 				</button>
 				<ul role="listbox" aria-label=${this.t('nav.pages')}>
-					${s.pages.map((p) => this.#page(p, s.pageId))}
+					${repeat(
+						s.pages,
+						(p) => p.id,
+						(p) => this.#page(p, s.pageId),
+					)}
 				</ul>
 				${s.section && !s.pages.length ? html`<p class="empty">${this.t('nav.noPages')}</p>` : nothing}
 			</section>
