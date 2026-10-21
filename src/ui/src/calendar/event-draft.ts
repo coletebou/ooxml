@@ -4,6 +4,7 @@
 // start keeps the length. `buildEvent` turns a draft into the `CalendarEvent` to store or names what
 // keeps it from being saved. A repeating event is edited as a whole series. DOM-free. New code.
 import {
+	dayMatchesOrdinal,
 	MINUTE_MS,
 	zonedParts,
 	zonedToUtc,
@@ -43,7 +44,10 @@ const nineOn = (ms: number, zone: string): number => {
 	return zonedToUtc({ year: p.year, month: p.month, day: p.day, hour: 9 }, zone);
 };
 
-/** A draft of a new event at `start` (a whole day when `allDay`), in the calendar's zone. */
+/**
+ * A draft of a new event at `start` (a whole day when `allDay`), in the calendar's zone. A timed
+ * one ends half an hour later, on the next day when that runs past midnight.
+ */
 export function newDraft(start: number, allDay: boolean, zone: string): EventDraft {
 	const begin = allDay ? nineOn(start, zone) : start;
 	return {
@@ -52,7 +56,7 @@ export function newDraft(start: number, allDay: boolean, zone: string): EventDra
 		allDay,
 		startDate: dateValue(start, zone),
 		startTime: timeValue(begin, zone),
-		endDate: dateValue(start, zone),
+		endDate: dateValue(allDay ? start : begin + NEW_LENGTH, zone),
 		endTime: timeValue(begin + NEW_LENGTH, zone),
 		location: '',
 		description: '',
@@ -106,20 +110,33 @@ function kept(event: CalendarEvent): Partial<CalendarEvent> {
 
 /**
  * The repeat fields to keep from the stored event: its end (count or date) while it still repeats,
- * the monthly rule while it stays monthly (the weekday ordinal only while the start stays), and the
- * changed or cancelled occurrences only while the series keeps its start, repeat and kind.
+ * the monthly rule while it stays monthly (the weekday ordinal while the start's date in the
+ * event's zone still fits it: a new time keeps "the last Friday"), and the changed or cancelled
+ * occurrences only while the series keeps its start, repeat and kind.
  */
-function series(original: CalendarEvent, repeat: Repeat, start: number, allDay: boolean) {
+function series(
+	original: CalendarEvent,
+	repeat: Repeat,
+	start: number,
+	allDay: boolean,
+	zone: string,
+) {
 	if (repeat === 'none' || original.repeat === 'none') return {};
 	const same = original.repeat === repeat;
 	const moved = start !== original.start || !same || allDay !== (original.allDay === true);
+	const day = zonedParts(start, zone);
+	const ordinal = original.ordinal;
+	const keepOrdinal =
+		ordinal !== undefined &&
+		same &&
+		(!moved || dayMatchesOrdinal(day.year, day.month, day.day, ordinal));
 	return {
 		...(original.until !== undefined ? { until: original.until } : {}),
 		...(original.count !== undefined ? { count: original.count } : {}),
 		...(same && repeat === 'monthly' && original.monthlyBy
 			? { monthlyBy: original.monthlyBy }
 			: {}),
-		...(!moved && original.ordinal !== undefined ? { ordinal: original.ordinal } : {}),
+		...(keepOrdinal ? { ordinal } : {}),
 		...(!moved && original.exceptions?.length ? { exceptions: original.exceptions } : {}),
 	};
 }
@@ -155,7 +172,7 @@ export function buildEvent(
 			repeat: draft.repeat,
 			...(draft.allDay ? { allDay: true } : {}),
 			...(location ? { location } : {}),
-			...(original ? series(original, draft.repeat, start, draft.allDay) : {}),
+			...(original ? series(original, draft.repeat, start, draft.allDay, eventZone) : {}),
 		},
 	};
 }

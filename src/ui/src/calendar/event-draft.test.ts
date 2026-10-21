@@ -78,6 +78,20 @@ describe('event drafts', () => {
 		});
 	});
 
+	it('ends a new event that runs past midnight on the next day, ready to save', () => {
+		const late = newDraft(at(BERLIN, 10, 20, 23, 30), false, BERLIN);
+		expect([late.startDate, late.startTime, late.endDate, late.endTime]).toEqual([
+			'2026-10-20',
+			'23:30',
+			'2026-10-21',
+			'00:00',
+		]);
+		const saved = built(buildEvent({ ...late, title: 'Late call' }, BERLIN, id));
+		expect(saved.end - saved.start).toBe(30 * 60_000);
+		// A whole day still ends on the day it starts (its last day).
+		expect(newDraft(at(BERLIN, 10, 20, 23, 30), true, BERLIN).endDate).toBe('2026-10-20');
+	});
+
 	it('shows a timed event in the calendar zone and saves it back unchanged', () => {
 		const stored = event({
 			zone: NEW_YORK,
@@ -172,11 +186,17 @@ describe('event drafts', () => {
 			...stored,
 			title: 'Renamed',
 		});
-		// Moving the start drops the occurrences of the old series and the old weekday ordinal.
+		// Moving the start drops the occurrences of the old series; a new time keeps the weekday
+		// ordinal, which still fits the date (6 October is the first Tuesday).
 		const moved = built(buildEvent({ ...draft, startTime: '10:00', endTime: '11:00' }, BERLIN, id));
-		expect(moved).toMatchObject({ repeat: 'monthly', monthlyBy: 'weekday', count: 5 });
+		expect(moved).toMatchObject({ repeat: 'monthly', monthlyBy: 'weekday', count: 5, ordinal: 1 });
 		expect(moved).not.toHaveProperty('exceptions');
-		expect(moved).not.toHaveProperty('ordinal');
+		// A date it no longer fits (13 October is the second Tuesday) drops it.
+		const later = built(
+			buildEvent({ ...draft, startDate: '2026-10-13', endDate: '2026-10-13' }, BERLIN, id),
+		);
+		expect(later).toMatchObject({ repeat: 'monthly', monthlyBy: 'weekday', count: 5 });
+		expect(later).not.toHaveProperty('ordinal');
 		const weekly = built(buildEvent({ ...draft, repeat: 'weekly' }, BERLIN, id));
 		expect(weekly).toMatchObject({ repeat: 'weekly', count: 5 });
 		expect(weekly).not.toHaveProperty('monthlyBy');
@@ -184,6 +204,27 @@ describe('event drafts', () => {
 		const once = built(buildEvent({ ...draft, repeat: 'none' }, BERLIN, id));
 		for (const key of ['monthlyBy', 'ordinal', 'count', 'until', 'exceptions'])
 			expect(once, key).not.toHaveProperty(key);
+	});
+
+	it('keeps a last-weekday series on the last weekday when only its time changes', () => {
+		// 27 November 2026 is both the fourth and the last Friday: only the ordinal says which.
+		const stored = event({
+			start: at(BERLIN, 11, 27, 9),
+			end: at(BERLIN, 11, 27, 10),
+			repeat: 'monthly',
+			monthlyBy: 'weekday',
+			ordinal: -1,
+		});
+		const draft = draftOf(stored, BERLIN);
+		const retimed = built(
+			buildEvent({ ...draft, startTime: '10:00', endTime: '11:00' }, BERLIN, id),
+		);
+		expect(retimed).toMatchObject({ monthlyBy: 'weekday', ordinal: -1 });
+		// 25 December is the last Friday too, so a move there keeps it.
+		const december = built(
+			buildEvent({ ...draft, startDate: '2026-12-25', endDate: '2026-12-25' }, BERLIN, id),
+		);
+		expect(december).toMatchObject({ ordinal: -1 });
 	});
 
 	it('moves the end with the start so the length stays', () => {
