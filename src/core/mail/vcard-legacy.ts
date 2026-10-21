@@ -2,7 +2,7 @@
 // declares. An inline binary PHOTO, LOGO, SOUND or KEY (`ENCODING=b;TYPE=JPEG` in 3.0,
 // `ENCODING=BASE64` or a bare `JPEG;BASE64` in 2.1) becomes the `data:` URI (RFC 2397) that 4.0
 // writes instead: 4.0 has no ENCODING parameter, and those properties are URIs there (RFC 6350
-// sections 6.2.4, 6.6.3, 6.7.5 and 6.8.1). Used by `vcard.ts`. New code.
+// sections 6.2.4, 6.6.3, 6.7.5 and 6.8.1). Used by `vcard-write.ts`. New code.
 import { splitContentLine } from '../calendar/ics-lines';
 import { parseLine } from './vcard-lines';
 
