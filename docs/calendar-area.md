@@ -62,7 +62,9 @@ for the reminder. All-day events are written as dates. DTEND is written only whe
 DTSTART (RFC 5545): without it a timed event ends where it starts and an all-day one lasts its day.
 A length in days on the clock is written as a DURATION, which is nominal for each occurrence.
 There is no METHOD unless the caller passes one (`REQUEST`, `CANCEL`): a file without it is a
-calendar snapshot, with no scheduling meant (RFC 5545 3.7.2).
+calendar snapshot, with no scheduling meant (RFC 5545 3.7.2). A TZID parameter is quoted when it
+holds a colon, a semicolon or a comma (RFC 5545 3.2), as the name of a zone given by its offset
+(`+01:00`, which the platform takes for a zone) does.
 
 A VTIMEZONE holds for every year the file needs it in (RFC 5545 3.6.5 asks it to for all the
 occurrences of a repeat): from the year before the first time written to the last occurrence of

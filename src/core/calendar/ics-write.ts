@@ -60,11 +60,27 @@ export function icsLocal(ms: number, zone: string): string {
 	return `${pad(p.year, 4)}${pad(p.month)}${pad(p.day)}T${pad(p.hour)}${pad(p.minute)}${pad(p.second)}`;
 }
 
+/** Control characters other than tabs and line breaks, which iCalendar text may not hold. */
+const controls = (text: string): string =>
+	text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '');
+
+/** A parameter value: RFC 6868 escapes for `^`, a line break and a quote, quoted when needed. */
+function paramValue(text: string): string {
+	const value = controls(text)
+		.replace(/\^/gu, '^^')
+		.replace(/\r\n|\r|\n/gu, '^n')
+		.replace(/"/gu, "^'");
+	return /[,;:]/u.test(value) ? `"${value}"` : value;
+}
+
+/** `TZID=<zone>`, quoted when it holds a colon (`+01:00`), semicolon or comma (RFC 5545 3.2). */
+const tzidParam = (zone: string): string => `TZID=${paramValue(zone)}`;
+
 /** A date-time property: `DTSTART;TZID=America/New_York:20261015T090000`, or `...:...Z` in UTC. */
 export function icsDateTime(name: string, ms: number, zone: string): string {
 	return UTC_ZONES.has(zone)
 		? `${name}:${icsUtc(ms)}`
-		: `${name};TZID=${zone}:${icsLocal(ms, zone)}`;
+		: `${name};${tzidParam(zone)}:${icsLocal(ms, zone)}`;
 }
 
 /** `20261015`: the wall date of an instant in a zone. */
@@ -141,7 +157,7 @@ export function icsRecurrence(
 		? `EXDATE;VALUE=DATE:${exdates.join(',')}`
 		: utc
 			? `EXDATE:${exdates.join(',')}`
-			: `EXDATE;TZID=${series.zone}:${exdates.join(',')}`;
+			: `EXDATE;${tzidParam(series.zone)}:${exdates.join(',')}`;
 	return [`RRULE:FREQ=${freq}${calendarParts(series)}${end}`, ...(exdates.length ? [exdate] : [])];
 }
 
@@ -172,19 +188,6 @@ export interface EventsToIcsOptions {
 	organizer?: EventPerson;
 	/** Written on events that have no attendees of their own. */
 	attendees?: readonly EventAttendee[];
-}
-
-/** Control characters other than tabs and line breaks, which iCalendar text may not hold. */
-const controls = (text: string): string =>
-	text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '');
-
-/** A parameter value: RFC 6868 escapes for `^`, a line break and a quote, quoted when needed. */
-function paramValue(text: string): string {
-	const value = controls(text)
-		.replace(/\^/gu, '^^')
-		.replace(/\r\n|\r|\n/gu, '^n')
-		.replace(/"/gu, "^'");
-	return /[,;:]/u.test(value) ? `"${value}"` : value;
 }
 
 /** `ORGANIZER;CN=Ada:mailto:ada@example.com`; null for a person without a usable address. */

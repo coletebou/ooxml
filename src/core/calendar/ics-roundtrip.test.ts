@@ -154,3 +154,72 @@ describe('iCalendar round trip', () => {
 		expect(back.events[0]!.end - back.events[0]!.start).toBe(HOUR_MS / 2);
 	});
 });
+
+describe('iCalendar round trip of a zone named by its offset', () => {
+	// The platform takes `+01:00` for a zone, so an imported TZID may name one; its colon must not
+	// end the name and parameters of the lines that refer to it.
+	const FILE = [
+		'BEGIN:VCALENDAR',
+		'VERSION:2.0',
+		'PRODID:-//Other//Calendar//EN',
+		'BEGIN:VEVENT',
+		'UID:stand-up@other.example',
+		'DTSTAMP:20261001T000000Z',
+		'DTSTART;TZID="+01:00":20261021T090000',
+		'DTEND;TZID="+01:00":20261021T100000',
+		'RRULE:FREQ=WEEKLY;COUNT=4',
+		'EXDATE;TZID="+01:00":20261028T090000',
+		'SUMMARY:Stand-up',
+		'END:VEVENT',
+		'BEGIN:VEVENT',
+		'UID:stand-up@other.example',
+		'DTSTAMP:20261001T000000Z',
+		'RECURRENCE-ID;TZID="+01:00":20261104T090000',
+		'DTSTART;TZID="+01:00":20261104T140000',
+		'DTEND;TZID="+01:00":20261104T150000',
+		'SUMMARY:Stand-up\\, moved',
+		'END:VEVENT',
+		'END:VCALENDAR',
+		'',
+	].join('\r\n');
+	const read = parseIcs(FILE);
+	const text = eventsToIcs(read.events, OPTIONS);
+
+	it('reads the zone and its times', () => {
+		expect(read.unsupported).toEqual([]);
+		expect(read.events).toMatchObject([
+			{
+				zone: '+01:00',
+				start: Date.UTC(2026, 9, 21, 8),
+				end: Date.UTC(2026, 9, 21, 9),
+				exceptions: [
+					{ originalStart: Date.UTC(2026, 9, 28, 8), cancelled: true },
+					{
+						originalStart: Date.UTC(2026, 10, 4, 8),
+						start: Date.UTC(2026, 10, 4, 13),
+						end: Date.UTC(2026, 10, 4, 14),
+						title: 'Stand-up, moved',
+					},
+				],
+			},
+		]);
+	});
+
+	it('reads back the same events, at the same instants, from what it writes', () => {
+		const back = parseIcs(text);
+		expect(back.unsupported).toEqual([]);
+		expect(back.events).toEqual(read.events);
+		expect(eventsToIcs(back.events, OPTIONS)).toBe(text);
+	});
+
+	it('quotes that TZID wherever it writes it (RFC 5545 3.2)', () => {
+		expect(text.split('\r\n').filter((line) => line.includes('TZID='))).toEqual([
+			'DTSTART;TZID="+01:00":20261021T090000',
+			'DTEND;TZID="+01:00":20261021T100000',
+			'EXDATE;TZID="+01:00":20261028T090000',
+			'RECURRENCE-ID;TZID="+01:00":20261104T090000',
+			'DTSTART;TZID="+01:00":20261104T140000',
+			'DTEND;TZID="+01:00":20261104T150000',
+		]);
+	});
+});
