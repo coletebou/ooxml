@@ -106,6 +106,15 @@ function domainOf(email: string): string | undefined {
 }
 
 /**
+ * A new Message-ID, without angle brackets, unique as RFC 5322 section 3.6.4 asks: the time `now`
+ * and twelve random bytes, at `domain`, else at the domain of the address `from`, else `localhost`.
+ */
+export function newMessageId(now: number, from?: string, domain?: string): string {
+	const right = domain ?? (from === undefined ? undefined : domainOf(from)) ?? 'localhost';
+	return `${Math.trunc(now).toString(36)}.${randomHex(12)}@${right}`;
+}
+
+/**
  * Writes `email` as an RFC 5322 message: CRLF line endings, `MIME-Version: 1.0`, header fields
  * folded within 78 characters where a space allows, encoded words (RFC 2047) for non-ASCII header
  * text, RFC 2231 for non-ASCII file names, `7bit` or quoted-printable text, base64 in 76-character
@@ -131,8 +140,7 @@ export function writeEmail(email: OutgoingEmail, options: WriteOptions = {}): Ui
 	if (options.includeBcc) addresses('Bcc', email.bcc);
 	// Written even when empty: a missing Subject is what spam filters count against a message.
 	lines.push(foldHeader('Subject', encodeHeaderText(email.subject)));
-	const domain = options.messageIdDomain ?? domainOf(email.from.email) ?? 'localhost';
-	const made = `${Math.trunc(date).toString(36)}.${randomHex(12)}@${domain}`;
+	const made = newMessageId(date, email.from.email, options.messageIdDomain);
 	add('Message-ID', formatMessageIds([email.messageId ?? '']) || formatMessageIds([made]));
 	add('In-Reply-To', formatMessageIds(email.inReplyTo ?? []));
 	add('References', formatMessageIds(email.references ?? []));

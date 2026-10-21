@@ -51,6 +51,11 @@ export interface FakeServer {
 		match: (request: Recorded) => boolean,
 		respond: (request: Recorded) => Response | Promise<Response>,
 	): void;
+	/**
+	 * Runs the method calls of an API request and returns the answer, for a route that loses it: the
+	 * server did what was asked and the client never heard.
+	 */
+	process(request: Recorded): Response;
 	/** Answers requests for `from` with a redirect (302 unless `status` says) to `location`. */
 	redirect(from: string, location: string, status?: number): void;
 	/**
@@ -327,6 +332,7 @@ export function createFakeServer(
 		route(match, respond) {
 			routes.unshift({ match, respond });
 		},
+		process: (request) => api(request),
 		redirect(from, location, status = 302) {
 			server.route(
 				(request) => request.url === from,

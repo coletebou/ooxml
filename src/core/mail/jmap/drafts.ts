@@ -7,23 +7,29 @@
 // (`maxCallsInRequest`), gets the clean-up as a second request instead, and with one call per
 // request the submission too. The copy a send made is destroyed only when it certainly did not go
 // out (the server refused it, or the request as a whole, RFC 8620 3.6); when that is not known it
-// stays, and the send fails as `uncertain` rather than as not sent (`submission.ts`). The same
-// message sent again then first asks the server whether that copy went out (RFC 8621 7.3), and is
-// sent again only when the server says it did not, or has neither the copy nor a submission of it
-// any more; while the server cannot be asked, nothing is sent. That is known in memory only: a
-// reload forgets it, and a message changed since is a new one. A request that creates and submits
-// the message at once and gets no answer at all fails with why (the network, say), not as
-// `uncertain`: the copy's id never came, so there is nothing to ask about. New code.
+// stays, and the send fails as `uncertain` rather than as not sent (`submission.ts`). So does a
+// request that creates and submits the message at once and gets no answer: the copy's id never
+// came, but every send gives its message a Message-ID of its own (RFC 8621 4.1.2.5, 4.6), by which
+// the copy is looked for (the `header` condition, 4.4.1). The same message sent again then first
+// asks the server whether that copy went out (RFC 8621 7.3), and is sent again only when the
+// server says it did not, has neither the copy nor a submission of it any more (a search for the
+// Message-ID finds no copy, when the id never came), or cannot search by header field
+// (`unsupportedFilter`), so it can never say; while the server cannot be asked, nothing is sent.
+// That is known in memory only: a reload forgets it, and a message changed since is a new one.
+// New code.
 import { ANSWERED, DRAFT, FORWARDED, SEEN, type Draft, type Identity } from '../model';
 import { MailTransportError } from '../transport';
 import type { JmapClient } from './client';
 import type { MailboxMethods } from './mailboxes';
-import { emailToCreate, pickIdentity } from './outgoing';
+import { emailToCreate, messageIdFor, pickIdentity } from './outgoing';
 import { patchPath, type JmapCall, type JmapRequestBuilder, type JmapResult } from './request';
-import { refused, uncertain, unprocessed, wentOut } from './submission';
+import { copyWithId, refused, uncertain, unprocessed, wentOut } from './submission';
 import { isRecord } from './types';
 
 type Patch = Record<string, true | null>;
+
+/** The copy a send whose submission was not certain made: its id, or the Message-ID it gave it. */
+type UnsureCopy = { emailId: string } | { messageId: string };
 
 export interface DraftOptions {
 	client: JmapClient;
@@ -107,7 +113,21 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 	 * Copies whose submission may or may not have happened, by the message they hold. Each stays
 	 * until the server can say whether it went out, so sending the same message again asks first.
 	 */
-	const unsure = new Map<string, string>();
+	const unsure = new Map<string, UnsureCopy>();
+
+	/**
+	 * Whether the copy an earlier send of the message `key` made went out (`wentOut`); when its id
+	 * never came, the copy is found by its Message-ID (`copyWithId`, `boxes` being Drafts and Sent).
+	 * Null when the server holds no such copy or cannot look for it. A copy found stays known by its
+	 * id. Throws while the server cannot be asked.
+	 */
+	const ask = async (key: string, earlier: UnsureCopy, boxes: readonly string[]) => {
+		const copy =
+			'emailId' in earlier ? earlier.emailId : await copyWithId(client, earlier.messageId, boxes);
+		if (copy === null) return null;
+		unsure.set(key, { emailId: copy });
+		return { copy, went: await wentOut(client, copy) };
+	};
 
 	const draftsMailbox = async (): Promise<string> => {
 		const id = await mailboxes.roleId('drafts');
@@ -180,19 +200,20 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			if (earlier !== undefined) {
 				// Asked before anything is sent: while the server cannot be asked, it is still not known,
 				// nothing is sent and the copy stays known for the next send.
-				const went = await wentOut(client, earlier).catch((error: unknown) => {
+				const boxes = sent ? [drafts, sent] : [drafts];
+				const asked = await ask(key, earlier, boxes).catch((error: unknown) => {
 					throw uncertain(error);
 				});
 				unsure.delete(key);
-				if (went) {
+				if (asked?.went) {
 					// It went out the first time: that send is finished, never made again.
-					await quietly(() => tidy(destroy, { ...marks, [earlier]: onSent }));
+					await quietly(() => tidy(destroy, { ...marks, [asked.copy]: onSent }));
 					nudge();
-					return { id: earlier };
+					return { id: asked.copy };
 				}
 				// It did not: that copy is a stray draft. When the server can never say (it has neither
-				// the copy nor a submission of it), the message is sent again.
-				if (went === false) await quietly(() => tidy([earlier], {}));
+				// the copy nor a submission of it, or cannot look for it), the message is sent again.
+				if (asked?.went === false) await quietly(() => tidy([asked.copy], {}));
 			}
 			const limit = await maxCalls();
 			// Created, submitted and cleaned up in one request of four calls when it is taken.
@@ -203,23 +224,36 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 					create: { send: { identityId: identity.id, emailId } },
 					onSuccessUpdateEmail: { '#send': onSent },
 				});
-			const first = await client.request((builder, accountId) => {
-				const email = builder.call('Email/set', { accountId, create: { draft: create } });
-				if (limit < 2) return { email, submission: null, clean: null };
-				const submission = submit(builder, accountId, '#draft');
-				if (!gated) return { email, submission, clean: null };
-				const echo = builder.call('Core/echo', {
-					sent: submission.ref('/created/send/id'),
-					destroy,
-					update: marks,
+			// Its own Message-ID: the copy is found by it when no answer says what the copy's id is.
+			const messageId = messageIdFor(draft, identity);
+			const message = { ...create, messageId: [messageId] };
+			const first = await client
+				.request((builder, accountId) => {
+					const email = builder.call('Email/set', { accountId, create: { draft: message } });
+					if (limit < 2) return { email, submission: null, clean: null };
+					const submission = submit(builder, accountId, '#draft');
+					if (!gated) return { email, submission, clean: null };
+					const echo = builder.call('Core/echo', {
+						sent: submission.ref('/created/send/id'),
+						destroy,
+						update: marks,
+					});
+					const clean = builder.call('Email/set', {
+						accountId,
+						destroy: destroy.length ? echo.ref('/destroy') : undefined,
+						update: Object.keys(marks).length ? echo.ref('/update') : undefined,
+					});
+					return { email, submission, clean };
+				})
+				.catch((error: unknown) => {
+					// Created and submitted at once, it may have gone out though no answer came, unless the
+					// server refused the request as a whole (RFC 8620 3.6): the next send of it looks for
+					// the copy by its Message-ID.
+					if (limit < 2 || unprocessed(error)) throw error;
+					unsure.set(key, { messageId });
+					nudge();
+					throw uncertain(error);
 				});
-				const clean = builder.call('Email/set', {
-					accountId,
-					destroy: destroy.length ? echo.ref('/destroy') : undefined,
-					update: Object.keys(marks).length ? echo.ref('/update') : undefined,
-				});
-				return { email, submission, clean };
-			});
 			// Not created: nothing was sent and the saved draft is untouched.
 			const id = first.result.created(first.calls.email, 'draft');
 			/**
@@ -229,7 +263,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			 */
 			const notSent = async (error: unknown, certain: boolean): Promise<never> => {
 				if (certain) await quietly(() => tidy([id], {}));
-				else unsure.set(key, id);
+				else unsure.set(key, { emailId: id });
 				nudge();
 				throw certain ? error : uncertain(error);
 			};

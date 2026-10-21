@@ -1,12 +1,14 @@
-// `Email/set`, `Email/get`, `EmailSubmission/set` and `EmailSubmission/query` on the fake server,
-// over a small store of messages, so the draft and send tests can check where messages end up.
-// Creation ids (`#draft`) are resolved the way RFC 8620 5.3 says, within the request and across it.
+// `Email/set`, `Email/get`, `Email/query` (by Message-ID), `EmailSubmission/set` and
+// `EmailSubmission/query` on the fake server, over a small store of messages, so the draft and send
+// tests can check where messages end up. Creation ids (`#draft`) are resolved the way RFC 8620 5.3
+// says, within the request and across it.
 import { isRecord, type JmapInvocation } from '../types';
 import type { FakeServer } from './fake-server';
 
 export interface StoredEmail {
 	mailboxIds: Record<string, true>;
 	keywords: Record<string, true>;
+	/** The object it was created from; its `messageId` is what a `header` search finds it by. */
 	create?: Record<string, unknown>;
 }
 
@@ -23,6 +25,23 @@ export interface MailStore {
 	 * `after`, as a server that sent the message and failed then.
 	 */
 	failSubmission: 'before' | 'after' | null;
+	/** False: `Email/query` refuses a `header` condition (`unsupportedFilter`, RFC 8620 5.5). */
+	headerSearch: boolean;
+}
+
+/**
+ * True when `email` meets the `header` condition of `filter` (RFC 8621 4.4.1), for `Message-ID`
+ * only, whose value a creation gave it; every email meets a filter without one.
+ */
+function matches(email: StoredEmail, filter: Record<string, unknown>): boolean {
+	if (!Array.isArray(filter.header)) return true;
+	const [name, text] = filter.header as unknown[];
+	const ids = email.create?.messageId;
+	return (
+		String(name).toLowerCase() === 'message-id' &&
+		Array.isArray(ids) &&
+		(text === undefined || ids.some((id) => String(id).includes(String(text))))
+	);
 }
 
 function applyPatch(email: StoredEmail, patch: Record<string, unknown>): void {
@@ -45,6 +64,7 @@ export function installMailStore(server: FakeServer): MailStore {
 		refuseSubmission: null,
 		skipImplicit: false,
 		failSubmission: null,
+		headerSearch: true,
 	};
 	const created = new Map<string, string>();
 	let next = 0;
@@ -134,6 +154,14 @@ export function installMailStore(server: FakeServer): MailStore {
 			}),
 			notFound: ids.filter((id) => !store.emails.has(id)),
 		};
+	});
+
+	server.on('Email/query', (args, call) => {
+		const filter = isRecord(args.filter) ? args.filter : {};
+		if (filter.header !== undefined && !store.headerSearch)
+			return [['error', { type: 'unsupportedFilter' }, call.id]];
+		const ids = [...store.emails].filter(([, email]) => matches(email, filter)).map(([id]) => id);
+		return { ids, position: 0, total: ids.length };
 	});
 	return store;
 }

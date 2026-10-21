@@ -1,7 +1,8 @@
 // The Email a draft becomes (RFC 8621 4.6 creation rules): addresses, the threading headers, one
 // `text/plain` part, one `text/html` part when the draft has rich text, attachments by blob id
-// (the pictures the HTML shows inline, with their Content-ID), and the identity it is written as.
-// New code.
+// (the pictures the HTML shows inline, with their Content-ID), and the identity it is written as;
+// and the Message-ID a send gives it. New code.
+import { newMessageId } from '../mime/build';
 import {
 	identityFor,
 	isWildcardAddress,
@@ -31,6 +32,15 @@ function sender(draft: Draft, identity: Identity | undefined): MailAddress | und
 
 const addresses = (list: readonly MailAddress[]) =>
 	list.length ? toJmapAddresses(list) : undefined;
+
+/**
+ * A Message-ID of its own for `draft` sent as `identity` (the `messageId` an `Email/set` creation
+ * may give, RFC 8621 4.1.2.5 and 4.6), at the domain of the address it is sent from: the
+ * identity's, a wildcard's included, when the From is left to the server.
+ */
+export function messageIdFor(draft: Draft, identity: Identity, now = Date.now()): string {
+	return newMessageId(now, sender(draft, identity)?.email ?? identity.email);
+}
 
 /**
  * The `Email/set` create object for `draft`, filed in `mailboxId` with `keywords`. `undefined`

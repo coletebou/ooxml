@@ -22,12 +22,14 @@ OpenMail is an early implementation. This page lists what it does not do, so not
 - **Rich text** uses the browser's editing commands; it is tested in Chromium. Quoted, pasted and
   dropped HTML, and a saved draft opened again, lose remote images (so composing never loads a
   tracker) and style sheets (inline styles stay): what is sent is what the editor shows.
-- **A send the server did not confirm** (it failed part way, or said nothing of the submission) is
-  reported as possibly sent. Sent again unchanged from the same open app, the message is first
-  checked with the server and goes out only if it did not the first time; while the server cannot
-  be reached, nothing is sent. After a reload, or once the message is changed, it is a new message,
-  and so is one whose copy was deleted meanwhile. A send that got no answer at all is reported as a
-  connection failure, though it may have gone out: look in Sent before sending it again.
+- **A send the server did not confirm** (it failed part way, said nothing of the submission, or
+  sent no answer at all) is reported as possibly sent. Sent again unchanged from the same open app,
+  the message is first checked with the server and goes out only if it did not the first time;
+  while the server cannot be reached, nothing is sent. After a reload, or once the message is
+  changed, it is a new message, and so is one whose copy was deleted meanwhile. After a send that
+  got no answer at all, the copy is looked for by the message's Message-ID: a server that cannot
+  search messages by header field cannot say whether it went out, and it is sent again, so look in
+  Sent first.
 - **Unsaved drafts when the app goes away**: if the app is removed, or connects to another mailbox,
   while a draft cannot be saved (offline, over quota), it keeps trying in the background (after 5,
   15 and 40 seconds, then once a minute) until the draft is saved; closing the page before then
