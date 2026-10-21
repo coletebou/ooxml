@@ -223,6 +223,40 @@ describe('page export to .docx', () => {
 		expect(instance?.levelOverrides?.[0]?.startOverride).toBe(3);
 	});
 
+	it('numbers only the first paragraph of a list item and indents the ones after it', async () => {
+		const para = (t: string): RichNode => ({
+			type: 'paragraph',
+			attrs: { todo: null },
+			content: [text(t)],
+		});
+		const { bytes } = await exportPageToDocx({
+			title: 'Items',
+			items: [
+				{
+					kind: 'text',
+					x: 0,
+					y: 0,
+					blocks: [
+						{
+							type: 'ordered_list',
+							attrs: { order: 1 },
+							content: [
+								{ type: 'list_item', content: [para('first'), para('more of the first')] },
+								{ type: 'list_item', content: [para('second')] },
+							],
+						},
+					],
+				},
+			],
+		});
+		const loaded = await loadDocx(bytes);
+		const byText = (t: string) => paragraphs(loaded.model).find((p) => textOf(p) === t)!;
+		expect(byText('first').numbering?.level).toBe(0);
+		expect(byText('more of the first').numbering).toBeUndefined();
+		expect(byText('more of the first').indentLeftTwips).toBe(720);
+		expect(byText('second').numbering?.numId).toBe(byText('first').numbering?.numId);
+	});
+
 	it('starts a nested numbered list at its number, on the level its items use', async () => {
 		const para = (t: string): RichNode => ({
 			type: 'paragraph',

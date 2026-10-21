@@ -12,6 +12,7 @@ import {
 	type PendingMediaPart,
 } from '../docx/model';
 import type { Paragraph } from '../docx/model-paragraph';
+import { signedTwips } from '../units/units';
 import type { TextRun } from '../docx/model-run';
 import { ensureListDefinition } from '../docx/numbering-editing';
 import { loadDocx } from '../docx/parse';
@@ -144,6 +145,9 @@ class Writer {
 	}
 
 	text(blocks: readonly RichNode[], list?: ListContext): void {
+		// In a list item only the first paragraph carries the number; the ones after it continue the
+		// item, indented to its text, as they read on the page.
+		let numbered = false;
 		for (const node of blocks) {
 			if (node.type === 'paragraph' || node.type === 'heading') {
 				const todo = node.attrs?.todo;
@@ -153,8 +157,13 @@ class Writer {
 				];
 				const style =
 					node.type === 'heading' ? `Heading${Number(node.attrs?.level ?? 1)}` : undefined;
-				const numbering = list ? { numId: list.numId, level: list.level } : undefined;
-				this.paragraph(runs, { ...(style ? { style } : {}), ...(numbering ? { numbering } : {}) });
+				const item: Partial<Paragraph> = !list
+					? {}
+					: numbered
+						? { indentLeftTwips: signedTwips(720 * (list.level + 1)) }
+						: { numbering: { numId: list.numId, level: list.level } };
+				numbered = true;
+				this.paragraph(runs, { ...(style ? { style } : {}), ...item });
 			} else if (node.type === 'bullet_list' || node.type === 'ordered_list') {
 				const kind = node.type === 'bullet_list' ? 'bullet' : 'decimal';
 				const level = list ? Math.min(8, list.level + 1) : 0;
