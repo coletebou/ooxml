@@ -45,7 +45,8 @@ export function applyNotebookProps(
 		if (key === 'theme') el.theme = props.theme ?? 'system';
 		else el[key] = props[key] ?? '';
 	}
-	if (props.config !== prev.config && props.config !== undefined) el.config = props.config;
+	// An omitted config means local mode, also when it replaces a server config.
+	if (props.config !== prev.config) el.config = props.config ?? null;
 }
 
 /** Subscribe to the element's events; the latest handlers are read through `get`. */
