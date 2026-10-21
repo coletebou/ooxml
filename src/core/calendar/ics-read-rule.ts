@@ -2,9 +2,10 @@
 // FREQ=DAILY, WEEKLY, MONTHLY or YEARLY with COUNT or UNTIL; a weekly rule on the start's own
 // weekday; a monthly rule on the start's date (BYMONTHDAY) or on its weekday by an ordinal (BYDAY
 // such as `3TU` or `-1FR`, or one weekday with BYSETPOS); a yearly rule on the start's month and
-// date. Anything else (an INTERVAL above 1, several days, BYWEEKNO, BYSETPOS lists, a rule out of
-// step with its start) is refused with a reason, and the caller imports the event as its first
-// occurrence. WKST only matters for what is refused, so it is ignored. DOM-free. New code.
+// date (one on a date with no month repeats every month: a monthly rule). Anything else (an
+// INTERVAL above 1, several days, BYWEEKNO, BYSETPOS lists, a rule out of step with its start)
+// is refused with a reason, and the caller imports the event as its first occurrence. WKST only
+// matters for what is refused, so it is ignored. DOM-free. New code.
 import type { MonthlyBy, Repeat } from './model';
 import { WEEKDAY_ORDINALS, dayMatchesOrdinal } from './recurrence-calendar';
 
@@ -107,6 +108,9 @@ export function readRule(value: string, start: RuleStart): ReadRule {
 		return { refused: `repeats weekly with BY rules (${value})` };
 	if (freq === 'YEARLY' && (byday || bysetpos))
 		return { refused: `repeats yearly on a weekday (${value})` };
+	// BYMONTHDAY without BYMONTH expands a yearly rule to every month of the year (RFC 5545
+	// 3.3.10): the same dates as a monthly rule on that day, which is what the series holds.
+	if (freq === 'YEARLY' && bymonthday && !bymonth) return { repeat: 'monthly', ...end };
 	if (freq === 'MONTHLY') {
 		if (bymonth) return { refused: `repeats monthly in one month (${value})` };
 		if (day) {

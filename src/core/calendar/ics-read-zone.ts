@@ -2,7 +2,8 @@
 // `Intl`, also behind a path prefix such as `/mozilla.org/20050126_1/Europe/Berlin`. Any other name
 // (a display name such as `W. Europe Standard Time`) is read from the file's own VTIMEZONE: its
 // STANDARD and DAYLIGHT observances (a first onset, the offsets before and after, a yearly RRULE by
-// month and weekday ordinal or by weekday and month days, RDATEs) give the offset at any instant.
+// month and weekday ordinal or by weekday and month days, either with one BYSETPOS, RDATEs) give
+// the offset at any instant.
 // Times are converted with those rules; a repeat keeps its time in the IANA zone whose clock
 // changes match them in the event's year (a city named in the TZID first, then a short list of
 // common zones, then every zone the platform knows). Without a match a repeat keeps UTC time.
@@ -13,6 +14,9 @@ import { daysInMonth, nthWeekdayOfMonth } from './recurrence-calendar';
 import { MINUTE_MS, isValidZone, offsetMinutes } from './time-zone';
 
 const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+/** The days of a month's first week, and of the whole of the longest month. */
+const FIRST_WEEK = [1, 2, 3, 4, 5, 6, 7];
+const MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 
 interface YearlyRule {
 	month: number;
@@ -21,6 +25,8 @@ interface YearlyRule {
 	/** 1 to 4, or -1 for the last. */
 	ordinal?: number;
 	monthDays?: number[];
+	/** BYSETPOS: which of the days the rest of the rule finds is meant (1 the first, -1 the last). */
+	setPos?: number;
 	until?: number;
 	count?: number;
 }
@@ -71,11 +77,21 @@ function readYearlyRule(value: string, onset: Wall): YearlyRule | undefined {
 		// A fifth weekday is how some programs say "the last".
 		if (day[1] !== undefined) rule.ordinal = Number(day[1]) >= 5 ? -1 : Number(day[1]);
 	}
+	const setPos = parts.get('BYSETPOS');
+	if (setPos !== undefined) {
+		// One position, such as -1 with BYDAY=SU for the last Sunday. A list of them would be several
+		// changes a year: such a rule is not read, rather than read as another one.
+		const position = Number(setPos);
+		if (!/^[+-]?\d{1,2}$/u.test(setPos) || position === 0) return undefined;
+		rule.setPos = position;
+	}
 	const monthDays = (parts.get('BYMONTHDAY') ?? '').split(',').filter(Boolean).map(Number);
 	if (monthDays.length && monthDays.every((d) => Number.isInteger(d) && d >= 1 && d <= 31))
 		rule.monthDays = monthDays;
+	// A weekday alone means its first in the month; with BYSETPOS, the one it picks of them all.
 	if (rule.ordinal === undefined && rule.monthDays === undefined)
-		rule.monthDays = rule.weekday === undefined ? [onset.day] : [1, 2, 3, 4, 5, 6, 7];
+		rule.monthDays =
+			rule.weekday === undefined ? [onset.day] : rule.setPos === undefined ? FIRST_WEEK : MONTH;
 	const until = readDateValue(parts.get('UNTIL') ?? '');
 	if (until) rule.until = wallAsUtc(until.wall);
 	const count = Number(parts.get('COUNT'));
@@ -108,19 +124,28 @@ export function readFileZone(c: Component): FileZone | null {
 	return tzid && observances.length ? { tzid, observances } : null;
 }
 
-/** The day of the month a yearly rule falls on in `year`, or null. */
-function ruleDay(rule: YearlyRule, year: number): number | null {
+/** The days of the month a yearly rule finds in `year`, in order, before BYSETPOS picks one. */
+function ruleDays(rule: YearlyRule, year: number): number[] {
 	if (rule.weekday !== undefined && rule.weekday >= 0 && rule.ordinal !== undefined)
 		return rule.ordinal === 0
-			? null
-			: nthWeekdayOfMonth(year, rule.month, rule.weekday, rule.ordinal);
+			? []
+			: [nthWeekdayOfMonth(year, rule.month, rule.weekday, rule.ordinal)];
 	const length = daysInMonth(year, rule.month);
-	for (const day of rule.monthDays ?? []) {
-		if (day > length) continue;
-		const weekday = new Date(Date.UTC(year, rule.month - 1, day)).getUTCDay();
-		if (rule.weekday === undefined || weekday === rule.weekday) return day;
-	}
-	return null;
+	return [...new Set(rule.monthDays ?? [])]
+		.sort((a, b) => a - b)
+		.filter(
+			(day) =>
+				day <= length &&
+				(rule.weekday === undefined ||
+					new Date(Date.UTC(year, rule.month - 1, day)).getUTCDay() === rule.weekday),
+		);
+}
+
+/** The day of the month a yearly rule falls on in `year`, or null. */
+function ruleDay(rule: YearlyRule, year: number): number | null {
+	const days = ruleDays(rule, year);
+	if (rule.setPos === undefined) return days[0] ?? null;
+	return days.at(rule.setPos > 0 ? rule.setPos - 1 : rule.setPos) ?? null;
 }
 
 /** Every change from the zone's onsets and its rules in the years around `year`, in order. */

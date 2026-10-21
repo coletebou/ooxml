@@ -333,6 +333,47 @@ describe('zones and times', () => {
 		expect(parseIcs(text).events[0]?.zone).toBe('Europe/Amsterdam');
 	});
 
+	it('reads BYSETPOS in a zone rule: -1 is the last Sunday, not the first', () => {
+		// Twelve hours ahead, thirteen from the last Sunday of September to the first of April.
+		const zone = (daylight: string): string[] => [
+			'BEGIN:VTIMEZONE',
+			'TZID:Zone Twelve',
+			'BEGIN:STANDARD',
+			'DTSTART:19700405T030000',
+			'TZOFFSETFROM:+1300',
+			'TZOFFSETTO:+1200',
+			'RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=SU;BYSETPOS=1',
+			'END:STANDARD',
+			'BEGIN:DAYLIGHT',
+			'DTSTART:19700927T020000',
+			'TZOFFSETFROM:+1200',
+			'TZOFFSETTO:+1300',
+			daylight,
+			'END:DAYLIGHT',
+			'END:VTIMEZONE',
+		];
+		const read = (wall: string, daylight = 'RRULE:FREQ=YEARLY;BYMONTH=9;BYDAY=SU;BYSETPOS=-1') =>
+			parseIcs(calendar(...zone(daylight), ...vevent('UID:z', `DTSTART;TZID=Zone Twelve:${wall}`)));
+		// 15 September 2026 comes before the last Sunday (the 27th): still twelve hours ahead.
+		const before = read('20260915T090000');
+		expect(before.events[0]).toMatchObject({
+			start: Date.UTC(2026, 8, 14, 21),
+			zone: 'Pacific/Auckland',
+		});
+		expect(before.unsupported).toEqual([]);
+		expect(read('20260928T090000').events[0]?.start).toBe(Date.UTC(2026, 8, 27, 20));
+		// The same rule written with the ordinal in BYDAY.
+		expect(read('20260915T090000', 'RRULE:FREQ=YEARLY;BYMONTH=9;BYDAY=-1SU').events[0]?.start).toBe(
+			Date.UTC(2026, 8, 14, 21),
+		);
+		// Several positions would be several changes a year: the rule is not read, never guessed.
+		const list = read('20260915T090000', 'RRULE:FREQ=YEARLY;BYMONTH=9;BYDAY=SU;BYSETPOS=1,-1');
+		expect(list.events[0]?.zone).toBe('UTC');
+		expect(list.unsupported).toEqual([
+			'Time zone "Zone Twelve" matches no known zone: repeats in it keep UTC time',
+		]);
+	});
+
 	it('reads DURATION, a missing end and an end before the start', () => {
 		const read = (...lines: string[]) =>
 			parseIcs(calendar(...vevent('UID:a', ...lines)), { zone: NY });
@@ -394,6 +435,19 @@ describe('repeat rules', () => {
 			expect(events[0]?.repeat).toBe('none');
 			expect(unsupported).toEqual([`"Rule" ${why}; only its first occurrence was imported`]);
 		}
+	});
+
+	it('reads a yearly rule on a date with no month as the monthly series it is', () => {
+		// BYMONTHDAY without BYMONTH expands a yearly rule to every month (RFC 5545 3.3.10).
+		const { events, unsupported } = read('RRULE:FREQ=YEARLY;BYMONTHDAY=20;COUNT=3');
+		expect(events[0]).toMatchObject({ repeat: 'monthly', count: 3 });
+		expect(events[0]?.monthlyBy).toBeUndefined();
+		expect(occurrencesBetween(events[0]!, 0, Date.UTC(2030, 0, 1)).map((o) => o.start)).toEqual([
+			Date.UTC(2026, 9, 20, 9),
+			Date.UTC(2026, 10, 20, 9),
+			Date.UTC(2026, 11, 20, 9),
+		]);
+		expect(unsupported).toEqual([]);
 	});
 
 	it('keeps a single occurrence when UNTIL is before the start', () => {
@@ -509,6 +563,85 @@ describe('changed and cancelled occurrences', () => {
 			'A changed occurrence of "Sync" is not on its series and was not imported',
 			'An occurrence of a repeating event was imported on its own: the file does not hold its series',
 		]);
+	});
+
+	it('lets a moved occurrence replace the EXDATE of the slot it moved from', () => {
+		// The way some calendars write a move: the slot excluded, and the occurrence given on its own.
+		const { events, unsupported } = parseIcs(
+			calendar(
+				...vevent(...series, 'EXDATE:20261021T090000Z,20261022T090000Z'),
+				...vevent(
+					'UID:s',
+					'RECURRENCE-ID:20261021T090000Z',
+					'SUMMARY:Sync',
+					'DTSTART:20261021T140000Z',
+					'DTEND:20261021T150000Z',
+				),
+			),
+		);
+		expect(events).toHaveLength(1);
+		expect(events[0]?.exceptions).toEqual([
+			{ originalStart: day(21), cancelled: false, start: day(21, 14), end: day(21, 15) },
+			{ originalStart: day(22), cancelled: true },
+		]);
+		expect(unsupported).toEqual([]);
+	});
+
+	it('imports an occurrence changed between all day and a set time as an event of its own', () => {
+		const offsite = [
+			'UID:d',
+			'SUMMARY:Offsite',
+			'DTSTART;VALUE=DATE:20261020',
+			'RRULE:FREQ=DAILY;COUNT=5',
+		];
+		const { events, unsupported } = parseIcs(
+			calendar(
+				...vevent(...offsite),
+				...vevent(
+					'UID:d',
+					'RECURRENCE-ID;VALUE=DATE:20261022',
+					'SUMMARY:Offsite',
+					'DTSTART:20261022T090000Z',
+					'DTEND:20261022T100000Z',
+				),
+			),
+		);
+		expect(events.map((e) => [e.id, e.uid, e.title, e.repeat, e.allDay])).toEqual([
+			['d', 'd', 'Offsite', 'daily', true],
+			['d-2', undefined, 'Offsite', 'none', undefined],
+		]);
+		expect(events[0]?.exceptions).toEqual([
+			{ originalStart: Date.UTC(2026, 9, 22), cancelled: true },
+		]);
+		// Shown at its time, not as a day without length.
+		expect(occurrencesBetween(events[1]!, Date.UTC(2026, 9, 22), Date.UTC(2026, 9, 23))).toEqual([
+			expect.objectContaining({ start: day(22), end: day(22, 10) }),
+		]);
+		expect(occurrencesBetween(events[1]!, 0, Date.UTC(2027, 0, 1))[0]?.dates).toBeUndefined();
+		expect(unsupported).toEqual([
+			'An occurrence of "Offsite" changed between all day and a set time; it was imported as an event of its own',
+		]);
+
+		// The other way round: one day of a timed series made all day.
+		const turned = parseIcs(
+			calendar(
+				...vevent(...series),
+				...vevent(
+					'UID:s',
+					'RECURRENCE-ID:20261023T090000Z',
+					'SUMMARY:Holiday',
+					'DTSTART;VALUE=DATE:20261023',
+				),
+			),
+		).events;
+		expect(turned[0]?.exceptions).toEqual([{ originalStart: day(23), cancelled: true }]);
+		expect(turned[1]).toMatchObject({
+			id: 's-2',
+			title: 'Holiday',
+			allDay: true,
+			start: Date.UTC(2026, 9, 23),
+			end: Date.UTC(2026, 9, 24),
+		});
 	});
 
 	it('keeps the latest of two versions of an event', () => {
