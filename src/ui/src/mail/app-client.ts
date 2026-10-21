@@ -1,8 +1,9 @@
 // The core client as <mail-app> uses it: the files the compose window is still reading and an
 // address still being typed there are part of the draft before the window closes, sends or gives
 // way to another, whatever asks the client (a key, a link, the host, the app letting it go), and a
-// client is let go only once its open draft is saved: one it cannot save yet keeps trying in the
-// background for as long as the page lives.
+// hand-over that waits for those files is for the draft open when it was asked: one thrown away or
+// replaced meanwhile hands nothing over. A client is let go only once its open draft is saved: one
+// it cannot save yet keeps trying in the background for as long as the page lives.
 import type { MailClient } from 'ooxml-core/mail';
 
 /** The pauses before the first new tries to save a released client's draft: four in a minute. */
@@ -25,16 +26,24 @@ export interface ComposeWindow {
  * showing it is done with it: the files it is still reading are in the draft, then the addresses
  * still being typed are recipients. `showing` is that window while it shows this client's draft,
  * else null; it is asked at once, so a client released meanwhile still finishes with its own.
+ * A hand-over belongs to the compose session open when it was asked: one whose draft was thrown
+ * away or gave way to another while the files were read resolves false, and nothing is sent,
+ * opened, closed or taken for the draft open by then, which nobody asked about.
  */
 export function committingClient(
 	client: MailClient,
 	showing: () => ComposeWindow | null,
 ): MailClient {
+	const session = (): number | undefined => client.getState().compose?.session;
 	const handedOver =
-		<A extends unknown[], R>(action: (...args: A) => Promise<R>) =>
-		async (...args: A): Promise<R> => {
+		<A extends unknown[]>(action: (...args: A) => Promise<boolean>) =>
+		async (...args: A): Promise<boolean> => {
 			const shown = showing();
-			if (shown?.readingFiles) await shown.filesRead();
+			if (shown?.readingFiles) {
+				const asked = session();
+				await shown.filesRead();
+				if (session() !== asked) return false;
+			}
 			shown?.commitRecipients();
 			return action(...args);
 		};

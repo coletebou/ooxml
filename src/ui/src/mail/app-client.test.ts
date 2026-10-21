@@ -49,6 +49,64 @@ async function editing(transport: MailTransport): Promise<MailClient> {
 	return client;
 }
 
+const ADA = { name: '', email: 'ada@example.com' };
+const BOB = { name: '', email: 'bob@example.com' };
+const CAROL = { name: '', email: 'carol@example.com' };
+
+/**
+ * A connected client as `<mail-app>` wraps it, its open draft to Ada, and the window showing that
+ * draft, still reading files until `finish()`. Asked for the addresses being typed, the window puts
+ * its To field in the open draft, as `MailCompose` does: Ada, and Carol, whose address is being
+ * typed. `sent` and `saved` say what the server was given, as subject and recipients.
+ */
+async function readingDraft() {
+	const base = createMemoryTransport(createDemoSeed({ now: Date.UTC(2026, 9, 20) }));
+	const sent: Draft[] = [];
+	const saved: Draft[] = [];
+	const transport: MailTransport = {
+		...base,
+		saveDraft(draft) {
+			saved.push(draft);
+			return base.saveDraft(draft);
+		},
+		send(draft) {
+			sent.push(draft);
+			return base.send(draft);
+		},
+	};
+	const client = createMailClient({ transport });
+	await vi.waitFor(() => expect(client.getState().status).toBe('ready'));
+	await client.compose('new');
+	client.updateDraft({ to: [ADA], subject: 'First' });
+	let finish: () => void = () => {};
+	const read = new Promise<void>((resolve) => (finish = resolve));
+	let taken = 0;
+	const reading = {
+		readingFiles: true,
+		filesRead: () => read,
+		commitRecipients: () => {
+			taken++;
+			client.updateDraft({ to: [ADA, CAROL] });
+		},
+	};
+	let shown: ComposeWindow | null = reading;
+	const given = (drafts: Draft[]) =>
+		drafts.map(({ subject, to }) => `${subject}: ${to.map((a) => a.email).join(', ')}`);
+	return {
+		client,
+		mail: committingClient(client, () => shown),
+		sent: () => given(sent),
+		saved: () => given(saved),
+		taken: () => taken,
+		/** The window that shows the open draft from now on, or none. */
+		show: (window: ComposeWindow | null) => void (shown = window),
+		finish: () => {
+			reading.readingFiles = false;
+			finish();
+		},
+	};
+}
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
@@ -104,7 +162,9 @@ describe('committingClient', () => {
 			order.push(name);
 			return true;
 		};
+		// One draft stays open throughout.
 		const client = {
+			getState: () => ({ compose: { session: 1 } }),
 			compose: action('compose'),
 			editDraft: action('editDraft'),
 			closeCompose: action('closeCompose'),
@@ -138,5 +198,50 @@ describe('committingClient', () => {
 		shown = null;
 		await wrapped.closeCompose();
 		expect(order).toEqual(['closeCompose']);
+	});
+
+	it('sends the draft once the files are read, with the addresses being typed', async () => {
+		const { client, mail, sent, taken, finish } = await readingDraft();
+		const sending = mail.send();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(sent()).toEqual([]);
+		finish();
+		expect(await sending).toBe(true);
+		expect(sent()).toEqual(['First: ada@example.com, carol@example.com']);
+		expect(taken()).toBe(1);
+		expect(client.getState().compose).toBeNull();
+		client.destroy();
+	});
+
+	it.each([
+		['Send', (mail: MailClient) => mail.send()],
+		['Close', (mail: MailClient) => mail.closeCompose()],
+		['a reply', (mail: MailClient) => mail.compose('reply', 'demo-welcome')],
+		['a saved draft', (mail: MailClient) => mail.editDraft('demo-draft')],
+	])('drops %s waiting for files once its draft gave way to another', async (_, handOver) => {
+		const { client, mail, sent, saved, taken, show, finish } = await readingDraft();
+		const waiting = handOver(mail);
+		await vi.advanceTimersByTimeAsync(0);
+		// Before the files are read, the draft is thrown away, its window with it, and another starts.
+		await mail.discardDraft();
+		show(null);
+		expect(await mail.compose('new')).toBe(true);
+		mail.updateDraft({ to: [BOB], subject: 'Second' });
+		const { session } = client.getState().compose!;
+		finish();
+		const handedOver = await waiting;
+		// The new draft stays open as it is: nothing sent, saved or opened in its place, and no
+		// address of the draft thrown away put in it.
+		expect(sent()).toEqual([]);
+		expect(saved()).toEqual([]);
+		expect(client.getState().compose).toMatchObject({
+			session,
+			mode: 'new',
+			status: 'editing',
+			draft: { subject: 'Second', to: [BOB] },
+		});
+		expect(taken()).toBe(0);
+		expect(handedOver).toBe(false);
+		client.destroy();
 	});
 });
