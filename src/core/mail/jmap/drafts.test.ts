@@ -1,7 +1,7 @@
 import submission from './__fixtures__/rfc8621-submission.json';
 import { createMailClient } from '../client';
 import type { Draft } from '../model';
-import { createFakeServer, json, rfcSession, until } from './test-support/fake-server';
+import { createFakeServer, rfcSession, until } from './test-support/fake-server';
 import { installMailStore } from './test-support/mail-store';
 import { DRAFTS, MAILBOXES, SENT, failure, setup } from './test-support/setup';
 
@@ -22,27 +22,10 @@ function mail() {
 	return { ...context, store: installMailStore(context.server) };
 }
 
-/**
- * A server that takes at most `max` calls in one request, as its session says, and refuses a
- * request with more with the `limit` problem of RFC 8620 3.6.1.
- */
+/** The mail store on a server that takes at most `max` calls in one request. */
 function limited(max: number) {
 	const context = mail();
-	const core = (context.server.session.capabilities as Record<string, Record<string, unknown>>)[
-		'urn:ietf:params:jmap:core'
-	]!;
-	core.maxCallsInRequest = max;
-	context.server.route(
-		(request) =>
-			request.method === 'POST' &&
-			request.body !== null &&
-			((JSON.parse(request.body) as { methodCalls?: unknown[] }).methodCalls?.length ?? 0) > max,
-		() =>
-			json(
-				{ type: 'urn:ietf:params:jmap:error:limit', limit: 'maxCallsInRequest', status: 400 },
-				400,
-			),
-	);
+	context.server.limitCalls(max);
 	return context;
 }
 
@@ -268,6 +251,44 @@ describe('send', () => {
 			expect(kept.emails.has('old-draft')).toBe(true);
 			expect(each.argsOf('Email/set').filter((args) => 'destroy' in args)).toEqual([]);
 		}
+	});
+
+	it('never sends a message twice when Send is pressed again after an uncertain send', async () => {
+		const { server, transport, store } = mail();
+		// The server sent it, then failed: whether it went out cannot be told from the answer.
+		store.failSubmission = 'after';
+		expect(await failure(transport.send(reply))).toMatchObject({ type: 'serverPartialFail' });
+		store.failSubmission = null;
+		// The same message again: the server is asked first, and the first send is finished instead.
+		expect(await transport.send(reply)).toEqual({ id: 'E1' });
+		expect(server.argsOf('EmailSubmission/query').at(-1)).toEqual({
+			accountId: 'A13824',
+			filter: { emailIds: ['E1'] },
+		});
+		expect(store.submissions).toEqual([{ identityId: 'XD-3301-222-11_22AAz', emailId: 'E1' }]);
+		expect(store.emails.get('E1')).toMatchObject({ mailboxIds: { [SENT]: true } });
+		expect(store.emails.get('E1')!.keywords).not.toHaveProperty('$draft');
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true, $answered: true });
+	});
+
+	it('sends the message again when the server says the uncertain send did not go out', async () => {
+		const { transport, store } = mail();
+		store.failSubmission = 'before';
+		expect(await failure(transport.send(reply))).toMatchObject({ type: 'serverPartialFail' });
+		store.failSubmission = null;
+		// No submission and still a draft: the copy is a stray, and the message goes out once.
+		expect(await transport.send(reply)).toEqual({ id: 'E2' });
+		expect(store.submissions).toEqual([{ identityId: 'XD-3301-222-11_22AAz', emailId: 'E2' }]);
+		expect([store.emails.has('E1'), store.emails.has('old-draft')]).toEqual([false, false]);
+		// When the server cannot say (the copy is gone), it is sent again as before.
+		const gone = mail();
+		gone.store.failSubmission = 'before';
+		await failure(gone.transport.send(reply));
+		gone.store.failSubmission = null;
+		gone.store.emails.delete('E1');
+		expect(await gone.transport.send(reply)).toEqual({ id: 'E2' });
+		expect(gone.store.submissions).toHaveLength(1);
 	});
 
 	it('drops the copy when the submission failed as a whole, which changes nothing', async () => {

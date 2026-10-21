@@ -6,7 +6,8 @@
 // not resolve references in an echo, or takes fewer calls in one request than that needs
 // (`maxCallsInRequest`), gets the clean-up as a second request instead, and with one call per
 // request the submission too. The copy a send made is destroyed only when it certainly did not go
-// out; when that is not known it stays. New code.
+// out; when that is not known it stays, and sending the same message again first asks the server
+// whether it went out (RFC 8621 7.3), so it is never sent twice. New code.
 import { ANSWERED, DRAFT, FORWARDED, SEEN, type Draft, type Identity } from '../model';
 import { MailTransportError } from '../transport';
 import type { JmapClient } from './client';
@@ -107,6 +108,36 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 	/** The calls one request may hold (`maxCallsInRequest`, RFC 8620 2): 16 is only a suggestion. */
 	const maxCalls = async (): Promise<number> => (await client.session()).limits.maxCallsInRequest;
 
+	/**
+	 * Copies whose submission may or may not have happened, by the message they hold: sending the
+	 * same message again asks first whether that copy went out, so it is never sent twice.
+	 */
+	const unsure = new Map<string, string>();
+
+	/**
+	 * Whether a copy whose submission was not certain went out: the server holds a submission of it
+	 * (RFC 8621 7.3), or it is no longer a draft, which only its submission makes it (a server may
+	 * drop the record of a submission, 7.5). Null when the server cannot say.
+	 */
+	const wentOut = async (emailId: string): Promise<boolean | null> => {
+		try {
+			const query = await client.request((builder, accountId) =>
+				builder.call('EmailSubmission/query', { accountId, filter: { emailIds: [emailId] } }),
+			);
+			const ids = query.result.get(query.calls).ids;
+			if (Array.isArray(ids) && ids.length) return true;
+			const get = await client.request((builder, accountId) =>
+				builder.call('Email/get', { accountId, ids: [emailId], properties: ['keywords'] }),
+			);
+			const list = get.result.get(get.calls).list;
+			const copy: unknown = Array.isArray(list) ? list[0] : undefined;
+			if (!isRecord(copy)) return null;
+			return !(isRecord(copy.keywords) && copy.keywords[DRAFT] === true);
+		} catch {
+			return null;
+		}
+	};
+
 	const draftsMailbox = async (): Promise<string> => {
 		const id = await mailboxes.roleId('drafts');
 		if (!id) throw new MailTransportError('notFound', 'The account has no Drafts folder.');
@@ -173,6 +204,20 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const destroy = draft.id === undefined ? [] : [draft.id];
 			const marks = markPatches(draft);
 			const cleanUp = destroy.length > 0 || Object.keys(marks).length > 0;
+			const key = JSON.stringify([draft.id ?? null, identity.id, create]);
+			const earlier = unsure.get(key);
+			if (earlier !== undefined) {
+				unsure.delete(key);
+				const went = await wentOut(earlier);
+				if (went) {
+					// It went out the first time: that send is finished, never made again.
+					await quietly(() => tidy(destroy, { ...marks, [earlier]: onSent }));
+					nudge();
+					return { id: earlier };
+				}
+				// It did not: that copy is a stray draft. When the server cannot say, it stays.
+				if (went === false) await quietly(() => tidy([earlier], {}));
+			}
 			const limit = await maxCalls();
 			// Created, submitted and cleaned up in one request of four calls when it is taken.
 			const gated = cleanUp && limit >= 4 && (await canGate());
@@ -208,6 +253,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				: await client
 						.request((builder, accountId) => submit(builder, accountId, id))
 						.catch((error: unknown) => {
+							unsure.set(key, id);
 							nudge();
 							throw error;
 						});
@@ -217,6 +263,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				// Not sent for certain: drop the copy just made, so the saved draft is the only one
 				// again. When it may have gone out, the copy may be the only one there is: it stays.
 				if (refused(result, submission, 'send')) await quietly(() => tidy([id], {}));
+				else unsure.set(key, id);
 				nudge();
 				throw error;
 			}

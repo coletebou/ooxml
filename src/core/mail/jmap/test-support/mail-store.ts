@@ -1,6 +1,6 @@
-// `Email/set` and `EmailSubmission/set` on the fake server, over a small store of messages, so the
-// draft and send tests can check where messages end up. Creation ids (`#draft`) are resolved the
-// way RFC 8620 5.3 says, within the request and across it.
+// `Email/set`, `Email/get`, `EmailSubmission/set` and `EmailSubmission/query` on the fake server,
+// over a small store of messages, so the draft and send tests can check where messages end up.
+// Creation ids (`#draft`) are resolved the way RFC 8620 5.3 says, within the request and across it.
 import { isRecord, type JmapInvocation } from '../types';
 import type { FakeServer } from './fake-server';
 
@@ -18,6 +18,11 @@ export interface MailStore {
 	refuseSubmission: string | null;
 	/** Leave out the implicit `Email/set` response of `onSuccessUpdateEmail`. */
 	skipImplicit: boolean;
+	/**
+	 * Answer a submission with `serverPartialFail` (RFC 8620 3.6.2), `before` recording it or
+	 * `after`, as a server that sent the message and failed then.
+	 */
+	failSubmission: 'before' | 'after' | null;
 }
 
 function applyPatch(email: StoredEmail, patch: Record<string, unknown>): void {
@@ -39,6 +44,7 @@ export function installMailStore(server: FakeServer): MailStore {
 		refuseCreate: null,
 		refuseSubmission: null,
 		skipImplicit: false,
+		failSubmission: null,
 	};
 	const created = new Map<string, string>();
 	let next = 0;
@@ -91,13 +97,13 @@ export function installMailStore(server: FakeServer): MailStore {
 			return {
 				notCreated: { [creationId]: { type: store.refuseSubmission ?? 'invalidProperties' } },
 			};
+		const failed: JmapInvocation[] = [['error', { type: 'serverPartialFail' }, call.id]];
+		if (store.failSubmission === 'before') return failed;
 		store.submissions.push({ ...submission, emailId });
+		if (store.failSubmission === 'after') return failed;
+		const id = `ES-${store.submissions.length}`;
 		const responses: JmapInvocation[] = [
-			[
-				'EmailSubmission/set',
-				{ created: { [creationId]: { id: 'ES-1', undoStatus: 'final' } } },
-				call.id,
-			],
+			['EmailSubmission/set', { created: { [creationId]: { id, undoStatus: 'final' } } }, call.id],
 		];
 		const onSuccess = isRecord(args.onSuccessUpdateEmail)
 			? args.onSuccessUpdateEmail[`#${creationId}`]
@@ -107,6 +113,27 @@ export function installMailStore(server: FakeServer): MailStore {
 			responses.push(['Email/set', { updated: { [emailId]: null } }, call.id]);
 		}
 		return responses;
+	});
+
+	server.on('EmailSubmission/query', (args) => {
+		const filter = isRecord(args.filter) ? args.filter : {};
+		const emailIds = Array.isArray(filter.emailIds) ? filter.emailIds : null;
+		const ids = store.submissions
+			.map((submission, index) => [submission.emailId, `ES-${index + 1}`] as const)
+			.filter(([emailId]) => !emailIds || emailIds.includes(emailId))
+			.map(([, id]) => id);
+		return { ids, position: 0, total: ids.length };
+	});
+
+	server.on('Email/get', (args) => {
+		const ids = Array.isArray(args.ids) ? (args.ids as string[]) : [];
+		return {
+			list: ids.flatMap((id) => {
+				const email = store.emails.get(id);
+				return email ? [{ id, mailboxIds: email.mailboxIds, keywords: email.keywords }] : [];
+			}),
+			notFound: ids.filter((id) => !store.emails.has(id)),
+		};
 	});
 	return store;
 }
