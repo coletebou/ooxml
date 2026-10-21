@@ -263,7 +263,7 @@ describe('message', () => {
 		expect(message).toMatchObject({
 			id: 'f123u457',
 			subject: 'Dinner on Thursday?',
-			html: '<html><body><p>Hello ...',
+			html: '<html><body><p>Hello ...<div>-- Sent by your friendly mailing list ...</div>',
 		});
 		expect(server.argsOf('Email/get')).toEqual([
 			{
@@ -286,6 +286,60 @@ describe('message', () => {
 			},
 		]);
 		expect(await failure(transport.message('f123u456'))).toMatchObject({ code: 'notFound' });
+	});
+
+	/** An Email/get whose one text part is cut to 8 bytes whenever `maxBodyValueBytes` is set. */
+	const cutting =
+		(keywords: Record<string, boolean>, whole: string) => (args: Record<string, unknown>) => ({
+			state: 'E1',
+			list: [
+				{
+					id: (args.ids as string[])[0],
+					keywords,
+					textBody: [{ partId: '1', type: 'text/plain' }],
+					bodyValues: {
+						'1': args.maxBodyValueBytes
+							? { value: whole.slice(0, 8), isTruncated: true }
+							: { value: whole, isTruncated: false },
+					},
+				},
+			],
+		});
+
+	it('fetches a draft the limit cut short again whole, since editing saves it back', async () => {
+		const { server, transport } = setup();
+		const whole = 'Draft text that runs past the limit.';
+		server.on('Email/get', cutting({ $draft: true, $seen: true }, whole));
+		expect((await transport.message('d1')).text).toBe(whole);
+		expect(server.argsOf('Email/get').map((args) => args.maxBodyValueBytes)).toEqual([
+			2 * 1024 * 1024,
+			undefined,
+		]);
+	});
+
+	it('keeps other messages to the limit and refuses a draft the server still cuts', async () => {
+		const { server, transport } = setup();
+		server.on('Email/get', cutting({ $seen: true }, 'Received text past the limit.'));
+		expect((await transport.message('m1')).text).toBe('Received');
+		expect(server.argsOf('Email/get')).toHaveLength(1);
+		// A server that cuts even when asked for whole values: the draft is not handed out cut.
+		server.on('Email/get', () => ({
+			state: 'E1',
+			list: [
+				{
+					id: 'd1',
+					keywords: { $draft: true },
+					textBody: [{ partId: '1', type: 'text/plain' }],
+					bodyValues: { '1': { value: 'Cut', isTruncated: true } },
+				},
+			],
+		}));
+		expect(await failure(transport.message('d1'))).toMatchObject({ code: 'tooLarge' });
+		expect(server.argsOf('Email/get').map((args) => args.maxBodyValueBytes)).toEqual([
+			2 * 1024 * 1024,
+			2 * 1024 * 1024,
+			undefined,
+		]);
 	});
 });
 

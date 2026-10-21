@@ -1,6 +1,7 @@
 import submission from './__fixtures__/rfc8621-submission.json';
+import { createMailClient } from '../client';
 import type { Draft } from '../model';
-import { createFakeServer, rfcSession } from './test-support/fake-server';
+import { createFakeServer, rfcSession, until } from './test-support/fake-server';
 import { installMailStore } from './test-support/mail-store';
 import { DRAFTS, MAILBOXES, SENT, failure, setup } from './test-support/setup';
 
@@ -111,6 +112,42 @@ describe('saveDraft', () => {
 			destroy: ['old-draft'],
 		});
 		expect(store.emails.has('old-draft')).toBe(false);
+	});
+
+	it('saves an edited draft whole when a message fetch would cut it short', async () => {
+		const { server, transport, store } = mail();
+		const whole = `${'The plan, step by step. '.repeat(4)}The end.`;
+		server.on('Email/query', () => ({ ids: [], position: 0, total: 0 }));
+		server.on('Email/get', (args) => ({
+			state: 'E1',
+			list: [
+				{
+					id: 'old-draft',
+					mailboxIds: { [DRAFTS]: true },
+					keywords: { $draft: true, $seen: true },
+					to: [{ name: 'John', email: 'john@example.com' }],
+					subject: 'World domination',
+					textBody: [{ partId: '1', type: 'text/plain' }],
+					htmlBody: [{ partId: '1', type: 'text/plain' }],
+					bodyValues: {
+						'1': args.maxBodyValueBytes
+							? { value: whole.slice(0, 24), isTruncated: true }
+							: { value: whole, isTruncated: false },
+					},
+				},
+			],
+		}));
+		const client = createMailClient({ transport });
+		await until(() => client.getState().status === 'ready');
+		await client.editDraft('old-draft');
+		client.updateDraft({ subject: 'World domination, the sequel' });
+		await client.saveDraft();
+		client.destroy();
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(store.emails.get('E1')!.create).toMatchObject({
+			subject: 'World domination, the sequel',
+			bodyValues: { text: { value: whole } },
+		});
 	});
 
 	it('needs a Drafts mailbox', async () => {

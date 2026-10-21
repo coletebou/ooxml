@@ -1,7 +1,7 @@
 // Messages over JMAP (RFC 8621 4): `Email/query` for searches, `Email/get` for summaries (header
 // properties only, batched by the server's limit) and for one message with its bodies, and
 // `Email/set` to change keywords and mailboxes or destroy. New code.
-import type { EmailSummary, MailMessage } from '../model';
+import { DRAFT, type EmailSummary, type MailMessage } from '../model';
 import {
 	MailTransportError,
 	type EmailPatch,
@@ -11,9 +11,10 @@ import {
 } from '../transport';
 import type { ChangeTracker } from './changes';
 import type { JmapClient } from './client';
-import { objects, strings, toMessage, toSummary } from './convert';
+import { objects, strings, toMessage, toSummary, type JmapObject } from './convert';
 import { toJmapFilter } from './filter';
 import { patchPath } from './request';
+import { isRecord } from './types';
 
 /** The `Email/get` properties a message list needs: everything but the bodies. */
 export const SUMMARY_PROPERTIES: readonly string[] = [
@@ -49,8 +50,26 @@ export const BODY_PROPERTIES: readonly string[] = [
 	'cid',
 ];
 
-/** The most of one body part's text a message fetch returns (`maxBodyValueBytes`). */
+/** The `Email/get` properties of one message with its bodies. */
+const MESSAGE_PROPERTIES: readonly string[] = [
+	...SUMMARY_PROPERTIES,
+	'bodyValues',
+	'textBody',
+	'htmlBody',
+	'attachments',
+];
+
+/**
+ * The most of one body part's text a message fetch returns (`maxBodyValueBytes`). Drafts are the
+ * exception: one cut short is fetched again whole, since editing saves it back.
+ */
 export const MAX_BODY_VALUE_BYTES = 2 * 1024 * 1024;
+
+/** True when the server cut one of the email's body values short (`isTruncated`). */
+function isCut(email: JmapObject): boolean {
+	const values = isRecord(email.bodyValues) ? Object.values(email.bodyValues) : [];
+	return values.some((value) => isRecord(value) && value.isTruncated === true);
+}
 
 /** A PatchObject for an `EmailPatch` (`keywords/$seen: true | null`, `mailboxIds/<id>: ...`). */
 export function emailPatch(patch: EmailPatch): Record<string, true | null> {
@@ -120,22 +139,34 @@ export function createEmailMethods(
 		},
 
 		async message(id) {
-			const { result, calls } = await client.request((builder, accountId) =>
-				builder.call('Email/get', {
-					accountId,
-					ids: [id],
-					properties: [...SUMMARY_PROPERTIES, 'bodyValues', 'textBody', 'htmlBody', 'attachments'],
-					bodyProperties: BODY_PROPERTIES,
-					fetchTextBodyValues: true,
-					fetchHTMLBodyValues: true,
-					maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
-				}),
-			);
-			const args = result.get(calls);
-			tracker.observe('Email', args.state);
-			const email = objects(args.list).find((item) => item.id === id);
-			if (!email) throw new MailTransportError('notFound', 'The message no longer exists.');
-			return toMessage(email);
+			/** The email with its bodies, each value cut to `maxBodyValueBytes` when one is given. */
+			const read = async (maxBodyValueBytes?: number): Promise<JmapObject> => {
+				const { result, calls } = await client.request((builder, accountId) =>
+					builder.call('Email/get', {
+						accountId,
+						ids: [id],
+						properties: MESSAGE_PROPERTIES,
+						bodyProperties: BODY_PROPERTIES,
+						fetchTextBodyValues: true,
+						fetchHTMLBodyValues: true,
+						maxBodyValueBytes,
+					}),
+				);
+				const args = result.get(calls);
+				tracker.observe('Email', args.state);
+				const email = objects(args.list).find((item) => item.id === id);
+				if (!email) throw new MailTransportError('notFound', 'The message no longer exists.');
+				return email;
+			};
+			const email = await read(MAX_BODY_VALUE_BYTES);
+			const message = toMessage(email);
+			// Editing a draft saves it in place of itself, so a cut body would replace the whole one:
+			// a draft comes whole (no limit), or not at all.
+			if (!message.keywords[DRAFT] || !isCut(email)) return message;
+			const whole = await read();
+			if (isCut(whole))
+				throw new MailTransportError('tooLarge', 'The server would only send part of the draft.');
+			return toMessage(whole);
 		},
 
 		async update(patches) {

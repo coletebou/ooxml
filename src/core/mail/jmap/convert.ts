@@ -1,6 +1,9 @@
 // JMAP objects to the `mail` model (RFC 8621 Mailbox, Email, EmailBodyPart, Identity) and back for
 // addresses. The server is untrusted, so each value is checked: dates become UTC milliseconds,
-// `null` lists empty lists, a `null` display name '', an unknown mailbox role `null`. New code.
+// `null` lists empty lists, a `null` display name '', an unknown mailbox role `null`. Bodies and
+// attachment names are read as the MIME reader reads them. New code.
+import { cleanFileName } from '../mime/file-names';
+import { textToHtml } from '../mime/structure';
 import {
 	MAILBOX_ROLES,
 	type EmailSummary,
@@ -108,20 +111,49 @@ export function toSummary(email: JmapObject): EmailSummary {
 	};
 }
 
+type Part = Record<string, unknown>;
+
+/** The object items of a body part list. */
+const records = (value: unknown): Part[] => list(value).filter(isRecord);
+const typeOf = (part: Part): string => text(part.type).toLowerCase();
+const isText = (type: string): boolean => type === 'text/plain' || type === 'text/html';
+
 /** Parts shown one after another: a line break between two when the first does not end one. */
 const joinParts = (parts: readonly string[]): string =>
 	parts.reduce((out, part) => (!out || out.endsWith('\n') ? out + part : `${out}\n${part}`), '');
 
-/** The fetched values of the `type` parts of a body part list, joined; `null` when none. */
-function bodyOf(parts: unknown, values: Record<string, unknown>, type: string): string | null {
-	const found: string[] = [];
-	for (const part of list(parts)) {
-		if (!isRecord(part) || text(part.type).toLowerCase() !== type) continue;
-		const partId = text(part.partId);
-		const value = Object.hasOwn(values, partId) ? values[partId] : undefined;
-		if (isRecord(value) && typeof value.value === 'string') found.push(value.value);
-	}
+/** The value the server fetched for a body part, `null` when it sent none. */
+function valueOf(part: Part, values: Record<string, unknown>): string | null {
+	const partId = text(part.partId);
+	const value = Object.hasOwn(values, partId) ? values[partId] : undefined;
+	return isRecord(value) && typeof value.value === 'string' ? value.value : null;
+}
+
+/** The `text/plain` values of `textBody`, joined; `null` when there are none. */
+function textOf(body: readonly Part[], values: Record<string, unknown>): string | null {
+	const found = body.flatMap((part) => {
+		const value = typeOf(part) === 'text/plain' ? valueOf(part, values) : null;
+		return value === null ? [] : [value];
+	});
 	return found.length ? joinParts(found) : null;
+}
+
+/**
+ * `htmlBody` in order: its `text/html` values as they are and its `text/plain` ones (RFC 8621 lists
+ * plain text such as a mailing list footer there too) escaped where they stand, as the MIME reader
+ * shows them; `null` without an HTML value.
+ */
+function htmlOf(body: readonly Part[], values: Record<string, unknown>): string | null {
+	let out = '';
+	let html = false;
+	for (const part of body) {
+		const type = typeOf(part);
+		const value = isText(type) ? valueOf(part, values) : null;
+		if (value === null) continue;
+		html ||= type === 'text/html';
+		out += type === 'text/html' ? value : `<div>${textToHtml(value)}</div>`;
+	}
+	return html ? out : null;
 }
 
 export function toAttachment(part: Record<string, unknown>): MailAttachment {
@@ -130,7 +162,8 @@ export function toAttachment(part: Record<string, unknown>): MailAttachment {
 	return {
 		partId: text(part.partId),
 		blobId: text(part.blobId),
-		name: text(part.name),
+		// Cleaned as the MIME reader cleans it: no directories, control or bidirectional characters.
+		name: cleanFileName(text(part.name)) ?? '',
 		type: text(part.type).toLowerCase() || 'application/octet-stream',
 		size: count(part.size),
 		disposition: disposition === 'inline' ? 'inline' : disposition ? 'attachment' : null,
@@ -139,19 +172,37 @@ export function toAttachment(part: Record<string, unknown>): MailAttachment {
 }
 
 /**
- * A message with its bodies: `text` is the `text/plain` values of `textBody`, `html` the
- * `text/html` values of `htmlBody` (`null` without an HTML part), `attachments` every part of
- * `attachments` that can be downloaded.
+ * Every downloadable part of `attachments`, then the parts the bodies show that a string cannot
+ * carry: images, audio and video between the text, which RFC 8621 leaves out of `attachments`
+ * when both bodies show them. They come last, as JMAP does not say where among the attachments
+ * they sit; each part is listed once.
+ */
+function attachmentsOf(email: JmapObject): MailAttachment[] {
+	// A part is its partId; the blob stands in on a server that leaves the id out.
+	const key = (part: Part): string => text(part.partId) || `blob:${text(part.blobId)}`;
+	const found = records(email.attachments);
+	const listed = new Set(found.map(key));
+	for (const part of [...records(email.textBody), ...records(email.htmlBody)]) {
+		if (isText(typeOf(part)) || listed.has(key(part))) continue;
+		listed.add(key(part));
+		found.push(part);
+	}
+	return found.filter((part) => !!text(part.blobId)).map(toAttachment);
+}
+
+/**
+ * A message with its bodies, read as the MIME reader reads the same message: `text` is the
+ * `text/plain` values of `textBody`, `html` the `htmlBody` with its plain text escaped in (`null`
+ * without an HTML value), `attachments` the downloadable parts of `attachments` and the media the
+ * bodies show.
  */
 export function toMessage(email: JmapObject): MailMessage {
 	const values = isRecord(email.bodyValues) ? email.bodyValues : {};
 	return {
 		...toSummary(email),
-		text: bodyOf(email.textBody, values, 'text/plain'),
-		html: bodyOf(email.htmlBody, values, 'text/html'),
-		attachments: list(email.attachments)
-			.filter((part): part is Record<string, unknown> => isRecord(part) && !!text(part.blobId))
-			.map(toAttachment),
+		text: textOf(records(email.textBody), values),
+		html: htmlOf(records(email.htmlBody), values),
+		attachments: attachmentsOf(email),
 	};
 }
 

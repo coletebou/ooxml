@@ -59,8 +59,12 @@ export function createSseParser(handlers: SseHandlers): SseParser {
 				started = true;
 				if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
 			}
-			if (afterCr && text.startsWith('\n')) text = text.slice(1);
-			if (text) afterCr = false;
+			// A CR that ended the last chunk pairs with an LF that starts this one, and with nothing
+			// later: an LF after that pair is a line break of its own.
+			if (afterCr && text) {
+				afterCr = false;
+				if (text.startsWith('\n')) text = text.slice(1);
+			}
 			const buffer = pending + text;
 			let start = 0;
 			for (let index = 0; index < buffer.length; index++) {

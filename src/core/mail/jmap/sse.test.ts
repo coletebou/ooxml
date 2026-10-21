@@ -53,6 +53,28 @@ describe('createSseParser', () => {
 		).toEqual(['a', 'b', 'c']);
 	});
 
+	it('keeps the empty line after a CRLF split as CR, LF and a lone LF chunk', () => {
+		// The CRLF ends the data line; the next LF is the empty line that dispatches the event.
+		const change = '{"@type":"StateChange","changed":{"a3123":{"Email":"d35ecb040aab"}}}';
+		expect(parse([`event: state\r\ndata: ${change}\r`, '\n', '\n']).events).toEqual([
+			{ type: 'state', data: change, lastEventId: '' },
+		]);
+		expect(
+			parse(['data: a\r', '\n', '\n', 'data: b\n\n']).events.map((event) => event.data),
+		).toEqual(['a', 'b']);
+	});
+
+	it('gives the same events wherever a stream mixing CR, LF and CRLF is cut in three', () => {
+		const text = 'data: a\r\n\ndata: b\r\r\ndata: c\n\r\ndata: d\r\n\r\n';
+		const whole = parse([text]).events;
+		expect(whole.map((event) => event.data)).toEqual(['a', 'b', 'c', 'd']);
+		for (let first = 0; first <= text.length; first++)
+			for (let second = first; second <= text.length; second++) {
+				const chunks = [text.slice(0, first), text.slice(first, second), text.slice(second)];
+				expect(parse(chunks).events).toEqual(whole);
+			}
+	});
+
 	it('ignores comments, unknown fields and events without data', () => {
 		expect(parse([':comment\nfoo: bar\nevent: nothing\n\nretry: soon\n\n']).events).toEqual([]);
 	});

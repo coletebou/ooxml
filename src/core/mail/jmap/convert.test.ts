@@ -1,6 +1,8 @@
 import email from './__fixtures__/rfc8621-email.json';
 import mailbox from './__fixtures__/rfc8621-mailbox.json';
 import submission from './__fixtures__/rfc8621-submission.json';
+import { readEmail, type ParsedAttachment } from '../mime';
+import type { MailAttachment } from '../model';
 import {
 	fromJmapDate,
 	objects,
@@ -116,15 +118,159 @@ describe('toSummary', () => {
 	});
 });
 
+/** A raw multipart/mixed message of `parts` (header lines, a blank line, then the body). */
+const mixed = (...parts: string[]): string =>
+	[
+		'Content-Type: multipart/mixed; boundary=b',
+		'',
+		...parts.flatMap((part) => ['--b', part]),
+		'--b--',
+		'',
+	].join('\r\n');
+
+const listed = (attachments: readonly MailAttachment[] | readonly ParsedAttachment[]) =>
+	attachments.map(({ partId, name, type, disposition, cid }) => ({
+		partId,
+		name,
+		type,
+		disposition,
+		cid,
+	}));
+
 describe('toMessage', () => {
-	it('reads the RFC 8621 4.2.1 Email/get: the HTML of htmlBody, no text without textBody', () => {
+	it('reads the RFC 8621 4.2.1 Email/get: htmlBody and its plain text footer, no text', () => {
 		const [found] = listOf(email.get.response);
 		const message = toMessage(found!);
 		expect(message.id).toBe('f123u457');
 		expect(message.receivedAt).toBe(Date.UTC(2013, 9, 13, 14, 12));
-		expect(message.html).toBe('<html><body><p>Hello ...');
+		// The mailing list footer is a text/plain part of htmlBody, shown after the HTML.
+		expect(message.html).toBe(
+			'<html><body><p>Hello ...<div>-- Sent by your friendly mailing list ...</div>',
+		);
 		expect(message.text).toBeNull();
 		expect(message.attachments).toEqual([]);
+	});
+
+	it('keeps the plain text of htmlBody in place, escaped, as the MIME reader does', () => {
+		const message = toMessage({
+			id: 'E',
+			textBody: [
+				{ partId: '1', type: 'text/plain' },
+				{ partId: '3', type: 'text/plain' },
+			],
+			htmlBody: [
+				{ partId: '1', type: 'text/plain' },
+				{ partId: '2', type: 'text/html' },
+				{ partId: '3', type: 'TEXT/PLAIN' },
+			],
+			bodyValues: {
+				'1': { value: 'Fish & <chips>' },
+				'2': { value: '<p>Menu</p>' },
+				'3': { value: '-- \n"Joe"' },
+			},
+		});
+		expect(message.html).toBe(
+			'<div>Fish &#38; &#60;chips&#62;</div><p>Menu</p><div>-- <br>&#34;Joe&#34;</div>',
+		);
+		const parsed = readEmail(
+			mixed(
+				'Content-Type: text/plain\r\n\r\nFish & <chips>',
+				'Content-Type: text/html\r\n\r\n<p>Menu</p>',
+				'Content-Type: text/plain\r\n\r\n-- \r\n"Joe"',
+			),
+		);
+		expect(message.html).toBe(parsed.html);
+		expect(message.text).toBe(parsed.text);
+	});
+
+	it('lists the images, audio and video both bodies show, which attachments leaves out', () => {
+		const photo = {
+			partId: '2',
+			blobId: 'B2',
+			size: 3,
+			name: 'photo.jpg',
+			type: 'image/jpeg',
+			disposition: 'inline',
+			cid: '<photo@x>',
+		};
+		const body = [{ partId: '1', type: 'text/plain' }, photo, { partId: '3', type: 'text/plain' }];
+		const withPhoto = {
+			id: 'E',
+			textBody: body,
+			htmlBody: body,
+			bodyValues: { '1': { value: 'Look:' }, '3': { value: 'Nice, right?' } },
+			attachments: [],
+		};
+		const message = toMessage(withPhoto);
+		expect(message.text).toBe('Look:\nNice, right?');
+		expect(message.html).toBeNull();
+		expect(message.attachments).toEqual([
+			{
+				partId: '2',
+				blobId: 'B2',
+				name: 'photo.jpg',
+				type: 'image/jpeg',
+				size: 3,
+				disposition: 'inline',
+				cid: 'photo@x',
+			},
+		]);
+		// Listed once however many of the lists name it; after the attachments, since JMAP does
+		// not say where among them a part of the bodies sits.
+		const pdf = { partId: '4', blobId: 'B4', size: 9, name: 'a.pdf', type: 'application/pdf' };
+		expect(toMessage({ ...withPhoto, attachments: [photo] }).attachments).toEqual(
+			message.attachments,
+		);
+		expect(
+			toMessage({ ...withPhoto, attachments: [pdf] }).attachments.map((part) => part.partId),
+		).toEqual(['4', '2']);
+		const parsed = readEmail(
+			mixed(
+				'Content-Type: text/plain\r\n\r\nLook:',
+				[
+					'Content-Type: image/jpeg; name=photo.jpg',
+					'Content-Disposition: inline; filename=photo.jpg',
+					'Content-ID: <photo@x>',
+					'Content-Transfer-Encoding: base64',
+					'',
+					'/9j/',
+				].join('\r\n'),
+				'Content-Type: text/plain\r\n\r\nNice, right?',
+			),
+		);
+		expect(message.text).toBe(parsed.text);
+		expect(message.html).toBe(parsed.html);
+		expect(listed(message.attachments)).toEqual(listed(parsed.attachments));
+	});
+
+	it('cleans attachment names as the MIME reader does', () => {
+		const RLO = String.fromCharCode(0x202e);
+		const name = (value: unknown): string => toAttachment({ blobId: 'B', name: value }).name;
+		expect(name(`invoice${RLO}fdp.exe`)).toBe('invoicefdp.exe');
+		expect(name('../../etc/passwd')).toBe('passwd');
+		expect(name('C:\\fakepath\\report.pdf')).toBe('report.pdf');
+		expect(name('a\u0000b\tc.txt')).toBe('a b c.txt');
+		expect(name('Résumé.pdf')).toBe('Résumé.pdf');
+		expect(name('folder/')).toBe('');
+		expect(name(null)).toBe('');
+		const message = toMessage({
+			id: 'E',
+			attachments: [{ partId: '2', blobId: 'B2', type: 'application/pdf', name: `x${RLO}fdp.exe` }],
+		});
+		expect(message.attachments[0]!.name).toBe('xfdp.exe');
+		// The MIME reader decodes the same name (RFC 2231) and cleans it the same way.
+		const parsed = readEmail(
+			mixed(
+				'Content-Type: text/plain\r\n\r\nSee the file.',
+				[
+					'Content-Type: application/pdf',
+					"Content-Disposition: attachment; filename*=utf-8''x%E2%80%AEfdp.exe",
+					'',
+					'%PDF',
+				].join('\r\n'),
+			),
+		);
+		expect(parsed.attachments.map((attachment) => attachment.name)).toEqual(['xfdp.exe']);
 	});
 
 	it('joins text parts, keeps HTML null without an HTML part and lists attachments', () => {

@@ -35,7 +35,10 @@ export interface JmapSessionAccount {
 
 /** A validated Session object (RFC 8620 2) with absolute endpoint URLs. */
 export interface JmapSession {
-	/** The session resource it was read from, after redirects; refetched from there. */
+	/**
+	 * The session resource it was read from, after redirects; refetched from there, so it is https
+	 * (or http to a loopback host) like every endpoint.
+	 */
 	url: string;
 	capabilities: Readonly<Record<string, unknown>>;
 	accounts: Readonly<Record<string, JmapSessionAccount>>;
@@ -78,8 +81,17 @@ function parseAccounts(value: unknown): Record<string, JmapSessionAccount> {
 	return Object.fromEntries(entries);
 }
 
-/** Validates a Session object read from `url` and resolves its endpoints against `url`. */
+/**
+ * Validates a Session object read from `url` and resolves its endpoints against `url`. The session
+ * is read from `url` again, with the credentials, so a `url` they may not go to is refused: a
+ * session a redirect took to plain http may be anyone's, endpoints included.
+ */
 export function parseJmapSession(json: unknown, url: string): JmapSession {
+	if (!isSafeUrl(url))
+		throw new MailTransportError(
+			'invalid',
+			'The JMAP session must be read over https (http only on localhost).',
+		);
 	if (!isRecord(json) || !isRecord(json.capabilities) || !isRecord(json.capabilities[CORE]))
 		throw new MailTransportError('unsupported', 'The server did not answer with a JMAP session.');
 	const capabilities = json.capabilities;
@@ -143,7 +155,9 @@ export async function loadJmapSession(
 		headers: { Accept: 'application/json' },
 		...(signal ? { signal } : {}),
 	};
-	const read = async (response: Response): Promise<JmapSession> => {
+	// `response.url` is where fetch ended up after following redirects (to plain http too, where no
+	// mixed content rule stops it); the session is checked as read from there.
+	const read = async (response: Response, requested: string): Promise<JmapSession> => {
 		let json: unknown;
 		try {
 			json = await http.json(response, what);
@@ -159,10 +173,10 @@ export async function loadJmapSession(
 				);
 			throw error;
 		}
-		return parseJmapSession(json, response.url || url);
+		return parseJmapSession(json, response.url || requested);
 	};
 	return http.exchange(url, { ...init, anyStatus: true }, what, async (response) => {
-		if (response.ok) return read(response);
+		if (response.ok) return read(response, url);
 		const target = response.url;
 		// fetch drops `Authorization` on a cross-origin redirect, which `/.well-known/jmap` often
 		// is: ask the redirect target directly.
@@ -174,7 +188,7 @@ export async function loadJmapSession(
 			isSafeUrl(target)
 		) {
 			await discard(response);
-			return http.exchange(target, init, what, read);
+			return http.exchange(target, init, what, (retried) => read(retried, target));
 		}
 		throw await responseError(response, what, http.redact);
 	});

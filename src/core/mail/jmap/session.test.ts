@@ -1,10 +1,18 @@
 import { MailTransportError } from '../transport';
+import { createJmapClient } from './client';
 import { sessionResourceUrl } from './http';
 import { accountHas, discoverJmapSession, mailAccountId, parseJmapSession } from './session';
 import { createFakeServer, json, rfcSession } from './test-support/fake-server';
 import { MAIL, SUBMISSION } from './types';
 
 const auth = { type: 'bearer', token: 'tok-SECRET-1' } as const;
+
+/** `response` as fetch hands it back after following redirects to `url`. */
+function redirectedTo(url: string, response: Response): Response {
+	Object.defineProperty(response, 'redirected', { value: true });
+	Object.defineProperty(response, 'url', { value: url });
+	return response;
+}
 
 async function failure(promise: Promise<unknown>): Promise<MailTransportError> {
 	try {
@@ -206,6 +214,47 @@ describe('discoverJmapSession', () => {
 			'https://api.example.net/jmap/session',
 		]);
 		expect(server.requests[1]!.headers.authorization).toBe('Bearer tok-SECRET-1');
+	});
+
+	it('refuses a session a redirect took to plain http, whatever endpoints it names', async () => {
+		const server = createFakeServer();
+		// Whoever answers on the http hop can name endpoints of their own, over https.
+		server.route(
+			(request) => request.url === 'https://jmap.example.com/.well-known/jmap',
+			() =>
+				redirectedTo(
+					'http://jmap.example.com/jmap/session',
+					json({ ...rfcSession(), apiUrl: 'https://attacker.example.net/api/' }),
+				),
+		);
+		const error = await failure(
+			discoverJmapSession({ url: 'jmap.example.com', auth, fetch: server.fetch }),
+		);
+		expect(error.code).toBe('invalid');
+		expect(error.message).not.toContain('tok-SECRET-1');
+		expect(() => parseJmapSession(rfcSession(), 'http://jmap.example.com/jmap/session')).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		);
+		// http stays fine on a loopback host, for development.
+		const local = { ...rfcSession(), apiUrl: 'http://127.0.0.1:8080/api/' };
+		expect(parseJmapSession(local, 'http://127.0.0.1:8080/jmap').url).toBe(
+			'http://127.0.0.1:8080/jmap',
+		);
+	});
+
+	it('never sends the credentials to where a redirect to http left the session', async () => {
+		const server = createFakeServer();
+		server.route(
+			(request) => request.url === 'https://jmap.example.com/.well-known/jmap',
+			() => redirectedTo('http://jmap.example.com/jmap/session', json(rfcSession())),
+		);
+		// Every API response then names another session state, which asks for a refetch.
+		server.sessionState = 'changed';
+		const client = createJmapClient({ url: 'jmap.example.com', auth, fetch: server.fetch });
+		for (let attempt = 0; attempt < 2; attempt++)
+			await client.request((builder) => builder.call('Core/echo', {})).catch(() => undefined);
+		expect(server.requests.length).toBeGreaterThan(0);
+		expect(server.requests.filter((request) => !request.url.startsWith('https:'))).toEqual([]);
 	});
 
 	it('takes the RFC minimums for limits the server leaves out', () => {
