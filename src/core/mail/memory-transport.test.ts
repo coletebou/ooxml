@@ -41,6 +41,18 @@ describe('createMemoryTransport', () => {
 		});
 	});
 
+	it('refuses to delete a folder that has folders inside it', async () => {
+		const transport = createMemoryTransport();
+		const parent = await transport.createMailbox({ name: 'Projects' });
+		const child = await transport.createMailbox({ name: 'Q3', parentId: parent.id });
+		await expect(transport.destroyMailbox(parent.id)).rejects.toMatchObject({ code: 'invalid' });
+		const ids = (await transport.mailboxes()).map((mailbox) => mailbox.id);
+		expect(ids).toEqual(expect.arrayContaining([parent.id, child.id]));
+		await transport.destroyMailbox(child.id);
+		await transport.destroyMailbox(parent.id);
+		expect((await transport.mailboxes()).map((mailbox) => mailbox.id)).not.toContain(parent.id);
+	});
+
 	it('delivers a message sent to yourself and pushes the changes', async () => {
 		const transport = createMemoryTransport();
 		const changes: MailChange[] = [];

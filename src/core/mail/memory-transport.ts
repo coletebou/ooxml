@@ -191,6 +191,9 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			if (!mailbox) throw new MailTransportError('notFound', `No mailbox ${id}.`);
 			if (mailbox.role)
 				throw new MailTransportError('forbidden', 'Special folders cannot be deleted.');
+			// Its folders would be left with a parent that is gone (JMAP's `mailboxHasChild`).
+			if ([...mailboxes.values()].some((other) => other.parentId === id))
+				throw new MailTransportError('invalid', 'The folder has folders inside it.');
 			if ([...messages.values()].some((m) => m.mailboxIds.includes(id)))
 				throw new MailTransportError('invalid', 'The folder is not empty.');
 			mailboxes.delete(id);
