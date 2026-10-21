@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import * as Y from 'yjs';
 import { notebookSchema } from './editor/schema';
+import { MAX_TEXT_LENGTH } from './model';
 import {
 	type RichNode,
 	plainText,
@@ -162,6 +163,24 @@ describe('rich text in the y-prosemirror encoding', () => {
 		expect(JSON.stringify(read)).not.toContain('too deep');
 		const runs = read.flatMap((b) => b.content ?? []);
 		expect(runs.find((r) => r.text === 'bold')?.marks).toEqual([{ type: 'bold' }]);
+	});
+
+	it('keeps at most the text a container holds, on write as on read', () => {
+		const f = fragment();
+		const long = 'a'.repeat(MAX_TEXT_LENGTH - 5);
+		writeRichText(f, [
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: long }] },
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: '0123456789' }] },
+		]);
+		const text = plainText(readRichText(f));
+		expect(text).toBe(`${long}\n01234`);
+		// What was written is read back whole, so an archive or export keeps all of it.
+		expect(
+			f
+				.toArray()
+				.map((p) => (p as Y.XmlElement).toArray().map(String).join(''))
+				.join('\n'),
+		).toBe(text);
 	});
 
 	it('turns pasted plain text into paragraphs', () => {

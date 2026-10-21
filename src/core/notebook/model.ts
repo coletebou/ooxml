@@ -17,6 +17,8 @@ export const MAX_COORDINATE = 100_000;
 export const MIN_CONTAINER_WIDTH = 40;
 export const MAX_CONTAINER_WIDTH = 4000;
 export const MAX_FILE_BYTES = 32 * 1024 * 1024;
+/** The most text one container holds: input stops there, and every read and write keeps it. */
+export const MAX_TEXT_LENGTH = 200_000;
 
 export type SectionKind = 'section' | 'group';
 

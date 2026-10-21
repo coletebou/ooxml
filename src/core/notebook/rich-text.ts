@@ -9,6 +9,7 @@
 import * as Y from 'yjs';
 import { isWordHighlightToken } from '../docx/highlight';
 import { isOpenableHyperlinkHref } from '../opc/safe-href';
+import { MAX_TEXT_LENGTH } from './model';
 
 export const RICH_BLOCK_TYPES = ['paragraph', 'heading', 'bullet_list', 'ordered_list'] as const;
 export const RICH_MARK_TYPES = ['bold', 'italic', 'underline', 'strike', 'highlight', 'link'];
@@ -27,7 +28,7 @@ export interface RichNode {
 	marks?: RichMark[];
 }
 
-const MAX_TEXT = 200_000;
+const MAX_TEXT = MAX_TEXT_LENGTH;
 const MAX_DEPTH = 12;
 const LEAVES = new Set(['hard_break']);
 const CONTAINERS = new Set(['bullet_list', 'ordered_list', 'list_item']);
@@ -137,20 +138,25 @@ const childrenOf = (node: RichNode): RichNode[] =>
 	Array.isArray(node.content) ? node.content.filter(isNode) : [];
 
 /** A text run or a leaf rebuilt from its valid parts only (text a string, marks objects). */
-function inlineNode(node: RichNode): RichNode | null {
+function inlineNode(node: RichNode, budget: { chars: number }): RichNode | null {
 	if (LEAVES.has(node.type)) return { type: node.type };
 	if (typeof node.text !== 'string' || !node.text) return null;
+	const text = node.text.slice(0, Math.max(0, budget.chars));
+	budget.chars -= text.length;
+	if (!text) return null;
 	const marks = Array.isArray(node.marks) ? node.marks.filter((m) => isTyped<RichMark>(m)) : [];
-	return marks.length
-		? { type: 'text', text: node.text, marks }
-		: { type: 'text', text: node.text };
+	return marks.length ? { type: 'text', text, marks } : { type: 'text', text };
 }
 
 /**
  * Wrap stray inline content into paragraphs and drop empty lists, so blocks are well formed. The
  * input may come from an archive, so any shape is accepted and lists nest at most `MAX_DEPTH` deep.
  */
-function normaliseBlocks(input: readonly RichNode[], depth = 0): RichNode[] {
+function normaliseBlocks(
+	input: readonly RichNode[],
+	depth = 0,
+	budget = { chars: MAX_TEXT },
+): RichNode[] {
 	if (depth > MAX_DEPTH) return [];
 	const nodes = unwrapUnknown(input);
 	const out: RichNode[] = [];
@@ -161,7 +167,7 @@ function normaliseBlocks(input: readonly RichNode[], depth = 0): RichNode[] {
 	};
 	for (const node of nodes) {
 		if (node.type === 'text' || LEAVES.has(node.type)) {
-			const leaf = inlineNode(node);
+			const leaf = inlineNode(node, budget);
 			if (leaf) inline.push(leaf);
 			continue;
 		}
@@ -169,14 +175,15 @@ function normaliseBlocks(input: readonly RichNode[], depth = 0): RichNode[] {
 		if (node.type === 'bullet_list' || node.type === 'ordered_list') {
 			const items = childrenOf(node)
 				.filter((c) => c.type === 'list_item')
-				.map((c) => ({ ...c, content: normaliseBlocks(childrenOf(c), depth + 1) }))
+				.map((c) => ({ ...c, content: normaliseBlocks(childrenOf(c), depth + 1, budget) }))
 				.map((c) => (c.content.length ? c : { ...c, content: [emptyParagraph()] }));
 			if (items.length) out.push({ ...node, content: items });
-		} else if (node.type === 'list_item') out.push(...normaliseBlocks(childrenOf(node), depth + 1));
+		} else if (node.type === 'list_item')
+			out.push(...normaliseBlocks(childrenOf(node), depth + 1, budget));
 		else if (node.type === 'paragraph' || node.type === 'heading') {
 			const content = childrenOf(node)
 				.filter((c) => c.type === 'text' || LEAVES.has(c.type))
-				.map(inlineNode)
+				.map((c) => inlineNode(c, budget))
 				.filter(isNode);
 			out.push(
 				content.length ? { ...node, content } : { type: node.type, attrs: node.attrs ?? {} },
