@@ -37,25 +37,34 @@ export function unfold(text: string): string[] {
 		.replace(/\r\n?/g, '\n')
 		.split('\n');
 	const out: string[] = [];
+	// The pieces of the line being joined, put together once it ends: joining each piece onto all
+	// the ones before it would copy a value of many breaks again at every break.
+	let pieces: string[] = [];
+	const end = (): void => {
+		if (pieces.length) out.push(pieces.join(''));
+		pieces = [];
+	};
 	/** The VERSION of the card being read, empty until it says. */
 	let version = '';
 	let quoted = false;
 	let soft = false;
 	for (const line of lines) {
-		const last = out.length - 1;
 		const folded = line.startsWith(' ') || line.startsWith('\t');
-		if (soft && (!folded || !FOLD_ANYWHERE.has(version)) && !CARD_EDGE.test(line))
-			out[last] = out[last]!.slice(0, -1) + line;
-		else if (folded && last >= 0) out[last] += line.slice(1);
+		if (soft && (!folded || !FOLD_ANYWHERE.has(version)) && !CARD_EDGE.test(line)) {
+			pieces[pieces.length - 1] = pieces.at(-1)!.slice(0, -1);
+			pieces.push(line);
+		} else if (folded && pieces.length) pieces.push(line.slice(1));
 		else {
+			end();
 			const property = parseLine(line);
 			if (property?.name === 'VERSION') version = property.value.trim();
 			else if (property?.name === 'BEGIN') version = '';
 			quoted = property !== null && isQuotedPrintable(property);
-			out.push(line);
+			pieces.push(line);
 		}
 		soft = quoted && line.endsWith('=');
 	}
+	end();
 	return out.filter((line) => line.trim() !== '');
 }
 
