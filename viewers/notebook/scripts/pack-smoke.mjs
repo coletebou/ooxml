@@ -200,7 +200,7 @@ try {
 		[
 			path.join(root, 'node_modules/typescript/bin/tsc'),
 			...['--noEmit', '--strict', '--skipLibCheck', '--target', 'ES2022', '--module', 'ESNext'],
-			...['--moduleResolution', 'bundler', '--types', ''],
+			...['--moduleResolution', 'bundler'],
 			path.join(work, 'consumer.ts'),
 		],
 		{ cwd: work },

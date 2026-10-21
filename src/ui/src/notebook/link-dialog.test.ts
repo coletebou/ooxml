@@ -18,4 +18,21 @@ describe('<notebook-link-dialog>', () => {
 		expect(field().value).toBe('');
 		dialog.remove();
 	});
+
+	it('keeps what was typed when the address is refused', async () => {
+		defineDialog();
+		defineNotebookLinkDialog();
+		const dialog = document.createElement('notebook-link-dialog') as NotebookLinkDialog;
+		document.body.append(dialog);
+		dialog.value = { href: '', text: 'label', linked: false };
+		await dialog.updateComplete;
+		const field = dialog.shadowRoot!.querySelector<HTMLInputElement>('input[name="href"]')!;
+		field.value = 'not a link';
+		field.dispatchEvent(new Event('input'));
+		field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		await dialog.updateComplete;
+		expect(dialog.shadowRoot!.querySelector('.error')).not.toBeNull();
+		expect(field.value).toBe('not a link');
+		dialog.remove();
+	});
 });

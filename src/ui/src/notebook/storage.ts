@@ -87,6 +87,7 @@ export function createIndexedDbStorage(
 			if (persistent) await run('readwrite', (store) => store.delete(key));
 		},
 		persistent: () => persistent,
+		id: name,
 		close() {
 			void db?.then((opened) => opened?.close());
 			db = null;

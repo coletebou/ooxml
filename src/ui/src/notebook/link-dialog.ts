@@ -34,6 +34,14 @@ export class NotebookLinkDialog extends NotebookElement {
 		this.invalid = false;
 	}
 
+	/** What is typed, kept across renders (an invalid address shows its error, not the old value). */
+	#draft = { href: '', text: '' };
+
+	protected override willUpdate(changed: Map<string, unknown>): void {
+		if (changed.has('value'))
+			this.#draft = { href: this.value?.href ?? '', text: this.value?.text ?? '' };
+	}
+
 	protected override updated(changed: Map<string, unknown>): void {
 		if (!changed.has('value')) return;
 		const dialog = this.renderRoot.querySelector<Dialog>('office-ui-dialog');
@@ -73,7 +81,8 @@ export class NotebookLinkDialog extends NotebookElement {
 				<input
 					name="href"
 					type="url"
-					.value=${live(value?.href ?? '')}
+					.value=${live(this.#draft.href)}
+					@input=${(e: Event) => (this.#draft.href = (e.target as HTMLInputElement).value)}
 					aria-invalid=${String(this.invalid)}
 					@keydown=${(e: KeyboardEvent) =>
 						e.key === 'Enter' && !composing(e) && (e.preventDefault(), this.#apply())}
@@ -84,7 +93,8 @@ export class NotebookLinkDialog extends NotebookElement {
 				<input
 					name="text"
 					type="text"
-					.value=${live(value?.text ?? '')}
+					.value=${live(this.#draft.text)}
+					@input=${(e: Event) => (this.#draft.text = (e.target as HTMLInputElement).value)}
 					?disabled=${!!value?.linked || !!value?.text}
 				/>
 			</label>
