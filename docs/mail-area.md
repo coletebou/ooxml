@@ -39,7 +39,7 @@ the bodies loaded so far, the `compose` window (draft, status, last save, upload
 
 Changes are applied to the list at once and put back if the server refuses them. Drafts are saved
 a quiet moment after the last edit, never two saves at once, and a draft counts as saved only once
-the server has its latest edit. A draft that cannot be saved keeps its window open with its edits:
+the server has its latest edit. A draft that cannot be saved, or whose attachments are still uploading, keeps its window open with its edits:
 closing it, or opening another message, waits for a save that succeeds (`compose`, `editDraft` and
 `closeCompose` resolve `false` otherwise). Without a Trash folder, Delete reports `unsupported`
 instead of destroying mail. Responses for a folder or search the person already left are dropped.

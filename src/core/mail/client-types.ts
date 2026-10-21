@@ -229,7 +229,7 @@ export interface MailClient {
 	/**
 	 * Close the compose window once the server holds its last edit, saving a draft that has anything
 	 * in it. A draft that cannot be saved keeps the window open, its status saying why, and the
-	 * result is false.
+	 * result is false; so does a draft whose attachments are still uploading.
 	 */
 	closeCompose(): Promise<boolean>;
 	download(attachment: MailAttachment): Promise<Uint8Array>;

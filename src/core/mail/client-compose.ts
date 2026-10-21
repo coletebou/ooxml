@@ -1,7 +1,7 @@
 // The compose window's actions: open a new message, a reply, a reply all or a forward; edit it;
 // attach files; save the draft automatically after a quiet moment (never two saves at once); send;
 // discard. Only edits the server has saved count as saved, and a window whose draft cannot be
-// saved stays open rather than losing it. New code.
+// saved, or that has a file still uploading, stays open rather than losing it. New code.
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
 import { composeDraft, draftRecipients, isEmptyDraft, type QuoteFormat } from './compose';
@@ -156,7 +156,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 		});
 	};
 
-	/** Closes the window once the server holds its last edit; a draft it cannot save stays open. */
+	/**
+	 * Closes the window once the server holds its last edit; a draft it cannot save stays open, and
+	 * so does one with a file still uploading (the file joins the draft once it is up).
+	 */
 	const close = async (): Promise<boolean> => {
 		if (!compose()) return true;
 		while (unsaved()) {
@@ -166,6 +169,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 				return false;
 			}
 		}
+		// Closing now would leave the file out: `attach` finds no window to add it to.
+		if (compose()?.uploading) return false;
 		core.cancel(timer);
 		timer = undefined;
 		core.patch({ compose: null });

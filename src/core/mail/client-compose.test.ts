@@ -34,7 +34,13 @@ function setup() {
 	const saves = createGate();
 	const uploads = createGate();
 	const reads = createGate();
-	const control = { failure: null as MailTransportError | null, saves, uploads, reads };
+	const control = {
+		failure: null as MailTransportError | null,
+		uploadFailure: null as MailTransportError | null,
+		saves,
+		uploads,
+		reads,
+	};
 	const transport: MailTransport = {
 		...memory,
 		async saveDraft(draft) {
@@ -44,6 +50,7 @@ function setup() {
 		},
 		async upload(bytes, type) {
 			await uploads.pass();
+			if (control.uploadFailure) throw control.uploadFailure;
 			return memory.upload(bytes, type);
 		},
 		async message(id) {
@@ -189,14 +196,58 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
-	it('keeps a file that finishes uploading after its window closed out of the next message', async () => {
+	it('stays open while a file uploads, then saves the file with its draft', async () => {
+		const { client, control, drafts } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ subject: 'With a file' });
+		const { session } = client.getState().compose!;
+		control.uploads.holding = true;
+		const attaching = client.attach([file('late.txt')]);
+		// Closing now, or giving way to another message, would save the draft without the file.
+		expect(await client.closeCompose()).toBe(false);
+		expect(await client.compose('new')).toBe(false);
+		expect(client.getState().compose).toMatchObject({
+			session,
+			uploading: 1,
+			draft: { subject: 'With a file', attachments: [] },
+		});
+		control.uploads.release();
+		await attaching;
+		expect(await client.closeCompose()).toBe(true);
+		const [saved, ...others] = await drafts();
+		expect(others).toEqual([]);
+		expect(saved?.subject).toBe('With a file');
+		expect(saved?.attachments.map((attachment) => attachment.name)).toEqual(['late.txt']);
+		client.destroy();
+	});
+
+	it('closes once a failed upload is over, without the file', async () => {
+		const { client, control, notices, drafts } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ subject: 'No file' });
+		control.uploads.holding = true;
+		control.uploadFailure = new MailTransportError('tooLarge', 'Too large.');
+		const attaching = client.attach([file('huge.bin')]);
+		expect(await client.closeCompose()).toBe(false);
+		control.uploads.release();
+		await attaching;
+		expect(notices).toContainEqual({ kind: 'error', action: 'upload', code: 'tooLarge' });
+		expect(await client.closeCompose()).toBe(true);
+		const [saved] = await drafts();
+		expect(saved).toMatchObject({ subject: 'No file', attachments: [] });
+		client.destroy();
+	});
+
+	it('keeps a file that finishes uploading after its draft was discarded out of the next message', async () => {
 		const { client, control } = setup();
 		await until(client, (s) => s.status === 'ready');
 		await client.compose('new');
 		client.updateDraft({ subject: 'With a file' });
 		control.uploads.holding = true;
 		const attaching = client.attach([file('late.txt')]);
-		await client.closeCompose();
+		await client.discardDraft();
 		await client.compose('new');
 		const { session } = client.getState().compose!;
 		control.uploads.release();
