@@ -1,11 +1,12 @@
-// <mail-html-frame>: one message's HTML body, sanitised (sanitize.ts) and shown in a sandboxed
-// frame: no scripts (`allow-scripts` is never granted), no forms, no top navigation, and a
-// Content-Security-Policy that blocks remote loads until `allowRemote`. The frame is same-origin
-// only so the host can size it to its content and route `mailto:` links to compose. New code.
+// <mail-html-frame>: one message's HTML body, sanitised (sanitize.ts, part by part when it was
+// sent in several) and shown in a sandboxed frame: no scripts (`allow-scripts` is never granted),
+// no forms, no top navigation, and a Content-Security-Policy that blocks remote loads until
+// `allowRemote`. The frame is same-origin only so the host can size it to its content and route
+// `mailto:` links to compose. New code.
 import { html, type PropertyValues } from 'lit';
 import { OFFICE_TOKENS, type OfficeToken } from '../tokens';
 import { defineOnce, MailElement, mailStyles } from './base';
-import { emailDocument, sanitizeEmailHtml, type FrameStyle } from './sanitize';
+import { emailDocument, sanitizeMessageHtml, type FrameStyle } from './sanitize';
 import css from './html-frame.css?raw';
 
 const SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
@@ -15,12 +16,19 @@ export class MailHtmlFrame extends MailElement {
 	static override properties = {
 		...MailElement.properties,
 		html: { attribute: false },
+		htmlParts: { attribute: false },
 		allowRemote: { type: Boolean, attribute: 'allow-remote' },
 		cidUrls: { attribute: false },
 		label: { type: String },
 	};
 	/** The message's HTML as sent: untrusted. */
 	declare html: string;
+	/**
+	 * The parts `html` was sent in, when there were several (`MailMessage.htmlParts`): untrusted.
+	 * Each is sanitised on its own, so one that ends in an open comment or tag cannot take in the
+	 * rest, and `html` is then not read.
+	 */
+	declare htmlParts: readonly string[] | null;
 	declare allowRemote: boolean;
 	declare cidUrls: ReadonlyMap<string, string>;
 	declare label: string;
@@ -29,6 +37,7 @@ export class MailHtmlFrame extends MailElement {
 	constructor() {
 		super();
 		this.html = '';
+		this.htmlParts = null;
 		this.allowRemote = false;
 		this.cidUrls = new Map();
 		this.label = '';
@@ -54,11 +63,12 @@ export class MailHtmlFrame extends MailElement {
 	}
 
 	protected override updated(changed: PropertyValues<this>): void {
-		if (!changed.has('html') && !changed.has('allowRemote') && !changed.has('cidUrls')) return;
-		const content = sanitizeEmailHtml(this.html, {
-			allowRemote: this.allowRemote,
-			cidUrls: this.cidUrls,
-		});
+		const inputs = ['html', 'htmlParts', 'allowRemote', 'cidUrls'] as const;
+		if (!inputs.some((name) => changed.has(name))) return;
+		const content = sanitizeMessageHtml(
+			{ html: this.html, htmlParts: this.htmlParts },
+			{ allowRemote: this.allowRemote, cidUrls: this.cidUrls },
+		);
 		this.emit('mail-remote-blocked', { count: content.blocked });
 		const frame = this.frame;
 		if (frame) frame.srcdoc = emailDocument(content, this.allowRemote, this.frameStyle());

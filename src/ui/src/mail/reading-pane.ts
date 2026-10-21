@@ -133,6 +133,7 @@ export class MailReadingPane extends MailElement {
 		const content = message.html
 			? html`<mail-html-frame
 					.html=${message.html}
+					.htmlParts=${message.htmlParts ?? null}
 					.allowRemote=${this.allowed.has(id)}
 					.cidUrls=${this.inline.get(id) ?? new Map()}
 					.label=${this.t('reading.bodyLabel', { subject: message.subject })}

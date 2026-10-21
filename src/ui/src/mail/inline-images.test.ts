@@ -76,6 +76,18 @@ describe('InlineImages', () => {
 		expect(urls.revoked).not.toContain(reused);
 	});
 
+	it('downloads the pictures every part of the body shows, as it is shown part by part', async () => {
+		objectUrls();
+		const download = vi.fn(bytes);
+		const images = new InlineImages(download, () => new Set());
+		// Read as one text, the comment the first part leaves open would hide the picture.
+		const message = picture('parts');
+		const htmlParts = ['<p>Hello<!--', message.html!];
+		const urls = await images.urls({ ...message, html: htmlParts.join(''), htmlParts });
+		expect([...urls.keys()]).toEqual(['parts@x']);
+		expect(download).toHaveBeenCalledTimes(1);
+	});
+
 	it('keeps every message on screen, however many, and nothing for a body without pictures', async () => {
 		const urls = objectUrls();
 		const download = vi.fn(bytes);

@@ -15,7 +15,7 @@ const part = (name: string, type: string, over: Partial<MailAttachment> = {}): M
 	...over,
 });
 
-type Shown = Pick<MailMessage, 'id' | 'html' | 'attachments'>;
+type Shown = Pick<MailMessage, 'id' | 'html' | 'htmlParts' | 'attachments'>;
 
 /** The file names the strip lists for a message. */
 function listed(message: Shown): string[] {
@@ -50,6 +50,21 @@ describe('attachmentStrip', () => {
 			'doc.pdf',
 			'notes.txt',
 		]);
+	});
+
+	it('leaves out the images any part of the HTML body shows, as the body is shown part by part', () => {
+		// Read as one text, the comment the first part leaves open would hide the logo.
+		const htmlParts = ['<p>Hello<!--', '<p><img src="cid:logo@x"></p>'];
+		const message: Shown = {
+			id: 'parts',
+			html: htmlParts.join(''),
+			htmlParts,
+			attachments: [
+				part('logo.png', 'image/png', { cid: 'logo@x' }),
+				part('notes.txt', 'text/plain', { disposition: 'attachment' }),
+			],
+		};
+		expect(listed(message)).toEqual(['notes.txt']);
 	});
 
 	it('lists the inline parts of a message without an HTML body', () => {

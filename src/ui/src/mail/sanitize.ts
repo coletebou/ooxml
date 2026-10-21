@@ -5,7 +5,7 @@
 // result is then shown in a sandboxed frame without scripts and with a Content-Security-Policy
 // (`emailDocument`), so a sanitiser miss still cannot run code or fetch anything there. Compose puts
 // the same HTML into the page itself, where no such policy applies, so the sanitiser must not miss.
-// New code.
+// A body sent in several parts is cleaned part by part (`sanitizeMessageHtml`). New code.
 import DOMPurify from 'dompurify';
 import { rewriteCss } from './sanitize-css';
 
@@ -169,6 +169,35 @@ export function sanitizeEmailHtml(html: string, options: SanitizeOptions): Sanit
 	} finally {
 		pass = null;
 	}
+}
+
+/** A message's HTML body: `html`, and the parts it was sent in when there were several. */
+export interface MessageHtml {
+	html: string | null;
+	/** `MailMessage.htmlParts`, `html` being them joined. */
+	htmlParts?: readonly string[] | null | undefined;
+}
+
+/**
+ * A message's HTML body cleaned as `sanitizeEmailHtml` cleans one text, part by part when it was
+ * sent in several, as RFC 8621 asks: read as one text, a part that ends in an open comment or tag
+ * would take in the parts after it. The styles and bodies are joined in order, what each part
+ * blocked is added up and the `cid`s they load are merged.
+ */
+export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptions): SanitizedHtml {
+	const parts = message.htmlParts?.length ? message.htmlParts : [message.html ?? ''];
+	const css: string[] = [];
+	const cids = new Set<string>();
+	let body = '';
+	let blocked = 0;
+	for (const part of parts) {
+		const clean = sanitizeEmailHtml(part, options);
+		if (clean.css) css.push(clean.css);
+		body += clean.body;
+		blocked += clean.blocked;
+		for (const cid of clean.cids) cids.add(cid);
+	}
+	return { css: css.join('\n'), body, blocked, cids: [...cids] };
 }
 
 /** Colours and type of the frame, read from the host's tokens (the frame cannot see them). */

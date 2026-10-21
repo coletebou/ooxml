@@ -11,8 +11,8 @@ export const KEPT_MESSAGES = 16;
 
 const NONE: ReadonlyMap<string, string> = new Map();
 
-/** What the pictures of a message are made from. */
-export type PictureMessage = Pick<MailMessage, 'id' | 'html' | 'attachments'>;
+/** What the pictures of a message are made from: its HTML body (part by part) and attachments. */
+export type PictureMessage = Pick<MailMessage, 'id' | 'html' | 'htmlParts' | 'attachments'>;
 
 interface Entry {
 	/** The parts the pictures are made from, so a message whose parts changed is read again. */

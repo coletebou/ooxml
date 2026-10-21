@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanCss, emailDocument, linkify, sanitizeEmailHtml } from './sanitize';
+import {
+	cleanCss,
+	emailDocument,
+	linkify,
+	sanitizeEmailHtml,
+	sanitizeMessageHtml,
+} from './sanitize';
 
 const STYLE = {
 	font: 'system-ui',
@@ -299,6 +305,65 @@ describe('cleanCss', () => {
 			['background:url(https://t.example/a.png),red', 'background:none,red'],
 		];
 		for (const [css, cleaned] of cases) expect(cleanCss(css), css).toBe(cleaned);
+	});
+});
+
+describe('sanitizeMessageHtml', () => {
+	const options = { allowRemote: false };
+	/** The text a cleaned body shows. */
+	const shown = (body: string): string =>
+		new DOMParser().parseFromString(body, 'text/html').body.textContent ?? '';
+
+	it('cleans each part of a body sent in several on its own', () => {
+		// Read as one text, the open comment and the open attribute would take in what follows.
+		const htmlParts = ['<p>Hello<!--', '<div>Footer</div>', '<p title="x>Lost', '<p>Bye</p>'];
+		const html = htmlParts.join('');
+		expect(shown(sanitizeEmailHtml(html, options).body)).toBe('Hello');
+		const { body } = sanitizeMessageHtml({ html, htmlParts }, options);
+		expect(shown(body)).toBe('HelloFooterBye');
+		// The parts are the body: `html` is not shown a second time.
+		expect(shown(sanitizeMessageHtml({ html: '<p>Other</p>', htmlParts }, options).body)).toBe(
+			'HelloFooterBye',
+		);
+	});
+
+	it('cleans every part, and keeps the styles of each', () => {
+		const htmlParts = [
+			'<style>p{color:red}</style><p>a</p>',
+			'<style>b{background:url(https://t.example/b.png)}</style><b onclick="steal()">b</b><script>steal()</script>',
+		];
+		const result = sanitizeMessageHtml({ html: htmlParts.join(''), htmlParts }, options);
+		expect(result.body).toBe('<p>a</p><b>b</b>');
+		expect(result.css).toBe('p{color:red}\nb{background:none}');
+	});
+
+	it('adds up what each part blocked and names the cid parts of all of them', () => {
+		const htmlParts = [
+			'<img src="https://t.example/a.png"><img src="cid:logo@x"><!--',
+			'<img src="https://t.example/b.png"><img src="cid:Logo@x"><p style="background:url(cid:back@x)">x</p>',
+		];
+		const cidUrls = new Map([['back@x', 'blob:http://localhost/1']]);
+		const result = sanitizeMessageHtml(
+			{ html: htmlParts.join(''), htmlParts },
+			{ allowRemote: false, cidUrls },
+		);
+		expect(result.blocked).toBe(2);
+		expect(result.cids).toEqual(['logo@x', 'back@x']);
+		expect(result.body).toContain('blob:http://localhost/1');
+	});
+
+	it('cleans a body in one part as sanitizeEmailHtml does', () => {
+		const html =
+			'<style>p{background:url(https://t.example/p.png)}</style><p>Hi<img src="cid:logo@x"><img src="https://t.example/i.png"></p>';
+		const cidUrls = new Map([['logo@x', 'blob:http://localhost/1']]);
+		for (const allowRemote of [false, true]) {
+			const expected = sanitizeEmailHtml(html, { allowRemote, cidUrls });
+			expect(sanitizeMessageHtml({ html }, { allowRemote, cidUrls })).toEqual(expected);
+			expect(sanitizeMessageHtml({ html, htmlParts: [] }, { allowRemote, cidUrls })).toEqual(
+				expected,
+			);
+		}
+		expect(sanitizeMessageHtml({ html: null }, options)).toEqual(sanitizeEmailHtml('', options));
 	});
 });
 

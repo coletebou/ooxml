@@ -6,7 +6,7 @@ import type { FileInput, MailAttachment, MailMessage } from 'ooxml-core/mail';
 import { fileSize } from './format';
 import type { MailI18n } from './i18n/translator';
 import { icon } from './icons';
-import { sanitizeEmailHtml } from './sanitize';
+import { sanitizeMessageHtml } from './sanitize';
 
 export type PreviewKind = 'docx' | 'xlsx' | 'pptx' | 'vsdx' | 'image' | 'text' | null;
 
@@ -58,22 +58,32 @@ export interface AttachmentHandlers {
 	download(attachment: MailAttachment): void;
 }
 
-type StripMessage = Pick<MailMessage, 'id' | 'html' | 'attachments'>;
+type StripMessage = Pick<MailMessage, 'id' | 'html' | 'htmlParts' | 'attachments'>;
+
+/** The body a message's `cid`s were read from (its HTML and the parts it came in), and them. */
+interface ShownEntry {
+	html: string;
+	parts: readonly string[] | undefined;
+	cids: ReadonlySet<string>;
+}
 
 /** The `cid`s the latest messages' bodies load, so a body is read once rather than per render. */
-const shownCache = new Map<string, { html: string; cids: ReadonlySet<string> }>();
+const shownCache = new Map<string, ShownEntry>();
 const SHOWN_KEPT = 32;
 const NONE: ReadonlySet<string> = new Set();
 
-/** The `cid`s (lower case) a message's HTML body loads as images or backgrounds. */
+/**
+ * The `cid`s (lower case) a message's HTML body loads as images or backgrounds, read part by part
+ * as the reading pane shows it.
+ */
 function shownCids(message: StripMessage): ReadonlySet<string> {
 	const markup = message.html;
 	if (!markup || !message.attachments.some((a) => a.cid)) return NONE;
 	const known = shownCache.get(message.id);
-	if (known?.html === markup) return known.cids;
-	const cids = new Set(sanitizeEmailHtml(markup, { allowRemote: false }).cids);
+	if (known?.html === markup && known.parts === message.htmlParts) return known.cids;
+	const cids = new Set(sanitizeMessageHtml(message, { allowRemote: false }).cids);
 	shownCache.delete(message.id);
-	shownCache.set(message.id, { html: markup, cids });
+	shownCache.set(message.id, { html: markup, parts: message.htmlParts, cids });
 	if (shownCache.size > SHOWN_KEPT) shownCache.delete(shownCache.keys().next().value!);
 	return cids;
 }
