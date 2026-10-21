@@ -141,7 +141,11 @@ export class MailRecipients extends MailElement {
 							const pasted = e.clipboardData?.getData('text/plain') ?? '';
 							if (!/[,;\n]/.test(pasted)) return;
 							e.preventDefault();
-							this.text = `${this.text}${pasted}`;
+							// The list goes where the browser would put it: over the selection, at the caret.
+							const input = e.currentTarget as HTMLInputElement;
+							const end = input.selectionEnd ?? input.value.length;
+							const start = Math.min(input.selectionStart ?? end, end);
+							this.text = `${input.value.slice(0, start)}${pasted}${input.value.slice(end)}`;
 							this.commit();
 						}}
 					/>
