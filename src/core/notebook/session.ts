@@ -74,7 +74,13 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	});
 	const edit = context(NOTEBOOK_ORIGIN);
 	const seed = context(NOTEBOOK_SEED_ORIGIN);
-	options.seed?.(seed);
+	try {
+		options.seed?.(seed);
+	} catch (error) {
+		// Nothing was saved or shared yet: drop the half-written document and let the caller decide.
+		doc.destroy();
+		throw error;
+	}
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let saving: Promise<void> = Promise.resolve();

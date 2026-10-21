@@ -19,7 +19,13 @@ import { isEntityId } from './model';
 import { paletteColor } from './palette';
 import { readContainers, readMeta, readPages, readSections, readStrokes } from './read';
 import { containerFragment, entityMap } from './schema';
-import { moveInRegistry, readRegistry, registerNotebook, updateRegistry } from './registry';
+import {
+	moveInRegistry,
+	readRegistry,
+	registerNotebook,
+	unregisterNotebook,
+	updateRegistry,
+} from './registry';
 import { type OpenNotebook, openNotebook } from './session';
 import { writeSnapshot } from './snapshot';
 import * as structure from './structure';
@@ -234,7 +240,8 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		const name = input.name?.trim() || (count ? `${names.notebook} ${count + 1}` : names.notebook);
 		const color = input.color ?? paletteColor(count);
 		registerNotebook(reg, { id, name, color, created: now() });
-		await registry.flush();
+		// A failed save is announced (save-failed) and retried; the notebook still opens.
+		await registry.flush().catch(() => undefined);
 		await switchTo(
 			id,
 			seed ??
@@ -244,6 +251,15 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 					structure.addPage(ctx, { sectionId: section });
 				}),
 		);
+		if (open?.id !== id && !destroyed) {
+			// It could not be opened or seeded (switchTo said why): leave no empty notebook in the
+			// list, and go back to one that opens.
+			unregisterNotebook(reg, id);
+			await registry.flush().catch(() => undefined);
+			const fallback = readRegistry(reg).find((e) => !e.deleted);
+			if (fallback) await switchTo(fallback.id);
+			throw new Error('The notebook could not be created.');
+		}
 		return id;
 	}
 
@@ -253,7 +269,8 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		ready = true;
 		const first = readRegistry(reg).find((e) => !e.deleted);
 		if (first) await switchTo(first.id);
-		else if (options.createDefault !== false) await create({});
+		// A first notebook that cannot be made was announced (open-failed); the client still starts.
+		else if (options.createDefault !== false) await create({}).catch(() => undefined);
 		refresh();
 	})();
 
@@ -423,7 +440,8 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		},
 		async exportNotebook() {
 			if (!open) throw new Error('No notebook is open');
-			await open.flush();
+			// The archive is built from the open document; a save that failed was announced already.
+			await open.flush().catch(() => undefined);
 			return exportArchive(open);
 		},
 		async importNotebook(bytes) {

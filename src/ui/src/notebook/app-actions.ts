@@ -179,7 +179,8 @@ export async function importArchive(app: AppHost, file: File): Promise<void> {
 	try {
 		await app.client?.importNotebook(new Uint8Array(await file.arrayBuffer()));
 	} catch {
-		// The client announced it (`import-failed`).
+		// The client announced it (`import-failed`, or `open-failed` when the archive's notebook
+		// could not be written; nothing is added then).
 	}
 }
 

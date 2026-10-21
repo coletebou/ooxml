@@ -449,7 +449,7 @@ export class NotebookApp extends NotebookElement implements AppHost {
 					variant="primary"
 					icon="plus"
 					label=${this.t('app.createNotebook')}
-					@office-command=${() => void this.#client?.createNotebook()}
+					@office-command=${() => void this.#client?.createNotebook().catch(() => undefined)}
 				></office-ui-button>
 			</div>`;
 		return html`<notebook-page

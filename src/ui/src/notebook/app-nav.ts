@@ -69,7 +69,8 @@ export function notebookMenuAt(app: AppHost, x: number, y: number): void {
 	if (!context) return;
 	app.openMenu(
 		notebookMenu(context, {
-			new: () => void app.client?.createNotebook(),
+			// A failure is announced by the client (`open-failed`) and leaves the list as it was.
+			new: () => void app.client?.createNotebook().catch(() => undefined),
 			import: () => app.pick('archive'),
 			exportPage: () => void exportPage(app),
 			exportNotebook: () => void exportNotebook(app),

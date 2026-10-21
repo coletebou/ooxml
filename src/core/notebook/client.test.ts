@@ -1,3 +1,4 @@
+import JSZip from 'jszip';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadDocx } from '../docx/parse';
 import { createNotebookClient } from './client';
@@ -223,6 +224,54 @@ describe('notebook client', () => {
 		await settle();
 		expect(reopened.getState().notebookId).toBe(id);
 		expect(reopened.getState().page?.title).toBe('Unsaved title');
+	});
+});
+
+describe('notebook client with damaged input', () => {
+	it('imports an archive whose text is malformed, keeping what is valid', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		client.addText({ x: 10, y: 10 }, [para('kept text')]);
+		await settle();
+		const zip = await JSZip.loadAsync((await client.exportNotebook()).bytes);
+		const manifest = JSON.parse(await zip.file('notebook.json')!.async('string')) as {
+			containers: { kind: string; content?: unknown[] }[];
+		};
+		const text = manifest.containers.find((c) => c.kind === 'text')!;
+		text.content = [
+			{ type: 'paragraph', content: 'not a list' },
+			...(text.content ?? []),
+			{ type: 'bullet_list', content: [null, { type: 'list_item', content: 5 }] },
+			{ type: 'paragraph', content: [{ type: 'text', text: 42 }] },
+		];
+		zip.file('notebook.json', JSON.stringify(manifest));
+		const before = client.getState().notebooks.length;
+		const id = await client.importNotebook(await zip.generateAsync({ type: 'uint8array' }));
+		await until(() => client.getState().notebookId === id && !client.getState().loading);
+		expect(client.getState().notebooks).toHaveLength(before + 1);
+		expect(client.getState().sections.length).toBeGreaterThan(0);
+		client.search('kept text');
+		await until(() => client.getState().searchResults.length === 1);
+	});
+
+	it('starts, opens and exports even when every save on the device fails', async () => {
+		const failing: NotebookStorage = {
+			load: async () => null,
+			remove: async () => undefined,
+			save: async () => {
+				throw new Error('quota exceeded');
+			},
+		};
+		const client = start(failing, createChannelHub());
+		const notices: string[] = [];
+		client.on('notice', (n) => notices.push(n.code));
+		await client.whenReady();
+		await settle();
+		expect(client.getState().notebookId).not.toBe('');
+		expect(client.getState().pages).toHaveLength(1);
+		await expect(client.exportNotebook()).resolves.toMatchObject({ mime: 'application/zip' });
+		expect(notices).toContain('save-failed');
 	});
 });
 
