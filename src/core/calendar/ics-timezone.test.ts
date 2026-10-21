@@ -124,4 +124,41 @@ describe('VTIMEZONE', () => {
 			expect(open).toEqual([]);
 		}
 	});
+
+	it('reads a change on a weekday counted from the end of its month, not only the last', () => {
+		// Eight hours ahead, nine from the second-to-last Sunday of October (the 18th in 2026) to the
+		// first Sunday of April.
+		const zone = (byDay: string) =>
+			readFileZone(
+				readComponents(
+					[
+						'BEGIN:VTIMEZONE',
+						'TZID:Zone Eight',
+						'BEGIN:STANDARD',
+						'DTSTART:19700405T030000',
+						'TZOFFSETFROM:+0900',
+						'TZOFFSETTO:+0800',
+						'RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=1SU',
+						'END:STANDARD',
+						'BEGIN:DAYLIGHT',
+						'DTSTART:19701018T020000',
+						'TZOFFSETFROM:+0800',
+						'TZOFFSETTO:+0900',
+						`RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=${byDay}`,
+						'END:DAYLIGHT',
+						'END:VTIMEZONE',
+					].join('\r\n'),
+				).components[0]!,
+			);
+		const second = zone('-2SU')!;
+		expect(fileZoneOffset(second, Date.UTC(2026, 9, 1, 12))).toBe(480);
+		expect(fileZoneOffset(second, Date.UTC(2026, 9, 17, 12))).toBe(480);
+		expect(fileZoneOffset(second, Date.UTC(2026, 9, 18, 12))).toBe(540);
+		// The fourth from the end of October 2026 is its first Sunday, the 4th.
+		const fourth = zone('-4SU')!;
+		expect(fileZoneOffset(fourth, Date.UTC(2026, 9, 3, 12))).toBe(480);
+		expect(fileZoneOffset(fourth, Date.UTC(2026, 9, 4, 12))).toBe(540);
+		// One counted back further than any month has weekdays is not read, never guessed.
+		expect(fileZoneOffset(zone('-5SU')!, Date.UTC(2026, 9, 25, 12))).toBe(480);
+	});
 });

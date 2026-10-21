@@ -74,8 +74,11 @@ function readYearlyRule(value: string, onset: Wall): YearlyRule | undefined {
 	const day = /^([+-]?\d)?(SU|MO|TU|WE|TH|FR|SA)$/u.exec(parts.get('BYDAY') ?? '');
 	if (day) {
 		rule.weekday = WEEKDAYS.indexOf(day[2] ?? '');
-		// A fifth weekday is how some programs say "the last".
-		if (day[1] !== undefined) rule.ordinal = Number(day[1]) >= 5 ? -1 : Number(day[1]);
+		// A fifth weekday is how some programs say "the last". One counted back from the end further
+		// than every month has that weekday is no change a year can be sure of: not read.
+		const ordinal = Number(day[1]);
+		if (ordinal < -4) return undefined;
+		if (day[1] !== undefined) rule.ordinal = ordinal >= 5 ? -1 : ordinal;
 	}
 	const setPos = parts.get('BYSETPOS');
 	if (setPos !== undefined) {

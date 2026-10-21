@@ -44,7 +44,10 @@ export function dayMatchesOrdinal(year: number, month: number, day: number, ordi
 		: Math.ceil(day / 7) === ordinal && ordinal >= 1 && ordinal <= 4;
 }
 
-/** The day of the month on which weekday `weekday` (0 = Sunday) falls for this ordinal. */
+/**
+ * The day of the month on which weekday `weekday` (0 = Sunday) falls for this ordinal, counted
+ * from the start of the month (1 the first) or, when negative, from its end (-1 the last).
+ */
 export function nthWeekdayOfMonth(
 	year: number,
 	month: number,
@@ -52,10 +55,10 @@ export function nthWeekdayOfMonth(
 	ordinal: number,
 ): number {
 	const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-	if (ordinal === -1) {
+	if (ordinal < 0) {
 		const length = daysInMonth(year, month);
 		const lastWeekday = (first + length - 1) % 7;
-		return length - ((lastWeekday - weekday + 7) % 7);
+		return length - ((lastWeekday - weekday + 7) % 7) + (ordinal + 1) * 7;
 	}
 	return 1 + ((weekday - first + 7) % 7) + (ordinal - 1) * 7;
 }

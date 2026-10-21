@@ -34,6 +34,9 @@ describe('weekday ordinal helpers', () => {
 		expect(nthWeekdayOfMonth(2026, 11, 0, 1)).toBe(1);
 		// February 2028 (leap) ends on a Tuesday.
 		expect(nthWeekdayOfMonth(2028, 2, 2, -1)).toBe(29);
+		// Counted from the end: the second-to-last and the fourth-from-last Sunday of October 2026.
+		expect(nthWeekdayOfMonth(2026, 10, 0, -2)).toBe(18);
+		expect(nthWeekdayOfMonth(2026, 10, 0, -4)).toBe(4);
 	});
 
 	it('maps a day to an ordinal, and checks one against a date', () => {
