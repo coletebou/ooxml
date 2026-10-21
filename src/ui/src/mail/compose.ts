@@ -17,10 +17,10 @@ import type {
 	Identity,
 	MailAddress,
 } from 'ooxml-core/mail';
-import { composeStatus } from './app-text';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { caretToStart, dropClean, editorHtml, pasteClean } from './compose-editor';
 import { FileReads, fileList } from './compose-files';
+import { composeFooter, type ComposeFooterHandlers } from './compose-footer';
 import { formatBar } from './compose-format';
 import { fromPicker } from './compose-from';
 import { DraftPictures, listedFiles, type DownloadPart } from './compose-pictures';
@@ -63,8 +63,16 @@ export class MailCompose extends MailElement {
 	declare dragging: boolean;
 	/** Picked or dropped files still being read, which are not in the draft yet. */
 	declare reading: number;
-	/** The compose session the editor holds, so updates of the same draft keep the caret. */
+	/**
+	 * The compose session the editor holds: an update of the same draft keeps the editor as it is,
+	 * caret and all, unless the draft's body changed from elsewhere (`body`).
+	 */
 	private session = 0;
+	/**
+	 * The body the editor shows, as it was given or as the editor last handed it over: the same
+	 * body coming back is the editor's own edit, and any other was changed from elsewhere.
+	 */
+	private body: { html: string | undefined; text: string } = { html: undefined, text: '' };
 	/** A drag started in the editor: a move of its own content, which the browser does. */
 	private moving = false;
 	private readonly files = new FileReads(
@@ -77,6 +85,11 @@ export class MailCompose extends MailElement {
 		() => this.editor,
 		() => this.requestUpdate(),
 	);
+	private readonly footer: ComposeFooterHandlers = {
+		send: () => this.handOver('mail-draft-send'),
+		attach: (files) => this.files.read(files),
+		discard: () => this.discard(),
+	};
 
 	constructor() {
 		super();
@@ -116,6 +129,10 @@ export class MailCompose extends MailElement {
 		return this.renderRoot.querySelector<HTMLElement>('.editor');
 	}
 
+	private get recipientFields(): NodeListOf<MailRecipients> {
+		return this.renderRoot.querySelectorAll<MailRecipients>('mail-recipients');
+	}
+
 	protected override updated(changed: PropertyValues<this>): void {
 		const compose = this.compose;
 		const editor = this.editor;
@@ -128,13 +145,19 @@ export class MailCompose extends MailElement {
 		if (!compose || !editor) return;
 		if (compose.session === this.session) {
 			if (changed.has('download')) this.pictures.mark();
+			// A body the host changed (a link fills a new message in) shows; the editor's own edit
+			// coming back is left as it is, with its caret.
+			const { html, text } = compose.draft;
+			if (changed.has('compose') && (html !== this.body.html || text !== this.body.text))
+				this.show(editor, compose.draft);
 			return;
 		}
 		this.session = compose.session;
 		const draft = compose.draft;
+		// What was being typed into an address field was for the draft before.
+		for (const field of this.recipientFields) field.discardText();
 		this.pictures.start(draft.attachments);
-		editor.innerHTML = editorHtml(draft, this.pictures);
-		this.pictures.mark();
+		this.show(editor, draft);
 		this.showCc ||= draft.cc.length > 0;
 		this.showBcc ||= draft.bcc.length > 0;
 		const focus = draft.to.length
@@ -144,14 +167,20 @@ export class MailCompose extends MailElement {
 		if (focus === editor) caretToStart(this.ownerDocument, editor);
 	}
 
+	/** Show the body of `draft` in the editor, with its pictures. */
+	private show(editor: HTMLElement, draft: Draft): void {
+		editor.innerHTML = editorHtml(draft, this.pictures);
+		this.body = { html: draft.html, text: draft.text };
+		this.pictures.mark();
+	}
+
 	private change(patch: Patch): void {
 		this.emit('mail-draft-change', { patch });
 	}
 
 	/** Turn the addresses still being typed into recipients (a draft change), so nothing is lost. */
 	commitRecipients(): void {
-		for (const field of this.renderRoot.querySelectorAll<MailRecipients>('mail-recipients'))
-			field.commit();
+		for (const field of this.recipientFields) field.commit();
 	}
 
 	/**
@@ -188,7 +217,9 @@ export class MailCompose extends MailElement {
 		const editor = this.editor;
 		if (!editor) return;
 		const text = editor.innerText.replace(/\n{3,}/g, '\n\n');
-		this.change({ html: this.pictures.read(editor), text });
+		const html = this.pictures.read(editor);
+		this.body = { html, text };
+		this.change({ html, text });
 	}
 
 	/** HTML pasted or dropped in: its pictures show, and the draft takes it. */
@@ -286,40 +317,7 @@ export class MailCompose extends MailElement {
 				@dragend=${() => (this.moving = false)}
 			></div>
 			${fileList(listedFiles(draft.attachments, this.pictures.shown), this.i18n, (blobId) => this.emit('mail-draft-detach', { blobId }))}
-			<footer>
-				<button
-					type="button"
-					class="send"
-					?disabled=${compose.status === 'sending' || compose.uploading > 0 || this.readingFiles}
-					@click=${() => this.handOver('mail-draft-send')}
-				>
-					${icon('mail-sent')}<span>${this.t('compose.send')}</span>
-				</button>
-				<label class="icon-button" title=${this.t('compose.attach')}>
-					${icon('mail-attach')}<span class="sr-only">${this.t('compose.attach')}</span>
-					<input
-						type="file"
-						multiple
-						hidden
-						@change=${async (e: Event) => {
-							const input = e.currentTarget as HTMLInputElement;
-							await this.files.read(input.files);
-							input.value = '';
-						}}
-					/>
-				</label>
-				<span class=${`status${compose.status === 'error' ? ' error' : ''}`} role="status"
-					>${composeStatus(compose, this.i18n)}</span
-				>
-				<button
-					type="button"
-					class="icon-button"
-					aria-label=${this.t('compose.discard')}
-					title=${this.t('compose.discard')}
-					@click=${() => this.discard()}
-					>${icon('trash')}</button
-				>
-			</footer>
+			${composeFooter(compose, this.readingFiles, this.i18n, this.footer)}
 		</section>`;
 	}
 }

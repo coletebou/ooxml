@@ -2,7 +2,8 @@
 // people from the address book; Enter, a comma, a semicolon or leaving the field turns the text into
 // chips through the RFC 5322 address parser, so pasted lists (`"Ada" <ada@x>, bob@y`) split right.
 // Leaving the field commits a moment later (a tap on a suggestion comes first), so whoever closes or
-// sends the message calls `commit()` before. `focus()` focuses the input.
+// sends the message calls `commit()` before, and whoever puts another draft in its place calls
+// `discardText()`. `focus()` focuses the input.
 import { html, nothing } from 'lit';
 import {
 	formatAddress,
@@ -67,6 +68,12 @@ export class MailRecipients extends MailElement {
 		this.text = '';
 		this.change([...this.addresses, ...added]);
 		return true;
+	}
+
+	/** Forget the text being typed, without a chip: it was for a draft that gave way to another. */
+	discardText(): void {
+		this.text = '';
+		this.active = 0;
 	}
 
 	private pick(address: MailAddress): void {

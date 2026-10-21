@@ -287,6 +287,21 @@ describe('<mail-compose>', () => {
 		expect(sessions(seen)).toEqual([['mail-draft-discard', 1]]);
 	});
 
+	it('opens the file picker from an Attach button the keyboard reaches', async () => {
+		const el = await mount(composeState());
+		const attach = el.shadowRoot!.querySelector<HTMLButtonElement>(
+			'footer button[aria-label="Attach files"]',
+		);
+		expect(attach?.tabIndex).toBe(0);
+		const picker = el.shadowRoot!.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const opened = vi.fn();
+		picker.addEventListener('click', opened);
+		// Enter and Space on a button are a click.
+		attach!.click();
+		expect(opened).toHaveBeenCalledOnce();
+		expect(picker.hidden).toBe(true);
+	});
+
 	it('puts the focus in the To field of a new message', async () => {
 		const el = await mount(composeState());
 		const to = fields(el)[0]!;
@@ -311,6 +326,45 @@ describe('<mail-compose>', () => {
 			['mail-draft-change', { patch: { to: ada } }],
 			['mail-draft-send', { session: 1 }],
 		]);
+	});
+
+	it('shows a body changed from elsewhere, and leaves its own edits and their caret alone', async () => {
+		const ada = [{ name: '', email: 'ada@example.com' }];
+		const el = await mount(composeState({ to: ada }));
+		// jsdom has no innerText.
+		Object.defineProperty(editor(el), 'innerText', { get: () => editor(el).textContent });
+		const seen = record(el, 'mail-draft-change');
+		// The host fills the body in, in the same compose session (a link with a body does).
+		el.compose = composeState({ to: ada, text: 'Hello\nthere' });
+		await settle(el);
+		expect(editor(el).innerHTML).toBe('Hello<br>there');
+		// An edit of the editor's own comes back from the host as the draft's body: the editor keeps
+		// its nodes, and so the caret in them.
+		editor(el).append(' again');
+		const typed = editor(el).lastChild;
+		editor(el).dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+		const { patch } = seen.at(-1)![1] as { patch: Partial<Draft> };
+		el.compose = composeState({ to: ada, ...patch });
+		await settle(el);
+		expect(editor(el).lastChild).toBe(typed);
+		expect(editor(el).textContent).toBe('Hellothere again');
+		expect(seen).toHaveLength(1);
+	});
+
+	it('leaves an address typed for one draft out of the draft that takes its place', async () => {
+		const el = await mount(composeState());
+		const seen = record(el, 'mail-draft-change', 'mail-draft-send');
+		const to = fields(el)[0]!;
+		await type(el, to, 'ada@example.com');
+		// The field is left (its own commit comes a moment later), and the host opens another draft
+		// in the window without handing this one over.
+		input(to).dispatchEvent(new Event('blur'));
+		el.compose = { ...composeState(), session: 2 };
+		await settle(el);
+		expect(input(to).value).toBe('');
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		el.shadowRoot!.querySelector<HTMLButtonElement>('.send')!.click();
+		expect(seen).toEqual([['mail-draft-send', { session: 2 }]]);
 	});
 
 	it('says a send the server did not confirm may have gone out, not that it failed', async () => {

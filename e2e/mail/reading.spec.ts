@@ -112,3 +112,34 @@ test('a mailto: area of an image map starts a message to its address, as a link 
 	// Compose opened in the app: no tab was opened for the address.
 	expect(tabs).toEqual([]);
 });
+
+test('a mailto: link with a body starts a message that shows it', async ({ page }) => {
+	await openDemo(page);
+	await importHtmlMail(page, [
+		{
+			subject: 'Mail link',
+			html: '<p><a href="mailto:bob@example.com?subject=Lunch&body=Noon%20at%20the%20usual%20place%3F">Write to Bob</a></p>',
+		},
+	]);
+	await openConversation(page, 'Mail link');
+	await page.frameLocator('mail-html-frame iframe').getByText('Write to Bob').click();
+	const compose = page.locator('mail-compose');
+	await expect(compose.getByPlaceholder('Subject')).toHaveValue('Lunch');
+	await expect(compose.locator('.editor')).toHaveText('Noon at the usual place?');
+	// What the editor shows is what the draft holds, also after an edit in it.
+	await compose.locator('.editor').click();
+	await page.keyboard.press('End');
+	await page.keyboard.type(' Or one?');
+	type Compose = { compose: { draft: { text: string } } | null };
+	await expect
+		.poll(() =>
+			page
+				.locator('mail-app')
+				.evaluate(
+					(app) =>
+						(app as unknown as { client: { getState(): Compose } }).client.getState().compose?.draft
+							.text,
+				),
+		)
+		.toBe('Noon at the usual place? Or one?');
+});
