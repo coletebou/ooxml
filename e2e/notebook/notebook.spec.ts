@@ -1,12 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { type Page, expect, test } from '@playwright/test';
+import { WORD_MIME, wordFile } from './support/word-file';
 
 // Each test gets its own IndexedDB database, so runs never see each other's notebooks.
 const fresh = (): string =>
 	`e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-const fixture = (name: string): string =>
-	fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const PNG = Buffer.from(
 	'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC',
 	'base64',
@@ -164,7 +162,13 @@ test('inserts a picture and a live Word document, then exports the page to .docx
 	await expect.poll(async () => (await picture.boundingBox())!.x).toBeCloseTo(before.x + 10, 0);
 	const files = page.waitForEvent('filechooser');
 	await command(page, 'file');
-	await (await files).setFiles(fixture('report.docx'));
+	await (
+		await files
+	).setFiles({
+		name: 'report.docx',
+		mimeType: WORD_MIME,
+		buffer: await wordFile('Embedded report', 'Hello from a Word document inside a notebook page.'),
+	});
 	const embed = page.locator('notebook-file');
 	await expect(embed.locator('.name')).toHaveText('report.docx');
 	await expect(embed.locator('docx-editor')).toContainText('Hello from a Word document', {
