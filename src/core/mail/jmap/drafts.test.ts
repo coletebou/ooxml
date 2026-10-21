@@ -298,6 +298,59 @@ describe('send', () => {
 		expect(gone.store.submissions).toHaveLength(1);
 	});
 
+	it('asks again after a resend the server could not answer, and sends at most once', async () => {
+		for (const failed of ['after', 'before'] as const) {
+			const { server, transport, store } = mail();
+			store.failSubmission = failed;
+			await failure(transport.send(reply));
+			store.failSubmission = null;
+			// Sent again while the server cannot be reached: it cannot say, and nothing is sent.
+			let offline = true;
+			server.route(
+				() => offline,
+				() => Promise.reject(new TypeError('Failed to fetch')),
+			);
+			const unreachable = await failure(transport.send(reply));
+			offline = false;
+			// Sent again once it can be reached: it is asked about the first copy again.
+			const asked = server.argsOf('EmailSubmission/query').length;
+			await transport.send(reply);
+			expect(server.argsOf('EmailSubmission/query').slice(asked), failed).toEqual([
+				{ accountId: 'A13824', filter: { emailIds: ['E1'] } },
+			]);
+			expect(store.submissions, failed).toHaveLength(1);
+			// The first copy went out and is filed in Sent, or it is a stray draft and is gone.
+			if (failed === 'after')
+				expect(store.emails.get('E1')).toMatchObject({ mailboxIds: { [SENT]: true } });
+			else expect(store.emails.has('E1')).toBe(false);
+			expect(store.emails.has('old-draft'), failed).toBe(false);
+			expect(unreachable, failed).toMatchObject({ code: 'uncertain', cause: { code: 'network' } });
+		}
+	});
+
+	it('sends nothing while the server cannot say whether the first copy went out', async () => {
+		const { server, transport, store } = mail();
+		store.failSubmission = 'after';
+		await failure(transport.send(reply));
+		store.failSubmission = null;
+		let unavailable = true;
+		const list = (args: Record<string, unknown>, call: { id: string; name: string }) => {
+			if (unavailable) return [['error', { type: 'serverUnavailable' }, call.id]];
+			const filter = args.filter as { emailIds: string[] };
+			return { ids: filter.emailIds.includes('E1') ? ['ES-1'] : [], position: 0, total: 1 };
+		};
+		server.on('EmailSubmission/query', list as Parameters<typeof server.on>[1]);
+		expect(await failure(transport.send(reply))).toMatchObject({
+			code: 'uncertain',
+			cause: { type: 'serverUnavailable' },
+		});
+		// Nothing was made or sent meanwhile; asked again once it can say, the first send is finished.
+		expect([...store.emails.keys()].sort()).toEqual(['E1', 'old-draft', 'original']);
+		unavailable = false;
+		expect(await transport.send(reply)).toEqual({ id: 'E1' });
+		expect(store.submissions).toHaveLength(1);
+	});
+
 	it('drops the copy when the submission failed as a whole, which changes nothing', async () => {
 		const { server, transport, store } = mail();
 		server.on('EmailSubmission/set', (_args, call) => [['error', { type: 'forbidden' }, call.id]]);
@@ -377,20 +430,47 @@ describe('send', () => {
 		});
 	});
 
-	it('keeps the copy when the request that submits it fails as a whole', async () => {
+	it.each([
+		['no answer', () => Promise.reject(new TypeError('Failed to fetch')), 'network'],
+		['a server error', () => new Response('Busy', { status: 503 }), 'server'],
+		['an answer that is not JSON', () => new Response('<html>', { status: 200 }), 'server'],
+	])('keeps the copy when the request that submits it gets %s', async (_what, respond, cause) => {
 		const { server, transport, store } = limited(1);
-		server.route(
-			(request) => request.body?.includes('EmailSubmission/set') ?? false,
-			() => Promise.reject(new TypeError('Failed to fetch')),
-		);
+		server.route((request) => request.body?.includes('EmailSubmission/set') ?? false, respond);
 		expect(await failure(transport.send(reply))).toMatchObject({
 			code: 'uncertain',
-			cause: { code: 'network' },
+			cause: { code: cause },
 		});
 		// Whether it went out is not known: the copy stays, and nothing else is changed.
 		expect(store.emails.has('E1')).toBe(true);
 		expect(store.emails.has('old-draft')).toBe(true);
 	});
+
+	it.each([
+		[401, {}, 'unauthorized'],
+		[403, {}, 'forbidden'],
+		[400, { type: 'urn:ietf:params:jmap:error:limit', limit: 'maxSizeRequest' }, 'tooLarge'],
+	])(
+		'drops the copy and says why when the server refuses the request that submits it (%i)',
+		async (status, problem, code) => {
+			const { server, transport, store } = limited(1);
+			// RFC 8620 3.6: a request rejected as a whole is not processed, so nothing was sent.
+			let refusing = true;
+			server.route(
+				(request) => refusing && (request.body?.includes('EmailSubmission/set') ?? false),
+				() => new Response(JSON.stringify({ status, ...problem }), { status }),
+			);
+			expect(await failure(transport.send(reply))).toMatchObject({ code, status });
+			expect(store.submissions).toEqual([]);
+			expect(store.emails.has('E1')).toBe(false);
+			expect(store.emails.has('old-draft')).toBe(true);
+			// Nothing is left to ask about: sent again, it goes out at once.
+			refusing = false;
+			expect(await transport.send(reply)).toEqual({ id: 'E2' });
+			expect(server.argsOf('EmailSubmission/query')).toEqual([]);
+			expect(store.submissions).toHaveLength(1);
+		},
+	);
 
 	it('refuses to send without submission or without an identity', async () => {
 		const plain = setup({

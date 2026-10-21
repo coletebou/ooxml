@@ -6,15 +6,21 @@
 // not resolve references in an echo, or takes fewer calls in one request than that needs
 // (`maxCallsInRequest`), gets the clean-up as a second request instead, and with one call per
 // request the submission too. The copy a send made is destroyed only when it certainly did not go
-// out; when that is not known it stays, the send fails as `uncertain` rather than as not sent, and
-// sending the same message again first asks the server whether it went out (RFC 8621 7.3), so it
-// is never sent twice. New code.
+// out (the server refused it, or the request as a whole, RFC 8620 3.6); when that is not known it
+// stays, and the send fails as `uncertain` rather than as not sent (`submission.ts`). The same
+// message sent again then first asks the server whether that copy went out (RFC 8621 7.3), and is
+// sent again only when the server says it did not, or has neither the copy nor a submission of it
+// any more; while the server cannot be asked, nothing is sent. That is known in memory only: a
+// reload forgets it, and a message changed since is a new one. A request that creates and submits
+// the message at once and gets no answer at all fails with why (the network, say), not as
+// `uncertain`: the copy's id never came, so there is nothing to ask about. New code.
 import { ANSWERED, DRAFT, FORWARDED, SEEN, type Draft, type Identity } from '../model';
 import { MailTransportError } from '../transport';
 import type { JmapClient } from './client';
 import type { MailboxMethods } from './mailboxes';
 import { emailToCreate, pickIdentity } from './outgoing';
 import { patchPath, type JmapCall, type JmapRequestBuilder, type JmapResult } from './request';
+import { refused, uncertain, unprocessed, wentOut } from './submission';
 import { isRecord } from './types';
 
 type Patch = Record<string, true | null>;
@@ -59,27 +65,6 @@ function filed(result: JmapResult, submission: JmapCall, id: string): boolean {
 	return isRecord(updated) && Object.hasOwn(updated, id);
 }
 
-/**
- * True when the server certainly did not create `creationId` in `call`: it refused it (a SetError
- * in `notCreated`), or the method failed, which changes nothing unless the error is
- * `serverPartialFail` (RFC 8620 3.6.2). That error, or no answer, may mean the message went out.
- */
-function refused(result: JmapResult, call: JmapCall, creationId: string): boolean {
-	const error = result.error(call);
-	if (error) return error.type !== 'serverPartialFail';
-	const notCreated = result.all(call).find((response) => response[0] === call.name)?.[1].notCreated;
-	return isRecord(notCreated) && Object.hasOwn(notCreated, creationId);
-}
-
-/**
- * A send that may have gone out, told as such: reported as not sent, it would be edited and sent
- * again, a second message. `cause` is what the server answered, or how the request failed.
- */
-const uncertain = (cause: unknown): MailTransportError =>
-	new MailTransportError('uncertain', 'The server did not say whether the message was sent.', {
-		cause,
-	});
-
 export function createDraftMethods(options: DraftOptions): DraftMethods {
 	const { client, mailboxes, nudge } = options;
 	let gating: Promise<boolean> | null = null;
@@ -119,34 +104,10 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 	const maxCalls = async (): Promise<number> => (await client.session()).limits.maxCallsInRequest;
 
 	/**
-	 * Copies whose submission may or may not have happened, by the message they hold: sending the
-	 * same message again asks first whether that copy went out, so it is never sent twice.
+	 * Copies whose submission may or may not have happened, by the message they hold. Each stays
+	 * until the server can say whether it went out, so sending the same message again asks first.
 	 */
 	const unsure = new Map<string, string>();
-
-	/**
-	 * Whether a copy whose submission was not certain went out: the server holds a submission of it
-	 * (RFC 8621 7.3), or it is no longer a draft, which only its submission makes it (a server may
-	 * drop the record of a submission, 7.5). Null when the server cannot say.
-	 */
-	const wentOut = async (emailId: string): Promise<boolean | null> => {
-		try {
-			const query = await client.request((builder, accountId) =>
-				builder.call('EmailSubmission/query', { accountId, filter: { emailIds: [emailId] } }),
-			);
-			const ids = query.result.get(query.calls).ids;
-			if (Array.isArray(ids) && ids.length) return true;
-			const get = await client.request((builder, accountId) =>
-				builder.call('Email/get', { accountId, ids: [emailId], properties: ['keywords'] }),
-			);
-			const list = get.result.get(get.calls).list;
-			const copy: unknown = Array.isArray(list) ? list[0] : undefined;
-			if (!isRecord(copy)) return null;
-			return !(isRecord(copy.keywords) && copy.keywords[DRAFT] === true);
-		} catch {
-			return null;
-		}
-	};
 
 	const draftsMailbox = async (): Promise<string> => {
 		const id = await mailboxes.roleId('drafts');
@@ -217,15 +178,20 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const key = JSON.stringify([draft.id ?? null, identity.id, create]);
 			const earlier = unsure.get(key);
 			if (earlier !== undefined) {
+				// Asked before anything is sent: while the server cannot be asked, it is still not known,
+				// nothing is sent and the copy stays known for the next send.
+				const went = await wentOut(client, earlier).catch((error: unknown) => {
+					throw uncertain(error);
+				});
 				unsure.delete(key);
-				const went = await wentOut(earlier);
 				if (went) {
 					// It went out the first time: that send is finished, never made again.
 					await quietly(() => tidy(destroy, { ...marks, [earlier]: onSent }));
 					nudge();
 					return { id: earlier };
 				}
-				// It did not: that copy is a stray draft. When the server cannot say, it stays.
+				// It did not: that copy is a stray draft. When the server can never say (it has neither
+				// the copy nor a submission of it), the message is sent again.
 				if (went === false) await quietly(() => tidy([earlier], {}));
 			}
 			const limit = await maxCalls();
@@ -256,27 +222,29 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			});
 			// Not created: nothing was sent and the saved draft is untouched.
 			const id = first.result.created(first.calls.email, 'draft');
-			// One call per request: the submission names the message the first one created. Should
-			// that request fail as a whole, whether it went out is not known, and the copy stays.
-			const { result, calls: submission } = first.calls.submission
-				? { result: first.result, calls: first.calls.submission }
-				: await client
-						.request((builder, accountId) => submit(builder, accountId, id))
-						.catch((error: unknown) => {
-							unsure.set(key, id);
-							nudge();
-							throw uncertain(error);
-						});
-			try {
-				result.created(submission, 'send');
-			} catch (error) {
-				// Not sent for certain: drop the copy just made, so the saved draft is the only one
-				// again. When it may have gone out, the copy may be the only one there is: it stays.
-				const certain = refused(result, submission, 'send');
+			/**
+			 * Ends a send that did not go through. Not sent for certain: the copy just made goes, so the
+			 * saved draft is the only one again. When it may have gone out, the copy may be the only one
+			 * there is: it stays, known for the next send to ask about.
+			 */
+			const notSent = async (error: unknown, certain: boolean): Promise<never> => {
 				if (certain) await quietly(() => tidy([id], {}));
 				else unsure.set(key, id);
 				nudge();
 				throw certain ? error : uncertain(error);
+			};
+			// One call per request: the submission names the message the first one created. A request
+			// the server refused as a whole changed nothing; any other failure of it leaves open
+			// whether the message went out.
+			const { result, calls: submission } = first.calls.submission
+				? { result: first.result, calls: first.calls.submission }
+				: await client
+						.request((builder, accountId) => submit(builder, accountId, id))
+						.catch((error: unknown) => notSent(error, unprocessed(error)));
+			try {
+				result.created(submission, 'send');
+			} catch (error) {
+				await notSent(error, refused(result, submission, 'send'));
 			}
 			const { clean } = first.calls;
 			const later = { destroy: [] as string[], update: {} as Record<string, Patch> };
