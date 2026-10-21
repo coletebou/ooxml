@@ -31,11 +31,16 @@ const cursorToEnd = (page: Page) =>
 		.locator('notebook-text')
 		.first()
 		.evaluate((el) => {
-			const view = (
-				el as unknown as {
-					view: { state: any; dispatch: (tr: unknown) => void; focus: () => void };
-				}
-			).view;
+			interface EditorViewLike {
+				state: {
+					doc: unknown;
+					selection: { constructor: { atEnd: (doc: unknown) => unknown } };
+					tr: { setSelection: (selection: unknown) => unknown };
+				};
+				dispatch: (tr: unknown) => void;
+				focus: () => void;
+			}
+			const view = (el as unknown as { view: EditorViewLike }).view;
 			const Selection = view.state.selection.constructor;
 			view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
 			view.focus();
