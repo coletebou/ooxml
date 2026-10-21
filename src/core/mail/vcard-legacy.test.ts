@@ -1,6 +1,31 @@
+import { parseVCards, serializeVCards } from './vcard';
 import { vcard4Line } from './vcard-legacy';
 
 describe('vcard4Line', () => {
+	it('writes a 3.0 or 2.1 position as the geo: URI that 4.0 gives it', () => {
+		// RFC 2426 3.4.2 (and 2.1, with a comma) writes two decimals; RFC 6350 6.5.2 a geo: URI.
+		expect(vcard4Line('GEO:37.386013;-122.082932')).toBe('GEO:geo:37.386013,-122.082932');
+		expect(vcard4Line('item1.GEO;TYPE=work:+37.24, -121.88')).toBe(
+			'item1.GEO;TYPE=work:geo:37.24,-121.88',
+		);
+		expect(vcard4Line('GEO;VALUE=float;ENCODING=QUOTED-PRINTABLE:48=2E85;2=2E35')).toBe(
+			'GEO:geo:48.85,2.35',
+		);
+		// A URI already, or a value that is no position, stays as it is.
+		for (const line of [
+			'GEO:geo:46.772673,-71.282945',
+			'GEO;TYPE=work:geo:46.772673\\,-71.282945',
+			'GEO:somewhere north',
+			'GEO:37.38;-122.08;12',
+		])
+			expect(vcard4Line(line)).toBe(line);
+		// Exported and read again, a card keeps its position as the URI.
+		const card = 'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:g\r\nFN:Ada\r\nGEO:51.5;-0.12\r\nEND:VCARD\r\n';
+		const text = serializeVCards(parseVCards(card).contacts);
+		expect(text).toContain('\r\nGEO:geo:51.5,-0.12\r\n');
+		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
+	});
+
 	it('keeps every line that is neither an inline binary value nor quoted-printable as it is', () => {
 		for (const line of [
 			'PHOTO:data:image/jpeg;base64,/9j/4AAQ',
