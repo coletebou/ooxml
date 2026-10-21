@@ -12,8 +12,16 @@ const ESSENCE = /^[\w!#$%&'*+.^`|~-]+\/[\w!#$%&'*+.^`|~-]+$/;
 /** Types a browser shows as a page that can run script: HTML, SVG and every XML type. */
 const SCRIPTED =
 	/^(?:text\/html|text\/xml|application\/xml|text\/xsl|multipart\/x-mixed-replace)$|\+xml$/;
-/** Placeholders a browser reads as "no type", guessing the type from the bytes. */
-const GUESSED = new Set(['unknown/unknown', 'application/unknown', '*/*']);
+/**
+ * Placeholders a browser reads as "no type", guessing the type from the bytes: those of the MIME
+ * Sniffing standard, and the name one browser gives an unknown type of its own.
+ */
+const GUESSED = new Set([
+	'unknown/unknown',
+	'application/unknown',
+	'*/*',
+	'application/x-unknown-content-type',
+]);
 const BYTES = 'application/octet-stream';
 
 /** The type and subtype of a MIME type in lower case, or '' when it is not a valid one. */

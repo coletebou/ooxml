@@ -35,8 +35,18 @@ describe('object URLs of message parts', () => {
 			'text/html; charset=utf-8',
 		])
 			expect(activeType(type), type).toBe(true);
-		// A browser guesses the type of bytes without a valid one, and may find HTML.
-		for (const type of ['', 'image', 'image/svg+xml,x', 'unknown/unknown', '*/*', 'image/ png'])
+		// A browser guesses the type of bytes without a valid one, and may find HTML: one browser
+		// guesses for its own name for an unknown type too.
+		for (const type of [
+			'',
+			'image',
+			'image/svg+xml,x',
+			'unknown/unknown',
+			'*/*',
+			'image/ png',
+			'application/x-unknown-content-type',
+			'Application/X-Unknown-Content-Type; charset=utf-8',
+		])
 			expect(activeType(type), type).toBe(true);
 		for (const type of [
 			'image/png',
