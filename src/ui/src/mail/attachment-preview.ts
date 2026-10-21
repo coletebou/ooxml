@@ -1,12 +1,14 @@
 // <mail-attachment-preview>: an attachment opened in place. Word, Excel and Visio files load in the
 // suite's own viewers (read-only), presentations in the shared reading surface, images and text as
-// they are; each viewer's code loads only when a file of its kind is opened.
+// they are; each viewer's code loads only when a file of its kind is opened. It is a modal dialog
+// (modal.ts): the focus moves in when it opens and back when it closes or is removed.
 import { html, nothing, type PropertyValues } from 'lit';
 import { keyed } from 'lit/directives/keyed.js';
 import { previewKind, type PreviewKind } from './attachments';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { icon } from './icons';
 import type { OpenAttachmentDetail } from './mail-app';
+import { FocusReturn, focusFirst, trapKeys } from './modal';
 import css from './attachment-preview.css?raw';
 
 type Viewer = HTMLElement & { load(bytes: Uint8Array, name?: string): Promise<void> };
@@ -25,6 +27,7 @@ export class MailAttachmentPreview extends MailElement {
 	declare text: string;
 	declare url: string;
 	private generation = 0;
+	private readonly focusReturn = new FocusReturn();
 
 	constructor() {
 		super();
@@ -35,13 +38,24 @@ export class MailAttachmentPreview extends MailElement {
 	}
 
 	protected override updated(changed: PropertyValues<this>): void {
-		if (changed.has('detail')) void this.load();
+		if (!changed.has('detail')) return;
+		const previous = changed.get('detail');
+		if (this.detail && !previous) {
+			this.focusReturn.take(this.ownerDocument);
+			focusFirst(this.renderRoot);
+		} else if (!this.detail && previous) this.focusReturn.restore();
+		void this.load();
 	}
 
 	override disconnectedCallback(): void {
 		this.generation++;
 		this.revoke();
 		super.disconnectedCallback();
+		// Removed while open (the app closes it that way): the focus goes back once it is gone.
+		if (this.detail)
+			queueMicrotask(() => {
+				if (!this.isConnected) this.focusReturn.restore();
+			});
 	}
 
 	private revoke(): void {
@@ -131,6 +145,7 @@ export class MailAttachmentPreview extends MailElement {
 			role="dialog"
 			aria-modal="true"
 			aria-label=${this.t('preview.title', { name: detail.attachment.name })}
+			@keydown=${(e: KeyboardEvent) => trapKeys(e, () => this.emit('mail-preview-close', {}))}
 		>
 			<header>
 				<h2>${detail.attachment.name}</h2>

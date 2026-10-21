@@ -318,6 +318,31 @@ describe('<mail-calendar>', () => {
 		expect(grid(el).shadowRoot!.activeElement).toBe(opener);
 	});
 
+	it('keeps Tab and Shift+Tab inside the dialog', async () => {
+		const el = await mount();
+		await click(el, 'New event');
+		const close = button(el, 'Close');
+		const cancel = button(el, 'Cancel');
+		const tab = (from: HTMLElement, shiftKey = false): KeyboardEvent => {
+			const event = new KeyboardEvent('keydown', {
+				key: 'Tab',
+				shiftKey,
+				bubbles: true,
+				composed: true,
+				cancelable: true,
+			});
+			from.dispatchEvent(event);
+			return event;
+		};
+		cancel.focus();
+		expect(tab(cancel).defaultPrevented).toBe(true);
+		expect(el.shadowRoot!.activeElement).toBe(close);
+		expect(tab(close, true).defaultPrevented).toBe(true);
+		expect(el.shadowRoot!.activeElement).toBe(cancel);
+		field(el, 'title').focus();
+		expect(tab(field(el, 'title')).defaultPrevented).toBe(false);
+	});
+
 	it('imports .ics files and exports the whole calendar', async () => {
 		const el = await mount([review]);
 		const imported = record(el, 'mail-import-ics');

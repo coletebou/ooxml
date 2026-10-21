@@ -1,4 +1,4 @@
-import { commandFor, isTyping, SHORTCUTS } from './keyboard';
+import { commandFor, controlOwnsKey, isTyping, SHORTCUTS } from './keyboard';
 
 describe('mail shortcuts', () => {
 	it('maps plain keys outside text fields', () => {
@@ -28,5 +28,23 @@ describe('mail shortcuts', () => {
 		expect(isTyping([input])).toBe(true);
 		expect(isTyping([div])).toBe(true);
 		expect(isTyping([document.createElement('button')])).toBe(false);
+	});
+	it('leaves the keys a focused control acts on to it', () => {
+		const el = (tag: string, role?: string): HTMLElement => {
+			const made = document.createElement(tag);
+			if (role) made.setAttribute('role', role);
+			return made;
+		};
+		expect(controlOwnsKey({ key: 'Enter' }, [el('button')])).toBe(true);
+		expect(controlOwnsKey({ key: 'Enter' }, [el('a')])).toBe(true);
+		expect(controlOwnsKey({ key: ' ' }, [el('summary')])).toBe(true);
+		expect(controlOwnsKey({ key: 'ArrowDown' }, [el('div', 'tab')])).toBe(true);
+		expect(controlOwnsKey({ key: 'ArrowUp' }, [el('select')])).toBe(true);
+		// Shortcut letters and the send chord still work on a button; a list box (the message list)
+		// keeps the focus itself and leaves Enter to the app.
+		expect(controlOwnsKey({ key: 'j' }, [el('button')])).toBe(false);
+		expect(controlOwnsKey({ key: 'Enter', ctrlKey: true }, [el('button')])).toBe(false);
+		expect(controlOwnsKey({ key: 'Enter' }, [el('div', 'listbox')])).toBe(false);
+		expect(controlOwnsKey({ key: 'Enter' }, [el('div')])).toBe(false);
 	});
 });

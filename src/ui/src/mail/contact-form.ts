@@ -17,6 +17,10 @@ const TYPE_LABELS: Record<string, MailKey> = {
 	cell: 'contacts.typeCell',
 	fax: 'contacts.typeFax',
 };
+/** The parts of a postal address the form shows (not the PO box nor the extended line). */
+const SHOWN = ['street', 'locality', 'region', 'postalCode', 'country'] as const;
+type ShownParts = Pick<ContactAddress, (typeof SHOWN)[number]>;
+const hasShownParts = (place: ShownParts): boolean => SHOWN.some((part) => place[part]);
 
 export interface ContactFormHandlers {
 	save(event: Event): void;
@@ -95,13 +99,18 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 				type: value(key.replace(`${prefix}-`, `${prefix}-type-`)),
 			}))
 			.filter((row) => row.value);
-	const street = value('street');
-	const locality = value('locality');
-	const region = value('region');
-	const postalCode = value('postalCode');
-	const country = value('country');
+	const shown: ShownParts = {
+		street: value('street'),
+		locality: value('locality'),
+		region: value('region'),
+		postalCode: value('postalCode'),
+		country: value('country'),
+	};
 	const first = base.addresses[0];
-	const hasPlace = street || locality || region || postalCode || country;
+	// An address holding only parts the form cannot show stays as it was; one whose shown parts
+	// were all cleared goes, with them.
+	const keepPlace =
+		hasShownParts(shown) || (!!first && !hasShownParts(first) && !!(first.poBox || first.extended));
 	const birthday = value('birthday') || (ISO_DATE.test(base.birthday) ? '' : base.birthday);
 	return {
 		...base,
@@ -112,17 +121,13 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 		phones: rows('phone').map((row) => ({ type: row.type, number: row.value })),
 		organization: value('organization'),
 		title: value('title'),
-		addresses: hasPlace
+		addresses: keepPlace
 			? [
 					{
 						type: first?.type ?? '',
 						poBox: first?.poBox ?? '',
 						extended: first?.extended ?? '',
-						street,
-						locality,
-						region,
-						postalCode,
-						country,
+						...shown,
 					},
 					...base.addresses.slice(1),
 				]

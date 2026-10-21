@@ -1,6 +1,8 @@
 // <mail-recipients>: an address field (To, Cc, Bcc). Each address is a chip; typing suggests
 // people from the address book; Enter, a comma, a semicolon or leaving the field turns the text into
 // chips through the RFC 5322 address parser, so pasted lists (`"Ada" <ada@x>, bob@y`) split right.
+// Leaving the field commits a moment later (a tap on a suggestion comes first), so whoever closes or
+// sends the message calls `commit()` before. `focus()` focuses the input.
 import { html, nothing } from 'lit';
 import {
 	formatAddress,
@@ -39,6 +41,12 @@ export class MailRecipients extends MailElement {
 		this.contacts = [];
 		this.text = '';
 		this.active = 0;
+	}
+
+	/** Focus the address input (the host itself takes no focus), once it is drawn. */
+	override focus(options?: FocusOptions): void {
+		if (this.hasUpdated) this.renderRoot.querySelector('input')?.focus(options);
+		else void this.updateComplete.then(() => this.focus(options));
 	}
 
 	private get suggestions(): MailAddress[] {

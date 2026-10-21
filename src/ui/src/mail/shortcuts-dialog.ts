@@ -1,8 +1,10 @@
-// The keyboard shortcuts dialog of <mail-app>: every command with its keys (keyboard.ts).
+// The keyboard shortcuts dialog of <mail-app>: every command with its keys (keyboard.ts). It is
+// modal (modal.ts); the app moves the focus in when it opens and back when it closes.
 import { html } from 'lit';
 import type { MailI18n, MailKey } from './i18n/translator';
 import { icon } from './icons';
 import { SHORTCUTS, type MailCommand } from './keyboard';
+import { trapKeys } from './modal';
 
 const LABELS: Record<MailCommand, MailKey> = {
 	compose: 'shortcut.compose',
@@ -28,7 +30,13 @@ const LABELS: Record<MailCommand, MailKey> = {
 
 export function shortcutsDialog(i18n: MailI18n, close: () => void) {
 	return html`<div class="overlay" @click=${(e: Event) => e.target === e.currentTarget && close()}>
-		<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+		<section
+			class="dialog"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="shortcuts-title"
+			@keydown=${(e: KeyboardEvent) => trapKeys(e, close)}
+		>
 			<header>
 				<h2 id="shortcuts-title">${i18n.t('shortcut.title')}</h2>
 				<button

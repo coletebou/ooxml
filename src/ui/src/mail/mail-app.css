@@ -356,6 +356,7 @@ kbd {
 	}
 }
 @container (max-width: 48em) {
+	/* Icons only: the rail items and New message keep their names through aria-label. */
 	.rail-item span:not(.badge) {
 		display: none;
 	}

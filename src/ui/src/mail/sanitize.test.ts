@@ -83,6 +83,28 @@ describe('sanitizeEmailHtml', () => {
 		expect(doc).not.toContain('</style><script>');
 	});
 
+	it('counts and drops the remote images CSS loads however it is written', () => {
+		const result = clean(
+			`<p style="background:image-set('https://t.example/a.png' 1x, 'https://t.example/b.png' 2x)">a</p><p style="background:\\75 rl(https://t.example/c.png)">b</p><p style="background:url('https://t.example/d(1).png')">c</p>`,
+		);
+		expect(result.blocked).toBe(4);
+		expect(result.body).not.toContain('t.example');
+		expect(result.body).toContain('background:none');
+	});
+
+	it('keeps local images in CSS and loads remote ones once allowed', () => {
+		const cidUrls = new Map([['logo@x', 'blob:http://localhost/1']]);
+		const css =
+			'a{background:image-set("cid:logo@x" 1x)}b{background:url(data:image/png;base64,AAAA)}c{background:image-set("https://t.example/c.png" 1x)}';
+		const html = `<style>${css}</style><p>x</p>`;
+		expect(sanitizeEmailHtml(html, { allowRemote: false, cidUrls }).css).toBe(
+			'a{background:image-set("blob:http://localhost/1" 1x)}b{background:url("data:image/png;base64,AAAA")}c{background:none}',
+		);
+		const allowed = sanitizeEmailHtml(html, { allowRemote: true, cidUrls });
+		expect(allowed.css).toContain('c{background:image-set("https://t.example/c.png" 1x)}');
+		expect(allowed.blocked).toBe(0);
+	});
+
 	it('stays fast on hostile CSS and long words', () => {
 		const started = performance.now();
 		cleanCss('url('.repeat(50_000));
@@ -90,6 +112,46 @@ describe('sanitizeEmailHtml', () => {
 		linkify('a.'.repeat(100_000));
 		linkify(`${'x'.repeat(200_000)}@`);
 		expect(performance.now() - started).toBeLessThan(3000);
+	});
+});
+
+describe('cleanCss', () => {
+	it('blocks every way CSS can load a remote resource', () => {
+		// Each of these loads from t.example in a browser; a url() pattern alone misses them.
+		const cases: [css: string, cleaned: string][] = [
+			["background:image-set('https://t.example/a.png' 1x)", 'background:none'],
+			[
+				'background:-webkit-image-set("https://t.example/a.png" 1x, "https://t.example/b.png" 2x)',
+				'background:none',
+			],
+			["background:image('https://t.example/a.png')", 'background:none'],
+			[
+				"background:cross-fade('https://t.example/a.png' 50%, url(https://t.example/b.png))",
+				'background:none',
+			],
+			['background:imag\\65-set("https://t.example/a.png" 1x)', 'background:none'],
+			['background:src("https://t.example/a.png")', 'background:none'],
+			['background:url("https://t.example/a(1).png")', 'background:none'],
+			["background:url('https://t.example/it\\'s.png')", 'background:none'],
+			[`background:url(https://t.example/${'a'.repeat(5000)}.png)`, 'background:none'],
+			['background:url(https://t.example/a.png', 'background:none'],
+			['background:url("https://t.example/a.png', 'background:none'],
+			['background:\\75 rl(https://t.example/a.png)', 'background:none'],
+			['background:U\\52L( "https://t.example/a.png" )', 'background:none'],
+			[
+				'--u:"https://t.example/a.png";background:image-set(var(--u) 1x)',
+				'--u:"https://t.example/a.png";background:none',
+			],
+		];
+		for (const [css, cleaned] of cases) expect(cleanCss(css), css.slice(0, 80)).toBe(cleaned);
+	});
+
+	it('drops @import however it is written', () => {
+		expect(cleanCss('@import "https://t.example/a.css";p{color:red}')).toBe('p{color:red}');
+		expect(cleanCss('@\\69mport "https://t.example/a.css";p{color:red}')).toBe('p{color:red}');
+		expect(cleanCss('@import url(https://t.example/a.css) screen;p{color:red}')).toBe(
+			'p{color:red}',
+		);
 	});
 });
 

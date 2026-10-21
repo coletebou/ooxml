@@ -1,6 +1,8 @@
 // The mail keyboard shortcuts, as a pure map from a key event to a command so they can be tested
 // and listed in the shortcuts dialog. They follow the conventions of common web mail programs.
-// Typing in a field never triggers one (except Escape and the send chord). New code.
+// Typing in a field never triggers one (except Escape and the send chord), and a key a focused
+// control acts on itself (Enter on a button or a link, the arrows on a tab) stays the control's, so
+// Enter opens from the message list only. New code.
 
 export type MailCommand =
 	| 'compose'
@@ -101,5 +103,60 @@ export function isTyping(path: readonly EventTarget[]): boolean {
 		tag === 'SELECT' ||
 		target.isContentEditable === true ||
 		target.getAttribute?.('contenteditable') === 'true'
+	);
+}
+
+/** The keys a focused control acts on itself: Enter and Space activate it, the arrows move in it. */
+const CONTROL_KEYS = new Set([
+	'Enter',
+	' ',
+	'ArrowUp',
+	'ArrowDown',
+	'ArrowLeft',
+	'ArrowRight',
+	'Home',
+	'End',
+	'PageUp',
+	'PageDown',
+]);
+const CONTROL_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY']);
+/**
+ * The ARIA roles of focusable controls. A composite one that keeps the focus itself (a `listbox`
+ * with an active descendant, as the message list is) is not here: it handles its keys or leaves
+ * them to the app.
+ */
+const CONTROL_ROLES = new Set([
+	'button',
+	'checkbox',
+	'combobox',
+	'gridcell',
+	'link',
+	'menuitem',
+	'menuitemcheckbox',
+	'menuitemradio',
+	'option',
+	'radio',
+	'scrollbar',
+	'searchbox',
+	'slider',
+	'spinbutton',
+	'switch',
+	'tab',
+	'textbox',
+	'treeitem',
+]);
+
+/**
+ * True when the focused control acts on this key itself (Enter on a button, a link or a summary,
+ * the arrows on a tab or in a field), so the key is not a shortcut. The send chord stays one.
+ */
+export function controlOwnsKey(event: KeyLike, path: readonly EventTarget[]): boolean {
+	if (event.ctrlKey || event.metaKey || !CONTROL_KEYS.has(event.key)) return false;
+	const target = path[0] as HTMLElement | undefined;
+	if (!target || !('tagName' in target)) return false;
+	return (
+		CONTROL_TAGS.has(target.tagName) ||
+		isTyping(path) ||
+		CONTROL_ROLES.has(target.getAttribute?.('role') ?? '')
 	);
 }

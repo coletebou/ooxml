@@ -1,10 +1,13 @@
 // Making a message's HTML safe to show. DOMPurify removes scripts, forms, frames, event handlers and
-// `javascript:` links; remote resources (images, backgrounds, CSS `url()`, `@import`) are blocked
-// until the person allows them, and counted so the reading pane can say so; `cid:` images point at
-// the message's own attachments; every link opens in a new tab without an opener. The result is then
-// shown in a sandboxed frame without scripts and with a Content-Security-Policy (`emailDocument`),
-// so a sanitiser miss still cannot run code or fetch anything. New code.
+// `javascript:` links; remote resources (images, backgrounds, every URL in CSS, `@import`) are
+// blocked until the person allows them, and counted so the reading pane can say so; `cid:` images
+// point at the message's own attachments; every link opens in a new tab without an opener. The
+// result is then shown in a sandboxed frame without scripts and with a Content-Security-Policy
+// (`emailDocument`), so a sanitiser miss still cannot run code or fetch anything there. Compose puts
+// the same HTML into the page itself, where no such policy applies, so the sanitiser must not miss.
+// New code.
 import DOMPurify from 'dompurify';
+import { rewriteCss } from './sanitize-css';
 
 export interface SanitizeOptions {
 	/** Load remote images and styles (the person chose "show images"). */
@@ -79,17 +82,11 @@ function resourceUrl(url: string): string {
 	return '';
 }
 
-/** Clean CSS text: no `@import`, no script-like constructs, `url()` through `resourceUrl`. */
+/** Clean CSS text: no `@import`, no script-like constructs, every URL through `resourceUrl`. */
 export function cleanCss(css: string): string {
-	return (
-		css
-			.replace(/@import\b[^;]{0,2000};?/gi, '')
-			.replace(/expression\s*\(|behavior\s*:|-moz-binding\s*:|javascript:/gi, 'x-blocked(')
-			// Bounded and paren-free, so hostile CSS cannot make the match quadratic.
-			.replace(/url\(\s*(['"]?)([^'"()]{0,4096})\1\s*\)/gi, (_, _quote: string, url: string) => {
-				const resolved = resourceUrl(url);
-				return resolved ? `url("${resolved.replace(/["\\]/g, '')}")` : 'none';
-			})
+	return rewriteCss(
+		css.replace(/expression\s*\(|behavior\s*:|-moz-binding\s*:|javascript:/gi, 'x-blocked('),
+		resourceUrl,
 	);
 }
 

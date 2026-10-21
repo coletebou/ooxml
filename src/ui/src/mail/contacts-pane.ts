@@ -1,7 +1,8 @@
 // <mail-contacts>: the address book. A searchable list beside the selected contact, which can be
 // edited, written to, deleted, and imported or exported as vCard (RFC 6350) files. Every change is
-// an event; the app saves through the client.
-import { html, nothing } from 'lit';
+// an event; the app saves through the client. The list is a WAI-ARIA list box: the arrows, Home and
+// End move through it and Enter or Space shows the contact (moving alone never drops an edit).
+import { html, nothing, type PropertyValues } from 'lit';
 import {
 	contactAddresses,
 	contactLabel,
@@ -45,11 +46,14 @@ export class MailContacts extends MailElement {
 		...MailElement.properties,
 		contacts: { attribute: false },
 		selectedId: { state: true },
+		activeId: { state: true },
 		editing: { state: true },
 		query: { state: true },
 	};
 	declare contacts: readonly Contact[];
 	declare selectedId: string;
+	/** The contact the keyboard is on in the list; empty follows the selection. */
+	declare activeId: string;
 	/** The contact in the form (a copy), or null while reading. */
 	declare editing: Contact | null;
 	declare query: string;
@@ -58,12 +62,50 @@ export class MailContacts extends MailElement {
 		super();
 		this.contacts = [];
 		this.selectedId = '';
+		this.activeId = '';
 		this.editing = null;
 		this.query = '';
 	}
 
 	private get selected(): Contact | undefined {
 		return this.contacts.find((c) => c.id === this.selectedId) ?? this.contacts[0];
+	}
+
+	protected override updated(changed: PropertyValues<this>): void {
+		if (changed.has('activeId'))
+			this.renderRoot.querySelector('li.active')?.scrollIntoView?.({ block: 'nearest' });
+	}
+
+	/** Show a contact (and leave the form). */
+	private choose(id: string): void {
+		this.selectedId = id;
+		this.activeId = id;
+		this.editing = null;
+	}
+
+	/** Where the keyboard is in `visible`: where it moved, else the selected contact, else the top. */
+	private activeIndex(visible: readonly Contact[], selected: Contact | undefined): number {
+		const moved = visible.findIndex((c) => c.id === this.activeId);
+		if (moved >= 0) return moved;
+		const chosen = visible.findIndex((c) => c.id === selected?.id);
+		return chosen >= 0 ? chosen : visible.length ? 0 : -1;
+	}
+
+	/** The list box keys at option `at`: the arrows, Home and End move; Enter and Space show it. */
+	private listKey(event: KeyboardEvent, visible: readonly Contact[], at: number): void {
+		if (event.altKey || event.ctrlKey || event.metaKey || at < 0) return;
+		const last = visible.length - 1;
+		const moves: Record<string, number> = {
+			ArrowDown: Math.min(at + 1, last),
+			ArrowUp: Math.max(at - 1, 0),
+			Home: 0,
+			End: last,
+		};
+		const to = moves[event.key];
+		if (to !== undefined) this.activeId = visible[to]!.id;
+		else if (event.key === 'Enter' || event.key === ' ') this.choose(visible[at]!.id);
+		else return;
+		event.preventDefault();
 	}
 
 	private async importFile(input: HTMLInputElement): Promise<void> {
@@ -153,6 +195,7 @@ export class MailContacts extends MailElement {
 	protected override render() {
 		const visible = searchContacts(this.contacts, this.query);
 		const selected = this.selected;
+		const active = this.activeIndex(visible, selected);
 		return html`<div class="pane">
 			<section class="list" aria-label=${this.t('contacts.title')}>
 				<div class="toolbar">
@@ -188,16 +231,21 @@ export class MailContacts extends MailElement {
 					aria-label=${this.t('contacts.search')}
 					@input=${(e: Event) => (this.query = (e.currentTarget as HTMLInputElement).value)}
 				/>
-				<ul role="listbox" aria-label=${this.t('contacts.title')}>
+				<ul
+					role="listbox"
+					tabindex=${visible.length ? '0' : nothing}
+					aria-label=${this.t('contacts.title')}
+					aria-activedescendant=${active >= 0 ? `contact-${active}` : nothing}
+					@keydown=${(e: KeyboardEvent) => this.listKey(e, visible, active)}
+				>
 					${visible.map(
-						(contact) =>
+						(contact, index) =>
 							html`<li
+								id=${`contact-${index}`}
 								role="option"
+								class=${index === active ? 'active' : ''}
 								aria-selected=${contact.id === selected?.id ? 'true' : 'false'}
-								@click=${() => {
-									this.selectedId = contact.id;
-									this.editing = null;
-								}}
+								@click=${() => this.choose(contact.id)}
 							>
 								${avatar(contact)}
 								<span class="who"

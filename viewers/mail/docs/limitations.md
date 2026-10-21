@@ -5,7 +5,9 @@ OpenMail is an early implementation. This page lists what it does not do, so not
 - **No live-server test yet.** The JMAP client is tested against the RFC examples and recorded
   responses, not a running server.
 - **Contacts and the calendar are local** to the browser (the demo keeps them in memory; with a
-  server they are kept in local storage). JMAP for contacts and calendars is not used yet.
+  server they are kept in local storage). JMAP for contacts and calendars is not used yet. They are
+  kept per server address, not per account: two accounts on one server in the same browser profile
+  share them (as do all custom transports).
 - **No invitations.** Calendar events import and export as iCalendar files, but meeting requests
   and replies (iTIP) are not handled.
 - **iCalendar import is partial**: repeating rules the calendar cannot represent (an interval

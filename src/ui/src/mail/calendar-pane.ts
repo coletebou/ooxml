@@ -28,6 +28,7 @@ import { defineOnce, MailElement, mailStyles } from './base';
 import { eventDialog, ISSUE_FIELD, readDraft, type EventDialogHandlers } from './event-dialog';
 import { mailI18n, type MailKey } from './i18n/translator';
 import { icon } from './icons';
+import { FocusReturn } from './modal';
 import css from './calendar-pane.css?raw';
 import dialogCss from './event-dialog.css?raw';
 
@@ -133,7 +134,7 @@ export class MailCalendar extends MailElement {
 	declare draft: EventDraft | null;
 	declare issue: DraftIssue | '';
 	/** What had the focus when the dialog opened, focused again when it closes. */
-	private opener: HTMLElement | null = null;
+	private readonly opener = new FocusReturn();
 	/** The field to focus once the next update is drawn. */
 	private focusField = '';
 
@@ -158,22 +159,16 @@ export class MailCalendar extends MailElement {
 	}
 
 	private openDialog(draft: EventDraft): void {
-		let active = this.shadowRoot?.activeElement ?? null;
-		while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
-		this.opener = active instanceof HTMLElement ? active : null;
+		if (this.shadowRoot) this.opener.take(this.shadowRoot);
 		this.issue = '';
 		this.draft = draft;
 		this.focusField = 'title';
 	}
 
 	private closeDialog(): void {
-		const opener = this.opener;
-		this.opener = null;
 		this.draft = null;
 		this.issue = '';
-		void this.updateComplete.then(() => {
-			if (opener?.isConnected) opener.focus();
-		});
+		void this.updateComplete.then(() => this.opener.restore());
 	}
 
 	private save(form: HTMLFormElement): void {

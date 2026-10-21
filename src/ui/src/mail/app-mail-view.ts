@@ -33,6 +33,7 @@ function topbar(app: MailApp, mail: MailClient, state: MailState) {
 		<button
 			type="button"
 			class="primary"
+			aria-label=${i18n.t('app.newMessage')}
 			?disabled=${!state.canSend}
 			@click=${() => void mail.compose('new')}
 		>

@@ -1,7 +1,8 @@
 // <mail-compose>: the compose window. Rich text is edited in place with the browser's editing
 // commands; pasted and quoted HTML go through the message sanitiser first (remote images are
 // dropped, so composing never loads a tracker). Every edit is an event; the client saves the draft
-// after a quiet moment, and Ctrl/Cmd+Enter sends.
+// after a quiet moment, and Ctrl/Cmd+Enter sends. An address still being typed is part of the draft
+// before the window closes or sends (`commitRecipients()`).
 import { html, nothing, type PropertyValues } from 'lit';
 import type {
 	ComposeMode,
@@ -17,7 +18,7 @@ import { defineOnce, MailElement, mailStyles } from './base';
 import { fileSize } from './format';
 import type { MailKey } from './i18n/translator';
 import { icon } from './icons';
-import { defineMailRecipients } from './recipients';
+import { defineMailRecipients, type MailRecipients } from './recipients';
 import { sanitizeEmailHtml } from './sanitize';
 import css from './compose.css?raw';
 
@@ -121,6 +122,18 @@ export class MailCompose extends MailElement {
 		this.emit('mail-draft-change', { patch });
 	}
 
+	/** Turn the addresses still being typed into recipients (a draft change), so nothing is lost. */
+	commitRecipients(): void {
+		for (const field of this.renderRoot.querySelectorAll<MailRecipients>('mail-recipients'))
+			field.commit();
+	}
+
+	/** Close or send the draft, with what its address fields hold. */
+	private handOver(type: 'mail-draft-close' | 'mail-draft-send'): void {
+		this.commitRecipients();
+		this.emit(type, {});
+	}
+
 	/** The editor's content as the draft's HTML and plain text. */
 	private edited(): void {
 		const editor = this.editor;
@@ -216,7 +229,7 @@ export class MailCompose extends MailElement {
 					class="icon-button"
 					aria-label=${this.t('compose.close')}
 					title=${this.t('compose.close')}
-					@click=${() => this.emit('mail-draft-close', {})}
+					@click=${() => this.handOver('mail-draft-close')}
 					>${icon('close')}</button
 				>
 			</header>
@@ -306,7 +319,7 @@ export class MailCompose extends MailElement {
 					type="button"
 					class="send"
 					?disabled=${compose.status === 'sending' || compose.uploading > 0}
-					@click=${() => this.emit('mail-draft-send', {})}
+					@click=${() => this.handOver('mail-draft-send')}
 				>
 					${icon('mail-sent')}<span>${this.t('compose.send')}</span>
 				</button>

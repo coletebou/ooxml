@@ -11,19 +11,21 @@ import type {
 	MailState,
 } from 'ooxml-core/mail';
 import { THEME_CSS, installOfficeUiTheme } from '../theme';
+import { committingClient, release } from './app-client';
 import { runCommand } from './app-commands';
 import { downloadBytes, mailView } from './app-mail-view';
 import { calendarView, contactsView } from './app-people-view';
 import { errorText, noticeText, quoteFormat } from './app-text';
 import { defineMailAttachmentPreview } from './attachment-preview';
 import { defineMailCalendar } from './calendar-pane';
-import { defineMailCompose } from './compose';
+import { defineMailCompose, type MailCompose } from './compose';
 import { defineMailContacts } from './contacts-pane';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { defineMailFolderPane } from './folder-pane';
 import { icon } from './icons';
-import { commandFor, isTyping } from './keyboard';
+import { commandFor, controlOwnsKey, isTyping } from './keyboard';
 import { defineMailMessageList } from './message-list';
+import { FocusReturn, focusFirst } from './modal';
 import { defineMailReadingPane } from './reading-pane';
 import { shortcutsDialog } from './shortcuts-dialog';
 import { createMail, sameMailConnection, type MailConnection } from './store';
@@ -88,6 +90,8 @@ export class MailApp extends MailElement {
 	/** Each message's inline image URLs, by message id, and the object URLs to revoke on stop. */
 	private inline = new Map<string, Promise<ReadonlyMap<string, string>>>();
 	private objectUrls: string[] = [];
+	/** What had the focus before the shortcuts dialog opened. */
+	private readonly dialogFocus = new FocusReturn();
 	private readonly onKey = (event: KeyboardEvent): void => this.keydown(event);
 
 	constructor() {
@@ -139,6 +143,16 @@ export class MailApp extends MailElement {
 				this.setAttribute('data-office-theme', this.theme);
 			else this.removeAttribute('data-office-theme');
 		}
+		if (changed.has('dialog') && this.dialog && !changed.get('dialog'))
+			this.dialogFocus.take(this.ownerDocument);
+	}
+
+	protected override updated(changed: PropertyValues<this>): void {
+		// The shortcuts dialog is modal: the focus moves in, and back to what had it once it closes.
+		if (!changed.has('dialog')) return;
+		if (this.dialog && !changed.get('dialog'))
+			focusFirst(this.renderRoot.querySelector('[aria-modal="true"]'));
+		else if (!this.dialog && changed.get('dialog')) this.dialogFocus.restore();
 	}
 
 	private start(): void {
@@ -147,7 +161,9 @@ export class MailApp extends MailElement {
 			...(this.config ? { config: this.config } : {}),
 			quoteFormat: quoteFormat(() => this.i18n),
 		});
-		this.mail = client;
+		this.mail = committingClient(client, () =>
+			this.renderRoot.querySelector<MailCompose>('mail-compose')?.commitRecipients(),
+		);
 		this.state = client.getState();
 		let ready = false;
 		this.stops = [
@@ -165,8 +181,7 @@ export class MailApp extends MailElement {
 	private stop(): void {
 		for (const stop of this.stops) stop();
 		this.stops = [];
-		void this.mail?.closeCompose();
-		this.mail?.destroy();
+		if (this.mail) void release(this.mail);
 		this.mail = null;
 		for (const url of this.objectUrls) URL.revokeObjectURL(url);
 		this.objectUrls = [];
@@ -191,8 +206,9 @@ export class MailApp extends MailElement {
 
 	private keydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		const command = commandFor(event, isTyping(event.composedPath()));
-		if (!command || !this.mail) return;
+		const path = event.composedPath();
+		const command = commandFor(event, isTyping(path));
+		if (!command || !this.mail || controlOwnsKey(event, path)) return;
 		if (runCommand(this, this.mail, command)) event.preventDefault();
 	}
 
@@ -250,7 +266,8 @@ export class MailApp extends MailElement {
 			.map((email) => email.trim())
 			.filter(Boolean)
 			.map((email) => ({ name: '', email }));
-		await mail.compose('new');
+		// False: the open draft could not be saved, so it stays open and must keep its fields.
+		if (!(await mail.compose('new'))) return;
 		mail.updateDraft({
 			to,
 			subject: url.searchParams.get('subject') ?? '',
@@ -290,10 +307,12 @@ export class MailApp extends MailElement {
 
 	private rail() {
 		const unread = this.state?.mailboxes.find((m) => m.role === 'inbox')?.unreadEmails ?? 0;
+		// Named by aria-label too: a narrow layout hides the labels and the icons are not announced.
 		const item = (view: MailView, glyph: string, label: string, badge = 0) =>
 			html`<button
 				type="button"
 				class="rail-item"
+				aria-label=${label}
 				aria-current=${this.view === view ? 'page' : 'false'}
 				@click=${() => (this.view = view)}
 				>${icon(glyph)}<span>${label}</span>${badge ? html`<span class="badge" aria-hidden="true">${badge > 99 ? '99+' : badge}</span>` : nothing}</button
@@ -303,7 +322,11 @@ export class MailApp extends MailElement {
 			${item('calendar', 'mail-calendar', this.t('app.calendar'))}
 			${item('contacts', 'mail-contacts', this.t('app.contacts'))}
 			<span class="rail-spacer"></span>
-			<button type="button" class="rail-item" @click=${() => (this.dialog = 'shortcuts')}
+			<button
+				type="button"
+				class="rail-item"
+				aria-label=${this.t('app.shortcuts')}
+				@click=${() => (this.dialog = 'shortcuts')}
 				>${icon('mail-keyboard')}<span>${this.t('app.shortcuts')}</span></button
 			>
 		</nav>`;

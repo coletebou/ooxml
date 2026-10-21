@@ -31,7 +31,14 @@ export { MailRecipients, defineMailRecipients } from './recipients';
 export { applyMailProps, listenMailEvents, type MailProps } from './bind';
 export * from './store';
 export { previewKind, type PreviewKind } from './attachments';
-export { commandFor, isTyping, SHORTCUTS, type KeyLike, type MailCommand } from './keyboard';
+export {
+	commandFor,
+	controlOwnsKey,
+	isTyping,
+	SHORTCUTS,
+	type KeyLike,
+	type MailCommand,
+} from './keyboard';
 export {
 	emailDocument,
 	linkify,

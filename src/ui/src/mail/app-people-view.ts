@@ -30,8 +30,8 @@ export function contactsView(app: MailApp, mail: MailClient, state: MailState) {
 		@mail-export-vcf=${(e: CustomEvent<{ ids?: string[] }>) => downloadText(app, mail.exportVCards(e.detail.ids), 'contacts.vcf', 'text/vcard')}
 		@mail-compose-to=${async (e: CustomEvent<{ address: MailAddress }>) => {
 			app.view = 'mail';
-			await mail.compose('new');
-			mail.updateDraft({ to: [e.detail.address] });
+			// False: the open draft could not be saved, so it stays open and must keep its fields.
+			if (await mail.compose('new')) mail.updateDraft({ to: [e.detail.address] });
 		}}
 	></mail-contacts>`;
 }

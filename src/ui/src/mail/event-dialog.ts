@@ -1,13 +1,14 @@
 // The event dialog of <mail-calendar>: create or edit one event (title, all day, start and end,
 // repeat, location and description) with Save, Cancel, Export and Delete, over the drafts of
 // `../calendar/event-draft` (wall-clock times in the calendar's zone, an all-day end date that is
-// the last day). Moving the start keeps the length. The dialog is modal: Tab stays inside, Escape
-// closes it, and the app's shortcuts never see its keys. New code.
+// the last day). Moving the start keeps the length. The dialog is modal (modal.ts): Tab stays
+// inside, Escape closes it, and the app's shortcuts never see its keys. New code.
 import { html, nothing } from 'lit';
 import { REPEATS, type Repeat } from 'ooxml-core/calendar';
 import { keepLength, type DraftIssue, type EventDraft } from '../calendar/event-draft';
 import type { MailI18n, MailKey } from './i18n/translator';
 import { icon } from './icons';
+import { trapKeys } from './modal';
 
 /** The message of each issue. */
 export const ISSUE_TEXT: Record<DraftIssue, MailKey> = {
@@ -62,26 +63,6 @@ export interface EventDialogHandlers {
 	exportEvent(id: string): void;
 }
 
-/** Trap Tab inside the dialog and close it with Escape; app shortcuts never see its keys. */
-function keydown(event: KeyboardEvent, on: EventDialogHandlers): void {
-	event.stopPropagation();
-	if (event.key === 'Escape') {
-		event.preventDefault();
-		on.cancel();
-		return;
-	}
-	if (event.key !== 'Tab') return;
-	const dialog = event.currentTarget as HTMLElement;
-	const stops = [...dialog.querySelectorAll<HTMLElement>('input, select, textarea, button')].filter(
-		(el) => !el.closest('[hidden]') && !(el as HTMLButtonElement).disabled,
-	);
-	const active = (dialog.getRootNode() as Document | ShadowRoot).activeElement;
-	const edge = event.shiftKey ? stops[0] : stops[stops.length - 1];
-	if (active !== edge) return;
-	event.preventDefault();
-	(event.shiftKey ? stops[stops.length - 1] : stops[0])?.focus();
-}
-
 /** The dialog over the calendar for `draft`, with the message of `issue` when there is one. */
 export function eventDialog(
 	draft: EventDraft,
@@ -111,7 +92,7 @@ export function eventDialog(
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="event-dialog-title"
-			@keydown=${(e: KeyboardEvent) => keydown(e, on)}
+			@keydown=${(e: KeyboardEvent) => trapKeys(e, () => on.cancel())}
 		>
 			<form
 				novalidate
