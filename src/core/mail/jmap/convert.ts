@@ -3,7 +3,8 @@
 // `null` lists empty lists, a `null` display name '', an unknown mailbox role `null`. Bodies and
 // attachment names are read as the MIME reader reads them. New code.
 import { cleanFileName } from '../mime/file-names';
-import { textToHtml } from '../mime/structure';
+import { htmlPartsOf } from '../mime/message';
+import { htmlBodyPart } from '../mime/structure';
 import {
 	MAILBOX_ROLES,
 	type EmailSummary,
@@ -122,6 +123,10 @@ const isText = (type: string): boolean => type === 'text/plain' || type === 'tex
 const joinParts = (parts: readonly string[]): string =>
 	parts.reduce((out, part) => (!out || out.endsWith('\n') ? out + part : `${out}\n${part}`), '');
 
+/** The values the server fetched for the body parts of an Email, by partId. */
+const bodyValues = (email: JmapObject): Record<string, unknown> =>
+	isRecord(email.bodyValues) ? email.bodyValues : {};
+
 /** The value the server fetched for a body part, `null` when it sent none. */
 function valueOf(part: Part, values: Record<string, unknown>): string | null {
 	const partId = text(part.partId);
@@ -139,21 +144,23 @@ function textOf(body: readonly Part[], values: Record<string, unknown>): string 
 }
 
 /**
- * `htmlBody` in order: its `text/html` values as they are and its `text/plain` ones (RFC 8621 lists
- * plain text such as a mailing list footer there too) escaped where they stand, as the MIME reader
- * shows them; `null` without an HTML value.
+ * `htmlBody` part by part, in order: its `text/html` values as they are and its `text/plain` ones
+ * (RFC 8621 lists plain text such as a mailing list footer there too) escaped, as the MIME reader
+ * keeps them (`messageBodies`); `null` without an HTML value. A reader shows each part on its own:
+ * parsed as one text, a part that ends in an open comment or tag would take in the parts after it.
  */
-function htmlOf(body: readonly Part[], values: Record<string, unknown>): string | null {
-	let out = '';
+export function htmlBodyParts(email: JmapObject): string[] | null {
+	const values = bodyValues(email);
+	const parts: string[] = [];
 	let html = false;
-	for (const part of body) {
+	for (const part of records(email.htmlBody)) {
 		const type = typeOf(part);
 		const value = isText(type) ? valueOf(part, values) : null;
 		if (value === null) continue;
 		html ||= type === 'text/html';
-		out += type === 'text/html' ? value : `<div>${textToHtml(value)}</div>`;
+		parts.push(htmlBodyPart(type, value));
 	}
-	return html ? out : null;
+	return html ? parts : null;
 }
 
 export function toAttachment(part: Record<string, unknown>): MailAttachment {
@@ -192,16 +199,17 @@ function attachmentsOf(email: JmapObject): MailAttachment[] {
 
 /**
  * A message with its bodies, read as the MIME reader reads the same message: `text` is the
- * `text/plain` values of `textBody`, `html` the `htmlBody` with its plain text escaped in (`null`
- * without an HTML value), `attachments` the downloadable parts of `attachments` and the media the
- * bodies show.
+ * `text/plain` values of `textBody`, `html` the parts of `htmlBody` joined (`htmlBodyParts`, `null`
+ * without an HTML value) and `htmlParts` those parts when there are several (`htmlPartsOf`),
+ * `attachments` the downloadable parts of `attachments` and the media the bodies show.
  */
 export function toMessage(email: JmapObject): MailMessage {
-	const values = isRecord(email.bodyValues) ? email.bodyValues : {};
+	const parts = htmlBodyParts(email);
 	return {
 		...toSummary(email),
-		text: textOf(records(email.textBody), values),
-		html: htmlOf(records(email.htmlBody), values),
+		text: textOf(records(email.textBody), bodyValues(email)),
+		html: parts?.join('') ?? null,
+		...htmlPartsOf(parts),
 		attachments: attachmentsOf(email),
 	};
 }

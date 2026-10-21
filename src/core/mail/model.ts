@@ -88,9 +88,18 @@ export interface MailMessage extends EmailSummary {
 	text: string | null;
 	/**
 	 * The HTML body exactly as sent, or `null`. It is untrusted markup: the UI must sanitise it
-	 * before it is shown (scripts, forms, event handlers and remote content).
+	 * before it is shown (scripts, forms, event handlers and remote content). A body sent in several
+	 * parts is here as one text, for search, quoting and export.
 	 */
 	html: string | null;
+	/**
+	 * Set only when the HTML body was sent in several parts (RFC 8621 `htmlBody`, where a plain text
+	 * part such as a mailing list footer is escaped into a `<div>`): those parts in order, `html`
+	 * being them joined. A reader shows each part on its own, as RFC 8621 asks: parsed as one text,
+	 * a part that ends in an open comment or tag would take in the parts after it. Untrusted markup,
+	 * as `html` is.
+	 */
+	htmlParts?: readonly string[];
 	attachments: readonly MailAttachment[];
 	/**
 	 * Set when the transport sent only the start of a long body, enough to show it. Quoting or

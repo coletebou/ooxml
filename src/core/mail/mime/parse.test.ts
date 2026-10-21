@@ -189,3 +189,34 @@ describe('readEmail on saved messages', () => {
 		]);
 	});
 });
+
+describe('readEmail on an HTML body in several parts', () => {
+	it('keeps each part as well as the parts joined', () => {
+		// Parsed as one text, the comment the first part leaves open would take in the others.
+		const email = readEmail(
+			[
+				'Content-Type: multipart/mixed; boundary=b',
+				'',
+				'--b',
+				'Content-Type: text/html',
+				'',
+				'<p>Hello<!--',
+				'--b',
+				'Content-Type: text/plain',
+				'',
+				'Footer',
+				'--b',
+				'Content-Type: text/html',
+				'',
+				'<p>Bye</p>',
+				'--b--',
+				'',
+			].join('\r\n'),
+		);
+		expect(email.htmlParts).toEqual(['<p>Hello<!--', '<div>Footer</div>', '<p>Bye</p>']);
+		expect(email.html).toBe('<p>Hello<!--<div>Footer</div><p>Bye</p>');
+		const single = readEmail(fixture('alternative-qp.eml'));
+		expect(single.htmlParts).toEqual([single.html]);
+		expect(readEmail(fixture('plain.eml')).htmlParts).toBeNull();
+	});
+});

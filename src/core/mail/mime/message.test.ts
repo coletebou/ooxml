@@ -103,4 +103,34 @@ describe('toMailMessage', () => {
 		expect(shown('<img src="cid:logo@example.com">')).toBe(false);
 		expect(shown('<p>no reference</p>')).toBe(true);
 	});
+
+	it('keeps the parts of an HTML body sent in several, and only then', () => {
+		const parsed = readEmail(
+			[
+				'Content-Type: multipart/mixed; boundary=b',
+				'',
+				'--b',
+				'Content-Type: text/html',
+				'',
+				'<p>Hello<!--',
+				'--b',
+				'Content-Type: text/html',
+				'',
+				'<p>Bye</p>',
+				'--b--',
+				'',
+			].join('\r\n'),
+		);
+		const message = toMailMessage(parsed, meta, (partId) => partId);
+		expect(message.htmlParts).toEqual(['<p>Hello<!--', '<p>Bye</p>']);
+		expect(message.html).toBe('<p>Hello<!--<p>Bye</p>');
+		// One part is the HTML itself.
+		const single = toMailMessage(
+			readEmail('Content-Type: text/html\r\n\r\n<p>Hello</p>'),
+			meta,
+			(partId) => partId,
+		);
+		expect(single.html).toBe('<p>Hello</p>');
+		expect(single).not.toHaveProperty('htmlParts');
+	});
 });

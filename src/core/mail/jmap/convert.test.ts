@@ -1,10 +1,12 @@
 import email from './__fixtures__/rfc8621-email.json';
 import mailbox from './__fixtures__/rfc8621-mailbox.json';
 import submission from './__fixtures__/rfc8621-submission.json';
-import { readEmail, type ParsedAttachment } from '../mime';
+import { readEmail, toMailMessage, type ParsedAttachment } from '../mime';
+import { messageBodies } from '../mime/structure';
 import type { MailAttachment } from '../model';
 import {
 	fromJmapDate,
+	htmlBodyParts,
 	objects,
 	toAddresses,
 	toAttachment,
@@ -181,6 +183,65 @@ describe('toMessage', () => {
 		);
 		expect(message.html).toBe(parsed.html);
 		expect(message.text).toBe(parsed.text);
+	});
+
+	it('keeps each part of the HTML body apart, as the MIME reader does', () => {
+		// Parsed as one text, the open comment and the open attribute would take in what follows.
+		const found = {
+			id: 'E',
+			htmlBody: [
+				{ partId: '1', type: 'text/html' },
+				{ partId: '2', type: 'text/plain' },
+				{ partId: '3', type: 'text/html' },
+			],
+			bodyValues: {
+				'1': { value: '<p>Hello<!--' },
+				'2': { value: 'Footer' },
+				'3': { value: '<p title="x>Bye</p>' },
+			},
+		};
+		const parts = htmlBodyParts(found);
+		expect(parts).toEqual(['<p>Hello<!--', '<div>Footer</div>', '<p title="x>Bye</p>']);
+		expect(toMessage(found).html).toBe(parts?.join(''));
+		const parsed = readEmail(
+			mixed(
+				'Content-Type: text/html\r\n\r\n<p>Hello<!--',
+				'Content-Type: text/plain\r\n\r\nFooter',
+				'Content-Type: text/html\r\n\r\n<p title="x>Bye</p>',
+			),
+		);
+		expect(messageBodies(parsed.root).htmlParts).toEqual(parts);
+		expect(htmlBodyParts({ id: 'E', htmlBody: [{ partId: '2', type: 'text/plain' }] })).toBeNull();
+	});
+
+	it('keeps the parts of an HTML body sent in several, and only then, as the MIME reader does', () => {
+		const message = toMessage({
+			id: 'E',
+			htmlBody: [
+				{ partId: '1', type: 'text/html' },
+				{ partId: '2', type: 'text/plain' },
+			],
+			bodyValues: { '1': { value: '<p>Hello<!--' }, '2': { value: 'Footer' } },
+		});
+		expect(message.htmlParts).toEqual(['<p>Hello<!--', '<div>Footer</div>']);
+		expect(message.html).toBe('<p>Hello<!--<div>Footer</div>');
+		const parsed = readEmail(
+			mixed(
+				'Content-Type: text/html\r\n\r\n<p>Hello<!--',
+				'Content-Type: text/plain\r\n\r\nFooter',
+			),
+		);
+		const meta = { id: 'E', threadId: '', blobId: '', mailboxIds: [], keywords: {}, receivedAt: 0 };
+		const read = toMailMessage(parsed, meta, (partId) => partId);
+		expect([read.html, read.htmlParts]).toEqual([message.html, message.htmlParts]);
+		// One part is the HTML itself.
+		const single = toMessage({
+			id: 'E',
+			htmlBody: [{ partId: '1', type: 'text/html' }],
+			bodyValues: { '1': { value: '<p>Hello</p>' } },
+		});
+		expect(single.html).toBe('<p>Hello</p>');
+		expect(single).not.toHaveProperty('htmlParts');
 	});
 
 	it('lists the images, audio and video both bodies show, which attachments leaves out', () => {

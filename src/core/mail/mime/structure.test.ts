@@ -83,6 +83,7 @@ describe('bodyStructure (RFC 8621 section 4.1.4)', () => {
 		expect(messageBodies(root)).toEqual({
 			text: 'before\nafter',
 			html: null,
+			htmlParts: null,
 			attachments: [image],
 		});
 	});
@@ -145,8 +146,23 @@ describe('messageBodies', () => {
 		expect(messageBodies(root)).toEqual({
 			text: 'one\n3 < 4 & "5"\nsix',
 			html: '<div>one</div><p>two</p><div>3 &#60; 4 &#38; &#34;5&#34;<br>six</div>',
+			htmlParts: ['<div>one</div>', '<p>two</p>', '<div>3 &#60; 4 &#38; &#34;5&#34;<br>six</div>'],
 			attachments: [],
 		});
+	});
+
+	it('keeps each part of the HTML body apart, for a reader that renders each on its own', () => {
+		// Parsed as one text, the open comment and the open attribute would take in what follows.
+		const root = multi(
+			'mixed',
+			textPart('text/html', '<p>Hello<!--'),
+			textPart('text/plain', 'Footer'),
+			textPart('text/html', '<p title="x>Bye</p>'),
+		);
+		const { html, htmlParts } = messageBodies(root);
+		expect(htmlParts).toEqual(['<p>Hello<!--', '<div>Footer</div>', '<p title="x>Bye</p>']);
+		expect(html).toBe(htmlParts?.join(''));
+		expect(messageBodies(textPart('text/plain', 'plain')).htmlParts).toBeNull();
 	});
 
 	it('decodes the charset and normalises line breaks to LF', () => {

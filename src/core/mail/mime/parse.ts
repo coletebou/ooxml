@@ -145,7 +145,7 @@ function toAttachment(part: MimePart, index: number): ParsedAttachment {
 function readMessage(bytes: Uint8Array, prefix: string, depth: number, state: State): ParsedEmail {
 	const root = readEntity(bytes, { message: prefix }, depth, state, 'text/plain');
 	const header = (name: string): string | undefined => getHeader(root.headers, name);
-	const { text, html, attachments } = messageBodies(root);
+	const { text, html, htmlParts, attachments } = messageBodies(root);
 	return {
 		headers: root.headers,
 		messageId: parseMessageIds(header('Message-ID')),
@@ -161,6 +161,7 @@ function readMessage(bytes: Uint8Array, prefix: string, depth: number, state: St
 		sentAt: parseDate(header('Date')),
 		text,
 		html,
+		htmlParts,
 		attachments: attachments.map(toAttachment),
 		root,
 		size: bytes.length,
@@ -222,6 +223,7 @@ export function readEmail(raw: Uint8Array | string, options: ReadOptions = {}): 
 			sentAt: undefined,
 			text: decodeUnlabelled(bytes),
 			html: null,
+			htmlParts: null,
 			attachments: [],
 			root,
 			size: bytes.length,

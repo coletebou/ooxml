@@ -12,7 +12,14 @@ export interface BodyStructure {
 
 export interface MessageBodies {
 	text: string | null;
+	/** The HTML body as one text: `htmlParts` joined. */
 	html: string | null;
+	/**
+	 * The HTML body part by part (`htmlBodyPart`), `null` without an HTML part. A reader shows each
+	 * part on its own: parsed as one text, a part that ends in an open comment or tag would take in
+	 * the parts after it.
+	 */
+	htmlParts: string[] | null;
 	attachments: MimePart[];
 }
 
@@ -114,6 +121,13 @@ export function partText(part: MimePart): string {
 export const textToHtml = (text: string): string =>
 	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`).replace(/\r?\n/g, '<br>');
 
+/**
+ * One part of an HTML body as markup: a `text/html` part as sent, a `text/plain` one (such as a
+ * mailing list footer) escaped into a `<div>`. The MIME and the JMAP readers both build it so.
+ */
+export const htmlBodyPart = (type: string, value: string): string =>
+	type === 'text/html' ? value : `<div>${textToHtml(value)}</div>`;
+
 function documentOrder(root: MimePart): Map<MimePart, number> {
 	const order = new Map<MimePart, number>();
 	const visit = (part: MimePart): void => {
@@ -126,9 +140,10 @@ function documentOrder(root: MimePart): Map<MimePart, number> {
 
 /**
  * What a reader shows: the plain text parts of the text body joined, the HTML body (its plain
- * text parts, if any, escaped into it) when it has an HTML part, and every part to list as an
- * attachment in message order. Those are RFC 8621's attachments plus images, audio and video shown
- * between the bodies, which string bodies could not carry and would otherwise lose.
+ * text parts, if any, escaped into it) part by part and joined when it has an HTML part, and every
+ * part to list as an attachment in message order. Those are RFC 8621's attachments plus images,
+ * audio and video shown between the bodies, which string bodies could not carry and would
+ * otherwise lose.
  */
 export function messageBodies(root: MimePart): MessageBodies {
 	const { textBody, htmlBody, attachments } = bodyStructure(root);
@@ -138,18 +153,15 @@ export function messageBodies(root: MimePart): MessageBodies {
 		const value = partText(part);
 		text = text === null ? value : `${text}${text.endsWith('\n') ? '' : '\n'}${value}`;
 	}
-	const html = htmlBody.some((part) => part.type === 'text/html')
+	const htmlParts = htmlBody.some((part) => part.type === 'text/html')
 		? htmlBody
 				.filter((part) => part.type === 'text/html' || part.type === 'text/plain')
-				.map((part) =>
-					part.type === 'text/html' ? partText(part) : `<div>${textToHtml(partText(part))}</div>`,
-				)
-				.join('')
+				.map((part) => htmlBodyPart(part.type, partText(part)))
 		: null;
 	const order = documentOrder(root);
 	const shown = [...textBody, ...htmlBody].filter((part) => isInlineMediaType(part.type));
 	const all = [...new Set([...attachments, ...shown])].sort(
 		(a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0),
 	);
-	return { text, html, attachments: all };
+	return { text, html: htmlParts?.join('') ?? null, htmlParts, attachments: all };
 }

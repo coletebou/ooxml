@@ -64,8 +64,16 @@ export interface ParsedEmail {
 	sentAt: number | undefined;
 	/** The text bodies joined (RFC 8621 `textBody`), line breaks as LF; `null` without one. */
 	text: string | null;
-	/** The HTML body (RFC 8621 `htmlBody`), line breaks as LF; untrusted markup; `null` without one. */
+	/**
+	 * The HTML body (RFC 8621 `htmlBody`) as one text, `htmlParts` joined; line breaks as LF;
+	 * untrusted markup; `null` without one.
+	 */
 	html: string | null;
+	/**
+	 * The HTML body part by part, each to be shown on its own: parsed as one text, a part that ends
+	 * in an open comment or tag would take in the parts after it. `null` without an HTML body.
+	 */
+	htmlParts: string[] | null;
 	attachments: ParsedAttachment[];
 	root: MimePart;
 	/** The raw size in bytes. */

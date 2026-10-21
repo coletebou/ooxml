@@ -16,6 +16,14 @@ export interface MailMessageMeta {
 	size?: number;
 }
 
+/**
+ * What a `MailMessage` keeps of an HTML body sent in `parts` besides `html` (the parts joined): the
+ * parts themselves, only when there are several, as one part is `html` itself. The MIME and the
+ * JMAP readers both keep them so.
+ */
+export const htmlPartsOf = (parts: readonly string[] | null): Pick<MailMessage, 'htmlParts'> =>
+	parts && parts.length > 1 ? { htmlParts: parts } : {};
+
 /** An image the HTML body shows itself: not an attachment, and referenced there as `cid:`. */
 function isEmbeddedImage(attachment: ParsedAttachment, html: string | null): boolean {
 	if (!html || !attachment.cid || attachment.disposition === 'attachment') return false;
@@ -27,7 +35,8 @@ function isEmbeddedImage(attachment: ParsedAttachment, html: string | null): boo
  * A `MailMessage` from a parsed message and what the store knows about it. `blobIdOf` names the
  * blob each attachment's bytes are kept under. The preview is the text body, else the HTML without
  * tags, scripts or styles, cut as RFC 8621 `preview` is; `hasAttachment` is true when any
- * attachment is more than an image the HTML body shows.
+ * attachment is more than an image the HTML body shows; an HTML body sent in several parts keeps
+ * them (`htmlPartsOf`).
  */
 export function toMailMessage(
 	parsed: ParsedEmail,
@@ -57,6 +66,7 @@ export function toMailMessage(
 		hasAttachment: parsed.attachments.some((attachment) => !isEmbeddedImage(attachment, html)),
 		text,
 		html,
+		...htmlPartsOf(parsed.htmlParts),
 		attachments: parsed.attachments.map((attachment) => ({
 			partId: attachment.partId,
 			blobId: blobIdOf(attachment.partId),
