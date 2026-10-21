@@ -52,10 +52,9 @@ export function createMailboxMethods(
 				}),
 			);
 			const args = result.get(calls);
-			const before = ids.size;
 			for (const id of strings(args.ids)) ids.add(id);
 			const total = typeof args.total === 'number' ? args.total : Number.POSITIVE_INFINITY;
-			if (ids.size === before || ids.size >= total) break;
+			if (ids.size === position || ids.size >= total) break;
 		}
 		return [...ids];
 	};

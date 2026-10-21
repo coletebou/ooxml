@@ -6,8 +6,10 @@ import { textToHtml } from './mime/structure';
 import {
 	sameAddress,
 	type Draft,
+	type DraftAttachment,
 	type Identity,
 	type MailAddress,
+	type MailAttachment,
 	type MailMessage,
 } from './model';
 import { bodyText, dropScriptsAndStyles } from './search';
@@ -45,6 +47,11 @@ function quoteText(text: string): string {
 /** The address a draft is written from: the chosen identity's, if there is one. */
 function sender(identity: Identity | null): MailAddress | undefined {
 	return identity ? { name: identity.name, email: identity.email } : undefined;
+}
+
+/** A message's file as a draft refers to it: by the blob the server already holds. */
+function draftAttachment({ blobId, name, type, size }: MailAttachment): DraftAttachment {
+	return { blobId, name, type, size };
 }
 
 /**
@@ -109,7 +116,7 @@ export function composeDraft(
 			html: `<p><br></p><div>${header.map(textToHtml).join('<br>')}</div><br>${source.html ?? textToHtml(original)}`,
 			attachments: source.attachments
 				.filter((attachment) => attachment.disposition !== 'inline' || !attachment.cid)
-				.map(({ blobId, name, type, size }) => ({ blobId, name, type, size })),
+				.map(draftAttachment),
 			references: answerReferences(source),
 			forwardOfEmailId: source.id,
 		};
@@ -143,12 +150,7 @@ export function draftFromMessage(message: MailMessage, identity: Identity | unde
 		subject: message.subject,
 		text: message.text ?? '',
 		...(message.html ? { html: message.html } : {}),
-		attachments: message.attachments.map(({ blobId, name, type, size }) => ({
-			blobId,
-			name,
-			type,
-			size,
-		})),
+		attachments: message.attachments.map(draftAttachment),
 		inReplyTo: message.inReplyTo,
 		references: message.references,
 	};

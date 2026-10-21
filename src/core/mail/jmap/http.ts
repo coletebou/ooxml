@@ -7,7 +7,7 @@ import { MailTransportError } from '../transport';
 import { JmapError, createRedactor, networkError, responseError, type Redact } from './errors';
 import { followRedirects, isSafeUrl, type Hop, type Landed, type RedirectMode } from './redirects';
 
-export { discard, isSafeUrl, type Landed } from './redirects';
+export { discard, isSafeUrl } from './redirects';
 
 /** Credentials for every request. They are never logged, stored or put in a URL or an error. */
 export type JmapAuth =
