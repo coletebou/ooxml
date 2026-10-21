@@ -116,9 +116,11 @@ export function useNotebookClient(options: CreateNotebookOptions | null): Notebo
 	const client = made?.key === key ? made.client : null;
 	// A language change renames what is created next; the client (and its notebooks) stays.
 	const locale = options?.locale;
+	const names = JSON.stringify(options?.names ?? {});
 	useEffect(() => {
-		client?.setNames(notebookNames(locale));
-	}, [client, locale]);
+		// Names the host gave win over the language's defaults.
+		client?.setNames({ ...notebookNames(locale), ...(JSON.parse(names) as object) });
+	}, [client, locale, names]);
 	return client;
 }
 

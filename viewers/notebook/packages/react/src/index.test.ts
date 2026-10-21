@@ -181,4 +181,29 @@ describe('useNotebook', () => {
 		);
 		root.unmount();
 	});
+
+	it('keeps the names the host gives the hook', async () => {
+		const seen: { client: NotebookClient | null; state: NotebookState | null } = {
+			client: null,
+			state: null,
+		};
+		const storageName = unique('react-names');
+		function Probe() {
+			const notebook = useNotebook({
+				user: { id: 'u-ada', name: 'Ada' },
+				storageName,
+				names: { section: 'Chapter' },
+			});
+			seen.client = notebook.client;
+			seen.state = notebook.state;
+			return null;
+		}
+		const { root } = mount();
+		root.render(createElement(Probe));
+		await vi.waitFor(() => expect(seen.state?.ready).toBe(true), { timeout: 10_000 });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		seen.client!.createSection();
+		await vi.waitFor(() => expect(seen.state?.sections.map((s) => s.name)).toContain('Chapter 2'));
+		root.unmount();
+	});
 });
