@@ -108,7 +108,10 @@ export class MailApp extends MailElement {
 		this.preview = null;
 	}
 
-	/** The core client behind this element, for hosts that want the raw actions. */
+	/**
+	 * The core client behind this element, for hosts that want the raw actions: there from the
+	 * element's first update in the page (`await el.updateComplete`) until it leaves the page.
+	 */
 	get client(): MailClient | null {
 		return this.mail;
 	}
@@ -124,7 +127,10 @@ export class MailApp extends MailElement {
 		defineMailContacts();
 		super.connectedCallback();
 		this.addEventListener('keydown', this.onKey);
-		if (!this.mail) this.start();
+		// The client starts with the next update (`willUpdate`), once the host has set what it sets
+		// along with connecting the element: a framework that defines or adds it, then sets `config`,
+		// gets that connection and never the demo mailbox first. Back in a page, it starts again.
+		if (!this.mail) this.requestUpdate();
 	}
 
 	override disconnectedCallback(): void {
@@ -134,9 +140,12 @@ export class MailApp extends MailElement {
 	}
 
 	protected override willUpdate(changed: PropertyValues<this>): void {
-		// Compared by value, so a host that writes an equal connection again (an inline object on
-		// every render) keeps its client; only a different mailbox reconnects.
-		if (changed.has('config') && this.mail && !sameMailConnection(this.config, this.startedWith)) {
+		// An update in the page starts the client with the connection set by then; out of the page,
+		// none starts. `config` is compared by value, so a host that writes an equal connection again
+		// (an inline object on every render) keeps its client; only a different mailbox reconnects.
+		if (!this.mail) {
+			if (this.isConnected) this.start();
+		} else if (changed.has('config') && !sameMailConnection(this.config, this.startedWith)) {
 			this.stop();
 			this.start();
 		}
@@ -164,11 +173,10 @@ export class MailApp extends MailElement {
 			quoteFormat: quoteFormat(() => this.i18n),
 		});
 		// Only while the window shows this client's draft: once released, a client trying again to
-		// save in the background must not commit what is being typed for the next one.
-		const mail = committingClient(client, () => {
-			if (this.mail === mail)
-				this.renderRoot.querySelector<MailCompose>('mail-compose')?.commitRecipients();
-		});
+		// save in the background must not take what is being typed for the next one.
+		const mail = committingClient(client, () =>
+			this.mail === mail ? this.renderRoot.querySelector<MailCompose>('mail-compose') : null,
+		);
 		this.mail = mail;
 		this.images = new InlineImages(
 			(part) => mail.download(part).catch(() => null),
@@ -191,9 +199,9 @@ export class MailApp extends MailElement {
 	private stop(): void {
 		for (const stop of this.stops) stop();
 		this.stops = [];
-		// Released while still current, so its first try commits what the window holds; any later
-		// tries run in the background until the draft is saved, and a new connection or remount
-		// never waits for them.
+		// Released while still current, so its first try takes what the window holds (the files it is
+		// still reading, then the addresses being typed); any later tries run in the background until
+		// the draft is saved, and a new connection or remount never waits for them.
 		if (this.mail) void release(this.mail);
 		this.mail = null;
 		// What the client showed goes with it: its pictures, the attachment opened from it, and its

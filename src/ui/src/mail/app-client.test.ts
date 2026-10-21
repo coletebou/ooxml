@@ -7,7 +7,7 @@ import {
 	type MailClient,
 	type MailTransport,
 } from 'ooxml-core/mail';
-import { release } from './app-client';
+import { committingClient, release, type ComposeWindow } from './app-client';
 
 /**
  * The demo mailbox through a transport whose first `failures` saves fail, as when offline, until
@@ -94,5 +94,49 @@ describe('release', () => {
 		expect(saved.map((draft) => draft.subject)).toEqual(['Unsent thoughts']);
 		expect(closed()).toBe(true);
 		expect(vi.getTimerCount()).toBe(0);
+	});
+});
+
+describe('committingClient', () => {
+	it('waits for the files the window still reads, then takes its addresses, at each hand-over', async () => {
+		const order: string[] = [];
+		const action = (name: string) => async (): Promise<boolean> => {
+			order.push(name);
+			return true;
+		};
+		const client = {
+			compose: action('compose'),
+			editDraft: action('editDraft'),
+			closeCompose: action('closeCompose'),
+			send: action('send'),
+		} as unknown as MailClient;
+		let finish: () => void = () => {};
+		const composer = {
+			readingFiles: true,
+			filesRead: () => new Promise<void>((resolve) => (finish = resolve)),
+			commitRecipients: () => void order.push('commit'),
+		};
+		let shown: ComposeWindow | null = composer;
+		const wrapped = committingClient(client, () => shown);
+		const replying = wrapped.compose('reply', 'm1');
+		// Released meanwhile, it still finishes with the window it showed its draft in.
+		shown = null;
+		await vi.advanceTimersByTimeAsync(0);
+		expect(order).toEqual([]);
+		composer.readingFiles = false;
+		finish();
+		expect(await replying).toBe(true);
+		expect(order).toEqual(['commit', 'compose']);
+		order.length = 0;
+		shown = composer;
+		await wrapped.editDraft('d1');
+		await wrapped.closeCompose();
+		await wrapped.send();
+		expect(order).toEqual(['commit', 'editDraft', 'commit', 'closeCompose', 'commit', 'send']);
+		// No window shows its draft any more (a released client trying again): nothing to take.
+		order.length = 0;
+		shown = null;
+		await wrapped.closeCompose();
+		expect(order).toEqual(['closeCompose']);
 	});
 });

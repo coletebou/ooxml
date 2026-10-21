@@ -1,7 +1,8 @@
-// The core client as <mail-app> uses it: an address still being typed in the compose window is part
-// of the draft before the window closes, sends or gives way to another, whatever asks the client
-// (a key, a link, the host), and a client is let go only once its open draft is saved: one it
-// cannot save yet keeps trying in the background for as long as the page lives.
+// The core client as <mail-app> uses it: the files the compose window is still reading and an
+// address still being typed there are part of the draft before the window closes, sends or gives
+// way to another, whatever asks the client (a key, a link, the host, the app letting it go), and a
+// client is let go only once its open draft is saved: one it cannot save yet keeps trying in the
+// background for as long as the page lives.
 import type { MailClient } from 'ooxml-core/mail';
 
 /** The pauses before the first new tries to save a released client's draft: four in a minute. */
@@ -9,20 +10,40 @@ const RETRY_MS = [5_000, 15_000, 40_000];
 /** The pause between the tries after those, for as long as the draft stays unsaved. */
 const LATER_MS = 60_000;
 
-/** `client` with `commit` (turning typed addresses into recipients) run before each hand-over. */
-export function committingClient(client: MailClient, commit: () => void): MailClient {
-	const committed =
-		<A extends unknown[], R>(action: (...args: A) => R) =>
-		(...args: A): R => {
-			commit();
+/** What a hand-over needs of the compose window that shows the draft (`MailCompose`). */
+export interface ComposeWindow {
+	/** Picked or dropped files are still being read: they are not in the draft yet. */
+	readonly readingFiles: boolean;
+	/** Resolves once they are. */
+	filesRead(): Promise<void>;
+	/** Turn the addresses still being typed into recipients. */
+	commitRecipients(): void;
+}
+
+/**
+ * `client` with each hand-over of the open draft (another draft, Close, Send) made once the window
+ * showing it is done with it: the files it is still reading are in the draft, then the addresses
+ * still being typed are recipients. `showing` is that window while it shows this client's draft,
+ * else null; it is asked at once, so a client released meanwhile still finishes with its own.
+ */
+export function committingClient(
+	client: MailClient,
+	showing: () => ComposeWindow | null,
+): MailClient {
+	const handedOver =
+		<A extends unknown[], R>(action: (...args: A) => Promise<R>) =>
+		async (...args: A): Promise<R> => {
+			const shown = showing();
+			if (shown?.readingFiles) await shown.filesRead();
+			shown?.commitRecipients();
 			return action(...args);
 		};
 	return {
 		...client,
-		compose: committed(client.compose),
-		editDraft: committed(client.editDraft),
-		closeCompose: committed(client.closeCompose),
-		send: committed(client.send),
+		compose: handedOver(client.compose),
+		editDraft: handedOver(client.editDraft),
+		closeCompose: handedOver(client.closeCompose),
+		send: handedOver(client.send),
 	};
 }
 

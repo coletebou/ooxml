@@ -4,7 +4,8 @@
 // an event; the client saves the draft after a quiet moment, and Ctrl/Cmd+Enter sends. An address
 // still being typed is part of the draft before the window closes or sends (`commitRecipients()`).
 // Picked files are read for the draft they were added to (`compose-files.ts`): Send stays off while
-// they are read, Close waits for them, and Discard drops them. Each hand-over names its session.
+// they are read, Close (and the app's own hand-overs, `filesRead()`) waits for them, and Discard
+// drops them. Each hand-over names its session.
 // The pictures the draft's HTML shows by `cid:` show from the bytes `download` reads, and the HTML
 // handed back always refers to them by `cid:` (`compose-pictures.ts`).
 import { html, nothing, type PropertyValues } from 'lit';
@@ -94,6 +95,11 @@ export class MailCompose extends MailElement {
 		return this.reading > 0;
 	}
 
+	/** Resolves once the files still being read are handed to the draft they were added to. */
+	filesRead(): Promise<void> {
+		return this.files.settled();
+	}
+
 	override connectedCallback(): void {
 		super.connectedCallback();
 		defineMailRecipients();
@@ -160,7 +166,7 @@ export class MailCompose extends MailElement {
 			this.commitRecipients();
 			this.emit(type, { session });
 		};
-		if (this.readingFiles) void this.files.settled().then(finish);
+		if (this.readingFiles) void this.filesRead().then(finish);
 		else finish();
 	}
 

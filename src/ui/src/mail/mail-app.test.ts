@@ -10,7 +10,7 @@ import {
 	type MailTransport,
 } from 'ooxml-core/mail';
 import type { MailHtmlFrame } from './html-frame';
-import { defineMailApp, type MailApp } from './mail-app';
+import { defineMailApp, MailApp } from './mail-app';
 import type { MailConnection } from './store';
 
 type Updating = HTMLElement & { updateComplete: Promise<unknown> };
@@ -20,6 +20,7 @@ beforeAll(() => defineMailApp());
 afterEach(() => {
 	document.body.replaceChildren();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 async function until(test: () => boolean): Promise<void> {
@@ -86,6 +87,18 @@ function testTransport(options: { failSaves?: number } = {}) {
 	return { transport, saved, sent, closed: () => closed };
 }
 
+/** The connection each client of a `<mail-app>` is started with, from now on. */
+function startedWith(): (MailConnection | null)[] {
+	const seen: (MailConnection | null)[] = [];
+	const proto = MailApp.prototype as unknown as { start(): void };
+	const start = proto.start;
+	vi.spyOn(proto, 'start').mockImplementation(function (this: MailApp) {
+		seen.push(this.config);
+		start.call(this);
+	});
+	return seen;
+}
+
 /**
  * Object URLs (jsdom has none) for the rest of the test, recording the blobs made and the URLs
  * revoked.
@@ -126,6 +139,28 @@ const withPictures = (message: MailMessage, id: string, html: string, ...cids: s
 		cid,
 	})),
 });
+
+/** A file whose read is held open until `finish()`, like a large one being read. */
+function readingFile(name: string) {
+	let finish: () => void = () => {};
+	const file = {
+		name,
+		type: 'text/plain',
+		arrayBuffer: () =>
+			new Promise<ArrayBuffer>((resolve) => (finish = () => resolve(new ArrayBuffer(2)))),
+	};
+	return { file, finish: () => finish() };
+}
+
+/** The open compose window of the app, with `file` dropped on it. */
+async function dropOn(app: MailApp, file: ReturnType<typeof readingFile>['file']): Promise<void> {
+	await app.updateComplete;
+	const compose = inner<Updating>(app, 'mail-compose')!;
+	await compose.updateComplete;
+	const drop = new Event('drop', { bubbles: true, cancelable: true, composed: true });
+	Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+	inner(compose, 'section')!.dispatchEvent(drop);
+}
 
 /** Open a new message and type `address` into its To field without finishing it. */
 async function typeAddress(app: MailApp, address: string): Promise<Updating> {
@@ -191,10 +226,9 @@ describe('<mail-app>', () => {
 		const app = document.createElement('mail-app') as MailApp;
 		app.config = { kind: 'demo', seed: { now: Date.UTC(2026, 9, 20) } };
 		document.body.append(app);
+		await app.updateComplete;
 		const first = app.client;
 		expect(first).not.toBeNull();
-		await app.updateComplete;
-		expect(app.client).toBe(first);
 		// A framework writing its connection inline hands over a new, equal object on every render.
 		app.config = { kind: 'demo', seed: { now: Date.UTC(2026, 9, 20) } };
 		await app.updateComplete;
@@ -203,6 +237,35 @@ describe('<mail-app>', () => {
 		await app.updateComplete;
 		expect(app.client).not.toBe(first);
 		expect(app.client).not.toBeNull();
+	});
+
+	it('starts the connection a host sets as it connects the element, never the demo first', async () => {
+		const started = startedWith();
+		const given = (): MailConnection => ({
+			kind: 'transport',
+			transport: testTransport().transport,
+		});
+		// Set right after connecting it, as a framework does once the element is in the page.
+		const app = document.createElement('mail-app') as MailApp;
+		document.body.append(app);
+		const after = given();
+		app.config = after;
+		await app.updateComplete;
+		// Set before the element is defined: it upgrades with it, as when a framework defines it late.
+		const tag = 'mail-app-upgraded';
+		const early = document.createElement(tag) as MailApp;
+		const before = given();
+		early.config = before;
+		document.body.append(early);
+		customElements.define(tag, class extends MailApp {});
+		await early.updateComplete;
+		expect(started).toEqual([after, before]);
+		expect([app.client, early.client]).not.toContain(null);
+		// Taken out and put back, it starts again with the connection it has.
+		app.remove();
+		document.body.append(app);
+		await app.updateComplete;
+		expect(started).toEqual([after, before, after]);
 	});
 
 	it('defines and shows the calendar and contacts views on its own', async () => {
@@ -386,19 +449,8 @@ describe('<mail-app>', () => {
 		const { transport } = testTransport();
 		const app = await mount({ kind: 'transport', transport });
 		await app.client!.compose('new');
-		await app.updateComplete;
-		const compose = inner<Updating>(app, 'mail-compose')!;
-		await compose.updateComplete;
-		let finish: () => void = () => {};
-		const file = {
-			name: 'notes.txt',
-			type: 'text/plain',
-			arrayBuffer: () =>
-				new Promise<ArrayBuffer>((resolve) => (finish = () => resolve(new ArrayBuffer(2)))),
-		};
-		const drop = new Event('drop', { bubbles: true, cancelable: true, composed: true });
-		Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
-		inner(compose, 'section')!.dispatchEvent(drop);
+		const { file, finish } = readingFile('notes.txt');
+		await dropOn(app, file);
 		app.dispatchEvent(key('Escape'));
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(state(app).compose).not.toBeNull();
@@ -406,6 +458,60 @@ describe('<mail-app>', () => {
 		// The file is in the draft; the window stays open while it uploads, as it does for a file
 		// added before Escape.
 		await until(() => state(app).compose?.draft.attachments.length === 1);
+	});
+
+	it('puts the files it is still reading in the draft before another draft takes its place', async () => {
+		const { transport, saved } = testTransport();
+		const app = await mount({ kind: 'transport', transport });
+		await app.client!.compose('new');
+		app.client!.updateDraft({ subject: 'With notes' });
+		const first = state(app).compose!.session;
+		const { file, finish } = readingFile('notes.txt');
+		await dropOn(app, file);
+		// A reply, a new message or a draft reopened from the list: the window waits for the file.
+		const opening = app.client!.compose('new');
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(state(app).compose?.session).toBe(first);
+		finish();
+		// The draft it was added to is saved with it (the upload is quick here) before the next opens.
+		expect(await opening).toBe(true);
+		expect(state(app).compose?.session).toBeGreaterThan(first);
+		expect(saved.at(-1)).toMatchObject({ subject: 'With notes' });
+		expect(saved.at(-1)?.attachments.map((attachment) => attachment.name)).toEqual(['notes.txt']);
+	});
+
+	it('puts the files it is still reading in the draft before it lets its connection go', async () => {
+		const leaves: [string, (app: MailApp) => void][] = [
+			['removed', (app) => app.remove()],
+			[
+				'reconnected',
+				(app) => (app.config = { kind: 'demo', seed: { now: Date.UTC(2026, 9, 20) } }),
+			],
+		];
+		for (const [how, leave] of leaves) {
+			const { transport, saved, closed } = testTransport();
+			const app = await mount({ kind: 'transport', transport });
+			await app.client!.compose('new');
+			app.client!.updateDraft({ subject: 'With notes' });
+			const { file, finish } = readingFile('notes.txt');
+			await dropOn(app, file);
+			vi.useFakeTimers();
+			try {
+				leave(app);
+				await vi.advanceTimersByTimeAsync(1_000);
+				// The client stays while the file is read, and its draft is saved with it.
+				expect(closed(), how).toBe(false);
+				finish();
+				await vi.advanceTimersByTimeAsync(60_000);
+				expect(closed(), how).toBe(true);
+				expect(
+					saved.at(-1)?.attachments.map((attachment) => attachment.name),
+					how,
+				).toEqual(['notes.txt']);
+			} finally {
+				vi.useRealTimers();
+			}
+		}
 	});
 
 	it('ignores what a compose window hands over for a draft that gave way to another', async () => {
