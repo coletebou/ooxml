@@ -106,11 +106,16 @@ export class ClientCore {
 		return (this.options.now ?? Date.now)();
 	}
 
-	/** A timer through the injected `setTimeout` (tests), else the platform's. */
+	/**
+	 * A timer through the injected `setTimeout` (tests), else the platform's. It never fires for a
+	 * destroyed client: a draft change waiting for its save would otherwise still be saved, over a
+	 * transport the host keeps open.
+	 */
 	later(callback: () => void, ms: number): unknown {
-		return this.options.setTimeout
-			? this.options.setTimeout(callback, ms)
-			: setTimeout(callback, ms);
+		const run = (): void => {
+			if (!this.destroyed) callback();
+		};
+		return this.options.setTimeout ? this.options.setTimeout(run, ms) : setTimeout(run, ms);
 	}
 
 	cancel(handle: unknown): void {

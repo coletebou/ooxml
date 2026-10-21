@@ -74,4 +74,25 @@ describe('destroying a mail client', () => {
 		expect((await transport.query({ mailboxId: 'sent' })).total).toBe(1);
 		next.destroy();
 	});
+
+	it('saves nothing once destroyed, not even a change still waiting for its save', async () => {
+		// The host's transport stays open, so a save timed before `destroy` would still go out.
+		const { transport } = hostTransport();
+		const saveDraft = vi.spyOn(transport, 'saveDraft');
+		const timers: (() => void)[] = [];
+		const client = createMailClient({
+			transport,
+			closeTransport: false,
+			setTimeout: (callback: () => void) => timers.push(callback),
+			clearTimeout: () => {},
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.compose('new')).toBe(true);
+		saveDraft.mockClear();
+		client.updateDraft({ to: [ada], subject: 'Typed just before' });
+		client.destroy();
+		for (const run of timers.splice(0)) run();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(saveDraft).not.toHaveBeenCalled();
+	});
 });
