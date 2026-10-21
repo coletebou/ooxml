@@ -3,6 +3,7 @@
 // an event; the app saves through the client. The list is a WAI-ARIA list box: the arrows, Home and
 // End move through it and Enter or Space shows the contact (moving alone never drops an edit).
 import { html, nothing, type PropertyValues } from 'lit';
+import { keyed } from 'lit/directives/keyed.js';
 import {
 	contactAddresses,
 	contactLabel,
@@ -32,10 +33,13 @@ function avatar(contact: Contact, large = false) {
 	>`;
 }
 
-/** A postal address on one line: street, extended, postal code and city, region, country. */
+/**
+ * A postal address on one line, in the order the edit form lists it: street, apartment or suite, PO
+ * box, postal code and city, region, country.
+ */
 function postalLine(place: ContactAddress): string {
 	const city = [place.postalCode, place.locality].filter(Boolean).join(' ');
-	return [place.street, place.extended, city, place.region, place.country]
+	return [place.street, place.extended, place.poBox, city, place.region, place.country]
 		.filter(Boolean)
 		.join(', ');
 }
@@ -181,13 +185,19 @@ export class MailContacts extends MailElement {
 		</article>`;
 	}
 
-	/** The form while editing, else the selected contact, else a note that none is selected. */
+	/**
+	 * The form while editing, else the selected contact, else a note that none is selected. Each
+	 * contact gets a form of its own: what was typed into the last one and not saved stays out.
+	 */
 	private mainView(selected: Contact | undefined) {
 		if (this.editing)
-			return contactForm(this.editing, this.i18n, {
-				save: (e) => this.save(e),
-				cancel: () => (this.editing = null),
-			});
+			return keyed(
+				this.editing.id,
+				contactForm(this.editing, this.i18n, {
+					save: (e) => this.save(e),
+					cancel: () => (this.editing = null),
+				}),
+			);
 		if (selected) return this.detail(selected);
 		return html`<p class="empty">${this.t('contacts.nothingSelected')}</p>`;
 	}
@@ -205,14 +215,21 @@ export class MailContacts extends MailElement {
 						@click=${() => (this.editing = emptyContact(newId(), Date.now()))}
 						>${icon('plus')}<span>${this.t('contacts.new')}</span></button
 					>
-					<label class="icon-button" title=${this.t('contacts.import')}
-						>${icon('mail-import')}<span class="sr-only">${this.t('contacts.import')}</span>
-						<input
-							type="file"
-							accept=".vcf,text/vcard,text/x-vcard"
-							hidden
-							@change=${(e: Event) => void this.importFile(e.currentTarget as HTMLInputElement)}
-					/></label>
+					<button
+						type="button"
+						class="icon-button"
+						title=${this.t('contacts.import')}
+						aria-label=${this.t('contacts.import')}
+						@click=${() => this.renderRoot.querySelector<HTMLInputElement>('input.file')?.click()}
+						>${icon('mail-import')}</button
+					>
+					<input
+						class="file"
+						type="file"
+						accept=".vcf,text/vcard,text/x-vcard"
+						hidden
+						@change=${(e: Event) => void this.importFile(e.currentTarget as HTMLInputElement)}
+					/>
 					<button
 						type="button"
 						class="icon-button"

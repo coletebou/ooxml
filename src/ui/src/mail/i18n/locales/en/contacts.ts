@@ -38,6 +38,8 @@ export const enContacts = {
 	'contacts.organization': 'Organization',
 	'contacts.jobTitle': 'Job title',
 	'contacts.street': 'Street',
+	'contacts.extendedAddress': 'Apartment or suite',
+	'contacts.poBox': 'PO box',
 	'contacts.city': 'City',
 	'contacts.region': 'State or region',
 	'contacts.postalCode': 'Postal code',

@@ -41,6 +41,8 @@ export const deContacts: Record<keyof typeof enContacts, string> = {
 	'contacts.organization': 'Organisation',
 	'contacts.jobTitle': 'Position',
 	'contacts.street': 'Straße',
+	'contacts.extendedAddress': 'Adresszusatz',
+	'contacts.poBox': 'Postfach',
 	'contacts.city': 'Ort',
 	'contacts.region': 'Bundesland oder Region',
 	'contacts.postalCode': 'Postleitzahl',

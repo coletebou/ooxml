@@ -79,15 +79,92 @@ describe('<mail-contacts>', () => {
 		expect(seen.map((c) => [c.phones, c.emails])).toEqual([[phones, emails]]);
 	});
 
+	it('keeps the PO box of an address whose street and city were cleared', async () => {
+		const both = place({ poBox: 'PO Box 7', street: 'Main St 1', locality: 'Springfield' });
+		const el = await mount([contact('ada', 'Ada', { addresses: [both] })]);
+		const seen = saved(el);
+		expect(el.shadowRoot!.querySelector('.detail dl')!.textContent).toContain(
+			'Main St 1, PO Box 7, Springfield',
+		);
+		await click(el, 'Edit');
+		field(el, 'street').value = '';
+		field(el, 'locality').value = '';
+		await click(el, 'Save');
+		expect(seen.map((c) => c.addresses)).toEqual([[place({ poBox: 'PO Box 7' })]]);
+	});
+
+	it('shows the PO box and the apartment line an address has, and only then', async () => {
+		const full = place({ poBox: 'PO Box 7', extended: 'Suite 2', street: 'Main St 1' });
+		const el = await mount([
+			contact('ada', 'Ada', { addresses: [full] }),
+			contact('bob', 'Bob', { addresses: [place({ street: 'Elm St 2' })] }),
+		]);
+		const seen = saved(el);
+		await click(el, 'Edit');
+		const labels = () =>
+			[...el.shadowRoot!.querySelectorAll('fieldset')]
+				.find((set) => set.querySelector('legend')!.textContent === 'Address')!
+				.querySelectorAll('label > span');
+		expect([...labels()].map((label) => label.textContent)).toEqual([
+			'Street',
+			'Apartment or suite',
+			'PO box',
+			'City',
+			'State or region',
+			'Postal code',
+			'Country',
+		]);
+		// Every part shown, so clearing them all takes the address away, knowingly.
+		for (const name of ['poBox', 'extended', 'street']) field(el, name).value = '';
+		await click(el, 'Save');
+		expect(seen.map((c) => c.addresses)).toEqual([[]]);
+		// A contact without them (vCard 4 advises leaving both empty) is not asked for them.
+		el.shadowRoot!.querySelectorAll<HTMLElement>('[role="option"]')[1]!.click();
+		await el.updateComplete;
+		await click(el, 'Edit');
+		expect([field(el, 'poBox'), field(el, 'extended')]).toEqual([null, null]);
+		expect(labels()).toHaveLength(5);
+	});
+
 	it('drops an address whose shown parts were all cleared', async () => {
 		const home = place({ extended: 'Apt 4', street: 'Main St 1', locality: 'Springfield' });
 		const el = await mount([contact('ada', 'Ada', { addresses: [home] })]);
 		const seen = saved(el);
 		await click(el, 'Edit');
-		field(el, 'street').value = '';
-		field(el, 'locality').value = '';
+		// The apartment line shows too, as the address has one.
+		for (const name of ['street', 'extended', 'locality']) field(el, name).value = '';
 		await click(el, 'Save');
 		expect(seen.map((c) => c.addresses)).toEqual([[]]);
+	});
+
+	it('starts a new contact on an empty form, whatever the last form held unsaved', async () => {
+		const el = await mount([contact('ada', 'Ada')]);
+		const seen = saved(el);
+		await click(el, 'Edit');
+		// Typed into fields Ada has nothing in, then left without saving.
+		field(el, 'phone-0').value = '+1 555 0100';
+		field(el, 'street').value = 'Main St 1';
+		field(el, 'note').value = 'Call after six';
+		await click(el, 'New contact');
+		const values = () => ['phone-0', 'street', 'note'].map((name) => field(el, name).value);
+		expect(values()).toEqual(['', '', '']);
+		field(el, 'name').value = 'Bob';
+		await click(el, 'Save');
+		expect(seen.map((c) => [c.name, c.phones, c.addresses, c.note])).toEqual([['Bob', [], [], '']]);
+	});
+
+	it('opens the vCard file picker from an Import button the keyboard reaches', async () => {
+		const el = await mount([contact('ada', 'Ada')]);
+		const importer = el.shadowRoot!.querySelector<HTMLButtonElement>(
+			'.toolbar button[aria-label="Import vCard files"]',
+		);
+		expect(importer?.tabIndex).toBe(0);
+		const picker = el.shadowRoot!.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const opened = vi.fn();
+		picker.addEventListener('click', opened);
+		importer!.click();
+		expect(opened).toHaveBeenCalledOnce();
+		expect([picker.hidden, picker.accept]).toEqual([true, '.vcf,text/vcard,text/x-vcard']);
 	});
 
 	it('moves through the list and selects with the keyboard', async () => {

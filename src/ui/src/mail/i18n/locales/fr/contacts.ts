@@ -40,6 +40,8 @@ export const frContacts: Record<keyof typeof enContacts, string> = {
 	'contacts.organization': 'Organisation',
 	'contacts.jobTitle': 'Fonction',
 	'contacts.street': 'Rue',
+	'contacts.extendedAddress': "Complément d'adresse",
+	'contacts.poBox': 'Boîte postale',
 	'contacts.city': 'Ville',
 	'contacts.region': 'État ou région',
 	'contacts.postalCode': 'Code postal',

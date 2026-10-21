@@ -19,10 +19,23 @@ const TYPE_LABELS: Record<string, MailKey> = {
 	fax: 'contacts.typeFax',
 	pager: 'contacts.typePager',
 };
-/** The parts of a postal address the form shows (not the PO box nor the extended line). */
-const SHOWN = ['street', 'locality', 'region', 'postalCode', 'country'] as const;
-type ShownParts = Pick<ContactAddress, (typeof SHOWN)[number]>;
-const hasShownParts = (place: ShownParts): boolean => SHOWN.some((part) => place[part]);
+/**
+ * The parts of a postal address besides its type, in the order the form lists them. The apartment
+ * or suite and the PO box show only where the address has one, as vCard 4 advises leaving both
+ * empty (RFC 6350, 6.3.1); shown, they are kept or cleared like the rest, never dropped unseen.
+ */
+const PARTS = [
+	['street', 'contacts.street'],
+	['extended', 'contacts.extendedAddress'],
+	['poBox', 'contacts.poBox'],
+	['locality', 'contacts.city'],
+	['region', 'contacts.region'],
+	['postalCode', 'contacts.postalCode'],
+	['country', 'contacts.country'],
+] as const satisfies readonly (readonly [keyof ContactAddress, MailKey])[];
+type Part = (typeof PARTS)[number][0];
+const shownPart = (part: Part, place: Partial<ContactAddress>): boolean =>
+	(part !== 'extended' && part !== 'poBox') || !!place[part];
 
 export interface ContactFormHandlers {
 	save(event: Event): void;
@@ -69,11 +82,7 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 		</fieldset>
 		<fieldset>
 			<legend>${t('contacts.address')}</legend>
-			${field('street', t('contacts.street'), place.street ?? '')}
-			${field('locality', t('contacts.city'), place.locality ?? '')}
-			${field('region', t('contacts.region'), place.region ?? '')}
-			${field('postalCode', t('contacts.postalCode'), place.postalCode ?? '')}
-			${field('country', t('contacts.country'), place.country ?? '')}
+			${PARTS.filter(([part]) => shownPart(part, place)).map(([part, label]) => field(part, t(label), place[part] ?? ''))}
 		</fieldset>
 		<fieldset>
 			<legend>${t('contacts.more')}</legend>
@@ -103,18 +112,13 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 				type: value(key.replace(`${prefix}-`, `${prefix}-type-`)),
 			}))
 			.filter((row) => row.value);
-	const shown: ShownParts = {
-		street: value('street'),
-		locality: value('locality'),
-		region: value('region'),
-		postalCode: value('postalCode'),
-		country: value('country'),
-	};
 	const first = base.addresses[0];
-	// An address holding only parts the form cannot show stays as it was; one whose shown parts
-	// were all cleared goes, with them.
-	const keepPlace =
-		hasShownParts(shown) || (!!first && !hasShownParts(first) && !!(first.poBox || first.extended));
+	// The form shows every part the address has, so one whose fields were all cleared goes.
+	const parts = Object.fromEntries(PARTS.map(([part]) => [part, value(part)])) as Record<
+		Part,
+		string
+	>;
+	const keepPlace = Object.values(parts).some(Boolean);
 	const birthday = value('birthday') || (ISO_DATE.test(base.birthday) ? '' : base.birthday);
 	return {
 		...base,
@@ -126,15 +130,7 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 		organization: value('organization'),
 		title: value('title'),
 		addresses: keepPlace
-			? [
-					{
-						type: first?.type ?? '',
-						poBox: first?.poBox ?? '',
-						extended: first?.extended ?? '',
-						...shown,
-					},
-					...base.addresses.slice(1),
-				]
+			? [{ type: first?.type ?? '', ...parts }, ...base.addresses.slice(1)]
 			: base.addresses.slice(1),
 		birthday,
 		url: value('url'),

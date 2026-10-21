@@ -40,6 +40,8 @@ export const esContacts: Record<keyof typeof enContacts, string> = {
 	'contacts.organization': 'Organización',
 	'contacts.jobTitle': 'Cargo',
 	'contacts.street': 'Calle',
+	'contacts.extendedAddress': 'Apartamento o suite',
+	'contacts.poBox': 'Apartado postal',
 	'contacts.city': 'Ciudad',
 	'contacts.region': 'Estado o región',
 	'contacts.postalCode': 'Código postal',

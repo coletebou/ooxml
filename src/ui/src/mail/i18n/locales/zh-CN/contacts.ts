@@ -40,6 +40,8 @@ export const zhCNContacts: Record<keyof typeof enContacts, string> = {
 	'contacts.organization': '单位',
 	'contacts.jobTitle': '职务',
 	'contacts.street': '街道',
+	'contacts.extendedAddress': '公寓或单元',
+	'contacts.poBox': '邮政信箱',
 	'contacts.city': '城市',
 	'contacts.region': '省/地区',
 	'contacts.postalCode': '邮政编码',
