@@ -11,7 +11,7 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   kept only until the page is closed, and a notice says so; once there is room again, the next
   change stores them all. When the browser does not let the page use local storage at all (it is
   turned off, or the page is in a frame that may not use it), contacts and the calendar are kept
-  only until the page is closed, without a notice.
+  only until the page is closed, and a notice says so at each change.
 - **Commas in a contact's name and address**: the parts of a vCard's `N` and `ADR` are lists, their
   values separated by commas (RFC 6350), and they are written back as lists. A comma a card escaped
   inside one value (`1 Main St\, Apt 2`) is read as the comma it is, and written back as a list

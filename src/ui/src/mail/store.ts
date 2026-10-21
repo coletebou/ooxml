@@ -88,8 +88,9 @@ export interface MailOptions {
 	contacts?: ContactStore;
 	calendar?: CalendarStore;
 	/**
-	 * Where the address book and the calendar are kept between visits (not in demo mode); `null`
-	 * keeps them in memory only. Never used for credentials.
+	 * Where the address book and the calendar are kept between visits (not in demo mode): the
+	 * browser's local storage by default, and where the page may not use it, nowhere, each change
+	 * then reported as not stored. `null` keeps them in memory only. Never used for credentials.
 	 */
 	storage?: KeyValueStorage | null;
 	quoteFormat?: QuoteFormat;
@@ -126,18 +127,28 @@ export function followQuoteFormat(current: () => QuoteFormat | undefined): Quote
 	};
 }
 
-/** `localStorage` when the page may use it, else nothing (private mode, sandboxed frames). */
+/**
+ * `localStorage` when the page may use it, else nothing (storage turned off, sandboxed frames). It
+ * is read to find out, never written: a full storage still holds the address book and the
+ * calendar, and their stores report each write it refuses.
+ */
 export function browserStorage(): KeyValueStorage | null {
 	try {
 		const storage = globalThis.localStorage;
-		const probe = '__ooxml_mail_probe__';
-		storage.setItem(probe, '1');
-		storage.removeItem(probe);
+		storage.getItem('__ooxml_mail_probe__');
 		return storage;
 	} catch {
 		return null;
 	}
 }
+
+/** Where the page may not use the browser's storage: every write refused, so each change says so. */
+const NOWHERE: KeyValueStorage = {
+	getItem: () => null,
+	setItem: () => {
+		throw new Error('The page may not use the browser storage.');
+	},
+};
 
 /** A storage key per account, so two servers never share an address book. */
 const accountKey = (config: MailConnection): string =>
@@ -151,7 +162,7 @@ export function createMail(options: MailOptions = {}): MailClient {
 	const config = options.config ?? { kind: 'demo' };
 	// Only a real account keeps its address book and calendar; the demo never touches storage.
 	const persisted = (name: string) => {
-		const storage = options.storage === undefined ? browserStorage() : options.storage;
+		const storage = options.storage === undefined ? (browserStorage() ?? NOWHERE) : options.storage;
 		return { ...(storage ? { storage } : {}), key: `ooxml-mail:${name}:${accountKey(config)}` };
 	};
 	let transport: MailTransport;

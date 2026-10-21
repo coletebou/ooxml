@@ -4,8 +4,10 @@ import {
 	createMemoryCalendarStore,
 	createMemoryContactStore,
 	createMemoryTransport,
+	emptyContact,
 	type Draft,
 	type MailMessage,
+	type MailNotice,
 	type QuoteFormat,
 } from 'ooxml-core/mail';
 import { editorHtml } from './compose-editor';
@@ -217,6 +219,69 @@ describe('createMail', () => {
 			expect(await mail.editDraft(saved)).toBe(true);
 			expect(shown().textContent).toBe('First partSecond part');
 			expect(logo(shown())).toBe('cid:logo@example.test');
+		} finally {
+			mail.destroy();
+		}
+	});
+});
+
+describe('createMail on the browser storage', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+		localStorage.clear();
+	});
+
+	const names = (mail: ReturnType<typeof createMail>): string[] =>
+		mail.getState().contacts.map((contact) => contact.name);
+	const open = (storage?: null) => {
+		const mail = createMail({
+			config: { kind: 'transport', transport: createMemoryTransport() },
+			...(storage === null ? { storage } : {}),
+		});
+		const notices: MailNotice[] = [];
+		mail.onNotice((notice) => notices.push(notice));
+		return { mail, notices };
+	};
+
+	it('reads a full storage, and says that a change it refuses is not stored', async () => {
+		const ada = { ...emptyContact('ada', 0), name: 'Ada' };
+		localStorage.setItem('ooxml-mail:contacts:transport', JSON.stringify([ada]));
+		vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+			throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+		});
+		const { mail, notices } = open();
+		try {
+			await vi.waitFor(() => expect(names(mail)).toEqual(['Ada']));
+			await mail.saveContact({ ...emptyContact('grace', 0), name: 'Grace' });
+			expect(names(mail)).toEqual(['Ada', 'Grace']);
+			expect(notices).toContainEqual({ kind: 'error', action: 'contacts', code: 'storage' });
+		} finally {
+			mail.destroy();
+		}
+	});
+
+	it('says that a change is not stored where the page may not use the storage', async () => {
+		vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
+			throw new DOMException('Access is denied for this document.', 'SecurityError');
+		});
+		const { mail, notices } = open();
+		try {
+			await vi.waitFor(() => expect(mail.getState().status).toBe('ready'));
+			await mail.saveContact({ ...emptyContact('grace', 0), name: 'Grace' });
+			expect(names(mail)).toEqual(['Grace']);
+			expect(notices).toContainEqual({ kind: 'error', action: 'contacts', code: 'storage' });
+		} finally {
+			mail.destroy();
+		}
+	});
+
+	it('says nothing for a host that keeps them in memory only', async () => {
+		const { mail, notices } = open(null);
+		try {
+			await vi.waitFor(() => expect(mail.getState().status).toBe('ready'));
+			await mail.saveContact({ ...emptyContact('grace', 0), name: 'Grace' });
+			expect(names(mail)).toEqual(['Grace']);
+			expect(notices.filter((notice) => notice.kind === 'error')).toEqual([]);
 		} finally {
 			mail.destroy();
 		}
