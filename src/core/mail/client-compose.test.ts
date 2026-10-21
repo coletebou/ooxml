@@ -14,8 +14,31 @@ const file = (name: string): FileInput => ({
 	bytes: new TextEncoder().encode(name),
 });
 
-/** A memory server whose saves, sends and uploads can fail or be held back, as its reads can. */
-function setup() {
+/** Timers a test runs by hand (`fire`), the cancelled ones never. */
+function manualTimers() {
+	const due = new Map<number, () => void>();
+	let next = 0;
+	return {
+		setTimeout: (callback: () => void): number => {
+			due.set(++next, callback);
+			return next;
+		},
+		clearTimeout: (handle: unknown): void => {
+			due.delete(handle as number);
+		},
+		fire: (): void => {
+			const callbacks = [...due.values()];
+			due.clear();
+			for (const callback of callbacks) callback();
+		},
+	};
+}
+
+/**
+ * A memory server whose saves, sends and uploads can fail or be held back, as its reads can. The
+ * autosave timer fires only when `timers` fires it.
+ */
+function setup(timers?: ReturnType<typeof manualTimers>) {
 	const memory = createMemoryTransport({
 		now: () => T0,
 		messages: [
@@ -71,8 +94,8 @@ function setup() {
 	const client = createMailClient({
 		transport,
 		now: () => T0,
-		setTimeout: () => 0,
-		clearTimeout: () => undefined,
+		setTimeout: timers?.setTimeout ?? (() => 0),
+		clearTimeout: timers?.clearTimeout ?? (() => undefined),
 	});
 	client.onNotice((notice) => notices.push(notice));
 	const drafts = async () => {
@@ -458,6 +481,44 @@ describe('the compose window', () => {
 		// Closed now, it saves the edit made while it was on its way.
 		expect(await client.closeCompose()).toBe(true);
 		expect((await drafts()).map((draft) => draft.text)).toEqual(['First words, and more']);
+		client.destroy();
+	});
+
+	it('saves what was typed just before Send once the send fails', async () => {
+		const timers = manualTimers();
+		const { client, control, drafts } = setup(timers);
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		// Sent within the quiet moment after the last edit: the save waiting for it is called off.
+		client.updateDraft({ to: [ada], subject: 'Offline', text: 'Typed just now' });
+		control.sendFailure = new MailTransportError('network', 'Offline.');
+		expect(await client.send()).toBe(false);
+		expect(client.getState().compose).toMatchObject({ status: 'error', error: 'network' });
+		// The edits the server does not hold are saved after a quiet moment again.
+		timers.fire();
+		await until(client, (s) => s.compose?.status === 'saved');
+		expect((await drafts()).map((draft) => draft.text)).toEqual(['Typed just now']);
+		client.destroy();
+	});
+
+	it('saves nothing over a message that may have gone out, so sent again it is asked about', async () => {
+		const timers = manualTimers();
+		const { client, control, drafts } = setup(timers);
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Perhaps', text: 'Sent or not' });
+		control.sendFailure = new MailTransportError('uncertain', 'Not confirmed.');
+		expect(await client.send()).toBe(false);
+		// Saved, the draft would be a new message, which a second Send could not ask about.
+		timers.fire();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(client.getState().compose).toMatchObject({
+			status: 'error',
+			error: 'uncertain',
+			draft: { text: 'Sent or not' },
+		});
+		expect(client.getState().compose?.draft.id).toBeUndefined();
+		expect(await drafts()).toEqual([]);
 		client.destroy();
 	});
 
