@@ -177,6 +177,33 @@ describe('parseVCards', () => {
 		expect(serializeVCards(contacts)).toContain(`\r\nX-NOTE:${'a'.repeat(41)}Ab\r\n`);
 	});
 
+	it('reads a 2.1 card written in Latin-1 that names no charset, and writes it as it reads', () => {
+		const [card] = parseVCards(
+			[
+				'BEGIN:VCARD',
+				'VERSION:2.1',
+				'UID:latin',
+				'N;ENCODING=QUOTED-PRINTABLE:Gr=FCn;Andr=E9',
+				'FN;ENCODING=QUOTED-PRINTABLE:Andr=E9 Gr=FCn',
+				'NOTE;ENCODING=QUOTED-PRINTABLE:Caf=E9 at noon',
+				'NOTE;ENCODING=QUOTED-PRINTABLE:R=E9sum=E9 to follow',
+				'END:VCARD',
+			].join('\r\n'),
+		).contacts;
+		expect(card).toMatchObject({
+			name: 'André Grün',
+			familyName: 'Grün',
+			givenName: 'André',
+			note: 'Café at noon',
+			extra: ['NOTE;ENCODING=QUOTED-PRINTABLE:R=E9sum=E9 to follow'],
+		});
+		const text = serializeVCards([card!]);
+		expect(text.split('\r\n')).toEqual(
+			expect.arrayContaining(['FN:André Grün', 'N:Grün;André;;;', 'NOTE:Résumé to follow']),
+		);
+		expect(text).not.toContain('�');
+	});
+
 	it('writes the quoted-printable lines a 2.1 card kept as the 4.0 text they encode', () => {
 		const [card] = parseVCards(
 			[

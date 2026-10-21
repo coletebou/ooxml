@@ -4,6 +4,7 @@
 // the line format; the rest stays vCard's own (group prefixes, bare 2.1 types, quoted-printable
 // soft breaks, only the escapes RFC 6350 defines). New code.
 import { caretDecode, splitContentLine } from '../calendar/ics-lines';
+import { decodeCharset } from './mime/charset';
 
 export interface Property {
 	name: string;
@@ -128,13 +129,12 @@ export function quotedPrintableBytes(text: string): Uint8Array {
 	return new Uint8Array(bytes);
 }
 
+/**
+ * A property's value as text: a quoted-printable one (vCard 2.1) is its bytes in the CHARSET it
+ * names, or without one as a MIME body without one is read (`decodeCharset`): UTF-8 when the bytes
+ * are valid UTF-8, else windows-1252, as an old card written in Latin-1 often does not say so.
+ */
 export function decodeValue(property: Property): string {
 	if (!isQuotedPrintable(property)) return property.value;
-	const bytes = quotedPrintableBytes(property.value);
-	const charset = property.params.CHARSET?.[0] ?? 'utf-8';
-	try {
-		return new TextDecoder(charset).decode(bytes);
-	} catch {
-		return new TextDecoder('utf-8').decode(bytes);
-	}
+	return decodeCharset(quotedPrintableBytes(property.value), property.params.CHARSET?.[0]);
 }

@@ -1,5 +1,26 @@
 import { parseVCards } from './vcard';
-import { parseLine, unfold } from './vcard-lines';
+import { decodeValue, parseLine, unfold } from './vcard-lines';
+
+describe('decodeValue', () => {
+	const value = (line: string): string => decodeValue(parseLine(line)!);
+
+	it('reads a quoted-printable value without a charset as UTF-8 when it is, else as Latin-1', () => {
+		// vCard 2.1 writes 8-bit text in the charset of the program that wrote it, and old cards
+		// often do not say which: as for a MIME body without one, UTF-8 when valid, else windows-1252.
+		expect(value('FN;ENCODING=QUOTED-PRINTABLE:Andr=E9')).toBe('André');
+		expect(value('FN;ENCODING=QUOTED-PRINTABLE:Andr=C3=A9')).toBe('André');
+		expect(value('NOTE;ENCODING=QUOTED-PRINTABLE:=80 5, =93quoted=94')).toBe('€ 5, “quoted”');
+	});
+
+	it('reads a quoted-printable value in the charset it names', () => {
+		expect(value('FN;CHARSET=ISO-8859-1;ENCODING=QUOTED-PRINTABLE:Andr=C3=A9')).toBe('AndrÃ©');
+		expect(value('FN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:Andr=E9')).toBe('Andr�');
+		expect(value('FN;CHARSET=WINDOWS-1251;ENCODING=QUOTED-PRINTABLE:=C0=ED=ED=E0')).toBe('Анна');
+		expect(value('FN;CHARSET=ISO-8859-2;ENCODING=QUOTED-PRINTABLE:=B5uba')).toBe('ľuba');
+		// A value that is not quoted-printable is the text as read.
+		expect(value('FN;CHARSET=ISO-8859-1:Andr=E9')).toBe('Andr=E9');
+	});
+});
 
 describe('parseLine', () => {
 	it('keeps every value of a repeated parameter, in the order written', () => {
