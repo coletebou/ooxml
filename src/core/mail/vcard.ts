@@ -1,8 +1,11 @@
 // vCard (RFC 6350) import and export for the address book. Reads vCard 4.0, 3.0 and the common
 // 2.1 forms (bare TYPE parameters, quoted-printable values), writes 4.0. Properties the contact
-// model does not edit are kept verbatim in `Contact.extra`, so an import then export keeps them.
+// model does not edit are kept verbatim in `Contact.extra`, so an import then export keeps them
+// (an inline 3.0 or 2.1 photo, logo, sound or key written as 4.0 has it, `vcard-legacy.ts`).
 // New code.
+import { sha256 } from '../digest/sha256';
 import { emptyContact, type Contact, type ContactAddress } from './contacts';
+import { vcard4Line } from './vcard-legacy';
 import {
 	decodeValue,
 	parseLine,
@@ -39,11 +42,16 @@ function parseRev(value: string): number | undefined {
 	return Number.isNaN(at) ? undefined : at;
 }
 
-/** A small stable hash, for ids of cards that have no UID. */
-function hash(text: string): string {
-	let h = 0x811c9dc5;
-	for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
-	return (h >>> 0).toString(36);
+const encoder = new TextEncoder();
+
+/**
+ * The id of a card without a UID, from its unfolded lines alone: the card is the same contact
+ * wherever it stands in a file, and in any file that holds it. 64 bits of SHA-256, so two different
+ * cards do not meet by chance in any address book.
+ */
+function contentId(card: string): string {
+	const digest = sha256(encoder.encode(card)).subarray(0, 8);
+	return `vcard-${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
 const SKIP = new Set(['BEGIN', 'END', 'VERSION', 'PRODID']);
@@ -139,11 +147,13 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 }
 
 /**
- * Every card in a `.vcf` file. Cards without a `UID` get an id derived from their text; lines
- * outside a card and cards without `END:VCARD` are counted in `skipped`, never silently lost.
+ * Every card in a `.vcf` file. Cards without a `UID` get an id derived from their text, and two
+ * copies of one such card are one contact; lines outside a card and cards without `END:VCARD` are
+ * counted in `skipped`, never silently lost.
  */
 export function parseVCards(text: string): { contacts: Contact[]; skipped: number } {
 	const contacts: Contact[] = [];
+	const copies = new Set<string>();
 	let skipped = 0;
 	let card: Property[] | null = null;
 	let cardText = '';
@@ -158,8 +168,14 @@ export function parseVCards(text: string): { contacts: Contact[]; skipped: numbe
 			card = [];
 			cardText = '';
 		} else if (property.name === 'END' && property.value.trim().toUpperCase() === 'VCARD') {
-			if (card) contacts.push(toContact(card, `vcard-${contacts.length}-${hash(cardText)}`));
-			else skipped++;
+			if (!card) skipped++;
+			else {
+				const id = contentId(cardText);
+				const contact = toContact(card, id);
+				// A second copy of a card without a UID is the contact the first one gave.
+				if (contact.id !== id || !copies.has(id)) contacts.push(contact);
+				copies.add(id);
+			}
 			card = null;
 		} else if (card) {
 			card.push(property);
@@ -170,16 +186,26 @@ export function parseVCards(text: string): { contacts: Contact[]; skipped: numbe
 	return { contacts, skipped };
 }
 
-const escapeText = (value: string): string =>
-	value.replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
 /**
- * A component of a structured value (`N`, `ADR`, `ORG`). Commas stay unescaped there: they separate
- * the values of one component (`ing. jr,M.Sc.`), so a list read in is written back as a list.
+ * Backslashes and line breaks escaped (RFC 6350 3.4). A lone CR, which quoted-printable `=0D`
+ * gives, is a line break too: written as it is, it would end the line for any reader.
  */
-const escapeComponent = (value: string): string =>
-	value.replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/;/g, '\\;');
+const escapeBreaks = (value: string): string =>
+	value.replace(/\\/g, '\\\\').replace(/\r\n|\r|\n/g, '\\n');
+const escapeText = (value: string): string =>
+	escapeBreaks(value).replace(/,/g, '\\,').replace(/;/g, '\\;');
+/**
+ * A component of `N` or `ADR`. Commas stay unescaped there: those components are lists (RFC 6350
+ * `list-component`), their values separated by commas (`ing. jr,M.Sc.`), so a list read in is
+ * written back as a list. An `ORG` component is a single value and is escaped as text.
+ */
+const escapeComponent = (value: string): string => escapeBreaks(value).replace(/;/g, '\\;');
+/**
+ * A URI value (`URL`, RFC 6350 6.7.8), not escaped as text: other readers keep such escapes in the
+ * link. A URI holds no line break (dropped) and no backslash (percent-encoded, never an escape).
+ */
+const escapeUri = (value: string): string => value.replace(/[\r\n]/g, '').replace(/\\/g, '%5C');
 
-const encoder = new TextEncoder();
 /** Fold at 75 octets (RFC 6350 3.2), never inside a UTF-8 sequence. */
 function foldLine(line: string): string {
 	if (encoder.encode(line).length <= 75) return line;
@@ -201,7 +227,18 @@ function foldLine(line: string): string {
 	return out.join('\r\n ');
 }
 
-const typeParam = (type: string): string => (type ? `;TYPE=${type}` : '');
+/** A TYPE parameter for a type that is a name (`work`, `x-desk`); anything else is left out. */
+const typeParam = (type: string): string => (/^[a-z\d-]+$/i.test(type) ? `;TYPE=${type}` : '');
+
+/** `BDAY` as a date (`19850412`, `--0412`), else as text (`VALUE=text`, RFC 6350 6.2.5). */
+function birthdayLine(birthday: string): string {
+	const date = birthday
+		.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$1$2$3')
+		.replace(/^--(\d{2})-(\d{2})$/, '--$1$2');
+	return /^(?:\d{8}|--\d{4})$/.test(date)
+		? `BDAY:${date}`
+		: `BDAY;VALUE=text:${escapeText(birthday)}`;
+}
 
 /** A URI (RFC 3986: a scheme and a colon), printable ASCII without spaces or backslashes. */
 const URI = /^[a-z][a-z\d+.-]*:[\x21-\x5b\x5d-\x7e]+$/i;
@@ -250,17 +287,14 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 		}
 		if (contact.organization || contact.organizationUnits.length)
 			lines.push(
-				`ORG:${[contact.organization, ...contact.organizationUnits].map(escapeComponent).join(';')}`,
+				`ORG:${[contact.organization, ...contact.organizationUnits].map(escapeText).join(';')}`,
 			);
 		if (contact.title) lines.push(`TITLE:${escapeText(contact.title)}`);
-		if (contact.birthday)
-			lines.push(
-				`BDAY:${contact.birthday.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$1$2$3').replace(/^--(\d{2})-(\d{2})$/, '--$1$2')}`,
-			);
-		if (contact.url) lines.push(`URL:${escapeText(contact.url)}`);
+		if (contact.birthday) lines.push(birthdayLine(contact.birthday));
+		if (contact.url) lines.push(`URL:${escapeUri(contact.url)}`);
 		if (contact.note) lines.push(`NOTE:${escapeText(contact.note)}`);
 		if (contact.updatedAt) lines.push(`REV:${formatRev(contact.updatedAt)}`);
-		lines.push(...contact.extra, 'END:VCARD');
+		lines.push(...contact.extra.map(vcard4Line), 'END:VCARD');
 	}
 	return lines.map(foldLine).join('\r\n') + (lines.length ? '\r\n' : '');
 }

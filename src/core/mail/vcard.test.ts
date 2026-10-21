@@ -93,7 +93,8 @@ describe('parseVCards', () => {
 			phones: [{ type: 'work', number: '+49 30 1234' }],
 			note: 'first line\r\nsecond line',
 		});
-		expect(contacts[1]!.id).toMatch(/^vcard-1-/);
+		// Without a UID, the id comes from the card's text, not from where it stands in the file.
+		expect(contacts[1]!.id).toMatch(/^vcard-[0-9a-f]{16}$/);
 	});
 
 	it('counts what it cannot read instead of dropping it silently', () => {
@@ -114,6 +115,25 @@ describe('parseVCards', () => {
 	it('gives cards without a UID a stable id', () => {
 		const card = 'BEGIN:VCARD\nFN:Ada\nEND:VCARD';
 		expect(parseVCards(card).contacts[0]!.id).toBe(parseVCards(card).contacts[0]!.id);
+	});
+
+	it('gives a card without a UID the same id wherever it stands, and one contact for two copies', () => {
+		const ada = 'BEGIN:VCARD\r\nFN:Ada\r\nEMAIL:ada@example.com\r\nEND:VCARD\r\n';
+		const bob = 'BEGIN:VCARD\r\nFN:Bob\r\nEND:VCARD\r\n';
+		const ids = (text: string): string[] => parseVCards(text).contacts.map((c) => c.id);
+		const [adaId, bobId] = ids(ada + bob);
+		expect(adaId).toMatch(/^vcard-[0-9a-f]{16}$/);
+		// A file reordered, or a part of it, brings the same contacts again, not copies of them.
+		expect(ids(bob + ada)).toEqual([bobId, adaId]);
+		expect(ids(bob)).toEqual([bobId]);
+		expect(parseVCards(ada + ada + bob)).toMatchObject({
+			contacts: [{ name: 'Ada' }, { name: 'Bob' }],
+			skipped: 0,
+		});
+		// Folding does not change a card.
+		expect(ids('BEGIN:VCARD\r\nFN:A\r\n da\r\nEMAIL:ada@example.com\r\nEND:VCARD\r\n')).toEqual([
+			adaId,
+		]);
 	});
 });
 
@@ -152,6 +172,123 @@ describe('serializeVCards', () => {
 		expect(text).toContain('\r\nUID;VALUE=text:a\\;b\\,c\r\n');
 		expect(text).toContain(`\r\nUID:${urn}\r\n`);
 		expect(parseVCards(text).contacts.map((c) => c.id)).toEqual(['contact-1', 'a;b,c', urn]);
+	});
+
+	it('writes a lone carriage return as a line break of the value, never one that ends the line', () => {
+		// Quoted-printable `=0D` reads as a lone CR, which a reader takes for the end of a line.
+		const [card] = parseVCards(
+			[
+				'BEGIN:VCARD',
+				'VERSION:2.1',
+				'UID:keep',
+				'NOTE;ENCODING=QUOTED-PRINTABLE:one=0Dtwo=0DUID:other',
+				'ADR;ENCODING=QUOTED-PRINTABLE:;;Main St=0DFloor 2;Town;;;',
+				'ORG;ENCODING=QUOTED-PRINTABLE:Example=0DLabs',
+				'END:VCARD',
+			].join('\r\n'),
+		).contacts;
+		expect(card).toMatchObject({
+			id: 'keep',
+			note: 'one\rtwo\rUID:other',
+			organization: 'Example\rLabs',
+		});
+		const text = serializeVCards([card!]);
+		expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/);
+		expect(parseVCards(text)).toEqual({
+			contacts: [
+				{
+					...card,
+					note: 'one\ntwo\nUID:other',
+					organization: 'Example\nLabs',
+					addresses: [{ ...card!.addresses[0], street: 'Main St\nFloor 2' }],
+				},
+			],
+			skipped: 0,
+		});
+	});
+
+	it('writes no line break from a stored type or a birthday that is not a date', () => {
+		const contact = {
+			...emptyContact('u-1', 0),
+			name: 'Ada',
+			birthday: 'circa\r\nUID:other',
+			emails: [{ type: 'work\r\nUID:other', address: 'ada@example.com' }],
+		};
+		const text = serializeVCards([contact]);
+		expect(text.split('\r\n')).toEqual(
+			expect.arrayContaining(['EMAIL:ada@example.com', 'BDAY;VALUE=text:circa\\nUID:other']),
+		);
+		expect(parseVCards(text).contacts.map((c) => c.id)).toEqual(['u-1']);
+	});
+
+	it('writes the URL as the URI it is: without text escapes or line breaks', () => {
+		const contact = {
+			...emptyContact('u-1', 0),
+			name: 'Ada',
+			url: 'https://example.com/a;b,c?q=1,2',
+		};
+		const text = serializeVCards([contact]);
+		expect(text).toContain('\r\nURL:https://example.com/a;b,c?q=1,2\r\n');
+		expect(parseVCards(text).contacts[0]?.url).toBe(contact.url);
+		const broken = serializeVCards([{ ...contact, url: 'https://example.com/\r\nUID:x\n/next' }]);
+		expect(broken).toContain('\r\nURL:https://example.com/UID:x/next\r\n');
+		// A backslash, which no URI holds and a reader of text escapes would read as one, is encoded.
+		const local = serializeVCards([{ ...contact, url: 'file:///C:/new\\notes' }]);
+		expect(local).toContain('\r\nURL:file:///C:/new%5Cnotes\r\n');
+		expect(parseVCards(local).contacts[0]?.url).toBe('file:///C:/new%5Cnotes');
+	});
+
+	it('escapes the commas of an organization, whose components are single values', () => {
+		const contact = {
+			...emptyContact('u-1', 0),
+			name: 'Ada',
+			organization: 'ABC, Inc.',
+			organizationUnits: ['North, South', 'Marketing'],
+		};
+		const text = serializeVCards([contact]);
+		expect(text).toContain('\r\nORG:ABC\\, Inc.;North\\, South;Marketing\r\n');
+		expect(parseVCards(text).contacts[0]).toEqual(contact);
+	});
+
+	it('writes a vCard 3 or 2.1 inline photo, logo, sound or key as a vCard 4 data URI', () => {
+		const { contacts } = parseVCards(
+			[
+				'BEGIN:VCARD',
+				'VERSION:3.0',
+				'UID:pictures',
+				'FN:Pictures',
+				'PHOTO;ENCODING=b;TYPE=JPEG:/9j/4AAQ',
+				'item1.LOGO;TYPE=image/png;ENCODING=BASE64;X-SIZE=4:iVBO',
+				' Rw0K',
+				'SOUND;TYPE=WAVE;ENCODING=b:UklGRg==',
+				'KEY;ENCODING=B;TYPE=X509:MIIC',
+				'PHOTO;VALUE=uri:https://example.com/a.jpg',
+				'END:VCARD',
+				'BEGIN:VCARD',
+				'VERSION:2.1',
+				'UID:old',
+				'PHOTO;JPEG;ENCODING=BASE64:',
+				'  /9j/4AAQ',
+				'  SkZJRg==',
+				'',
+				'END:VCARD',
+			].join('\r\n'),
+		);
+		const text = serializeVCards(contacts);
+		const lines = text.replace(/\r\n /g, '').split('\r\n');
+		expect(lines).toEqual(
+			expect.arrayContaining([
+				'PHOTO:data:image/jpeg;base64,/9j/4AAQ',
+				'item1.LOGO;X-SIZE=4:data:image/png;base64,iVBORw0K',
+				'SOUND:data:audio/wav;base64,UklGRg==',
+				'KEY:data:application/pkix-cert;base64,MIIC',
+				'PHOTO;VALUE=uri:https://example.com/a.jpg',
+				'PHOTO:data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+			]),
+		);
+		expect(text).not.toMatch(/ENCODING/i);
+		// Read back, the cards keep the vCard 4 lines, so a second export writes the same text.
+		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
 	});
 });
 
