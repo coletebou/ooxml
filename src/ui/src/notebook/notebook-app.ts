@@ -536,9 +536,11 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			? 'closed'
 			: s.mode !== 'local'
 				? s.status
-				: s.persistent
-					? 'local'
-					: 'memory';
+				: !s.persistent
+					? 'memory'
+					: s.unsaved
+						? 'unsaved'
+						: 'local';
 		const peers = s?.peers ?? [];
 		return html`<div
 			class="app"

@@ -246,8 +246,10 @@ export function notebookMenu(
 			else if (action.startsWith('nbcolor:') && current)
 				c.client.setNotebookColor(current, action.slice(8));
 			else if (action === 'delete' && current) {
-				void c.client.deleteNotebook(current);
-				c.deleted('notebook', null, current);
+				// The notice (with Undo) only when it went: it stays when its changes could not be saved.
+				void c.client
+					.deleteNotebook(current)
+					.then((done) => done && c.deleted('notebook', null, current));
 			}
 		},
 	};

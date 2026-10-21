@@ -190,6 +190,7 @@ export const zhCN: Record<keyof typeof en, string> = {
 	'notice.sync-error': '与协作者的连接出现问题。',
 
 	'status.local': '已保存在此设备上',
+	'status.unsaved': '更改未保存在此设备上',
 	'status.memory': '未保存在此设备上：笔记本只保留到此标签页关闭',
 	'status.connected': '已连接',
 	'status.connecting': '正在连接',

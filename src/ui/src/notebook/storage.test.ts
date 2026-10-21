@@ -65,4 +65,11 @@ describe('notebook IndexedDB storage', () => {
 		expect(await storage.load('k')).toEqual(new Uint8Array([4]));
 		expect(storage.persistent()).toBe(false);
 	});
+
+	it('keeps memory-only notebooks for the tab under one database name', async () => {
+		const name = `memory-${Math.random().toString(36).slice(2)}`;
+		await createIndexedDbStorage(name, null).save('k', new Uint8Array([5]));
+		expect(await createIndexedDbStorage(name, null).load('k')).toEqual(new Uint8Array([5]));
+		expect(await createIndexedDbStorage(`${name}-other`, null).load('k')).toBeNull();
+	});
 });

@@ -189,6 +189,7 @@ export const en = {
 
 	'status.local': 'Saved on this device',
 	'status.memory': 'Not saved on this device: notebooks last until this tab closes',
+	'status.unsaved': 'Changes not saved on this device',
 	'status.connected': 'Connected',
 	'status.connecting': 'Connecting',
 	'status.disconnected': 'Offline',

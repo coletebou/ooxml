@@ -54,6 +54,17 @@ export class NotebookNav extends NotebookElement {
 		if (value.trim()) this.fire('nb-rename', { kind, id, name: value });
 	}
 
+	/** The tree's items, with one in the Tab order: the selected section, else its visible group. */
+	#sectionItems(s: NotebookState) {
+		const visible = this.#visibleSections(s.sections);
+		const shown = new Set(visible.map((x) => x.id));
+		const parent = new Map(s.sections.map((x) => [x.id, x.parentId]));
+		let stop = s.sectionId;
+		while (stop && !shown.has(stop)) stop = parent.get(stop) ?? '';
+		stop ||= visible[0]?.id ?? '';
+		return visible.map((x) => this.#section(x, s.sectionId, x.id === stop));
+	}
+
 	#visibleSections(sections: readonly SectionView[]): SectionView[] {
 		const hidden = new Set<string>();
 		return sections.filter((s) => {
@@ -158,7 +169,7 @@ export class NotebookNav extends NotebookElement {
 		>`;
 	}
 
-	#section(s: SectionView, selected: string) {
+	#section(s: SectionView, selected: string, tabStop: boolean) {
 		const kind: NavItemKind = s.kind === 'group' ? 'group' : 'section';
 		const drag = this.#drag(kind, s.id);
 		const open = !this.collapsed.has(s.id);
@@ -169,7 +180,7 @@ export class NotebookNav extends NotebookElement {
 			aria-level=${s.depth + 1}
 			aria-selected=${kind === 'section' ? String(s.id === selected) : nothing}
 			aria-expanded=${kind === 'group' ? String(open) : nothing}
-			tabindex=${s.id === selected ? 0 : -1}
+			tabindex=${tabStop ? 0 : -1}
 			style=${`--tab:${s.color};--depth:${s.depth}`}
 			draggable="true"
 			@click=${() => (kind === 'group' ? this.#toggle(s.id) : this.fire('nb-select-section', { id: s.id }))}
@@ -279,7 +290,7 @@ export class NotebookNav extends NotebookElement {
 		return html`<div class="columns">
 			<section class="sections" aria-label=${this.t('nav.sections')}>
 				<ul role="tree" aria-label=${this.t('nav.sections')}>
-					${this.#visibleSections(s.sections).map((x) => this.#section(x, s.sectionId))}
+					${this.#sectionItems(s)}
 				</ul>
 				${s.sections.length ? nothing : html`<p class="empty">${this.t('nav.noSections')}</p>`}
 				<button class="add" @click=${() => this.fire('nb-add-section', {})}>

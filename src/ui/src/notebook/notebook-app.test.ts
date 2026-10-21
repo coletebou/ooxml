@@ -331,6 +331,22 @@ describe('<notebook-app>', () => {
 		expect(app.page()!.shadowRoot!.activeElement).not.toBe(title);
 	});
 
+	it('keeps a section-tree item in the Tab order when the selected one is folded away', async () => {
+		app = await mount();
+		const client = app.client!;
+		const group = client.createSection({ kind: 'group', name: 'Group' });
+		const inner = client.createSection({ name: 'Inner', parentId: group });
+		client.selectSection(inner);
+		await until(() => app.state!.sectionId === inner);
+		const nav = app.nav()!;
+		await nav.updateComplete;
+		const stops = () => [...nav.shadowRoot!.querySelectorAll('[role="treeitem"][tabindex="0"]')];
+		nav.shadowRoot!.querySelector<HTMLElement>(`[data-id="${group}"]`)!.click();
+		await nav.updateComplete;
+		expect(nav.shadowRoot!.querySelector(`[data-id="${inner}"]`)).toBeNull();
+		expect(stops().map((el) => el.getAttribute('data-id'))).toEqual([group]);
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;

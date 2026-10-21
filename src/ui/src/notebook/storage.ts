@@ -20,13 +20,18 @@ const wrap = <T>(request: IDBRequest<T>): Promise<T> =>
 		request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
 	});
 
+const memories = new Map<string, NotebookStorage>();
+
 export function createIndexedDbStorage(
 	name: string = DEFAULT_NOTEBOOK_DATABASE,
 	/** The IndexedDB to use; omitted means the browser's, `null` means none (memory only). */
 	idb?: IDBFactory | null,
 ): IndexedDbStorage {
 	const factory = idb === undefined ? globalThis.indexedDB : (idb ?? undefined);
-	const memory = createMemoryStorage();
+	// Without IndexedDB the notebooks live in memory for the tab: a new client (the app moved in
+	// the DOM, another user name) finds them again under the same database name.
+	const memory = memories.get(name) ?? createMemoryStorage();
+	memories.set(name, memory);
 	let persistent = !!factory;
 	let db: Promise<IDBDatabase | null> | null = null;
 	const open = (): Promise<IDBDatabase | null> =>

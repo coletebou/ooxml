@@ -191,6 +191,7 @@ export const fr: Record<keyof typeof en, string> = {
 	'notice.sync-error': 'La connexion avec les collaborateurs a rencontré un problème.',
 
 	'status.local': 'Enregistré sur cet appareil',
+	'status.unsaved': 'Modifications non enregistrées sur cet appareil',
 	'status.memory':
 		'Non enregistré sur cet appareil : les blocs-notes durent jusqu’à la fermeture de cet onglet',
 	'status.connected': 'Connecté',
