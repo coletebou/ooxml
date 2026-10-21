@@ -108,8 +108,8 @@ See the [React guide](https://christophervr.github.io/ooxml/notebook/frameworks/
 
 ## Packages
 
-| Package                     | What it is                                        | Peer dependency |
-| --------------------------- | ------------------------------------------------- | --------------- |
+| Package                  | What it is                                        | Peer dependency |
+| ------------------------ | ------------------------------------------------- | --------------- |
 | `opennotes-react-viewer` | React 18+ component and hooks (`packages/react`). | `react`         |
 
 The workspace also holds **private** packages that are never published: `notebook-viewer` (`packages/web-component`, the shared binding wiring, inlined into the binding at build time), the demo and the browser tests.

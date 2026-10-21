@@ -17,8 +17,8 @@ makes no claim of feature parity with one, and does not open legacy binary noteb
 npm install opennotes-react-viewer react
 ```
 
-| Package                     | For       | Peer dependency |
-| --------------------------- | --------- | --------------- |
+| Package                  | For       | Peer dependency |
+| ------------------------ | --------- | --------------- |
 | `opennotes-react-viewer` | React 18+ | `react`         |
 
 The binding is self-contained: its thin wiring is bundled in, and
