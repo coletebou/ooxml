@@ -279,6 +279,40 @@ describe('send', () => {
 		expect(store.emails.get('original')!.keywords).toEqual({ $seen: true, $answered: true });
 	});
 
+	it('asks about an uncertain send after its unchanged message is saved under a new id', async () => {
+		for (const failed of ['after', 'before'] as const) {
+			const { server, transport, store } = mail();
+			store.failSubmission = failed;
+			expect(await failure(transport.send(reply))).toMatchObject({ code: 'uncertain' });
+			store.failSubmission = null;
+			// Saved as it was (its window closed and kept): a new draft of the same message.
+			const { id } = await transport.saveDraft(reply);
+			expect(id, failed).not.toBe(reply.id);
+			// Sent from that draft, the server is asked about the first send before anything goes.
+			const asked = server.argsOf('EmailSubmission/query').length;
+			const result = await transport.send({ ...reply, id });
+			expect(server.argsOf('EmailSubmission/query').slice(asked), failed).toEqual([
+				{ accountId: 'A13824', filter: { emailIds: ['E1'] } },
+			]);
+			// It went out once: that send is finished; or it did not, and it goes out once now.
+			expect(store.submissions, failed).toHaveLength(1);
+			expect(result, failed).toEqual({
+				id: failed === 'after' ? 'E1' : store.submissions[0]!.emailId,
+			});
+			expect(store.emails.has(id), failed).toBe(false);
+		}
+		// A message changed before it was saved is a new message, sent without asking.
+		const { server, transport, store } = mail();
+		store.failSubmission = 'after';
+		await failure(transport.send(reply));
+		store.failSubmission = null;
+		const changed = { ...reply, subject: 'World domination, revised' };
+		const { id } = await transport.saveDraft(changed);
+		await transport.send({ ...changed, id });
+		expect(server.argsOf('EmailSubmission/query')).toEqual([]);
+		expect(store.submissions).toHaveLength(2);
+	});
+
 	it('sends the message again when the server says the uncertain send did not go out', async () => {
 		const { transport, store } = mail();
 		store.failSubmission = 'before';

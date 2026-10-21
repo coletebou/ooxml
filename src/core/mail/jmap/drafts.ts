@@ -110,10 +110,13 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 	const maxCalls = async (): Promise<number> => (await client.session()).limits.maxCallsInRequest;
 
 	/**
-	 * Copies whose submission may or may not have happened, by the message they hold. Each stays
-	 * until the server can say whether it went out, so sending the same message again asks first.
+	 * Copies whose submission may or may not have happened, by the message they hold (`sendKey`):
+	 * each stays until the server can say whether it went out, so sending it again asks first.
 	 */
 	const unsure = new Map<string, UnsureCopy>();
+	/** The message a send of the draft `draftId` makes: the draft, the identity and the content. */
+	const sendKey = (draftId: string | undefined, identityId: string, create: unknown): string =>
+		JSON.stringify([draftId ?? null, identityId, create]);
 
 	/**
 	 * Whether the copy an earlier send of the message `key` made went out (`wentOut`); when its id
@@ -146,12 +149,8 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 	return {
 		async saveDraft(draft) {
 			const drafts = await draftsMailbox();
-			const create = emailToCreate(
-				draft,
-				drafts,
-				[DRAFT, SEEN],
-				pickIdentity(await identitiesOrNone(), draft),
-			);
+			const identity = pickIdentity(await identitiesOrNone(), draft);
+			const create = emailToCreate(draft, drafts, [DRAFT, SEEN], identity);
 			const previous = draft.id;
 			// Saved, and the previous one destroyed, in one request of three calls when it is taken.
 			const gated = previous !== undefined && (await maxCalls()) >= 3 && (await canGate());
@@ -170,6 +169,12 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const id = result.created(calls.save, 'draft');
 			if (previous !== undefined && (!calls.clean || result.error(calls.clean)))
 				await quietly(() => tidy([previous], {}));
+			// A message a send left unsure of, saved unchanged, is still that message: its next send,
+			// from the new draft, asks about the first one too.
+			const before = identity ? sendKey(previous, identity.id, create) : '';
+			const copy = unsure.get(before);
+			if (identity && copy && unsure.delete(before))
+				unsure.set(sendKey(id, identity.id, create), copy);
 			nudge();
 			return { id };
 		},
@@ -195,7 +200,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const destroy = draft.id === undefined ? [] : [draft.id];
 			const marks = markPatches(draft);
 			const cleanUp = destroy.length > 0 || Object.keys(marks).length > 0;
-			const key = JSON.stringify([draft.id ?? null, identity.id, create]);
+			const key = sendKey(draft.id, identity.id, create);
 			const earlier = unsure.get(key);
 			if (earlier !== undefined) {
 				// Asked before anything is sent: while the server cannot be asked, it is still not known,
