@@ -10,6 +10,7 @@ import { controlStyles } from '../base';
 import { glyph } from '../glyph';
 import { definer } from '../registry';
 import { NotebookElement } from './base';
+import { composing } from './keys';
 import css from './nav-pane.css?raw';
 
 export type NavItemKind = 'section' | 'group' | 'page' | 'notebook';
@@ -146,7 +147,8 @@ export class NotebookNav extends NotebookElement {
 				@click=${(e: Event) => e.stopPropagation()}
 				@keydown=${(e: KeyboardEvent) => {
 					e.stopPropagation();
-					if (e.key === 'Enter') this.#commit(kind, id, (e.target as HTMLInputElement).value);
+					if (e.key === 'Enter' && !composing(e))
+						this.#commit(kind, id, (e.target as HTMLInputElement).value);
 					if (e.key === 'Escape') this.editing = null;
 				}}
 				@blur=${(e: Event) => this.#commit(kind, id, (e.target as HTMLInputElement).value)}

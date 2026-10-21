@@ -236,8 +236,11 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		super.connectedCallback();
 		installOfficeUiTheme();
 		globalThis.addEventListener?.('pagehide', this.#flush);
-		// Moved in the DOM (removed and attached again): the client was released; start a new one.
+		// Moved in the DOM (removed and attached again): the client was released; start a new one,
+		// and give the ribbon its KeyTips again (firstUpdated only runs once).
 		if (!this.#client) this.requestUpdate();
+		if (this.hasUpdated && !this.#keytips)
+			this.#keytips = attachKeyTips(this.renderRoot as ShadowRoot);
 	}
 
 	override disconnectedCallback(): void {
@@ -320,6 +323,12 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			this.#editorId = '';
 			this.formats = null;
 		}
+		// A deleted text box takes its editor with it on the next render.
+		if (this.#editorId && !state.containers.some((c) => c.id === this.#editorId)) {
+			this.editor = null;
+			this.#editorId = '';
+			this.formats = null;
+		}
 		this.state = state;
 		if (this.editor && !this.editor.dom.isConnected) this.editor = null;
 		const nav = `${state.notebookId}|${state.sectionId}|${state.pageId}`;
@@ -338,7 +347,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			changed.has(k),
 		);
 		if ((restart || !this.#client) && this.isConnected) this.#start();
-		else if (changed.has('locale')) this.#client?.setNames(notebookNames(this.locale));
+		// Also when a restart prop changed without a restart (an equal config, for example).
+		if (changed.has('locale')) this.#client?.setNames(notebookNames(this.locale));
 		if (changed.has('theme')) {
 			if (this.theme === 'light' || this.theme === 'dark')
 				this.setAttribute('data-office-theme', this.theme);

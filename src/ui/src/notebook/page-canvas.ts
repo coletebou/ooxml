@@ -22,6 +22,7 @@ import { NotebookElement } from './base';
 import { defineNotebookFile } from './file-embed';
 import { formatCreated } from './i18n/translator';
 import { defineNotebookInk, type StrokeDetail } from './ink-layer';
+import { composing } from './keys';
 import { belowContent, placeFiles } from './page-files';
 import { type NotebookText, defineNotebookText } from './text-container';
 import css from './page-canvas.css?raw';
@@ -449,7 +450,7 @@ export class NotebookPage extends NotebookElement {
 								this.#title = (e.target as HTMLInputElement).value;
 								this.client?.renamePage(page.id, this.#title);
 							}}
-							@keydown=${(e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+							@keydown=${(e: KeyboardEvent) => e.key === 'Enter' && !composing(e) && (e.target as HTMLInputElement).blur()}
 						/>
 						<div class="created" title=${this.t('page.created')}>
 							<span>${created.date}</span><span>${created.time}</span>

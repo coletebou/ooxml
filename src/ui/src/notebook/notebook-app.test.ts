@@ -280,6 +280,43 @@ describe('<notebook-app>', () => {
 		expect(app.state!.sections.map((s) => s.name)).toContain('Neuer Abschnitt 2');
 	});
 
+	it('lets go of the editor when its text box is deleted and keeps KeyTips after a move', async () => {
+		app = await mount();
+		const page = app.page()!;
+		const id = app.client!.addText({ x: 40, y: 40 }, [
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'gone soon' }] },
+		]);
+		await until(() => page.shadowRoot!.querySelector<NotebookText>('notebook-text')?.view);
+		const view = page.shadowRoot!.querySelector<NotebookText>('notebook-text')!.view!;
+		view.focus();
+		await until(() => app.editor === view);
+		app.client!.deleteContainers([id]);
+		await until(() => app.state!.containers.length === 0);
+		expect([app.editor, app.formats]).toEqual([null, null]);
+		// Moved in the DOM: the ribbon's KeyTips (their badge layer in the shadow root) come back.
+		const layer = () =>
+			[...app.shadowRoot!.children].some((el) => el.matches('div[aria-hidden="true"]'));
+		expect(layer()).toBe(true);
+		const parent = app.parentElement!;
+		app.remove();
+		expect(layer()).toBe(false);
+		parent.append(app);
+		await until(() => !!app.state?.page);
+		expect(layer()).toBe(true);
+	});
+
+	it('keeps the title field for an input method that confirms with Enter', async () => {
+		app = await mount();
+		const title = app.page()!.shadowRoot!.querySelector<HTMLInputElement>('input.title')!;
+		title.focus();
+		title.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+		);
+		expect(app.page()!.shadowRoot!.activeElement).toBe(title);
+		title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		expect(app.page()!.shadowRoot!.activeElement).not.toBe(title);
+	});
+
 	it('deletes a page with Undo in the notice and translates the whole UI', async () => {
 		app = await mount();
 		const before = app.state!.pages.length;
