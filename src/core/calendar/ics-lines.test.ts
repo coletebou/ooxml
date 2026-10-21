@@ -89,4 +89,27 @@ describe('components', () => {
 		expect(tree.components[0]?.components.map((c) => c.name)).toEqual(['VEVENT', 'VEVENT']);
 		expect(tree.components[0]?.components[1]?.properties[0]?.value).toBe('b');
 	});
+
+	it('reads nesting tens of thousands deep in linear time, however its ends are written', () => {
+		const lines = (n: number, line: string): string[] => Array.from({ length: n }, () => line);
+		const read = (...parts: string[][]) => readComponents(parts.flat().join('\r\n'));
+		const started = performance.now();
+		// Each end closes the component at the top.
+		const nested = read(lines(50_000, 'BEGIN:X'), lines(50_000, 'END:X'));
+		// Ends of components that are not open, each one ignored.
+		const stray = read(lines(25_000, 'BEGIN:X'), lines(25_000, 'END:Y'));
+		// Each end closes the component below the top, and the one at the top with it.
+		const pairs = read(lines(20_000, 'BEGIN:A\r\nBEGIN:B'), lines(20_000, 'END:A'));
+		const elapsed = performance.now() - started;
+		let depth = 0;
+		for (let at = nested.components[0]; at; at = at.components[0]) depth++;
+		expect([depth, nested.unclosed.length]).toEqual([50_000, 0]);
+		expect(stray.unclosed).toHaveLength(25_000);
+		expect(new Set(stray.unclosed)).toEqual(new Set(['X']));
+		expect(pairs.unclosed).toEqual(lines(20_000, 'B'));
+		expect(pairs.components[0]?.components.map((c) => c.name)).toEqual(['B']);
+		// Each end used to look through every open component; generous, so a loaded runner does
+		// not flake.
+		expect(elapsed).toBeLessThan(2000);
+	});
 });

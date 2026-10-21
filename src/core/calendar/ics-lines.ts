@@ -110,12 +110,23 @@ export function parseContentLine(line: string): ContentLine | null {
 export const unescapeText = (value: string): string =>
 	value.replace(/\\([\s\S])/gu, (_, c: string) => (c === 'n' || c === 'N' ? '\n' : c));
 
-/** The component tree of a text. */
+/**
+ * The component tree of a text. An END closes the innermost open component of its name, and any
+ * still open inside it. Where each name is open is kept by name, so finding it never looks through
+ * the components open above it: a text nested tens of thousands deep is read in linear time.
+ */
 export function readComponents(text: string): ComponentTree {
 	const root: Component = { name: '', properties: [], components: [] };
 	const stack: Component[] = [root];
+	/** The depths on `stack` at which each name is open, innermost last. */
+	const open = new Map<string, number[]>();
 	const unclosed: string[] = [];
 	let unreadable = 0;
+	/** Closes the component at depth `at` and, as unclosed, every one still open inside it. */
+	const close = (at: number): void => {
+		for (let i = at + 1; i < stack.length; i++) unclosed.push(stack[i]!.name);
+		for (const closed of stack.splice(at)) open.get(closed.name)?.pop();
+	};
 	for (const raw of unfoldLines(text)) {
 		if (!raw.trim()) continue;
 		const line = parseContentLine(raw);
@@ -128,17 +139,16 @@ export function readComponents(text: string): ComponentTree {
 				components: [],
 			};
 			top.components.push(child);
+			const depths = open.get(child.name) ?? [];
+			open.set(child.name, depths);
+			depths.push(stack.length);
 			stack.push(child);
 		} else if (line.name === 'END') {
-			const name = line.value.trim().toUpperCase();
-			const at = stack.map((c) => c.name).lastIndexOf(name);
-			if (at > 0) {
-				unclosed.push(...stack.slice(at + 1).map((c) => c.name));
-				stack.length = at;
-			}
+			const at = open.get(line.value.trim().toUpperCase())?.at(-1);
+			if (at !== undefined) close(at);
 		} else if (top === root) unreadable++;
 		else top.properties.push(line);
 	}
-	unclosed.push(...stack.slice(1).map((c) => c.name));
+	for (let i = 1; i < stack.length; i++) unclosed.push(stack[i]!.name);
 	return { components: root.components, unreadable, unclosed };
 }
