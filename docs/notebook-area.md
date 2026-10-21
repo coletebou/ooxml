@@ -67,10 +67,13 @@ top-level types never conflict when two peers initialise a room at once:
 
 Ids are minted per client (`createIdGenerator`), so concurrent adds never collide and each map is
 created by one peer. Fields are set one by one, so a move and a concurrent resize both survive,
-and text merges per character. Everything a peer wrote is re-validated when read back
-(`read.ts`, `rich-text.ts`): unknown nodes and marks are unwrapped to their text, links must be
-http, https or mailto (the shared `opc/safe-href` policy), colours `#rrggbb`, coordinates are
-clamped.
+and text merges per character. Everything a peer wrote is re-validated when the core reads it
+back (`read.ts`, `rich-text.ts`, which serve structure, search, to-dos, export and archives):
+unknown nodes and marks are unwrapped to their text, links must be http, https or mailto (the
+shared `opc/safe-href` policy), colours `#rrggbb`, coordinates are clamped. The editor builds its
+document through y-prosemirror and the schema instead: its link mark only ever puts an http, https
+or mailto address into an `href`, the Link dialog only offers such addresses, and y-prosemirror
+drops content it cannot build from the schema.
 
 **Deterministic structure rules.** A section whose group is missing sits at the top; groups put in
 a cycle by concurrent moves all sit at the top; anything under a deleted group counts as deleted;
