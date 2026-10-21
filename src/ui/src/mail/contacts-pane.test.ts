@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { emptyContact, type Contact, type ContactAddress } from 'ooxml-core/mail';
+import { emptyContact, parseVCards, type Contact, type ContactAddress } from 'ooxml-core/mail';
 import { defineMailContacts, type MailContacts } from './contacts-pane';
 
 beforeAll(() => defineMailContacts());
@@ -165,6 +165,26 @@ describe('<mail-contacts>', () => {
 		importer!.click();
 		expect(opened).toHaveBeenCalledOnce();
 		expect([picker.hidden, picker.accept]).toEqual([true, '.vcf,text/vcard,text/x-vcard']);
+	});
+
+	it('imports every vCard file picked, in one go', async () => {
+		const el = await mount([contact('ada', 'Ada')]);
+		const picker = el.shadowRoot!.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const card = (name: string) => `BEGIN:VCARD\r\nVERSION:4.0\r\nFN:${name}\r\nEND:VCARD`;
+		// The first file ends without a line break after its card; the second holds two cards.
+		const files = [
+			new File([card('Bea')], 'bea.vcf', { type: 'text/vcard' }),
+			new File([`${card('Cy')}\r\n${card('Dee')}\r\n`], 'team.vcf', { type: 'text/vcard' }),
+		];
+		Object.defineProperty(picker, 'files', { value: files, configurable: true });
+		const imported: string[] = [];
+		el.addEventListener('mail-import-vcf', (e) =>
+			imported.push((e as CustomEvent<{ text: string }>).detail.text),
+		);
+		picker.dispatchEvent(new Event('change'));
+		await vi.waitFor(() => expect(imported).toHaveLength(1));
+		expect(parseVCards(imported[0]!).contacts.map((c) => c.name)).toEqual(['Bea', 'Cy', 'Dee']);
+		expect(picker.multiple).toBe(true);
 	});
 
 	it('moves through the list and selects with the keyboard', async () => {

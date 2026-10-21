@@ -112,10 +112,17 @@ export class MailContacts extends MailElement {
 		event.preventDefault();
 	}
 
-	private async importFile(input: HTMLInputElement): Promise<void> {
-		const file = input.files?.[0];
+	/**
+	 * Import the vCard files picked as one stream of cards (RFC 6350 3.3), so they make one import
+	 * and one notice. A line break goes between two files: a card that ends a file without one
+	 * would otherwise run into the next file's first line.
+	 */
+	private async importFiles(input: HTMLInputElement): Promise<void> {
+		const files = [...(input.files ?? [])];
 		input.value = '';
-		if (file) this.emit('mail-import-vcf', { text: await file.text() });
+		if (!files.length) return;
+		const texts = await Promise.all(files.map((file) => file.text()));
+		this.emit('mail-import-vcf', { text: texts.join('\r\n') });
 	}
 
 	private save(event: Event): void {
@@ -227,8 +234,9 @@ export class MailContacts extends MailElement {
 						class="file"
 						type="file"
 						accept=".vcf,text/vcard,text/x-vcard"
+						multiple
 						hidden
-						@change=${(e: Event) => void this.importFile(e.currentTarget as HTMLInputElement)}
+						@change=${(e: Event) => void this.importFiles(e.currentTarget as HTMLInputElement)}
 					/>
 					<button
 						type="button"
