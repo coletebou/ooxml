@@ -65,6 +65,9 @@ Without React, use the element directly after `registerMail()` from `ooxml-ui/ma
 
 ## Keyboard
 
+The shortcuts work while the focus is inside the app, so they never take keys from the rest of
+your page. Those that act on conversations work in the mail view only.
+
 `c` new message, `/` search, `j`/`k` next and previous, `o` or Enter open, `x` select, `e` archive,
 `#` or Delete delete, `!` junk, `s` flag, Shift+I and Shift+U read and unread, `r` reply, `a` reply
 all, `f` forward, Ctrl+Enter send, Escape close, `?` all shortcuts.
