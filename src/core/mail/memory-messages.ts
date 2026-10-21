@@ -2,6 +2,7 @@
 // becomes one. Separate from the transport so the rules (counts, previews, thread ids) are testable
 // on their own. New code.
 import { readEmail, toMailMessage, writeEmail, type OutgoingAttachment } from './mime';
+import { plainText } from './mime/build';
 import { hasListedFile } from './mime/message';
 import {
 	DRAFT,
@@ -171,8 +172,9 @@ export function messageFromSeed(seed: SeedMessage, id: string, blobs: BlobStore)
 
 /**
  * A stored message from a draft (`$draft` in Drafts) or a sent copy (in Sent), its parts kept as
- * the draft has them: inline with their Content-ID, or attached. `from` is the address the
- * transport writes it from; without one it has no From.
+ * the draft has them: inline with their Content-ID, or attached, and its plain text as written
+ * (`plainText`: the HTML's for a draft that has only HTML). `from` is the address the transport
+ * writes it from; without one it has no From.
  */
 export function messageFromDraft(
 	draft: Draft,
@@ -194,6 +196,7 @@ export function messageFromDraft(
 		disposition: attachment.inline ? 'inline' : 'attachment',
 		cid: attachment.cid ?? null,
 	}));
+	const text = plainText(draft);
 	return {
 		id,
 		threadId: id,
@@ -202,8 +205,7 @@ export function messageFromDraft(
 		keywords: keywordsOf(options.sent ? [SEEN] : [SEEN, DRAFT]),
 		receivedAt: options.now,
 		sentAt: options.now,
-		size:
-			draft.text.length + (draft.html?.length ?? 0) + attachments.reduce((n, a) => n + a.size, 0),
+		size: text.length + (draft.html?.length ?? 0) + attachments.reduce((n, a) => n + a.size, 0),
 		messageId: [`${id}@memory.invalid`],
 		inReplyTo: [...(draft.inReplyTo ?? [])],
 		references: [...(draft.references ?? [])],
@@ -213,9 +215,9 @@ export function messageFromDraft(
 		bcc: [...draft.bcc],
 		replyTo: [],
 		subject: draft.subject,
-		preview: preview(draft),
+		preview: preview({ ...draft, text }),
 		hasAttachment: hasFile(attachments, draft.html),
-		text: draft.text,
+		text,
 		html: draft.html ?? null,
 		attachments,
 	};
@@ -252,7 +254,8 @@ export function messageFromRaw(
 
 /**
  * A stored message as raw RFC 5322 bytes (its `.eml`), written from what is kept of it; one with no
- * From is written from `account`. A draft keeps its Bcc, as a client's own copy does.
+ * From is written from `account`, one with only HTML with the HTML's text as its plain part
+ * (`plainText`). A draft keeps its Bcc, as a client's own copy does.
  */
 export function messageBytes(target: MailMessage, blobs: BlobStore, account: string): Uint8Array {
 	return writeEmail(
@@ -263,7 +266,7 @@ export function messageBytes(target: MailMessage, blobs: BlobStore, account: str
 			bcc: target.bcc,
 			replyTo: target.replyTo,
 			subject: target.subject,
-			text: target.text ?? '',
+			text: plainText({ text: target.text ?? '', html: target.html ?? undefined }),
 			...(target.html ? { html: target.html } : {}),
 			attachments: target.attachments.map((attachment) => ({
 				name: attachment.name,

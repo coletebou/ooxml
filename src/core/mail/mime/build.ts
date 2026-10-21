@@ -1,6 +1,7 @@
 // Writing an RFC 5322 message with MIME (RFC 2045, RFC 2046, RFC 2047, RFC 2231, RFC 2387): what a
 // transport submits and what `.eml` export saves. New code.
 import type { MailAddress } from '../model';
+import { htmlText } from '../search';
 import { formatAddressList, formatMessageIds } from './addresses';
 import { utf8 } from './binary';
 import {
@@ -66,6 +67,17 @@ const OWN_HEADERS = new Set([
 	'mime-version',
 ]);
 const FIELD_NAME = /^[!-9;-~]+$/;
+
+/**
+ * The plain text a message of `text` and `html` goes with: the text, or when it is blank beside
+ * HTML, the HTML's text, so the `text/plain` alternative never says nothing while the `text/html`
+ * one says something (RFC 2046 5.1.4: alternatives are the same content). The transports make a
+ * draft's plain text so, the same whether they save or send it, and the memory transport writes a
+ * message it keeps so; `writeEmail` writes the text it is given, which reads back as written.
+ */
+export function plainText(body: { text: string; html?: string | undefined }): string {
+	return body.html && !body.text.trim() ? htmlText(body.html) : body.text;
+}
 
 /**
  * The part tree: the text alone, or `multipart/alternative` with the HTML, which goes in a

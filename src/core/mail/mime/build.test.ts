@@ -1,5 +1,5 @@
 import { utf8 } from './binary';
-import { writeEmail, type OutgoingEmail, type WriteOptions } from './build';
+import { plainText, writeEmail, type OutgoingEmail, type WriteOptions } from './build';
 import { decodeEncodedWords } from './encoded-words';
 import { getHeader, getHeaders } from './headers';
 import { readEmail } from './parse';
@@ -258,6 +258,20 @@ describe('writeEmail', () => {
 		]);
 		// The message stays 7-bit, so it can go through any transport.
 		expect(raw.every((byte) => byte < 0x80)).toBe(true);
+	});
+});
+
+describe('plainText', () => {
+	it('is the text, or the text of the HTML beside which the text is blank', () => {
+		const html = '<p>See you at <b>noon</b>.</p><p>Ada</p>';
+		// The two alternatives say the same (RFC 2046 5.1.4), whichever one a reader shows.
+		expect(plainText({ text: '', html })).toBe('See you at noon.\nAda\n');
+		expect(plainText({ text: ' \r\n', html })).toBe('See you at noon.\nAda\n');
+		expect(plainText({ text: 'Own words', html })).toBe('Own words');
+		expect([plainText({ text: '' }), plainText({ text: ' ', html: '' })]).toEqual(['', ' ']);
+		// writeEmail itself writes the text it is given, so a message reads back as it was written.
+		const raw = writeEmail({ from: ada, to: [grace], subject: 's', text: '', html }, fixed);
+		expect(readEmail(raw)).toMatchObject({ text: '', html });
 	});
 });
 

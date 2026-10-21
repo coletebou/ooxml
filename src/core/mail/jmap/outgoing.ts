@@ -1,8 +1,8 @@
 // The Email a draft becomes (RFC 8621 4.6 creation rules): addresses, the threading headers, one
-// `text/plain` part, one `text/html` part when the draft has rich text, attachments by blob id
-// (the pictures the HTML shows inline, with their Content-ID), and the identity it is written as;
-// and the Message-ID a send gives it. New code.
-import { newMessageId } from '../mime/build';
+// `text/plain` part (the HTML's text for a draft that has only HTML), one `text/html` part when
+// the draft has rich text, attachments by blob id (the pictures the HTML shows inline, with their
+// Content-ID), and the identity it is written as; and the Message-ID a send gives it. New code.
+import { newMessageId, plainText } from '../mime/build';
 import {
 	identityFor,
 	isWildcardAddress,
@@ -65,7 +65,7 @@ export function emailToCreate(
 		subject: draft.subject,
 		inReplyTo: draft.inReplyTo?.length ? [...draft.inReplyTo] : undefined,
 		references: draft.references?.length ? [...draft.references] : undefined,
-		bodyValues: { text: { value: draft.text }, ...(html ? { html: { value: html } } : {}) },
+		bodyValues: { text: { value: plainText(draft) }, ...(html ? { html: { value: html } } : {}) },
 		textBody: [{ partId: 'text', type: 'text/plain' }],
 		htmlBody: html ? [{ partId: 'html', type: 'text/html' }] : undefined,
 		attachments: draft.attachments.length

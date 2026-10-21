@@ -1,9 +1,11 @@
 import { createDemoSeed } from './demo-seed';
 import { DEFAULT_MAILBOXES } from './memory-messages';
 import { createMemoryTransport } from './memory-transport';
+import { readEmail } from './mime';
 import { PartialUpdateError, type MailChange } from './transport';
 
 const me = { name: 'You', email: 'you@example.com' };
+const ada = { name: 'Ada', email: 'ada@example.com' };
 
 describe('createMemoryTransport', () => {
 	it('pages a query newest first and counts every match', async () => {
@@ -194,6 +196,36 @@ describe('createMemoryTransport', () => {
 		const sent = await fresh.send({ ...draft, to: [me], id: 's1' });
 		expect((await fresh.message(sent.id)).subject).toBe('Kept');
 		expect((await fresh.query({ mailboxId: 'sent' })).ids).toEqual([sent.id]);
+	});
+
+	it('saves and sends a draft that has only HTML with the text of its HTML as its plain text', async () => {
+		const transport = createMemoryTransport();
+		const html = '<p>See you at <b>noon</b>.</p>';
+		const draft = { to: [ada], cc: [], bcc: [], subject: 'Noon', text: '', html, attachments: [] };
+		const { id } = await transport.saveDraft(draft);
+		expect((await transport.message(id)).text).toBe('See you at noon.\n');
+		const sent = await transport.message((await transport.send({ ...draft, id })).id);
+		expect(sent).toMatchObject({ text: 'See you at noon.\n', html, preview: 'See you at noon.' });
+		// Its .eml says the same in both alternatives.
+		const raw = await transport.download(sent.blobId, { type: 'message/rfc822', name: 'noon.eml' });
+		const parsed = readEmail(raw);
+		expect(parsed.root.parts.map((part) => part.type)).toEqual(['text/plain', 'text/html']);
+		expect([parsed.text, parsed.html]).toEqual(['See you at noon.\n', html]);
+	});
+
+	it('exports a message that has only HTML with the text of its HTML as its plain part', async () => {
+		const html = '<p>Our <b>offer</b> ends Friday.</p>';
+		const transport = createMemoryTransport({
+			messages: [
+				{ id: 'offer', mailboxId: 'inbox', from: ada, subject: 'Offer', html, receivedAt: 1 },
+			],
+		});
+		const offer = await transport.message('offer');
+		const raw = await transport.download(offer.blobId, {
+			type: 'message/rfc822',
+			name: 'offer.eml',
+		});
+		expect(readEmail(raw)).toMatchObject({ text: 'Our offer ends Friday.\n', html });
 	});
 
 	it('sends a message to yourself where there is no Inbox once, into Sent', async () => {

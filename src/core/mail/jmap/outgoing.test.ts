@@ -2,6 +2,8 @@ import submission from './__fixtures__/rfc8621-submission.json';
 import type { Draft } from '../model';
 import { objects, toIdentity } from './convert';
 import { emailToCreate, identityCovers, pickIdentity } from './outgoing';
+import { installMailStore } from './test-support/mail-store';
+import { failure, setup } from './test-support/setup';
 
 const identities = objects((submission.identityResponse[1] as { list: unknown }).list).map(
 	toIdentity,
@@ -94,5 +96,47 @@ describe('emailToCreate', () => {
 			},
 			{ blobId: 'B2', type: 'application/pdf', name: 'plan.pdf', disposition: 'attachment' },
 		]);
+	});
+
+	it('writes the text of its HTML as the plain text of a draft that has only HTML', () => {
+		const html = '<p>See you at <b>noon</b>.</p><p>Ada</p>';
+		const values = (text: string) =>
+			emailToCreate({ ...draft, text, html }, 'D', [], joe).bodyValues;
+		// The two alternatives say the same (RFC 2046 5.1.4), whichever one a reader shows.
+		expect(values('')).toEqual({
+			text: { value: 'See you at noon.\nAda\n' },
+			html: { value: html },
+		});
+		expect(values(' \n')).toEqual(values(''));
+		expect(values('Own words')).toEqual({ text: { value: 'Own words' }, html: { value: html } });
+		expect(emailToCreate(draft, 'D', [], joe).bodyValues).toEqual({ text: { value: '' } });
+	});
+});
+
+describe('a draft that has only HTML', () => {
+	const rich: Draft = {
+		...draft,
+		to: [{ name: 'John', email: 'john@example.com' }],
+		subject: 'Noon',
+		html: '<p>See you at <b>noon</b>.</p>',
+	};
+	const textOf = (create: unknown): unknown =>
+		(create as { bodyValues: { text: { value: string } } }).bodyValues.text.value;
+
+	it('is saved and sent with the text of its HTML, as the same message both times', async () => {
+		const { server, transport } = setup();
+		const store = installMailStore(server);
+		const { id } = await transport.saveDraft(rich);
+		expect(textOf(store.emails.get(id)!.create)).toBe('See you at noon.\n');
+		// A send the server does not confirm, then its message saved and sent again: it is asked
+		// about first, as saved or sent it is the same message.
+		store.failSubmission = 'after';
+		expect(await failure(transport.send({ ...rich, id }))).toMatchObject({ code: 'uncertain' });
+		store.failSubmission = null;
+		const copy = String(store.submissions[0]!.emailId);
+		expect(textOf(store.emails.get(copy)!.create)).toBe('See you at noon.\n');
+		const { id: again } = await transport.saveDraft({ ...rich, id });
+		expect(await transport.send({ ...rich, id: again })).toEqual({ id: copy });
+		expect(store.submissions).toHaveLength(1);
 	});
 });
