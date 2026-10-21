@@ -128,10 +128,23 @@ export function baseSubject(subject: string): BaseSubject {
 	return { key: base.toLowerCase(), text: base, isReplyOrForward };
 }
 
+/**
+ * True when a subject (white space down to single spaces) starts `re`, then an optional `[blob]`,
+ * then a colon, a space allowed before each. Read with the scans above, not a pattern that tries
+ * every way of splitting a run of white space, so any subject takes linear time.
+ */
+function readsAsReply(text: string): boolean {
+	if (text.slice(0, 2).toLowerCase() !== 're') return false;
+	let at = skipSpaces(text, 2, text.length);
+	const close = blobClose(text, at, text.length);
+	if (close >= 0) at = skipSpaces(text, close + 1, text.length);
+	return text[at] === ':';
+}
+
 /** `Re: <subject>` unless the subject already reads as a reply. */
 export function replySubject(subject: string): string {
 	const trimmed = subject.trim();
-	return /^re\s*(?:\[[^[\]]*\])?\s*:/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+	return readsAsReply(trimmed.replace(/\s+/g, ' ')) ? trimmed : `Re: ${trimmed}`;
 }
 
 /** `Fwd: <subject>`. */

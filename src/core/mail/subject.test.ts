@@ -143,6 +143,39 @@ describe('reply and forward subjects', () => {
 		expect(replySubject('Lunch')).toBe('Re: Lunch');
 		expect(replySubject('Re: Lunch')).toBe('Re: Lunch');
 		expect(replySubject('RE[3]: Lunch')).toBe('RE[3]: Lunch');
+		expect(replySubject('re \t[list]  : Lunch')).toBe('re \t[list]  : Lunch');
+		expect(replySubject('Re [a] [b]: Lunch')).toBe('Re: Re [a] [b]: Lunch');
+		expect(replySubject('Rest: Lunch')).toBe('Re: Rest: Lunch');
+	});
+
+	it('reads as replies exactly the subjects the pattern it replaces did', () => {
+		// Quadratic on long runs of white space, so only for short subjects.
+		const pattern = /^re\s*(?:\[[^[\]]*\])?\s*:/i;
+		const text = fc.oneof(
+			subjects,
+			fc.string({ unit: fc.constantFrom(...'rReE[]:x \t\n\u00a0\u3000'), maxLength: 16 }),
+		);
+		fc.assert(
+			fc.property(text, (subject) => {
+				const trimmed = subject.trim();
+				expect(replySubject(subject)).toBe(pattern.test(trimmed) ? trimmed : `Re: ${trimmed}`);
+			}),
+			{ numRuns: 4000 },
+		);
+	});
+
+	it('reads a subject of long white space runs in linear time', () => {
+		const spaces = ' '.repeat(100_000);
+		const cases: [subject: string, reply: string][] = [
+			[`re${spaces}x`, `Re: re${spaces}x`],
+			[`re${spaces}[a]${spaces}x`, `Re: re${spaces}[a]${spaces}x`],
+			[`re${spaces}[${'a'.repeat(100_000)}`, `Re: re${spaces}[${'a'.repeat(100_000)}`],
+			[`re${spaces}:x`, `re${spaces}:x`],
+		];
+		const started = performance.now();
+		for (const [subject, reply] of cases) expect(replySubject(subject)).toBe(reply);
+		// The two runs of white space either side of the blob used to be split every way.
+		expect(performance.now() - started).toBeLessThan(1000);
 	});
 	it('always adds Fwd:', () => {
 		expect(forwardSubject('Re: Lunch')).toBe('Fwd: Re: Lunch');
