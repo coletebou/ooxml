@@ -83,8 +83,20 @@ const records = (value: unknown): Raw[] =>
 const num = (value: unknown, fallback = 0): number =>
 	typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
+export interface ArchiveImportOptions {
+	/** Total bytes of pictures and files an import may take (default 512 MiB). */
+	maxMediaBytes?: number;
+}
+
 /** Read an archive back as a snapshot. Throws `NotebookArchiveError` when it is not one. */
-export async function importNotebookArchive(bytes: Uint8Array): Promise<NotebookSnapshot> {
+export async function importNotebookArchive(
+	bytes: Uint8Array,
+	options: ArchiveImportOptions = {},
+): Promise<NotebookSnapshot> {
+	// Each media entry is inflated once, however many containers name it, and all of them together
+	// stay within a budget: a small archive that names one entry thousands of times stays small.
+	const media = new Map<string, Uint8Array | null>();
+	let budget = options.maxMediaBytes ?? 512 * 1024 * 1024;
 	const zip = await openZip(bytes, { label: 'Notebook archive', maxTotalBytes: 512 * 1024 * 1024 });
 	const entry = zip.file(MANIFEST);
 	if (!entry) throw new NotebookArchiveError('Not a notebook archive: notebook.json is missing');
@@ -141,9 +153,15 @@ export async function importNotebookArchive(bytes: Uint8Array): Promise<Notebook
 		}
 		if (c.kind !== 'image' && c.kind !== 'file') continue;
 		const path = typeof c.media === 'string' ? c.media : '';
-		const file = path.startsWith('media/') ? zip.file(path) : null;
-		const data = file ? await file.async('uint8array') : undefined;
+		if (!media.has(path)) {
+			const file = path.startsWith('media/') ? zip.file(path) : null;
+			media.set(path, file ? await file.async('uint8array') : null);
+		}
+		const data = media.get(path);
 		if (!data || !data.length || data.length > MAX_FILE_BYTES) continue;
+		budget -= data.length;
+		if (budget < 0)
+			throw new NotebookArchiveError('This archive holds more media than an import takes');
 		const name = sanitizeFileName(c.name, c.kind === 'image' ? 'picture' : 'file');
 		const mime = sanitizeMime(c.mime);
 		const container: Container =

@@ -171,4 +171,34 @@ describe('notebook archive', () => {
 			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'x' }] },
 		]);
 	});
+
+	it('reads a media entry once and keeps the total within a budget', async () => {
+		const zip = new JSZip();
+		zip.file('media/a.png', new Uint8Array([1, 2, 3]));
+		const image = (id: string) => ({
+			id,
+			pageId: 'p1',
+			kind: 'image',
+			media: 'media/a.png',
+			name: 'a.png',
+			mime: 'image/png',
+		});
+		zip.file(
+			'notebook.json',
+			JSON.stringify({
+				format: 'ooxml-notebook',
+				version: 1,
+				sections: [{ id: 's1', kind: 'section', name: 'S' }],
+				pages: [{ id: 'p1', sectionId: 's1', title: 'P' }],
+				containers: [image('c1'), image('c2')],
+			}),
+		);
+		const bytes = await zip.generateAsync({ type: 'uint8array' });
+		const ok = await importNotebookArchive(bytes, { maxMediaBytes: 6 });
+		expect(ok.containers.map((c) => c.bytes)).toEqual([
+			new Uint8Array([1, 2, 3]),
+			new Uint8Array([1, 2, 3]),
+		]);
+		await expect(importNotebookArchive(bytes, { maxMediaBytes: 5 })).rejects.toThrow('more media');
+	});
 });
