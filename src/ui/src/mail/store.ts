@@ -5,6 +5,7 @@
 //   const stop = mail.subscribe(() => render(mail.getState()));
 //   await mail.search('from:ada invoice');
 import {
+	ENGLISH_QUOTE_FORMAT,
 	createDemoSeed,
 	createJmapTransport,
 	createMailClient,
@@ -91,6 +92,37 @@ export interface MailOptions {
 	 */
 	storage?: KeyValueStorage | null;
 	quoteFormat?: QuoteFormat;
+}
+
+/**
+ * Whether a client made for `a` serves `b` as well: the same connection, compared by value as
+ * `sameMailConnection` does, and the same address book, calendar and storage objects. A raw hook
+ * makes a new client only when this is false. The quote wording is not compared: a hook hands it
+ * on through `followQuoteFormat`, which needs no new client.
+ */
+export function sameMailOptions(
+	a: MailOptions | null | undefined,
+	b: MailOptions | null | undefined,
+): boolean {
+	if (!a || !b) return !a === !b;
+	return (
+		sameMailConnection(a.config, b.config) &&
+		a.contacts === b.contacts &&
+		a.calendar === b.calendar &&
+		a.storage === b.storage
+	);
+}
+
+/**
+ * Quote wording that is `current()` each time a reply or forward starts (English when there is
+ * none), for a raw hook to give `createMail` so that wording a host changes is used from then on.
+ */
+export function followQuoteFormat(current: () => QuoteFormat | undefined): QuoteFormat {
+	const format = (): QuoteFormat => current() ?? ENGLISH_QUOTE_FORMAT;
+	return {
+		attribution: (source) => format().attribution(source),
+		forwardHeader: (source) => format().forwardHeader(source),
+	};
 }
 
 /** `localStorage` when the page may use it, else nothing (private mode, sandboxed frames). */

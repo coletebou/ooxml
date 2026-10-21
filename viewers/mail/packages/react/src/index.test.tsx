@@ -2,7 +2,13 @@
 import { act, createElement, StrictMode, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createDemoSeed, createMemoryTransport, type MailTransport } from 'ooxml-core/mail';
+import {
+	createDemoSeed,
+	createMemoryContactStore,
+	createMemoryTransport,
+	emptyContact,
+	type MailTransport,
+} from 'ooxml-core/mail';
 import { MailApp, type MailClient, type MailConnection, type MailOptions } from 'mail-viewer';
 import { Mail, useMail } from './index';
 
@@ -157,6 +163,45 @@ describe('useMail', () => {
 			await act(() => new Promise((done) => setTimeout(done, 5)));
 		expect(destroy).toHaveBeenCalledOnce();
 		destroy.mockRestore();
+	});
+
+	it('makes a new client for a store given later, and keeps it for new quote wording', async () => {
+		const seen: (MailClient | null)[] = [];
+		function Probe({ options }: { options: MailOptions }): ReactElement {
+			seen.push(useMail(options).client);
+			return createElement('output');
+		}
+		const { root: view } = root();
+		const render = (options: MailOptions): Promise<void> =>
+			act(async () => view.render(createElement(Probe, { options })));
+		const config: MailConnection = { kind: 'demo', seed: { now: NOW } };
+		await render({ config });
+		const first = seen.at(-1)!;
+		// The host's own address book, given once it has loaded.
+		const contacts = createMemoryContactStore({
+			seed: [{ ...emptyContact('kim', 0), name: 'Kim from the host' }],
+		});
+		await render({ config, contacts });
+		const client = seen.at(-1)!;
+		expect(client).not.toBe(first);
+		await waitFor(() => client.getState().contacts.some((c) => c.name === 'Kim from the host'));
+		expect(client.getState().contacts.map((c) => c.name)).toEqual(['Kim from the host']);
+		// Quote wording written inline, new on every render: the same client, the latest wording.
+		const reply = async (said: string): Promise<string> => {
+			await render({
+				config,
+				contacts,
+				quoteFormat: { attribution: () => said, forwardHeader: () => [] },
+			});
+			expect(seen.at(-1)).toBe(client);
+			await waitFor(() => client.getState().status === 'ready');
+			const latest = client.getState().conversations[0]!.latestId;
+			expect(await client.compose('reply', latest)).toBe(true);
+			return client.getState().compose!.draft.text;
+		};
+		expect(await reply('Ada said:')).toContain('Ada said:');
+		expect(await reply('Ada wrote:')).toContain('Ada wrote:');
+		await act(async () => view.unmount());
 	});
 
 	it('keeps one client, and the transport it was given open, through StrictMode', async () => {

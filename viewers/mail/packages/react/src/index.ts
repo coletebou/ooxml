@@ -12,13 +12,13 @@ import {
 	bindMail,
 	createMail,
 	defineMailApp,
+	followQuoteFormat,
 	pickMailProps,
 	releaseMailClient,
-	sameMailConnection,
+	sameMailOptions,
 	type MailApp,
 	type MailBinding,
 	type MailClient,
-	type MailConnection,
 	type MailOptions,
 	type MailProps,
 	type MailState,
@@ -74,15 +74,17 @@ export const Mail = forwardRef<MailApp | null, MailProps & { className?: string 
 /** The client of an effect run that was cleaned up, while its release waits a moment. */
 interface Leaving {
 	client: MailClient;
-	config: MailConnection | undefined;
-	/** Call the release off: the effect ran again at once with the same connection. */
+	options: MailOptions;
+	/** Call the release off: the effect ran again at once with the same options. */
 	keep(): void;
 }
 
 /**
- * The raw hook: a core mail client for `options`, recreated when the connection changes and
- * destroyed on unmount (StrictMode's replay of the effect keeps it). Returns `null` until mounted
- * (and while `options` is `null`).
+ * The raw hook: a core mail client for `options`, recreated when the connection, the address book,
+ * the calendar or the storage changes, and destroyed on unmount (StrictMode's replay of the effect
+ * keeps it). Make the stores once (outside render, or in `useState`): a new one on every render
+ * would make a new client each time. The quote wording may change freely; replies use the latest.
+ * Returns `null` until mounted (and while `options` is `null`).
  *
  *   const client = useMailClient({ config: { kind: 'jmap', url, auth } });
  *   const state = useMailState(client);
@@ -91,23 +93,25 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 	const [client, setClient] = useState<MailClient | null>(null);
 	const latest = useRef(options);
 	latest.current = options;
-	// The connection is compared by value, so an inline `config` (a new object on every render)
-	// keeps the client; credentials are compared, never made part of a string key.
-	const connection = useRef(options?.config);
-	if (!sameMailConnection(connection.current, options?.config))
-		connection.current = options?.config;
-	const config = connection.current;
+	// The options the client was made for, kept while they make the same client: the connection
+	// is compared by value, so an inline `config` (a new object on every render) keeps the client,
+	// and credentials are compared, never made part of a string key.
+	const madeFor = useRef(options);
+	if (!sameMailOptions(madeFor.current, options)) madeFor.current = options;
+	const wanted = madeFor.current;
 	const leaving = useRef<Leaving | null>(null);
 	useEffect(() => {
 		const opts = latest.current;
 		const last = leaving.current;
 		leaving.current = null;
 		if (!opts) return;
-		// StrictMode runs the cleanup and the effect again at once: the same connection keeps its
+		// StrictMode runs the cleanup and the effect again at once: the same options keep their
 		// client, whose release (closing the host's transport) is called off.
-		const kept = last && sameMailConnection(last.config, opts.config) ? last : null;
+		const kept = last && sameMailOptions(last.options, opts) ? last : null;
 		kept?.keep();
-		const created = kept?.client ?? createMail(opts);
+		const created =
+			kept?.client ??
+			createMail({ ...opts, quoteFormat: followQuoteFormat(() => latest.current?.quoteFormat) });
 		setClient(created);
 		return () => {
 			// The open draft is saved (retried until it is) before the client goes.
@@ -115,10 +119,10 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 				if (leaving.current?.client === created) leaving.current = null;
 				void releaseMailClient(created);
 			});
-			leaving.current = { client: created, config: opts.config, keep: () => clearTimeout(release) };
+			leaving.current = { client: created, options: opts, keep: () => clearTimeout(release) };
 			setClient(null);
 		};
-	}, [options === null, config]);
+	}, [wanted]);
 	return client;
 }
 

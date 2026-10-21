@@ -1,8 +1,22 @@
 // @vitest-environment jsdom
-import { createMemoryTransport, type Draft } from 'ooxml-core/mail';
+import {
+	ENGLISH_QUOTE_FORMAT,
+	createMemoryCalendarStore,
+	createMemoryContactStore,
+	createMemoryTransport,
+	type Draft,
+	type MailMessage,
+	type QuoteFormat,
+} from 'ooxml-core/mail';
 import { editorHtml } from './compose-editor';
 import { DraftPictures } from './compose-pictures';
-import { createMail, sameMailConnection, type MailConnection } from './store';
+import {
+	createMail,
+	followQuoteFormat,
+	sameMailConnection,
+	sameMailOptions,
+	type MailConnection,
+} from './store';
 
 const jmap = (auth: Extract<MailConnection, { kind: 'jmap' }>['auth']): MailConnection => ({
 	kind: 'jmap',
@@ -88,6 +102,46 @@ describe('sameMailConnection', () => {
 			),
 		).toBe(false);
 		expect(sameMailConnection({ kind: 'transport', transport }, { kind: 'demo' })).toBe(false);
+	});
+});
+
+describe('sameMailOptions', () => {
+	it('keeps a client for an equal connection and the same stores, whatever the quote wording', () => {
+		const contacts = createMemoryContactStore();
+		const options = { config: jmap({ type: 'bearer', token: 'a' }), contacts, storage: null };
+		const wording = { attribution: () => 'Wrote:', forwardHeader: () => [] };
+		expect(
+			sameMailOptions(options, { ...options, config: jmap({ type: 'bearer', token: 'a' }) }),
+		).toBe(true);
+		expect(sameMailOptions(options, { ...options, quoteFormat: wording })).toBe(true);
+		expect(sameMailOptions(null, undefined)).toBe(true);
+	});
+
+	it('makes a new one for another connection, store or storage, or for none', () => {
+		const options = { config: jmap({ type: 'bearer', token: 'a' }) };
+		for (const other of [
+			{ ...options, config: jmap({ type: 'bearer', token: 'b' }) },
+			{ ...options, contacts: createMemoryContactStore() },
+			{ ...options, calendar: createMemoryCalendarStore() },
+			{ ...options, storage: null },
+			null,
+		])
+			expect(sameMailOptions(options, other)).toBe(false);
+	});
+});
+
+describe('followQuoteFormat', () => {
+	it('quotes with the wording given now, else in English', () => {
+		const source = { from: [{ name: 'Ada', email: 'ada@example.com' }], subject: 'Plans' };
+		let wording: QuoteFormat | undefined;
+		const format = followQuoteFormat(() => wording);
+		const message = source as unknown as MailMessage;
+		expect(format.attribution(message)).toBe(ENGLISH_QUOTE_FORMAT.attribution(message));
+		wording = { attribution: (m) => `${m.subject}, said:`, forwardHeader: () => ['Forwarded'] };
+		expect([format.attribution(message), format.forwardHeader(message)]).toEqual([
+			'Plans, said:',
+			['Forwarded'],
+		]);
 	});
 });
 
