@@ -27,6 +27,11 @@ import css from './reading-pane.css?raw';
 export type InlineUrls = (message: MailMessage) => Promise<ReadonlyMap<string, string>>;
 
 export class MailReadingPane extends MailElement {
+	/** Focus the first action of the toolbar (Back on a narrow app), where reading starts. */
+	override focus(options?: FocusOptions): void {
+		this.renderRoot.querySelector<HTMLElement>('.toolbar button')?.focus(options);
+	}
+
 	static override styles = mailStyles(css);
 	static override properties = {
 		...MailElement.properties,

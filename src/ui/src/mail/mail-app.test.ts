@@ -200,6 +200,20 @@ describe('<mail-app>', () => {
 		await until(() => !state(app).conversations.some((c) => c.id === id));
 	});
 
+	it('moves the focus into the reading pane when opening hides the list', async () => {
+		const app = await mount();
+		// A narrow app hides the list once a conversation is open (a container query jsdom cannot run).
+		const list = app.shadowRoot!.querySelector<HTMLElement>('.list-pane')!;
+		Object.defineProperty(list, 'checkVisibility', { value: () => false, configurable: true });
+		const id = state(app).conversations[0]!.id;
+		inner(app, 'mail-message-list')!.dispatchEvent(
+			new CustomEvent('mail-open', { detail: { id }, bubbles: true, composed: true }),
+		);
+		await until(() => app.shadowRoot!.activeElement?.tagName === 'MAIL-READING-PANE');
+		const pane = inner<HTMLElement>(app, 'mail-reading-pane')!;
+		expect(pane.shadowRoot!.activeElement?.closest('.toolbar')).not.toBeNull();
+	});
+
 	it('opens compose from the keyboard and closes it with Escape', async () => {
 		const app = await mount();
 		app.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, composed: true }));

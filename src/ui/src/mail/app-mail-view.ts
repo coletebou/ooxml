@@ -169,7 +169,7 @@ export function mailView(app: MailApp, mail: MailClient, state: MailState) {
 						const conversation = state.conversations.find((c) => c.id === e.detail.id);
 						if (conversation?.draft && conversation.count === 1 && role === 'drafts')
 							void mail.editDraft(conversation.emailIds[0]!);
-						else void mail.open(e.detail.id);
+						else void mail.open(e.detail.id).then(() => app.followOpened());
 					}}
 					@mail-toggle-select=${(e: CustomEvent<{ id: string }>) => mail.toggleSelected(e.detail.id)}
 					@mail-select-range=${(e: CustomEvent<{ id: string }>) => mail.selectRange(e.detail.id)}

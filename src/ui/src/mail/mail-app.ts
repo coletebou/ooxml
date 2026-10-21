@@ -26,7 +26,7 @@ import { icon } from './icons';
 import { commandFor, controlOwnsKey, isTyping } from './keyboard';
 import { defineMailMessageList } from './message-list';
 import { FocusReturn, focusFirst } from './modal';
-import { defineMailReadingPane } from './reading-pane';
+import { defineMailReadingPane, type MailReadingPane } from './reading-pane';
 import { shortcutsDialog } from './shortcuts-dialog';
 import { createMail, sameMailConnection, type MailConnection } from './store';
 import css from './mail-app.css?raw';
@@ -215,6 +215,20 @@ export class MailApp extends MailElement {
 	/** The translator of this element, for the view modules. */
 	i18nFor() {
 		return this.i18n;
+	}
+
+	/**
+	 * After the person opened a conversation from the list: on a narrow app the list hides, which
+	 * would drop the focus out of the app (and its shortcuts), so it follows into the reading pane.
+	 */
+	followOpened(): void {
+		void this.updateComplete.then(async () => {
+			const list = this.renderRoot.querySelector<HTMLElement>('.list-pane');
+			if (list?.checkVisibility?.() !== false) return;
+			const pane = this.renderRoot.querySelector<MailReadingPane>('mail-reading-pane');
+			await pane?.updateComplete;
+			pane?.focus();
+		});
 	}
 
 	focusSearch(): boolean {

@@ -77,7 +77,7 @@ export function runCommand(app: MailApp, mail: MailClient, command: MailCommand)
 		}
 		case 'open':
 			if (!state.focusedId) return false;
-			void mail.open(state.focusedId);
+			void mail.open(state.focusedId).then(() => app.followOpened());
 			return true;
 		case 'close':
 			return app.closeTopmost();
