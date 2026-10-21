@@ -149,13 +149,14 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 		async upload(bytes, type) {
 			await state.settle();
 			const blobId = state.nextId('b', blobs);
-			blobs.set(blobId, { bytes: bytes.slice(), type });
+			// Copied into memory of its own: `slice` of a Node Buffer is a view of the caller's.
+			blobs.set(blobId, { bytes: new Uint8Array(bytes), type });
 			return { blobId, type, size: bytes.length };
 		},
 		async download(blobId) {
 			await state.settle();
 			const blob = blobs.get(blobId);
-			if (blob) return blob.bytes.slice();
+			if (blob) return new Uint8Array(blob.bytes);
 			const owner = [...messages.values()].find((m) => m.blobId === blobId);
 			if (!owner) throw new MailTransportError('notFound', `No blob ${blobId}.`);
 			return messageBytes(owner, blobs, state.account.name);

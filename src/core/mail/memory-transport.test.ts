@@ -228,6 +228,44 @@ describe('createMemoryTransport', () => {
 		expect(readEmail(raw)).toMatchObject({ text: 'Our offer ends Friday.\n', html });
 	});
 
+	it('keeps a copy of its own of a file uploaded, and gives out copies of their own', async () => {
+		const transport = createMemoryTransport();
+		const read = async (blobId: string) =>
+			transport.download(blobId, { type: 'text/plain', name: 'notes.txt' });
+		// A small Buffer lies in memory Node shares between buffers, and `slice` of one is a view.
+		const given = Buffer.from('original');
+		const { blobId } = await transport.upload(given, 'text/plain');
+		given.fill(0x78);
+		const out = await read(blobId);
+		expect(new TextDecoder().decode(out)).toBe('original');
+		expect([out.constructor, out.byteOffset, out.buffer.byteLength]).toEqual([Uint8Array, 0, 8]);
+		out.fill(0x79);
+		expect(new TextDecoder().decode(await read(blobId))).toBe('original');
+	});
+
+	it('keeps a copy of its own of a message imported and of the parts of one delivered', async () => {
+		const transport = createMemoryTransport();
+		const text = 'Subject: Kept\r\n\r\nThe words\r\n';
+		const eml = Buffer.from(text);
+		const { id } = await transport.importMessage(eml, 'inbox');
+		eml.fill(0x20);
+		const { blobId } = await transport.message(id);
+		const raw = await transport.download(blobId, { type: 'message/rfc822', name: 'kept.eml' });
+		expect(new TextDecoder().decode(raw)).toBe(text);
+		const part = Buffer.from('notes');
+		const delivered = transport.deliver({
+			mailboxId: 'inbox',
+			from: me,
+			subject: 'Notes',
+			attachments: [{ name: 'notes.txt', type: 'text/plain', bytes: part }],
+			receivedAt: 2,
+		});
+		part.fill(0x20);
+		const [file] = (await transport.message(delivered)).attachments;
+		const bytes = await transport.download(file!.blobId, { type: 'text/plain', name: 'notes.txt' });
+		expect(new TextDecoder().decode(bytes)).toBe('notes');
+	});
+
 	it('sends a message to yourself where there is no Inbox once, into Sent', async () => {
 		const transport = createMemoryTransport({
 			mailboxes: DEFAULT_MAILBOXES.filter((mailbox) => mailbox.role !== 'inbox'),

@@ -117,7 +117,8 @@ function attachmentsOf(
 ): MailAttachment[] {
 	return attachments.map((attachment, index) => {
 		const blobId = `${id}-part-${index + 2}`;
-		blobs.set(blobId, { bytes: attachment.bytes, type: attachment.type });
+		// Copied, as every blob the transport keeps: the caller may reuse its bytes (a Node Buffer).
+		blobs.set(blobId, { bytes: new Uint8Array(attachment.bytes), type: attachment.type });
 		return {
 			partId: String(index + 2),
 			blobId,
@@ -236,7 +237,7 @@ export function messageFromRaw(
 			bytes: attachment.bytes,
 			type: attachment.type,
 		});
-	options.blobs.set(`${id}-raw`, { bytes, type: 'message/rfc822' });
+	options.blobs.set(`${id}-raw`, { bytes: new Uint8Array(bytes), type: 'message/rfc822' });
 	return toMailMessage(
 		parsed,
 		{
