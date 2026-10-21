@@ -203,6 +203,42 @@ describe('eventsToIcs', () => {
 		right(eventsToIcs(far, OPTIONS), 2026, 2500);
 	});
 
+	it('writes a series whose count no date reaches as one that does not end', () => {
+		// A crafted file's daily or weekly series of nearly a billion occurrences: its last one has
+		// no date, so its zone is covered as for a series without an end, and its count is kept.
+		const file = [
+			'BEGIN:VCALENDAR',
+			'VERSION:2.0',
+			'PRODID:-//Example//Test//EN',
+			'BEGIN:VEVENT',
+			'UID:huge@example.com',
+			'DTSTAMP:20260101T000000Z',
+			'DTSTART;TZID=America/New_York:20261015T090000',
+			'DTEND;TZID=America/New_York:20261015T100000',
+			'RRULE:FREQ=DAILY;COUNT=999999999',
+			'SUMMARY:Forever',
+			'END:VEVENT',
+			'END:VCALENDAR',
+			'',
+		].join('\r\n');
+		const [imported] = parseIcs(file).events;
+		expect(imported).toMatchObject({ repeat: 'daily', count: 999_999_999 });
+		for (const repeat of ['daily', 'weekly'] as const) {
+			const out = lines([{ ...imported!, repeat }]);
+			expect(vevent(out)).toContain(`RRULE:FREQ=${repeat.toUpperCase()};COUNT=999999999`);
+			const zone = readFileZone(
+				readComponents(out.join('\r\n')).components[0]!.components.find(
+					(c) => c.name === 'VTIMEZONE',
+				)!,
+			)!;
+			const summer = (year: number) => Date.UTC(year, 6, 15, 12);
+			for (const year of [2026, 2036])
+				expect(fileZoneOffset(zone, summer(year)), `${repeat} ${year}`).toBe(
+					offsetMinutes(summer(year), NY),
+				);
+		}
+	});
+
 	it('writes an all-day event as dates, its end the day after the last', () => {
 		const tokyo = 'Asia/Tokyo';
 		const out = vevent(

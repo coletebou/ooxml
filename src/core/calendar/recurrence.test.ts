@@ -1,6 +1,6 @@
 import type { CalendarEvent } from './model';
 import { occurrenceAt, occurrencesBetween } from './occurrences';
-import { seriesIndexOf } from './recurrence';
+import { seriesIndexOf, seriesStart } from './recurrence';
 import { DAY_MS, HOUR_MS, minuteOfDay, zonedToUtc } from './time-zone';
 
 const NY = 'America/New_York';
@@ -50,6 +50,18 @@ describe('recurrence end', () => {
 
 	it('ignores an end on an event that does not repeat', () => {
 		expect(starts(event({ repeat: 'none', count: 2 }), 0, 1e15)).toEqual([at(3, 2)]);
+	});
+
+	it('puts an occurrence past the last date there can be after every instant', () => {
+		// A count no calendar reaches (a crafted file's COUNT=999999999): later than any date, as the
+		// date of a monthly or yearly series past its scan limit is, never a time that cannot exist.
+		for (const repeat of ['daily', 'weekly', 'monthly', 'yearly'] as const) {
+			const m = event({ repeat, count: 999_999_999 });
+			expect(seriesStart(m, 999_999_998), repeat).toBe(Number.POSITIVE_INFINITY);
+			expect(seriesStart(m, 1), repeat).toBeGreaterThan(m.start);
+		}
+		expect(seriesStart(event(), 2)).toBe(at(3, 4));
+		expect(starts(event({ count: 999_999_999 }), at(3, 3), at(3, 5))).toEqual([at(3, 3), at(3, 4)]);
 	});
 
 	it('keeps the wall time across the autumn change for a weekly series', () => {

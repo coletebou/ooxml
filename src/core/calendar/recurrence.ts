@@ -30,7 +30,14 @@ export interface SeriesSlot {
 const stepDays = (meeting: Pick<RecurringSeries, 'repeat'>): number =>
 	meeting.repeat === 'daily' ? 1 : 7;
 
-/** The start of the `index`-th occurrence, ignoring the end of the series. */
+/** The last instant a `Date` holds (ECMA-262 21.4.1.1), less a day for the offset of any zone. */
+const LAST_INSTANT = 8.64e15 - DAY_MS;
+
+/**
+ * The start of the `index`-th occurrence, ignoring the end of the series. One past the last date
+ * there can be (a count no calendar reaches) starts after every instant, as one of a monthly or
+ * yearly series past its scan limit does.
+ */
 export function seriesStart(meeting: Series, index: number): number {
 	if (index === 0 || meeting.repeat === 'none') return meeting.start;
 	if (isCalendarRepeat(meeting.repeat)) {
@@ -38,7 +45,10 @@ export function seriesStart(meeting: Series, index: number): number {
 		return slot ? slotStart(meeting, slot) : Number.POSITIVE_INFINITY;
 	}
 	const anchor = zonedParts(meeting.start, meeting.zone);
-	return zonedToUtc({ ...anchor, day: anchor.day + index * stepDays(meeting) }, meeting.zone);
+	const wall = { ...anchor, day: anchor.day + index * stepDays(meeting) };
+	const naive = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second);
+	if (!(naive <= LAST_INSTANT)) return Number.POSITIVE_INFINITY;
+	return zonedToUtc(wall, meeting.zone);
 }
 
 /** Whether the series still has an occurrence at this index and start. */
