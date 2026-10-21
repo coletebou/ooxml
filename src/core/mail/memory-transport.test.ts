@@ -26,6 +26,31 @@ describe('createMemoryTransport', () => {
 		});
 	});
 
+	it('lists a message without its bodies, the parts of an html body included', async () => {
+		const transport = createMemoryTransport();
+		const raw = [
+			'Subject: Parts',
+			'Content-Type: multipart/mixed; boundary=b',
+			'',
+			'--b',
+			'Content-Type: text/html',
+			'',
+			'<p>Hello<!--',
+			'--b',
+			'Content-Type: text/html',
+			'',
+			'<p>Bye</p>',
+			'--b--',
+			'',
+		].join('\r\n');
+		const { id } = await transport.importMessage(new TextEncoder().encode(raw), 'inbox');
+		expect((await transport.message(id)).htmlParts).toHaveLength(2);
+		const [summary] = await transport.summaries([id]);
+		expect(summary?.subject).toBe('Parts');
+		for (const body of ['text', 'html', 'htmlParts', 'attachments'])
+			expect(summary, body).not.toHaveProperty(body);
+	});
+
 	it('keeps special-use folders and refuses to delete a folder that holds mail', async () => {
 		const transport = createMemoryTransport({
 			messages: [{ id: 'a', mailboxId: 'inbox', from: me, subject: 'x', receivedAt: 1 }],

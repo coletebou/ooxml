@@ -222,7 +222,15 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			return ids.flatMap((id) => {
 				const found = messages.get(id);
 				if (!found) return [];
-				const { text: _text, html: _html, attachments: _attachments, ...summary } = found;
+				// Every field only a whole message has (`MailMessage` beyond `EmailSummary`) stays out.
+				const {
+					text: _text,
+					html: _html,
+					htmlParts: _htmlParts,
+					attachments: _attachments,
+					truncated: _truncated,
+					...summary
+				} = found;
 				return [summary];
 			});
 		},
