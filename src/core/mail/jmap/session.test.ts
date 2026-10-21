@@ -2,17 +2,17 @@ import { MailTransportError } from '../transport';
 import { createJmapClient } from './client';
 import { sessionResourceUrl } from './http';
 import { accountHas, discoverJmapSession, mailAccountId, parseJmapSession } from './session';
-import { createFakeServer, json, rfcSession } from './test-support/fake-server';
+import {
+	createFakeServer,
+	json,
+	redirectedTo,
+	rfcSession,
+	type FakeServer,
+	type Recorded,
+} from './test-support/fake-server';
 import { MAIL, SUBMISSION } from './types';
 
 const auth = { type: 'bearer', token: 'tok-SECRET-1' } as const;
-
-/** `response` as fetch hands it back after following redirects to `url`. */
-function redirectedTo(url: string, response: Response): Response {
-	Object.defineProperty(response, 'redirected', { value: true });
-	Object.defineProperty(response, 'url', { value: url });
-	return response;
-}
 
 async function failure(promise: Promise<unknown>): Promise<MailTransportError> {
 	try {
@@ -266,6 +266,175 @@ describe('discoverJmapSession', () => {
 			maxObjectsInGet: 500,
 			maxObjectsInSet: 500,
 		});
+	});
+});
+
+describe('discoverJmapSession through redirects', () => {
+	const WELL_KNOWN = 'https://jmap.example.com/.well-known/jmap';
+	const HTTP_HOP = 'http://jmap.example.com/jmap/session';
+	const ATTACKER = 'https://attacker.example.net/jmap/session';
+	const API = 'https://api.example.net/jmap/session';
+
+	/** A valid session whose endpoints are on the attacker's own https server. */
+	const attackerSession = (): Record<string, unknown> => ({
+		...rfcSession(),
+		apiUrl: 'https://attacker.example.net/api/',
+		downloadUrl: 'https://attacker.example.net/download/{accountId}/{blobId}/{name}',
+		uploadUrl: 'https://attacker.example.net/upload/{accountId}/',
+	});
+	/** Serves `session` at `url` to a request with credentials, and asks for them (401) otherwise. */
+	const asksForCredentials = (
+		server: FakeServer,
+		url: string,
+		session: Record<string, unknown>,
+	): void =>
+		server.route(
+			(request) => request.url === url,
+			(request) =>
+				request.headers.authorization
+					? json(session)
+					: json({ type: 'about:blank', status: 401 }, 401),
+		);
+	const urls = (requests: readonly Recorded[]): string[] => requests.map((request) => request.url);
+	/** Where the credentials went, in order. */
+	const credentialsSentTo = (requests: readonly Recorded[]): string[] =>
+		urls(requests.filter((request) => request.headers.authorization !== undefined));
+
+	it('refuses a hop to plain http before taking it, though the chain comes back to https', async () => {
+		const server = createFakeServer();
+		// An on-path attacker answers the http hop with a redirect to a server of their own, which
+		// asks for the credentials.
+		server.redirect(WELL_KNOWN, HTTP_HOP);
+		server.redirect(HTTP_HOP, ATTACKER);
+		asksForCredentials(server, ATTACKER, attackerSession());
+		const outcome = await discoverJmapSession({
+			url: 'jmap.example.com',
+			auth,
+			fetch: server.fetch,
+		}).catch((error: unknown) => error);
+		expect(credentialsSentTo(server.requests)).toEqual([WELL_KNOWN]);
+		expect(urls(server.requests)).toEqual([WELL_KNOWN]);
+		expect(outcome).toMatchObject({ code: 'invalid' });
+		expect(String((outcome as Error).message)).not.toContain('tok-SECRET-1');
+	});
+
+	it('never sends the credentials where a session found past an http hop points', async () => {
+		const server = createFakeServer();
+		server.redirect(WELL_KNOWN, HTTP_HOP);
+		server.redirect(HTTP_HOP, ATTACKER);
+		// This one serves its session to anyone: the credentials would follow with the API calls.
+		server.route(
+			(request) => request.url.startsWith('https://attacker.example.net/'),
+			(request) =>
+				request.method === 'GET'
+					? json(attackerSession())
+					: json({ methodResponses: [], sessionState: '75128aab4b1b' }),
+		);
+		const client = createJmapClient({ url: 'jmap.example.com', auth, fetch: server.fetch });
+		const outcome = await client
+			.request((builder) => builder.call('Core/echo', {}))
+			.catch((error: unknown) => error);
+		expect(credentialsSentTo(server.requests)).toEqual([WELL_KNOWN]);
+		expect(urls(server.requests)).toEqual([WELL_KNOWN]);
+		expect(outcome).toMatchObject({ code: 'invalid' });
+	});
+
+	it('follows https redirects itself, keeping the credentials on the same origin', async () => {
+		const server = createFakeServer({ sessionUrl: 'https://jmap.example.com/jmap/session' });
+		server.redirect(WELL_KNOWN, '/jmap/', 301);
+		server.redirect('https://jmap.example.com/jmap/', 'session', 308);
+		const session = await discoverJmapSession({
+			url: 'jmap.example.com',
+			auth,
+			fetch: server.fetch,
+		});
+		expect(session.url).toBe('https://jmap.example.com/jmap/session');
+		expect(credentialsSentTo(server.requests)).toEqual([
+			WELL_KNOWN,
+			'https://jmap.example.com/jmap/',
+			'https://jmap.example.com/jmap/session',
+		]);
+		// Plain http stays fine on a loopback host, for development.
+		const local = createFakeServer({ sessionUrl: 'http://localhost:8080/jmap/session' });
+		local.session = { ...rfcSession(), apiUrl: 'http://localhost:8080/api/' };
+		local.redirect('http://localhost:8080/.well-known/jmap', '/jmap/session');
+		const developing = await discoverJmapSession({
+			url: 'http://localhost:8080',
+			auth,
+			fetch: local.fetch,
+		});
+		expect(developing.url).toBe('http://localhost:8080/jmap/session');
+	});
+
+	it('takes a cross-origin hop without the credentials, then asks that server with them', async () => {
+		const server = createFakeServer({ sessionUrl: API });
+		server.redirect(WELL_KNOWN, API);
+		asksForCredentials(server, API, rfcSession());
+		const session = await discoverJmapSession({
+			url: 'jmap.example.com',
+			auth,
+			fetch: server.fetch,
+		});
+		expect(session.url).toBe(API);
+		expect(urls(server.requests)).toEqual([WELL_KNOWN, API, API]);
+		expect(credentialsSentTo(server.requests)).toEqual([WELL_KNOWN, API]);
+	});
+
+	it('lets a browser follow the redirects it hides, as it blocks plain http itself', async () => {
+		const server = createFakeServer({ sessionUrl: API });
+		server.runtime = 'browser';
+		server.redirect(WELL_KNOWN, API);
+		asksForCredentials(server, API, rfcSession());
+		const session = await discoverJmapSession({
+			url: 'jmap.example.com',
+			auth,
+			fetch: server.fetch,
+		});
+		expect(session.url).toBe(API);
+		// Asked by hand first (the redirect comes back opaque), then followed, then asked again
+		// with the credentials the cross-origin hop dropped.
+		expect(urls(server.requests)).toEqual([WELL_KNOWN, WELL_KNOWN, API, API]);
+		expect(credentialsSentTo(server.requests)).toEqual([WELL_KNOWN, WELL_KNOWN, API]);
+
+		const attacked = createFakeServer();
+		attacked.runtime = 'browser';
+		attacked.redirect(WELL_KNOWN, HTTP_HOP);
+		attacked.redirect(HTTP_HOP, ATTACKER);
+		asksForCredentials(attacked, ATTACKER, attackerSession());
+		const blocked = await failure(
+			discoverJmapSession({ url: 'jmap.example.com', auth, fetch: attacked.fetch }),
+		);
+		expect(blocked.code).toBe('network');
+		expect(urls(attacked.requests)).toEqual([WELL_KNOWN, WELL_KNOWN]);
+	});
+
+	it('refuses a hop to an address it may not send credentials to, or cannot read', async () => {
+		// Built with the URL API, so the fake credentials never sit in the source as a literal address.
+		const withCredentials = new URL('https://jmap.example.com/jmap/session');
+		withCredentials.username = 'john';
+		withCredentials.password = 'hunter2';
+		for (const location of [withCredentials.href, HTTP_HOP, 'https://[jmap.example.com/']) {
+			const server = createFakeServer();
+			server.redirect(WELL_KNOWN, location);
+			const error = await failure(
+				discoverJmapSession({ url: 'jmap.example.com', auth, fetch: server.fetch }),
+			);
+			expect(error.code, location).toBe('invalid');
+			expect(error.message).not.toContain('hunter2');
+			expect(urls(server.requests), location).toEqual([WELL_KNOWN]);
+		}
+	});
+
+	it('gives up on a redirect loop after a few hops', async () => {
+		const server = createFakeServer();
+		server.redirect(WELL_KNOWN, 'https://jmap.example.com/jmap/session');
+		server.redirect('https://jmap.example.com/jmap/session', WELL_KNOWN);
+		const error = await failure(
+			discoverJmapSession({ url: 'jmap.example.com', auth, fetch: server.fetch }),
+		);
+		expect(error.code).toBe('server');
+		// The first request and five redirects.
+		expect(server.requests).toHaveLength(6);
 	});
 });
 

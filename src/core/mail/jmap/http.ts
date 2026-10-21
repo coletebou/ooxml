@@ -45,6 +45,10 @@ export interface JmapHttpInit {
 	signal?: AbortSignal;
 	/** Leave a failure status to `read` instead of throwing it. */
 	anyStatus?: boolean;
+	/** Hand a redirect back, to check where it goes before following it, instead of following it. */
+	redirect?: 'manual';
+	/** Leave the credentials out: a hop to another origin, where fetch drops them too. */
+	anonymous?: boolean;
 }
 
 export interface JmapHttp {
@@ -111,7 +115,9 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 		const doFetch = options.fetch ?? globalThis.fetch;
 		if (typeof doFetch !== 'function')
 			throw new MailTransportError('unsupported', 'This platform has no fetch.');
-		const headers = { ...init.headers, Authorization: authorization(options.auth) };
+		const headers = init.anonymous
+			? { ...init.headers }
+			: { ...init.headers, Authorization: authorization(options.auth) };
 		try {
 			return await doFetch(url, {
 				method: init.method,
@@ -119,7 +125,7 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 				...(init.body === undefined ? {} : { body: init.body }),
 				...(signal ? { signal } : {}),
 				credentials: 'omit',
-				redirect: 'follow',
+				redirect: init.redirect ?? 'follow',
 			});
 		} catch (error) {
 			if (signal?.aborted) throw abortReason(signal);

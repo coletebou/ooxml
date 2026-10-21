@@ -1,7 +1,7 @@
 // A fake JMAP server for the transport tests: a `fetch` that serves the session, runs method calls
 // (resolving result references as RFC 8620 3.7 says, with `Core/echo` built in), takes uploads,
-// serves downloads and holds event source streams open, recording every request. Nothing touches
-// the network.
+// serves downloads, holds event source streams open and follows redirects the way a server-side
+// or a browser fetch does, recording every request. Nothing touches the network.
 import fixture from '../__fixtures__/rfc8620-session.json';
 import { SUBMISSION, isRecord, type JmapInvocation, type JmapRequest } from '../types';
 
@@ -27,6 +27,15 @@ export interface FakeStream {
 	readonly closed: boolean;
 }
 
+/**
+ * Whose `fetch` the fake is when an answer is a redirect. `node` (the default) follows every hop,
+ * plain http included, and hands a redirect back as it is under `redirect: 'manual'`. `browser`
+ * (an https page) refuses plain http to anything but loopback as mixed content and hides a manual
+ * redirect behind an `opaqueredirect` response. Both drop `Authorization` on a hop to another
+ * origin, as fetch does.
+ */
+export type FakeRuntime = 'node' | 'browser';
+
 export interface FakeServer {
 	fetch: typeof fetch;
 	requests: Recorded[];
@@ -34,12 +43,15 @@ export interface FakeServer {
 	sessionUrl: string;
 	sessionState: string;
 	streams: FakeStream[];
+	runtime: FakeRuntime;
 	on(method: string, handler: MethodHandler): void;
 	/** Answers the requests `match` accepts with `respond` (newest route first). */
 	route(
 		match: (request: Recorded) => boolean,
 		respond: (request: Recorded) => Response | Promise<Response>,
 	): void;
+	/** Answers requests for `from` with a redirect (302 unless `status` says) to `location`. */
+	redirect(from: string, location: string, status?: number): void;
 	apiRequests(): JmapRequest[];
 	/** Every method call posted, in order. */
 	calls(): JmapInvocation[];
@@ -70,6 +82,31 @@ export const json = (
 		status,
 		headers: { 'Content-Type': 'application/json', ...headers },
 	});
+
+/** `response` as fetch hands it back after following redirects to `url`. */
+export function redirectedTo(url: string, response: Response): Response {
+	Object.defineProperty(response, 'redirected', { value: true });
+	Object.defineProperty(response, 'url', { value: url });
+	return response;
+}
+
+/** The statuses fetch follows (Fetch, "redirect status"). */
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+/** Fetch's own limit on redirects in a row. */
+const MAX_REDIRECTS = 20;
+
+/** What a browser on an https page refuses to fetch: plain http to anything but loopback. */
+function mixedContent(url: string): boolean {
+	const { protocol, hostname } = new URL(url);
+	return protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+}
+
+/** A browser's answer to `redirect: 'manual'`: no status, no headers, nothing about the target. */
+function opaqueRedirect(): Response {
+	const response = Response.error();
+	Object.defineProperty(response, 'type', { value: 'opaqueredirect' });
+	return response;
+}
 
 function unescape(token: string): string {
 	return token.replace(/~1/g, '/').replace(/~0/g, '~');
@@ -211,18 +248,11 @@ export function createFakeServer(
 		return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
 	};
 
-	const fakeFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-		const signal = init?.signal ?? undefined;
-		if (signal?.aborted) throw signal.reason;
-		const raw = init?.body;
-		const request: Recorded = {
-			method: init?.method ?? 'GET',
-			url: String(input),
-			headers: lower(init?.headers),
-			body: typeof raw === 'string' ? raw : null,
-			bytes: raw instanceof Uint8Array ? raw : null,
-		};
-		server.requests.push(request);
+	/** The server's answer to one request (one hop of a redirect chain). */
+	const answer = (
+		request: Recorded,
+		signal: AbortSignal | undefined,
+	): Response | Promise<Response> => {
 		const route = routes.find((candidate) => candidate.match(request));
 		if (route) return abortable(route.respond(request), signal);
 		if (request.method === 'GET' && request.url === server.sessionUrl) return json(server.session);
@@ -237,6 +267,42 @@ export function createFakeServer(
 		return json({ type: 'about:blank', status: 404, detail: 'Not found' }, 404);
 	};
 
+	const fakeFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+		const signal = init?.signal ?? undefined;
+		if (signal?.aborted) throw signal.reason;
+		const raw = init?.body;
+		let request: Recorded = {
+			method: init?.method ?? 'GET',
+			url: String(input),
+			headers: lower(init?.headers),
+			body: typeof raw === 'string' ? raw : null,
+			bytes: raw instanceof Uint8Array ? raw : null,
+		};
+		for (let hops = 0; ; hops++) {
+			// Blocked before it is sent, so the server never sees it.
+			if (server.runtime === 'browser' && mixedContent(request.url))
+				throw new TypeError('Failed to fetch: mixed content.');
+			server.requests.push(request);
+			const response = await answer(request, signal);
+			const location = REDIRECTS.has(response.status) ? response.headers.get('location') : null;
+			if (location === null) return hops ? redirectedTo(request.url, response) : response;
+			if (init?.redirect === 'manual')
+				return server.runtime === 'browser' ? opaqueRedirect() : response;
+			if (init?.redirect === 'error') throw new TypeError('Failed to fetch: a redirect.');
+			if (hops === MAX_REDIRECTS) throw new TypeError('Failed to fetch: too many redirects.');
+			const url = new URL(location, request.url).href;
+			const headers = { ...request.headers };
+			if (new URL(url).origin !== new URL(request.url).origin) delete headers.authorization;
+			// A 303, or a 301 or 302 answering a POST, goes on as a GET without the body.
+			const get =
+				response.status === 303 ||
+				(request.method === 'POST' && (response.status === 301 || response.status === 302));
+			request = get
+				? { method: 'GET', url, headers, body: null, bytes: null }
+				: { ...request, url, headers };
+		}
+	};
+
 	const server: FakeServer = {
 		fetch: fakeFetch as typeof fetch,
 		requests: [],
@@ -244,11 +310,18 @@ export function createFakeServer(
 		sessionUrl: options.sessionUrl ?? 'https://jmap.example.com/.well-known/jmap',
 		sessionState: '75128aab4b1b',
 		streams: [],
+		runtime: 'node',
 		on(method, handler) {
 			handlers.set(method, handler);
 		},
 		route(match, respond) {
 			routes.unshift({ match, respond });
+		},
+		redirect(from, location, status = 302) {
+			server.route(
+				(request) => request.url === from,
+				() => new Response(null, { status, headers: { Location: location } }),
+			);
 		},
 		apiRequests: () =>
 			server.requests
