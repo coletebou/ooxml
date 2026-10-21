@@ -89,6 +89,46 @@ describe('threadConversations (RFC 5256 REFERENCES)', () => {
 		expect(all).toEqual(['a', 'b', 'c']);
 	});
 
+	it('compares message ids case-sensitively, once their quoting is removed (RFC 5256 3)', () => {
+		const list = threadConversations(
+			[
+				summary('a', { messageId: 'Root.A@example.test', minute: 1 }),
+				summary('b', { references: ['root.a@example.test'], minute: 2 }),
+				summary('c', { messageId: '"Quoted.C"@example.test', minute: 3 }),
+				summary('d', { references: ['Quoted.C@example.test'], minute: 4 }),
+			],
+			{ bySubject: false },
+		);
+		expect(list.map(ids)).toEqual([['c@0', 'd@1'], ['b@0'], ['a@0']]);
+	});
+
+	it('links a References header of a hundred thousand ids without walking back each time', () => {
+		const references = Array.from({ length: 100_000 }, (_, i) => `r${i}@example.test`);
+		const started = performance.now();
+		const [only, ...others] = threadConversations([summary('m', { references })]);
+		const elapsed = performance.now() - started;
+		expect(others).toEqual([]);
+		expect(ids(only!)).toEqual(['m@0']);
+		// Each new id used to walk back through every id before it, five billion steps and many
+		// seconds; now it is milliseconds. Generous, so a loaded runner does not flake.
+		expect(elapsed).toBeLessThan(2000);
+	});
+
+	it('still refuses a reference loop through messages already linked', () => {
+		const list = threadConversations([
+			summary('a', { minute: 1, subject: 'Loop' }),
+			summary('b', { references: ['a@example.test'], minute: 2, subject: 'Re: Loop' }),
+			summary('c', { references: ['b@example.test'], minute: 3, subject: 'Re: Loop' }),
+			// Claims to be above its own ancestors: linking it there would close a loop.
+			summary('d', {
+				references: ['c@example.test', 'a@example.test'],
+				minute: 4,
+				subject: 'Re: Loop',
+			}),
+		]);
+		expect(list.map(ids)).toEqual([['a@0', 'b@1', 'c@2', 'd@1']]);
+	});
+
 	it('ignores messages without a subject when grouping', () => {
 		const list = threadConversations([
 			summary('a', { subject: '' }),

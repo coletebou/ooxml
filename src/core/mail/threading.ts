@@ -32,13 +32,29 @@ interface Container {
 /** When a message was written: its `Date` header, else when the server received it. */
 export const messageDate = (email: EmailSummary): number => email.sentAt ?? email.receivedAt;
 
-const cleanId = (id: string | undefined): string =>
-	(id ?? '').trim().replace(/^<|>$/g, '').toLowerCase();
+/** A quoted left part: `"a.b"@example.com`, with backslash escapes inside the quotes. */
+const QUOTED_LEFT = /^"((?:[^"\\]|\\.)*)"(@.*)$/s;
 
-const isAncestor = (ancestor: Container, node: Container | null): boolean => {
-	for (let at = node; at; at = at.parent) if (at === ancestor) return true;
+/**
+ * A Message-ID as RFC 5256 section 3 compares it: without angle brackets or the quoting of its
+ * left part (`"a.b"@x` is `a.b@x`), and with its case kept, since the comparison is case-sensitive.
+ */
+function cleanId(id: string | undefined): string {
+	const bare = (id ?? '').trim().replace(/^<|>$/g, '');
+	const quoted = QUOTED_LEFT.exec(bare);
+	return quoted ? `${quoted[1]!.replace(/\\(.)/gs, '$1')}${quoted[2]!}` : bare;
+}
+
+/**
+ * True when linking `child` below `parent` would close a loop, that is when `child` is `parent` or
+ * one of its ancestors. A container without children is nobody's ancestor, so a fresh one is
+ * linked without walking up from `parent`: a long References header stays linear.
+ */
+function wouldLoop(parent: Container, child: Container): boolean {
+	if (!child.children.length) return parent === child;
+	for (let at: Container | null = parent; at; at = at.parent) if (at === child) return true;
 	return false;
-};
+}
 
 const unlink = (child: Container): void => {
 	const parent = child.parent;
@@ -87,19 +103,14 @@ function linkMessages(emails: readonly EmailSummary[]): Container[] {
 		let previous: Container | undefined;
 		for (const ref of refs) {
 			const container = containerFor(ref);
-			if (
-				previous &&
-				container !== previous &&
-				!container.parent &&
-				!isAncestor(container, previous)
-			)
+			if (previous && !container.parent && !wouldLoop(previous, container))
 				link(previous, container);
 			previous = container;
 		}
 		// The message's own parent is its last reference, replacing a guessed one (1C).
 		if (previous !== own) {
 			unlink(own);
-			if (previous && !isAncestor(own, previous)) link(previous, own);
+			if (previous && !wouldLoop(previous, own)) link(previous, own);
 		}
 	}
 	return all.filter((container) => !container.parent);
