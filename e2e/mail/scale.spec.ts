@@ -17,7 +17,7 @@ test('the list still fills its pane after the app is moved in the page', async (
 	await openDemo(page, '?bulk=5000');
 	// Moved as a host moves it (a tab dragged to another panel): the same element, with its panes.
 	await page.evaluate(() => {
-		const app = document.querySelector('mail-app')!;
+		const app = document.querySelector<HTMLElement>('mail-app')!;
 		const panel = document.createElement('div');
 		panel.style.cssText = 'position:fixed;inset:0;display:flex;background:white;z-index:1';
 		document.body.append(panel);
