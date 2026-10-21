@@ -182,6 +182,13 @@ export interface TextSegment {
 	href?: string;
 }
 
+/** Where a found link points: an address becomes `mailto:`, a bare `www.` host `https://`. */
+function linkHref(value: string): string {
+	if (value.includes('@') && !/^https?:|^www\./i.test(value)) return `mailto:${value}`;
+	if (/^www\./i.test(value)) return `https://${value}`;
+	return value;
+}
+
 /** Plain text split into text and links (`https://...`, `www....`, addresses), never markup. */
 export function linkify(text: string): TextSegment[] {
 	const out: TextSegment[] = [];
@@ -193,13 +200,7 @@ export function linkify(text: string): TextSegment[] {
 		const start = match.index ?? 0;
 		if (start > at) out.push({ text: text.slice(at, start) });
 		const value = match[0];
-		const href =
-			value.includes('@') && !/^https?:|^www\./i.test(value)
-				? `mailto:${value}`
-				: /^www\./i.test(value)
-					? `https://${value}`
-					: value;
-		out.push({ text: value, href });
+		out.push({ text: value, href: linkHref(value) });
 		at = start + value.length;
 	}
 	if (at < text.length) out.push({ text: text.slice(at) });

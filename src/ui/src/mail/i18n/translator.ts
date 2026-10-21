@@ -3,7 +3,6 @@
 import {
 	SUPPORTED_OFFICE_LOCALES,
 	type MessageDictionary,
-	type MessageParams,
 	type OfficeLocale,
 } from 'ooxml-core/i18n';
 import {
@@ -25,7 +24,6 @@ export const MAIL_LOCALES = SUPPORTED_OFFICE_LOCALES;
 export type MailKey = keyof typeof en;
 export type MailPluralKey = PluralKeyOf<MailKey>;
 export type MailI18n = ProductI18n<MailKey>;
-export type MailTranslate = (key: MailKey, params?: MessageParams) => string;
 
 export const MAIL_MESSAGES: Readonly<Record<MailLocale, MessageDictionary>> = {
 	en,

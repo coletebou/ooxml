@@ -13,7 +13,7 @@ function targets(mail: MailClient): string[] {
 	return id ? [id] : [];
 }
 
-/** The conversation after `id` in the list (or before it at the end), for auto-advance. */
+/** The conversation after the last of `ids` in the list, else the last one left (auto-advance). */
 function neighbour(mail: MailClient, ids: readonly string[]): string | null {
 	const order = mail.getState().conversations.map((c) => c.id);
 	const last = Math.max(...ids.map((id) => order.indexOf(id)));
@@ -25,12 +25,10 @@ function neighbour(mail: MailClient, ids: readonly string[]): string | null {
 
 /** The newest message of the open (else focused) conversation, for reply and forward. */
 function latestMessage(mail: MailClient): string | null {
-	const state = mail.getState();
-	const id = state.open?.id ?? state.focusedId;
-	const conversation = state.conversations.find((c) => c.id === id);
-	if (state.open?.id === id && state.open.messages.length)
-		return state.open.messages.at(-1)!.summary.id;
-	return conversation?.emailIds.at(-1) ?? null;
+	const { open, focusedId, conversations } = mail.getState();
+	if (open?.messages.length) return open.messages.at(-1)!.summary.id;
+	const id = open?.id ?? focusedId;
+	return conversations.find((c) => c.id === id)?.emailIds.at(-1) ?? null;
 }
 
 async function moveAway(mail: MailClient, run: (ids: string[]) => Promise<void>): Promise<void> {

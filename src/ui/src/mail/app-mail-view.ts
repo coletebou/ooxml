@@ -3,18 +3,10 @@
 import { html, nothing } from 'lit';
 import type { MailAttachment, MailClient, MailMessage, MailState } from 'ooxml-core/mail';
 import { runCommand } from './app-commands';
+import { readFiles } from './attachments';
 import { icon } from './icons';
 import { folderLabel } from './labels';
 import type { MailApp } from './mail-app';
-
-const files = async (input: HTMLInputElement) =>
-	Promise.all(
-		[...(input.files ?? [])].map(async (file) => ({
-			name: file.name,
-			type: file.type,
-			bytes: new Uint8Array(await file.arrayBuffer()),
-		})),
-	);
 
 /** Save bytes as a download in the browser. */
 export function downloadBytes(doc: Document, bytes: Uint8Array, name: string, type: string): void {
@@ -28,12 +20,12 @@ export function downloadBytes(doc: Document, bytes: Uint8Array, name: string, ty
 }
 
 function topbar(app: MailApp, mail: MailClient, state: MailState) {
-	const t = app.i18nFor();
+	const i18n = app.i18nFor();
 	return html`<header class="topbar">
 		<button
 			type="button"
 			class="icon-button folders-toggle"
-			aria-label=${t.t('app.folders')}
+			aria-label=${i18n.t('app.folders')}
 			aria-expanded=${app.foldersOpen ? 'true' : 'false'}
 			@click=${() => (app.foldersOpen = !app.foldersOpen)}
 			>${icon('mail-menu')}</button
@@ -44,7 +36,7 @@ function topbar(app: MailApp, mail: MailClient, state: MailState) {
 			?disabled=${!state.canSend}
 			@click=${() => void mail.compose('new')}
 		>
-			${icon('pencil')}<span>${t.t('app.newMessage')}</span>
+			${icon('pencil')}<span>${i18n.t('app.newMessage')}</span>
 		</button>
 		<form
 			class="search"
@@ -62,17 +54,17 @@ function topbar(app: MailApp, mail: MailClient, state: MailState) {
 				name="q"
 				type="search"
 				.value=${state.query}
-				placeholder=${t.t('app.searchPlaceholder')}
-				aria-label=${t.t('app.search')}
+				placeholder=${i18n.t('app.searchPlaceholder')}
+				aria-label=${i18n.t('app.search')}
 				@search=${(e: Event) => !(e.currentTarget as HTMLInputElement).value && void mail.search('')}
 			/>
 			<select
-				aria-label=${t.t('app.searchScope')}
+				aria-label=${i18n.t('app.searchScope')}
 				.value=${state.searchScope}
 				@change=${(e: Event) => void mail.setSearchScope((e.currentTarget as HTMLSelectElement).value as 'mailbox' | 'all')}
 			>
-				<option value="mailbox">${t.t('app.scopeFolder')}</option>
-				<option value="all">${t.t('app.scopeAll')}</option>
+				<option value="mailbox">${i18n.t('app.scopeFolder')}</option>
+				<option value="all">${i18n.t('app.scopeAll')}</option>
 			</select>
 		</form>
 		<span class="account" title=${state.account?.name ?? ''}>${state.account?.name ?? ''}</span>
@@ -80,7 +72,7 @@ function topbar(app: MailApp, mail: MailClient, state: MailState) {
 }
 
 function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
-	const t = app.i18nFor();
+	const i18n = app.i18nFor();
 	const all =
 		state.conversations.length > 0 && state.selection.length === state.conversations.length;
 	const some = state.selection.length > 0;
@@ -94,33 +86,33 @@ function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
 			@click=${run}
 			>${icon(glyph)}</button
 		>`;
-	return html`<div class="list-toolbar" role="toolbar" aria-label=${t.t('app.listActions')}>
+	return html`<div class="list-toolbar" role="toolbar" aria-label=${i18n.t('app.listActions')}>
 		<input
 			type="checkbox"
-			aria-label=${t.t('app.selectAll')}
+			aria-label=${i18n.t('app.selectAll')}
 			.checked=${all}
 			.indeterminate=${some && !all}
 			@change=${() => (all ? mail.clearSelection() : mail.selectAll())}
 		/>
-		${button('mail-refresh', t.t('app.refresh'), () => void mail.refresh())}
-		${button('mail-archive', t.t('action.archive'), () => runCommand(app, mail, 'archive'), !some)}
-		${button('trash', t.t('action.delete'), () => runCommand(app, mail, 'delete'), !some)}
-		${button('mail-junk', t.t('action.junk'), () => runCommand(app, mail, 'junk'), !some)}
-		${button('mail-open', t.t('action.markRead'), () => void mail.markRead(true), !some)}
-		${button('mail-envelope', t.t('action.markUnread'), () => void mail.markRead(false), !some)}
-		${button('mail-flag', t.t('action.flag'), () => void mail.toggleFlagged(), !some)}
+		${button('mail-refresh', i18n.t('app.refresh'), () => void mail.refresh())}
+		${button('mail-archive', i18n.t('action.archive'), () => runCommand(app, mail, 'archive'), !some)}
+		${button('trash', i18n.t('action.delete'), () => runCommand(app, mail, 'delete'), !some)}
+		${button('mail-junk', i18n.t('action.junk'), () => runCommand(app, mail, 'junk'), !some)}
+		${button('mail-open', i18n.t('action.markRead'), () => void mail.markRead(true), !some)}
+		${button('mail-envelope', i18n.t('action.markUnread'), () => void mail.markRead(false), !some)}
+		${button('mail-flag', i18n.t('action.flag'), () => void mail.toggleFlagged(), !some)}
 		<span class="toolbar-spacer"></span>
-		${some ? html`<span class="selected-count">${t.tn('app.selected', state.selection.length)}</span>` : nothing}
-		<label class="toggle" title=${t.t('app.threadedHint')}>
+		${some ? html`<span class="selected-count">${i18n.tn('app.selected', state.selection.length)}</span>` : nothing}
+		<label class="toggle" title=${i18n.t('app.threadedHint')}>
 			<input
 				type="checkbox"
 				.checked=${state.threaded}
 				@change=${(e: Event) => mail.setThreaded((e.currentTarget as HTMLInputElement).checked)}
 			/>
-			<span>${t.t('app.threaded')}</span>
+			<span>${i18n.t('app.threaded')}</span>
 		</label>
-		<label class="icon-button" title=${t.t('app.importEml')}>
-			${icon('mail-import')}<span class="sr-only">${t.t('app.importEml')}</span>
+		<label class="icon-button" title=${i18n.t('app.importEml')}>
+			${icon('mail-import')}<span class="sr-only">${i18n.t('app.importEml')}</span>
 			<input
 				type="file"
 				accept=".eml,message/rfc822"
@@ -128,7 +120,7 @@ function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
 				hidden
 				@change=${async (e: Event) => {
 					const input = e.currentTarget as HTMLInputElement;
-					await mail.importEml(await files(input));
+					await mail.importEml(await readFiles(input.files));
 					input.value = '';
 				}}
 			/>
@@ -137,11 +129,12 @@ function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
 }
 
 export function mailView(app: MailApp, mail: MailClient, state: MailState) {
-	const role = state.mailboxes.find((m) => m.id === state.mailboxId)?.role ?? null;
+	const current = state.mailboxes.find((m) => m.id === state.mailboxId);
+	const role = current?.role ?? null;
 	const showRecipients = role === 'sent' || role === 'drafts';
 	const me = state.identities.map((identity) => identity.email);
-	const current = state.mailboxes.find((m) => m.id === state.mailboxId);
-	const t = app.i18nFor();
+	const i18n = app.i18nFor();
+	const listLabel = current ? folderLabel(current, i18n) : i18n.t('app.mail');
 	return html`${topbar(app, mail, state)}
 		<div class=${`panes${state.open ? ' reading' : ''}${app.foldersOpen ? ' folders-open' : ''}`}>
 			<mail-folder-pane
@@ -154,12 +147,12 @@ export function mailView(app: MailApp, mail: MailClient, state: MailState) {
 				@mail-create-folder=${(e: CustomEvent<{ name: string }>) => void mail.createMailbox(e.detail.name)}
 				@mail-rename-folder=${(e: CustomEvent<{ id: string; name: string }>) => void mail.renameMailbox(e.detail.id, e.detail.name)}
 				@mail-delete-folder=${(e: CustomEvent<{ id: string; name: string }>) => {
-					if (globalThis.confirm?.(t.t('folder.confirmDelete', { name: e.detail.name })) !== false)
-						void mail.deleteMailbox(e.detail.id);
+					const question = i18n.t('folder.confirmDelete', { name: e.detail.name });
+					if (globalThis.confirm?.(question) !== false) void mail.deleteMailbox(e.detail.id);
 				}}
 				@mail-move=${(e: CustomEvent<{ mailboxId: string; ids: string[] }>) => void mail.moveTo(e.detail.mailboxId, e.detail.ids)}
 			></mail-folder-pane>
-			<section class="list-pane" aria-label=${current ? folderLabel(current, t) : t.t('app.mail')}>
+			<section class="list-pane" aria-label=${listLabel}>
 				${listToolbar(app, mail, state)}
 				<mail-message-list
 					.conversations=${state.conversations}
@@ -172,9 +165,9 @@ export function mailView(app: MailApp, mail: MailClient, state: MailState) {
 					.recipients=${showRecipients}
 					.searching=${!!state.query}
 					@mail-open=${(e: CustomEvent<{ id: string }>) => {
-						const draft = state.conversations.find((c) => c.id === e.detail.id);
-						if (draft?.draft && draft.count === 1 && role === 'drafts')
-							void mail.editDraft(draft.emailIds[0]!);
+						const conversation = state.conversations.find((c) => c.id === e.detail.id);
+						if (conversation?.draft && conversation.count === 1 && role === 'drafts')
+							void mail.editDraft(conversation.emailIds[0]!);
 						else void mail.open(e.detail.id);
 					}}
 					@mail-toggle-select=${(e: CustomEvent<{ id: string }>) => mail.toggleSelected(e.detail.id)}

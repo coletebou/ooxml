@@ -3,8 +3,16 @@
 // dropped, so composing never loads a tracker). Every edit is an event; the client saves the draft
 // after a quiet moment, and Ctrl/Cmd+Enter sends.
 import { html, nothing, type PropertyValues } from 'lit';
-import type { ComposeState, Contact, Draft, Identity, MailAddress } from 'ooxml-core/mail';
+import type {
+	ComposeMode,
+	ComposeState,
+	Contact,
+	Draft,
+	Identity,
+	MailAddress,
+} from 'ooxml-core/mail';
 import { errorText } from './app-text';
+import { readFiles } from './attachments';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { fileSize } from './format';
 import type { MailKey } from './i18n/translator';
@@ -19,6 +27,14 @@ const escapeHtml = (text: string): string =>
 	text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 /** Plain text as editor HTML (lines become breaks). */
 const textHtml = (text: string): string => escapeHtml(text).replace(/\r?\n/g, '<br>');
+
+/** The title of the compose window in each mode. */
+const TITLES: Record<ComposeMode, MailKey> = {
+	new: 'compose.titleNew',
+	reply: 'compose.titleReply',
+	replyAll: 'compose.titleReply',
+	forward: 'compose.titleForward',
+};
 
 /** Editing command, glyph, label and command value of each formatting button. */
 const FORMATS: readonly { command: string; glyph: string; label: MailKey; value?: string }[] = [
@@ -133,13 +149,7 @@ export class MailCompose extends MailElement {
 	}
 
 	private async attachFiles(list: FileList | null | undefined): Promise<void> {
-		const files = await Promise.all(
-			[...(list ?? [])].map(async (file) => ({
-				name: file.name,
-				type: file.type,
-				bytes: new Uint8Array(await file.arrayBuffer()),
-			})),
-		);
+		const files = await readFiles(list);
 		if (files.length) this.emit('mail-draft-attach', { files });
 	}
 
@@ -181,13 +191,7 @@ export class MailCompose extends MailElement {
 		const compose = this.compose;
 		if (!compose) return nothing;
 		const draft = compose.draft;
-		const title = this.t(
-			compose.mode === 'reply' || compose.mode === 'replyAll'
-				? 'compose.titleReply'
-				: compose.mode === 'forward'
-					? 'compose.titleForward'
-					: 'compose.titleNew',
-		);
+		const title = this.t(TITLES[compose.mode]);
 		return html`<section
 			class=${`compose${this.dragging ? ' dragging' : ''}`}
 			role="dialog"

@@ -92,8 +92,8 @@ export function eventDialog(
 ) {
 	const t = i18n.t;
 	const original = draft.original;
-	const invalid = (name: string) => (issue && ISSUE_FIELD[issue] === name ? 'true' : 'false');
-	const described = (name: string) => (invalid(name) === 'true' ? 'event-issue' : nothing);
+	/** Whether the issue is about the field `name`. */
+	const flagged = (name: string): boolean => issue !== '' && ISSUE_FIELD[issue] === name;
 	const input = (name: string, label: MailKey, type: string, value: string, hidden = false) =>
 		html`<label ?hidden=${hidden}
 			><span>${t(label)}</span
@@ -101,8 +101,8 @@ export function eventDialog(
 				name=${name}
 				type=${type}
 				.value=${value}
-				aria-invalid=${invalid(name)}
-				aria-describedby=${described(name)}
+				aria-invalid=${String(flagged(name))}
+				aria-describedby=${flagged(name) ? 'event-issue' : nothing}
 		/></label>`;
 	const repeats = original && original.repeat !== 'none';
 	return html`<div class="overlay">

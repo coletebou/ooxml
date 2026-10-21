@@ -5,6 +5,8 @@ import { html } from 'lit';
 import type { Contact, ContactAddress } from 'ooxml-core/mail';
 import type { MailI18n, MailKey } from './i18n/translator';
 
+/** A whole date (`YYYY-MM-DD`): the only birthday a date input can show. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_TYPES = ['', 'home', 'work', 'other'];
 const PHONE_TYPES = ['', 'cell', 'home', 'work', 'fax', 'other'];
 const TYPE_LABELS: Record<string, MailKey> = {
@@ -67,7 +69,7 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 		</fieldset>
 		<fieldset>
 			<legend>${t('contacts.more')}</legend>
-			${field('birthday', t('contacts.birthday'), /^\d{4}-\d{2}-\d{2}$/.test(contact.birthday) ? contact.birthday : '', 'date')}
+			${field('birthday', t('contacts.birthday'), ISO_DATE.test(contact.birthday) ? contact.birthday : '', 'date')}
 			${field('url', t('contacts.website'), contact.url, 'url')}
 			<label
 				><span>${t('contacts.note')}</span
@@ -100,8 +102,7 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 	const country = value('country');
 	const first = base.addresses[0];
 	const hasPlace = street || locality || region || postalCode || country;
-	const birthday =
-		value('birthday') || (/^\d{4}-\d{2}-\d{2}$/.test(base.birthday) ? '' : base.birthday);
+	const birthday = value('birthday') || (ISO_DATE.test(base.birthday) ? '' : base.birthday);
 	return {
 		...base,
 		name: value('name'),

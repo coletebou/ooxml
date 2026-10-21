@@ -80,7 +80,6 @@ export class MailAttachmentPreview extends MailElement {
 						'mail-presentation-preview',
 					);
 				if (generation !== this.generation) return;
-				this.status = 'loading';
 				await this.updateComplete;
 				const viewer = this.renderRoot.querySelector<Viewer>(
 					'docx-editor, xlsx-editor, visio-viewer, mail-presentation-preview',

@@ -13,6 +13,7 @@ import {
 	type Occurrence,
 	DAY_MS,
 	localZone,
+	minuteOfDay,
 	monthGrid as monthDays,
 	occurrencesBetween,
 	shiftAnchor,
@@ -26,11 +27,12 @@ import { OfficeElement } from '../base';
 import { inheritLocale, LOCALE_HOST, pushLocale, type LocaleHost } from '../i18n/locale-host';
 import { rangeText } from './format';
 import { monthGrid } from './month-grid';
-import { timeGrid } from './time-grid';
+import { SLOT_MINUTES, timeGrid } from './time-grid';
 import type {
 	CalendarGlyph,
 	CalendarGridItem,
 	CalendarLabel,
+	CalendarUnit,
 	GridContext,
 	ShownOccurrence,
 } from './types';
@@ -43,7 +45,12 @@ export type * from './types';
 export const CALENDAR_GRID_CSS = `${gridCss}\n${monthCss}`;
 
 const FIRST_VISIBLE_HOUR = 8;
-const SLOT_MINUTES = 30;
+
+/** The period previous and next step by in a mode: the work week steps a whole week. */
+function stepUnit(mode: CalendarMode): CalendarUnit {
+	if (mode === 'day' || mode === 'month') return mode;
+	return 'week';
+}
 
 /**
  * The shared calendar view. Properties: `zone` (IANA, this device's by default), `now` (the clock,
@@ -126,8 +133,7 @@ export abstract class CalendarGridView<
 		const day = zonedParts(shown, this.zone);
 		if (startOfDay(shown, this.zone) !== startOfDay(now, this.zone))
 			return zonedToUtc({ year: day.year, month: day.month, day: day.day, hour: 9 }, this.zone);
-		const clock = zonedParts(now, this.zone);
-		const minute = (Math.floor((clock.hour * 60 + clock.minute) / SLOT_MINUTES) + 1) * SLOT_MINUTES;
+		const minute = (Math.floor(minuteOfDay(now, this.zone) / SLOT_MINUTES) + 1) * SLOT_MINUTES;
 		return zonedToUtc({ year: day.year, month: day.month, day: day.day, minute }, this.zone);
 	}
 
@@ -136,7 +142,7 @@ export abstract class CalendarGridView<
 		inheritLocale(this as unknown as LocaleHost);
 		this.setAttribute('role', 'region');
 		if (!this.anchor) this.anchor = this.clock();
-		// A phone opens on the day view, like the Teams mobile calendar.
+		// A phone opens on the day view, unless another mode was set or there is no day view.
 		const opening = (this.constructor as typeof CalendarGridView).defaultMode;
 		if (
 			globalThis.matchMedia?.('(max-width: 40em)').matches &&
@@ -239,7 +245,7 @@ export abstract class CalendarGridView<
 	}
 
 	private bar(days: readonly CalendarDay[], anchor: number) {
-		const unit = this.mode === 'day' ? 'day' : this.mode === 'month' ? 'month' : 'week';
+		const unit = stepUnit(this.mode);
 		return html`<div class="bar">
 			<h2 class="range" aria-live="polite"
 				>${rangeText(days, this.mode, anchor, this.zone, this.intlLocale())}</h2

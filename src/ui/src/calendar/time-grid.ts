@@ -9,15 +9,16 @@ import {
 	type PlacedOccurrence,
 	eventsByDay,
 	layoutDay,
+	minuteOfDay,
 	startOfDay,
-	zonedParts,
 	zonedToUtc,
 } from 'ooxml-core/calendar';
 import { eventChip } from './chip';
 import { dayName, eventTitle, hourLabel, timeRange, weekdayName } from './format';
 import type { CalendarGridItem, GridContext, ShownOccurrence } from './types';
 
-const SLOT_MINUTES = 30;
+/** The slot length, in minutes, that new events snap to. */
+export const SLOT_MINUTES = 30;
 
 /** The grid of `days`; `shown` are the occurrences around them. */
 export function timeGrid<E extends CalendarGridItem>(
@@ -26,8 +27,7 @@ export function timeGrid<E extends CalendarGridItem>(
 	shown: readonly ShownOccurrence<E>[],
 ) {
 	const today = startOfDay(view.now, view.zone);
-	const clock = zonedParts(view.now, view.zone);
-	const nowMinute = clock.hour * 60 + clock.minute;
+	const nowMinute = minuteOfDay(view.now, view.zone);
 	const timed = shown.filter((o) => o.dates === undefined);
 	const allDay = eventsByDay(
 		shown.filter((o) => o.dates !== undefined),

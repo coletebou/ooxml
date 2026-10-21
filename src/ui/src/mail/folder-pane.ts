@@ -48,8 +48,10 @@ export class MailFolderPane extends MailElement {
 			'name',
 		) as HTMLInputElement;
 		const name = input.value.trim();
-		if (name)
-			this.emit(id ? 'mail-rename-folder' : 'mail-create-folder', id ? { id, name } : { name });
+		if (name) {
+			if (id) this.emit('mail-rename-folder', { id, name });
+			else this.emit('mail-create-folder', { name });
+		}
 		this.editing = '';
 		this.creating = false;
 	}

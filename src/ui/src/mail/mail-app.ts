@@ -85,6 +85,9 @@ export class MailApp extends MailElement {
 	private startedWith: MailConnection | null = null;
 	private stops: (() => void)[] = [];
 	private toastId = 0;
+	/** Each message's inline image URLs, by message id, and the object URLs to revoke on stop. */
+	private inline = new Map<string, Promise<ReadonlyMap<string, string>>>();
+	private objectUrls: string[] = [];
 	private readonly onKey = (event: KeyboardEvent): void => this.keydown(event);
 
 	constructor() {
@@ -174,13 +177,16 @@ export class MailApp extends MailElement {
 	notify(notice: MailNotice): void {
 		this.emit('mail-notice', notice);
 		const id = ++this.toastId;
-		const tone = notice.kind === 'done' ? 'done' : notice.kind;
 		const undo = notice.kind === 'done' ? notice.undo : undefined;
 		this.toasts = [
 			...this.toasts.slice(-2),
-			{ id, text: noticeText(notice, this.i18n), tone, ...(undo ? { undo } : {}) },
+			{ id, text: noticeText(notice, this.i18n), tone: notice.kind, ...(undo ? { undo } : {}) },
 		];
-		setTimeout(() => (this.toasts = this.toasts.filter((toast) => toast.id !== id)), TOAST_MS);
+		setTimeout(() => this.dismissToast(id), TOAST_MS);
+	}
+
+	private dismissToast(id: number): void {
+		this.toasts = this.toasts.filter((toast) => toast.id !== id);
 	}
 
 	private keydown(event: KeyboardEvent): void {
@@ -252,9 +258,6 @@ export class MailApp extends MailElement {
 		});
 	}
 
-	private inline = new Map<string, Promise<ReadonlyMap<string, string>>>();
-	private objectUrls: string[] = [];
-
 	/** Object URLs of a message's inline (`cid:`) images, made once per message. */
 	inlineUrls(message: MailMessage): Promise<ReadonlyMap<string, string>> {
 		const known = this.inline.get(message.id);
@@ -318,7 +321,7 @@ export class MailApp extends MailElement {
 										type="button"
 										@click=${() => {
 											void toast.undo!();
-											this.toasts = this.toasts.filter((t) => t.id !== toast.id);
+											this.dismissToast(toast.id);
 										}}
 										>${this.t('notice.undo')}</button
 									>`
@@ -328,7 +331,7 @@ export class MailApp extends MailElement {
 							type="button"
 							class="dismiss"
 							aria-label=${this.t('notice.dismiss')}
-							@click=${() => (this.toasts = this.toasts.filter((t) => t.id !== toast.id))}
+							@click=${() => this.dismissToast(toast.id)}
 							>${icon('close')}</button
 						>
 					</div>`,

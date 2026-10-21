@@ -8,6 +8,7 @@ import {
 	emptyContact,
 	searchContacts,
 	type Contact,
+	type ContactAddress,
 } from 'ooxml-core/mail';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { contactForm, readContactForm } from './contact-form';
@@ -18,6 +19,25 @@ import css from './contacts-pane.css?raw';
 const newId = (): string =>
 	globalThis.crypto?.randomUUID?.() ??
 	`contact-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** A contact's initials on the colour of its first address. */
+function avatar(contact: Contact, large = false) {
+	const email = contact.emails[0]?.address;
+	return html`<span
+		class=${large ? 'avatar large' : 'avatar'}
+		style=${`--hue:${hueOf(email ?? contact.id)}`}
+		aria-hidden="true"
+		>${initials({ name: contactLabel(contact), email: email ?? '' })}</span
+	>`;
+}
+
+/** A postal address on one line: street, extended, postal code and city, region, country. */
+function postalLine(place: ContactAddress): string {
+	const city = [place.postalCode, place.locality].filter(Boolean).join(' ');
+	return [place.street, place.extended, city, place.region, place.country]
+		.filter(Boolean)
+		.join(', ');
+}
 
 export class MailContacts extends MailElement {
 	static override styles = mailStyles(css);
@@ -68,12 +88,7 @@ export class MailContacts extends MailElement {
 			value ? html`<dt>${label}</dt><dd>${value}</dd>` : nothing;
 		return html`<article class="detail">
 			<header>
-				<span
-					class="avatar large"
-					style=${`--hue:${hueOf(contact.emails[0]?.address ?? contact.id)}`}
-					aria-hidden="true"
-					>${initials({ name: contactLabel(contact), email: contact.emails[0]?.address ?? '' })}</span
-				>
+				${avatar(contact, true)}
 				<div>
 					<h2>${contactLabel(contact) || this.t('contacts.unnamed')}</h2>
 					${contact.title || contact.organization ? html`<p class="sub">${[contact.title, contact.organization].filter(Boolean).join(', ')}</p>` : nothing}
@@ -116,12 +131,23 @@ export class MailContacts extends MailElement {
 							>`,
 				)}
 				${contact.phones.map((phone) => html`<dt>${this.t('contacts.phone')}</dt><dd>${phone.number}${phone.type ? html` <small>${phone.type}</small>` : nothing}</dd>`)}
-				${place ? line(this.t('contacts.address'), [place.street, place.extended, [place.postalCode, place.locality].filter(Boolean).join(' '), place.region, place.country].filter(Boolean).join(', ')) : nothing}
+				${place ? line(this.t('contacts.address'), postalLine(place)) : nothing}
 				${line(this.t('contacts.birthday'), contact.birthday)}
 				${line(this.t('contacts.website'), contact.url)}
 				${line(this.t('contacts.note'), contact.note)}
 			</dl>
 		</article>`;
+	}
+
+	/** The form while editing, else the selected contact, else a note that none is selected. */
+	private mainView(selected: Contact | undefined) {
+		if (this.editing)
+			return contactForm(this.editing, this.i18n, {
+				save: (e) => this.save(e),
+				cancel: () => (this.editing = null),
+			});
+		if (selected) return this.detail(selected);
+		return html`<p class="empty">${this.t('contacts.nothingSelected')}</p>`;
 	}
 
 	protected override render() {
@@ -173,12 +199,7 @@ export class MailContacts extends MailElement {
 									this.editing = null;
 								}}
 							>
-								<span
-									class="avatar"
-									style=${`--hue:${hueOf(contact.emails[0]?.address ?? contact.id)}`}
-									aria-hidden="true"
-									>${initials({ name: contactLabel(contact), email: contact.emails[0]?.address ?? '' })}</span
-								>
+								${avatar(contact)}
 								<span class="who"
 									><strong>${contactLabel(contact) || this.t('contacts.unnamed')}</strong
 									><small>${contact.emails[0]?.address ?? contact.organization}</small></span
@@ -188,18 +209,7 @@ export class MailContacts extends MailElement {
 				</ul>
 				${visible.length ? nothing : html`<p class="empty">${this.t(this.contacts.length ? 'contacts.noMatches' : 'contacts.empty')}</p>`}
 			</section>
-			<section class="main">
-				${
-					this.editing
-						? contactForm(this.editing, this.i18n, {
-								save: (e) => this.save(e),
-								cancel: () => (this.editing = null),
-							})
-						: selected
-							? this.detail(selected)
-							: html`<p class="empty">${this.t('contacts.nothingSelected')}</p>`
-				}
-			</section>
+			<section class="main">${this.mainView(selected)}</section>
 		</div>`;
 	}
 }

@@ -101,10 +101,13 @@ export class MailReadingPane extends MailElement {
 		this.expanded = next;
 	}
 
+	/** Whether an address is one of the person's own. */
+	private isMe(address: MailAddress): boolean {
+		return this.me.some((own) => sameAddress(own, address));
+	}
+
 	private person(address: MailAddress): string {
-		return this.me.some((own) => sameAddress(own, address))
-			? this.t('reading.me')
-			: formatAddress(address);
+		return this.isMe(address) ? this.t('reading.me') : formatAddress(address);
 	}
 
 	private body(view: OpenMessageView) {
@@ -164,6 +167,16 @@ export class MailReadingPane extends MailElement {
 		const from = summary.from[0];
 		const open = this.expanded.has(summary.id);
 		const recipients = [...summary.to, ...summary.cc];
+		const to = recipients.length
+			? this.t('reading.to', {
+					names: names(
+						recipients.map((a) =>
+							this.isMe(a) ? { name: this.t('reading.me'), email: a.email } : a,
+						),
+						this.i18n,
+					),
+				})
+			: '';
 		const draft = summary.keywords[DRAFT] === true;
 		return html`<article
 			class=${`message${open ? ' open' : ''}${summary.keywords.$seen ? '' : ' unread'}`}
@@ -181,22 +194,7 @@ export class MailReadingPane extends MailElement {
 					>
 					<span class="who">
 						<strong>${from ? this.person(from) : this.t('list.noSender')}</strong>
-						<span class="to"
-							>${
-								recipients.length
-									? this.t('reading.to', {
-											names: names(
-												recipients.map((a) =>
-													this.me.some((own) => sameAddress(own, a))
-														? { name: this.t('reading.me'), email: a.email }
-														: a,
-												),
-												this.i18n,
-											),
-										})
-									: ''
-							}</span
-						>
+						<span class="to">${to}</span>
 					</span>
 					<time>${fullDate(summary.sentAt ?? summary.receivedAt, this.i18n)}</time>
 				</button>
