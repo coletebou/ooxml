@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act, createElement, type ReactElement } from 'react';
+import { act, createElement, StrictMode, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { MailApp, MailClient, MailOptions } from 'mail-viewer';
+import { createDemoSeed, createMemoryTransport, type MailTransport } from 'ooxml-core/mail';
+import { MailApp, type MailClient, type MailConnection, type MailOptions } from 'mail-viewer';
 import { Mail, useMail } from './index';
 
 beforeAll(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true));
@@ -15,6 +16,26 @@ function root(): { root: Root; container: HTMLElement } {
 	const container = document.createElement('div');
 	document.body.append(container);
 	return { root: createRoot(container), container };
+}
+
+/** The demo mailbox through a transport of the host's own, which records when it is closed. */
+function hostTransport(): { transport: MailTransport; closed: () => boolean } {
+	const base = createMemoryTransport(createDemoSeed({ now: NOW }));
+	let closed = false;
+	const transport: MailTransport = {
+		...base,
+		close() {
+			closed = true;
+			base.close();
+		},
+	};
+	return { transport, closed: () => closed };
+}
+
+/** Let React and the clients run for `ms`, `times` times or until `done`. */
+async function waitFor(done: () => boolean, ms = 5, times = 200): Promise<void> {
+	for (let i = 0; i < times && !done(); i++)
+		await act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 }
 
 describe('<Mail>', () => {
@@ -51,6 +72,58 @@ describe('<Mail>', () => {
 		await act(async () => view.unmount());
 		expect(el.client).toBeNull();
 	});
+
+	it('gives the element its connection before it starts, so no demo mailbox shows first', async () => {
+		// Outside act(), React runs the effects in their real order: the passive ones come after the
+		// element's first update (and, in a browser, after a paint).
+		vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', false);
+		const started: (MailConnection | null)[] = [];
+		const proto = MailApp.prototype as unknown as { start(): void };
+		const start = proto.start;
+		const spy = vi.spyOn(proto, 'start').mockImplementation(function (this: MailApp) {
+			started.push(this.config);
+			start.call(this);
+		});
+		try {
+			const { root: view } = root();
+			const config: MailConnection = { kind: 'demo', seed: { now: NOW, bulk: 3 } };
+			view.render(createElement(Mail, { config }));
+			for (let i = 0; i < 40; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+			expect(started).toEqual([config]);
+			view.unmount();
+		} finally {
+			spy.mockRestore();
+			vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+		}
+	});
+
+	it('keeps its element, client and the transport it was given through StrictMode', async () => {
+		const { transport, closed } = hostTransport();
+		const { root: view, container } = root();
+		await act(async () => {
+			view.render(
+				createElement(
+					StrictMode,
+					null,
+					createElement(Mail, { config: { kind: 'transport', transport } }),
+				),
+			);
+		});
+		const el = container.querySelector('mail-app') as MailApp;
+		await el.updateComplete;
+		const client = el.client;
+		await waitFor(() => client?.getState().status === 'ready');
+		await waitFor(() => false, 10, 5);
+		expect([container.querySelectorAll('mail-app').length, el.client, closed()]).toEqual([
+			1,
+			client,
+			false,
+		]);
+		expect(client?.getState().status).toBe('ready');
+		await act(async () => view.unmount());
+		await waitFor(closed);
+		expect(closed()).toBe(true);
+	});
 });
 
 describe('useMail', () => {
@@ -84,5 +157,28 @@ describe('useMail', () => {
 			await act(() => new Promise((done) => setTimeout(done, 5)));
 		expect(destroy).toHaveBeenCalledOnce();
 		destroy.mockRestore();
+	});
+
+	it('keeps one client, and the transport it was given open, through StrictMode', async () => {
+		// StrictMode runs the effect, its cleanup and the effect again: the client of the first run
+		// is the one kept, so the cleanup in between must not close the host's transport.
+		const { transport, closed } = hostTransport();
+		const options: MailOptions = { config: { kind: 'transport', transport } };
+		const seen = new Set<MailClient>();
+		function Probe(): ReactElement {
+			const { client, state } = useMail(options);
+			if (client) seen.add(client);
+			return createElement('output', null, state?.status ?? 'none');
+		}
+		const { root: view, container } = root();
+		await act(async () => {
+			view.render(createElement(StrictMode, null, createElement(Probe)));
+		});
+		await waitFor(() => ['ready', 'error'].includes(container.textContent ?? ''));
+		await waitFor(() => false, 10, 5);
+		expect([container.textContent, closed(), seen.size]).toEqual(['ready', false, 1]);
+		await act(async () => view.unmount());
+		await waitFor(closed);
+		expect(closed()).toBe(true);
 	});
 });
