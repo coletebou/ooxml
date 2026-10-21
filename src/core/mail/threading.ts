@@ -46,14 +46,33 @@ function cleanId(id: string | undefined): string {
 }
 
 /**
- * True when linking `child` below `parent` would close a loop, that is when `child` is `parent` or
- * one of its ancestors. A container without children is nobody's ancestor, so a fresh one is
- * linked without walking up from `parent`: a long References header stays linear.
+ * The root of `container`'s tree. While links are only added (one References header), a root found
+ * once stays an ancestor of each container on the way up to it, so `roots` keeps it for them and
+ * the next walk from any of them starts there.
  */
-function wouldLoop(parent: Container, child: Container): boolean {
-	if (!child.children.length) return parent === child;
-	for (let at: Container | null = parent; at; at = at.parent) if (at === child) return true;
-	return false;
+function rootOf(container: Container, roots: Map<Container, Container>): Container {
+	const path: Container[] = [];
+	let at = container;
+	for (let up = roots.get(at) ?? at.parent; up; up = roots.get(at) ?? at.parent) {
+		path.push(at);
+		at = up;
+	}
+	for (const below of path) roots.set(below, at);
+	return at;
+}
+
+/**
+ * True when linking `child`, which has no parent, below `parent` would close a loop: when `child`
+ * is the root of `parent`'s tree. A container without children is nobody's ancestor, so a fresh one
+ * is linked without walking up from `parent`: a long References header stays linear, and with the
+ * roots it found (`roots`) one that repeats its ids walks up once, not once per repetition.
+ */
+function wouldLoop(
+	parent: Container,
+	child: Container,
+	roots = new Map<Container, Container>(),
+): boolean {
+	return child.children.length ? rootOf(parent, roots) === child : parent === child;
 }
 
 const unlink = (child: Container): void => {
@@ -101,13 +120,15 @@ function linkMessages(emails: readonly EmailSummary[]): Container[] {
 			.map(cleanId)
 			.filter(Boolean);
 		let previous: Container | undefined;
+		const roots = new Map<Container, Container>();
 		for (const ref of refs) {
 			const container = containerFor(ref);
-			if (previous && !container.parent && !wouldLoop(previous, container))
+			if (previous && !container.parent && !wouldLoop(previous, container, roots))
 				link(previous, container);
 			previous = container;
 		}
-		// The message's own parent is its last reference, replacing a guessed one (1C).
+		// The message's own parent is its last reference, replacing a guessed one (1C). Unlinking it
+		// leaves the roots found above wrong for its own tree, so this walk starts afresh.
 		if (previous !== own) {
 			unlink(own);
 			if (previous && !wouldLoop(previous, own)) link(previous, own);

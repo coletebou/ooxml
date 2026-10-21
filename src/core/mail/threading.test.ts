@@ -114,6 +114,44 @@ describe('threadConversations (RFC 5256 REFERENCES)', () => {
 		expect(elapsed).toBeLessThan(2000);
 	});
 
+	it('walks a long References chain once however often the header repeats its ends', () => {
+		const n = 60_000;
+		const chain = Array.from({ length: n }, (_, i) => `r${i}@example.test`);
+		// Each repeated first id would close a loop under the last, and stays without a parent; each
+		// other id at the bottom of the chain is checked again from as deep.
+		const repeats = Array.from({ length: n }, (_, i) => [chain[0]!, chain[n - 1 - (i % 100)]!]);
+		const started = performance.now();
+		const [only, ...others] = threadConversations([
+			summary('m', { references: [...chain, ...repeats.flat()] }),
+		]);
+		const elapsed = performance.now() - started;
+		expect(others).toEqual([]);
+		expect(ids(only!)).toEqual(['m@0']);
+		// Each repeat used to walk the whole chain again: 3.6 billion steps. Generous, so a loaded
+		// runner does not flake.
+		expect(elapsed).toBeLessThan(2000);
+	});
+
+	it('links repeated ids where the algorithm does, and refuses the loops', () => {
+		const list = threadConversations([
+			summary('a', { minute: 1, subject: 'Loop' }),
+			summary('b', { references: ['a@example.test'], minute: 2, subject: 'Re: Loop' }),
+			// Under b, then a again, which would close a loop: the message stays under a, its last id.
+			summary('c', {
+				references: ['b@example.test', 'a@example.test', 'b@example.test', 'a@example.test'],
+				minute: 3,
+				subject: 'Re: Loop',
+			}),
+			// x and a placeholder p under it, then both again: x would close a loop under p.
+			summary('d', {
+				references: ['x@example.test', 'p@example.test', 'x@example.test', 'p@example.test'],
+				minute: 4,
+				subject: 'Other',
+			}),
+		]);
+		expect(list.map(ids)).toEqual([['d@0'], ['a@0', 'b@1', 'c@1']]);
+	});
+
 	it('still refuses a reference loop through messages already linked', () => {
 		const list = threadConversations([
 			summary('a', { minute: 1, subject: 'Loop' }),
