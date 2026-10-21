@@ -1,10 +1,13 @@
 // vCard 3.0 and 2.1 lines the address book keeps as read, written for the vCard 4.0 the export
 // declares. An inline binary PHOTO, LOGO, SOUND or KEY (`ENCODING=b;TYPE=JPEG` in 3.0,
-// `ENCODING=BASE64` or a bare `JPEG;BASE64` in 2.1) becomes the `data:` URI (RFC 2397) that 4.0
-// writes instead: 4.0 has no ENCODING parameter, and those properties are URIs there (RFC 6350
-// sections 6.2.4, 6.6.3, 6.7.5 and 6.8.1). Used by `vcard-write.ts`. New code.
+// `ENCODING=BASE64`, quoted-printable or a bare `JPEG;BASE64` in 2.1) becomes the `data:` URI
+// (RFC 2397) that 4.0 writes instead: 4.0 has no ENCODING parameter, and those properties are URIs
+// there (RFC 6350 sections 6.2.4, 6.6.3, 6.7.5 and 6.8.1). Any other quoted-printable value, an
+// encoding 3.0 already dropped (RFC 2426 section 5), becomes the text it encodes. Used by
+// `vcard-write.ts`. New code.
 import { splitContentLine } from '../calendar/ics-lines';
-import { parseLine } from './vcard-lines';
+import { encodeBase64 } from '../digest/base64';
+import { decodeValue, isQuotedPrintable, parseLine, quotedPrintableBytes } from './vcard-lines';
 
 const BINARY = new Set(['PHOTO', 'LOGO', 'SOUND', 'KEY']);
 
@@ -31,21 +34,36 @@ function mediaType(property: string, type: string): string {
 
 /**
  * A kept line as vCard 4.0 writes it: an inline binary value as a `data:` URI, with the line's
- * group and its other parameters; any other line as it is.
+ * group and its other parameters; a quoted-printable one as the text it encodes, a line break in
+ * it as `\n` (RFC 6350 3.4), without the encoding and the charset (4.0 is UTF-8 alone, 3.1); any
+ * other line as it is.
  */
 export function vcard4Line(line: string): string {
 	const property = parseLine(line);
 	const parts = splitContentLine(line);
-	if (!property || !parts || !BINARY.has(property.name)) return line;
+	if (!property || !parts) return line;
+	const quoted = isQuotedPrintable(property);
 	const types = property.params.TYPE ?? [];
 	const encoding = property.params.ENCODING?.[0]?.toUpperCase();
 	const base64 = (type: string): boolean => type.toUpperCase() === 'BASE64';
-	if (encoding !== 'B' && encoding !== 'BASE64' && !types.some(base64)) return line;
+	// A quoted-printable PHOTO is the image itself unless its value is a link (2.1 VALUE=URL).
+	const link = /^(?:URL|URI|CID|CONTENT-ID)$/i.test(property.params.VALUE?.[0] ?? '');
+	const inline =
+		BINARY.has(property.name) &&
+		(encoding === 'B' || encoding === 'BASE64' || types.some(base64) || (quoted && !link));
+	if (!inline) {
+		if (!quoted) return line;
+		const kept = parts.params.filter((param) => !/^\s*(?:ENCODING|CHARSET)\s*=/i.test(param));
+		const text = decodeValue(property).replace(/\r\n|\r|\n/g, '\\n');
+		return `${[parts.name, ...kept].join(';')}:${text}`;
+	}
 	const format = types.find((type) => !base64(type)) ?? '';
 	// The type, the encoding and the value type go into the URI; a bare 2.1 parameter is one of them.
 	const kept = parts.params.filter(
-		(param) => param.includes('=') && !/^\s*(?:TYPE|ENCODING|VALUE)\s*=/i.test(param),
+		(param) => param.includes('=') && !/^\s*(?:TYPE|ENCODING|VALUE|CHARSET)\s*=/i.test(param),
 	);
-	const data = property.value.replace(/\s+/g, '');
+	const data = quoted
+		? encodeBase64(quotedPrintableBytes(property.value))
+		: property.value.replace(/\s+/g, '');
 	return `${[parts.name, ...kept].join(';')}:data:${mediaType(property.name, format)};base64,${data}`;
 }

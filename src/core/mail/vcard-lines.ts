@@ -106,10 +106,9 @@ export function splitUnescaped(value: string, separator: ';' | ','): string[] {
 export const unescapeText = (value: string): string =>
 	value.replace(/\\([\\,;nN])/g, (_, c: string) => (c === 'n' || c === 'N' ? '\n' : c));
 
-export function decodeValue(property: Property): string {
-	if (!isQuotedPrintable(property)) return property.value;
+/** The bytes of a quoted-printable value: `=XX` is that byte, any other character its own. */
+export function quotedPrintableBytes(text: string): Uint8Array {
 	const bytes: number[] = [];
-	const text = property.value;
 	for (let i = 0; i < text.length; i++) {
 		const hex = text.slice(i + 1, i + 3);
 		if (text[i] === '=' && /^[0-9A-F]{2}$/i.test(hex)) {
@@ -117,10 +116,16 @@ export function decodeValue(property: Property): string {
 			i += 2;
 		} else bytes.push(text.charCodeAt(i) & 0xff);
 	}
+	return new Uint8Array(bytes);
+}
+
+export function decodeValue(property: Property): string {
+	if (!isQuotedPrintable(property)) return property.value;
+	const bytes = quotedPrintableBytes(property.value);
 	const charset = property.params.CHARSET?.[0] ?? 'utf-8';
 	try {
-		return new TextDecoder(charset).decode(new Uint8Array(bytes));
+		return new TextDecoder(charset).decode(bytes);
 	} catch {
-		return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+		return new TextDecoder('utf-8').decode(bytes);
 	}
 }

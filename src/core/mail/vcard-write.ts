@@ -1,8 +1,8 @@
 // vCard 4.0 (RFC 6350) export for the address book: one card per contact, CRLF line ends, folded at
 // 75 octets. Each edited field is escaped as its value type asks (text, the list components of `N`
 // and `ADR`, a URI), and the lines `Contact.extra` keeps follow as read, an inline 3.0 or 2.1
-// photo, logo, sound or key written as 4.0 has it (`vcard-legacy.ts`), so `vcard.ts` reads each
-// card back as it was. New code.
+// photo, logo, sound or key and a quoted-printable 2.1 value written as 4.0 has them
+// (`vcard-legacy.ts`), so `vcard.ts` reads each card back as it was. New code.
 import type { Contact } from './contacts';
 import { vcard4Line } from './vcard-legacy';
 

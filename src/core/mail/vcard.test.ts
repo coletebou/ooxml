@@ -159,12 +159,47 @@ describe('parseVCards', () => {
 		expect([contacts[0]?.note, skipped]).toEqual(['a==', 0]);
 	});
 
-	it('reads back the quoted-printable lines it keeps, folded the vCard 4.0 way', () => {
+	it('reads a quoted-printable line another program left in a 4.0 card, folded the 4.0 way', () => {
 		// 4.0 folds with a space after any character: here right after the `=` of `=41`.
 		const kept = `X-NOTE;ENCODING=QUOTED-PRINTABLE:${'a'.repeat(41)}=41b`;
-		const text = serializeVCards([{ ...emptyContact('u-1', 0), name: 'Ada', extra: [kept] }]);
-		expect(text).toContain(`${'a'.repeat(41)}=\r\n 41b`);
-		expect(parseVCards(text).contacts[0]?.extra).toEqual([kept]);
+		const text = [
+			'BEGIN:VCARD',
+			'VERSION:4.0',
+			'UID:u-1',
+			'FN:Ada',
+			kept.slice(0, 75),
+			` ${kept.slice(75)}`,
+			'END:VCARD',
+		].join('\r\n');
+		const { contacts } = parseVCards(text);
+		expect(contacts[0]?.extra).toEqual([kept]);
+		// Written out again, it is the text it encodes.
+		expect(serializeVCards(contacts)).toContain(`\r\nX-NOTE:${'a'.repeat(41)}Ab\r\n`);
+	});
+
+	it('writes the quoted-printable lines a 2.1 card kept as the 4.0 text they encode', () => {
+		const [card] = parseVCards(
+			[
+				'BEGIN:VCARD',
+				'VERSION:2.1',
+				'UID:qp',
+				'FN:Ada',
+				'NOTE;ENCODING=QUOTED-PRINTABLE:first=20note',
+				'NOTE;ENCODING=QUOTED-PRINTABLE:next=20call=0D=0Aline two',
+				'ROLE;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:B=C3=BCroleitung',
+				'END:VCARD',
+			].join('\r\n'),
+		).contacts;
+		const text = serializeVCards([card!]);
+		expect(text).not.toMatch(/ENCODING|CHARSET|=20|=C3/u);
+		expect(text.split('\r\n')).toEqual(
+			expect.arrayContaining(['NOTE:first note', 'NOTE:next call\\nline two', 'ROLE:Büroleitung']),
+		);
+		// Read again, the card says the same.
+		expect(parseVCards(text).contacts[0]).toMatchObject({
+			note: 'first note',
+			extra: ['NOTE:next call\\nline two', 'ROLE:Büroleitung'],
+		});
 	});
 
 	it('counts what it cannot read instead of dropping it silently', () => {

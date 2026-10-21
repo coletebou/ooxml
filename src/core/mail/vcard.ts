@@ -2,7 +2,8 @@
 // forms (bare TYPE parameters, quoted-printable values); `vcard-write.ts` writes 4.0. Properties
 // the contact model does not edit, and a second website, note, title, organization or name of a
 // card, are kept verbatim in `Contact.extra`, so an import then export keeps them (an inline 3.0 or
-// 2.1 photo, logo, sound or key written as 4.0 has it, `vcard-legacy.ts`). New code.
+// 2.1 photo, logo, sound or key and a quoted-printable 2.1 value written as 4.0 has them,
+// `vcard-legacy.ts`). New code.
 import { sha256 } from '../digest/sha256';
 import { emptyContact, type Contact, type ContactAddress } from './contacts';
 import {
