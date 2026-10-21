@@ -63,6 +63,19 @@ describe('parseDate', () => {
 		])
 			expect(parseDate(value)).toBeUndefined();
 	});
+
+	it('gives undefined, never NaN, for a year past the range of a date', () => {
+		// The last instant a date can hold is 13 September 275760, 00:00 UTC.
+		expect(parseDate('13 Sep 275760 00:00:00 +0000')).toBe(8.64e15);
+		for (const value of [
+			'Mon, 05 Jan 9999999 09:00:00 +0000',
+			'5 Jan 99999999999999999999 09:00 GMT',
+			'13 Sep 275760 00:00:01 +0000',
+			// In range as written, an hour past it in UTC.
+			'13 Sep 275760 00:00:00 -0100',
+		])
+			expect(parseDate(value)).toBeUndefined();
+	});
 });
 
 describe('formatDate', () => {

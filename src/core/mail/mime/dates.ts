@@ -122,7 +122,9 @@ function toTime(parts: Parts): number | undefined {
 		return undefined;
 	if (hour > 23 || minute > 59 || second > 59 || day < 1) return undefined;
 	if (day > new Date(Date.UTC(year, month + 1, 0)).getUTCDate()) return undefined;
-	return Date.UTC(year, month, day, hour, minute, second) - zone * 60_000;
+	const time = Date.UTC(year, month, day, hour, minute, second) - zone * 60_000;
+	// A year past what a date can hold is NaN here, and so is the zone moving the time out of range.
+	return Number.isNaN(new Date(time).getTime()) ? undefined : time;
 }
 
 /**
