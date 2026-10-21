@@ -14,7 +14,7 @@ test('the fork preview starts and serves its commit-specific suite and binary as
 	await mkdir(join(root, 'suite-dist/docs'), { recursive: true });
 	await writeFile(
 		join(root, 'suite-dist/docs/index.html'),
-		'<a href="../visio/">Visio</a><a href="../xlsx/getting-started">Excel</a><a href="../?suite">Office</a>',
+		'<a href="../visio/">Visio</a><a href="../xlsx/getting-started">Excel</a><a href="../mail/">Mail</a><a href="../?suite">Office</a>',
 	);
 	await cp(new URL('../site/index.html', import.meta.url), join(root, 'suite-dist/index.html'));
 	const binary = Buffer.from([0, 128, 255, 12]);
@@ -87,6 +87,7 @@ test('the fork preview starts and serves its commit-specific suite and binary as
 		powerpoint: 'pptx',
 		visio: 'vsdx',
 		teams: 'teams',
+		mail: 'mail',
 	})) {
 		const response = await fetch(new URL(`apps/${slug}/`, url));
 		assert.equal(response.status, 200);
@@ -95,6 +96,7 @@ test('the fork preview starts and serves its commit-specific suite and binary as
 	const docs = await (await fetch(new URL('docs/', url))).text();
 	assert.match(docs, /href="https:\/\/christophervr.github.io\/ooxml\/visio\/"/);
 	assert.match(docs, /href="https:\/\/christophervr.github.io\/ooxml\/xlsx\/getting-started"/);
+	assert.match(docs, /href="https:\/\/christophervr.github.io\/ooxml\/mail\/"/);
 	assert.match(docs, /href="\.\.\/\?suite"/);
 	const asset = await fetch(new URL('suite-assets/icon.png', url));
 	assert.equal(asset.headers.get('content-type'), 'image/png');

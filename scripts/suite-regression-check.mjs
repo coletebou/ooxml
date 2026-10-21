@@ -159,6 +159,32 @@ try {
 		statusInside: true,
 	});
 	console.log('Visio: flex host, ribbon and status bar in view, page fitted on open passed.');
+	// Mail runs on its in-memory demo mailbox. An Office attachment opens in the suite's own editor
+	// (not the app's read-only preview) as one library copy, however often it is opened; any other
+	// file keeps the app's preview.
+	await page.locator('#rail [data-mail]').click();
+	const mail = page.locator('mail-app');
+	await mail.locator('mail-message-list .row .subject', { hasText: 'Your trip to Lisbon' }).click();
+	for (let i = 0; i < 2; i++) {
+		await mail.getByRole('button', { name: 'Preview Itinerary.docx' }).click();
+		await expect(page.locator('#editors docx-editor [contenteditable=true]').first()).toContainText(
+			'Your trip to Lisbon',
+		);
+		await expect(mail.locator('mail-attachment-preview')).toHaveCount(0);
+		await page.locator('#tabs [data-mail]').click();
+	}
+	await expect(page.locator('#editors docx-editor')).toHaveCount(1);
+	await page.locator('#rail [data-home]').click();
+	await expect(page.locator('#files .file-name', { hasText: 'Itinerary.docx' })).toHaveCount(1);
+	await page.locator('#tabs [data-mail]').click();
+	await mail.locator('mail-message-list .row .subject', { hasText: 'Interview notes' }).click();
+	// The notes are on the first message of the thread, which opens folded.
+	await mail.locator('mail-reading-pane article.message button.summary').first().click();
+	await mail.getByRole('button', { name: 'Preview Interview notes.txt' }).click();
+	await expect(mail.locator('mail-attachment-preview')).toBeVisible();
+	console.log(
+		'Mail: an Office attachment opens once, as a library copy, in the suite editor; a text file keeps the preview.',
+	);
 	await page.evaluate(() => navigator.serviceWorker.ready);
 	await page.waitForFunction(() => !!navigator.serviceWorker.controller, {}, { timeout: 60000 });
 	const ids = new Set();
@@ -169,13 +195,14 @@ try {
 		'/apps/powerpoint/',
 		'/apps/visio/',
 		'/apps/teams/',
+		'/apps/mail/',
 	]) {
 		const response = await context.request.get(base + path + 'manifest.webmanifest');
 		assert(response.ok());
 		const manifest = await response.json();
 		ids.add(new URL(manifest.id, base + path).href);
 	}
-	assert.equal(ids.size, 6);
+	assert.equal(ids.size, 7);
 	await context.setOffline(true);
 	for (const [slug, kind] of [
 		['word', 'docx'],
@@ -183,12 +210,18 @@ try {
 		['powerpoint', 'pptx'],
 		['visio', 'vsdx'],
 		['teams', 'teams'],
+		['mail', 'mail'],
 	]) {
 		await page.goto(base + '/apps/' + slug + '/');
 		await expect(page.locator('body')).toHaveAttribute('data-product', kind);
 		await expect(page.locator('.workspace-sidebar')).toBeHidden();
 		if (kind === 'teams')
 			await expect(page.locator('office-ui-chat-composer textarea')).toBeVisible();
+		// The standalone Mail app opens straight on its mailbox, its attachments included.
+		else if (kind === 'mail')
+			await expect(
+				page.locator('mail-message-list .row .subject', { hasText: 'Your trip to Lisbon' }),
+			).toBeVisible();
 		else {
 			await page.locator(`[data-create=${kind}]`).click();
 			const editor = { pptx: '.pptxv', vsdx: 'visio-viewer' }[kind] ?? `${kind}-editor`;
@@ -204,33 +237,33 @@ try {
 	const fresh = await browser.newContext();
 	const visitor = await fresh.newPage();
 	await visitor.goto(base + '/');
-	await visitor.locator('#dialog [data-start=vsdx]').click();
+	await visitor.locator('#start-screen [data-start=vsdx]').click();
 	await visitor.waitForURL(base + '/visio/');
 	await visitor.goto(base + '/');
-	await visitor.locator('#dialog [data-start=office]').click();
-	await expect(visitor.locator('#dialog')).not.toBeVisible();
+	await visitor.locator('#start-screen [data-start=office]').click();
+	await expect(visitor.locator('#start-screen')).not.toBeVisible();
 	// The suite opens on chat; its rail leads to the file home.
 	await expect(visitor.locator('#chat-input')).toBeVisible();
 	await visitor.locator('#rail [data-home]').click();
 	await visitor.locator('[data-create=docx]').click();
 	await expect(visitor.locator('docx-editor')).toBeVisible();
 	await visitor.reload();
-	await expect(visitor.locator('#dialog [data-start=office]')).toBeVisible();
+	await expect(visitor.locator('#start-screen [data-start=office]')).toBeVisible();
 	assert.equal(await visitor.evaluate(() => sessionStorage.length), 0);
 	await visitor.goto(base + '/?suite#/');
 	await expect(visitor.locator('[data-create=docx]')).toBeVisible();
-	await expect(visitor.locator('#dialog')).not.toBeVisible();
+	await expect(visitor.locator('#start-screen')).not.toBeVisible();
 	// Every new visit asks again, and nothing of the suite shows or loads until it is picked.
 	const again = await fresh.newPage();
 	const editorChunks = [];
 	again.on('request', (r) => /suite-assets\/main-/.test(r.url()) && editorChunks.push(r.url()));
 	await again.goto(base + '/');
-	await expect(again.locator('#dialog [data-start=office]')).toBeVisible();
+	await expect(again.locator('#start-screen [data-start=office]')).toBeVisible();
 	await expect(again.locator('#upload')).not.toBeVisible();
 	assert.deepEqual(editorChunks, []);
 	await again.keyboard.press('Escape');
-	await expect(again.locator('#dialog')).toBeVisible();
-	await again.locator('#dialog [data-start=office]').click();
+	await expect(again.locator('#start-screen')).toBeVisible();
+	await again.locator('#start-screen [data-start=office]').click();
 	// Each app's view has its own create button beside Upload.
 	await again.locator('#rail [data-app=xlsx]').click();
 	await expect(again.locator('#create-new')).toHaveText('New workbook');
@@ -241,7 +274,7 @@ try {
 	await fresh.close();
 	assert.deepEqual(errors, []);
 	console.log(
-		'Start chooser asks on every visit, opens product sites and asks again on reload; apps have create buttons. PWA: six distinct manifests; all standalone pages and suite reopen offline; Word/Excel/PowerPoint/Visio create offline.',
+		'Start chooser asks on every visit, opens product sites and asks again on reload; apps have create buttons. PWA: seven distinct manifests; all standalone pages and suite reopen offline; Word/Excel/PowerPoint/Visio create offline; Mail opens its mailbox offline.',
 	);
 } finally {
 	await browser.close();

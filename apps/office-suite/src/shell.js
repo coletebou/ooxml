@@ -5,7 +5,7 @@ import { shellLayout } from './shell-layout.js';
 /**
  * Adapt the shell to phones: size it to the visible viewport (address bar, on-screen keyboard),
  * fold the chrome away in landscape and offer the document actions as one More menu.
- * `state()` returns `{ view, documents, teamsOpen }` for the current render; the returned
+ * `state()` returns `{ view, documents, teamsOpen, mailOpen }` for the current render; the returned
  * function re-applies the layout after the state changes.
  */
 export function mountShell(state) {

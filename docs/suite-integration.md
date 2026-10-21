@@ -1,6 +1,6 @@
 # OOXML Office application
 
-The suite mounts the real Word, Excel, PowerPoint, Visio and OpenTeams components in one application. `apps/office-suite/src` owns host UI and framework wiring; `src/ui/src/suite` owns browser document persistence. Office parsing, editing and serialization remain in `src/core`.
+The suite mounts the real Word, Excel, PowerPoint, Visio, OpenTeams and OpenMail components in one application. `apps/office-suite/src` owns host UI and framework wiring; `src/ui/src/suite` owns browser document persistence. Office parsing, editing and serialization remain in `src/core`.
 
 ## Account and workspace UI
 
@@ -19,6 +19,7 @@ Local profiles are organizational conveniences, not authentication or authorizat
 - Open native Office packages from a parent's `embeddings` directory. Saving updates child and parent atomically, with revision checks. Reopen a child after its parent changes. Binary OLE containers are offered for download only. Updating a chart workbook does not regenerate every external chart cache or object preview.
 - Open on **Chat**, the suite's front door: a conversation history (search, pin, rename, delete, grouped by date, kept per profile in IndexedDB), a model picker and starters for each app. Chat and the assistant pane beside an open document are the same chat, so a conversation moves between them ("Open in Chat"). The pane attaches the open document and suggests prompts for its app; **Ask AI** in the document command bar opens it.
 - Attach files explicitly (and optionally the current Teams conversation). The assistant reads current saved editor content and replies in Markdown; anything it wants done travels in one fenced `ooxml-actions` block that becomes cards. Edit cards propose bounded Word run, spreadsheet cell, PowerPoint run and Visio shape-text edits; applying one updates all targeted documents atomically, and Undo restores the prior snapshots if no intervening edit occurred. Create cards build a new Word document (title, headings, paragraphs, bullet and numbered lists), workbook (sheets of values and formulas) or deck (title slide and bulleted slides with notes) through `ooxml-core` and open it in a tab. AI proposals for embedded documents are read-only; use the editor for parent save-back.
+- Open **Mail** (the rail, the Start tile or the launcher; route `#/mail`) on the in-memory demo mailbox, with its calendar and contacts. Office attachments of 32 MB or less open in the suite's own editors as a library copy (opening the same attachment again reopens that copy); other attachments use the mail app's preview. The demo mailbox resets on reload, and the status bar says so.
 - Light, Dark and System appearance plus four accent themes. Preferences persist; the host updates open editors and Teams. Document page colours remain document content.
 
 ## Build and verification
@@ -48,7 +49,7 @@ OOXML Office is independent of Microsoft.
 
 ## Application package and installation
 
-`apps/office-suite` is the private workspace package `ooxml-office`. This is the application source used by the web and Tauri builds, not a demo wrapper or another Office logic library. It is not published to npm. Standalone app entry points are generated from the same source; each has a distinct manifest id and install scope under `apps/word/`, `apps/excel/`, `apps/powerpoint/`, `apps/visio/` and `apps/teams/`. They use one profile identity, library and theme preference on the same origin. Their app launcher links back to Office or the other standalone apps.
+`apps/office-suite` is the private workspace package `ooxml-office`. This is the application source used by the web and Tauri builds, not a demo wrapper or another Office logic library. It is not published to npm. Standalone app entry points are generated from the same source; each has a distinct manifest id and install scope under `apps/word/`, `apps/excel/`, `apps/powerpoint/`, `apps/visio/`, `apps/teams/` and `apps/mail/`. They use one profile identity, library and theme preference on the same origin. Their app launcher links back to Office or the other standalone apps.
 
 The service worker precaches generated shell/editor resources for offline use. It does not cache arbitrary network traffic, account endpoints, assistant calls or Teams server data. Installation requires a secure origin, and offline availability starts after initial asset caching succeeds. Updates wait for existing app windows to close. Offline chat remains local; this does not make network services available offline. The account menu provides installation guidance for browsers, including Safari on iOS. Desktop WebViews retain their bundled assets without depending on PWA installation.
 

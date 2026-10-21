@@ -48,12 +48,16 @@ test('the chooser opens bundled preview apps while the full site opens product s
 		preview = mode;
 		showChooser();
 		assert.match(markup, mode ? /open one app separately/ : /guides and demos/);
+		// Every product sits on the ring, Mail included.
+		for (const id of ['docx', 'xlsx', 'pptx', 'vsdx', 'teams', 'mail'])
+			assert.match(markup, new RegExp(`data-start="${id}"`));
 		for (const [id, site, app] of [
 			['docx', 'docx', 'word'],
 			['xlsx', 'xlsx', 'excel'],
 			['pptx', 'pptx', 'powerpoint'],
 			['vsdx', 'visio', 'visio'],
 			['teams', 'teams', 'teams'],
+			['mail', 'mail', 'mail'],
 			['docs', 'docs', null],
 		]) {
 			click({ target: { closest: () => ({ dataset: { start: id } }) } });

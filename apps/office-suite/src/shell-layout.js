@@ -9,11 +9,21 @@ export const SHORT_HEIGHT = 500;
  *
  * - `narrow`: the actions bar becomes one More button.
  * - `drawer`: the app rail becomes an off-canvas drawer (not in a standalone product, which has no rail).
- * - `hideTabs`: a lone open document on a narrow screen needs no tab strip (the brand returns home).
+ * - `hideTabs`: a lone open document on a narrow screen needs no tab strip (the brand returns home),
+ *   unless a Teams or Mail tab is open: the strip is the way back to it.
  * - `collapsible`: short editor views may fold the title bar, tabs and actions behind a toggle.
  * - `collapsed`: that fold is currently applied.
  */
-export function shellLayout({ width, height, view, documents, teamsOpen, expanded, standalone }) {
+export function shellLayout({
+	width,
+	height,
+	view,
+	documents,
+	teamsOpen,
+	mailOpen,
+	expanded,
+	standalone,
+}) {
 	const narrow = width <= NARROW_WIDTH;
 	const short = height <= SHORT_HEIGHT;
 	const editing = view === 'editor';
@@ -21,7 +31,7 @@ export function shellLayout({ width, height, view, documents, teamsOpen, expande
 	return {
 		narrow,
 		drawer: narrow && !standalone,
-		hideTabs: narrow && editing && documents === 1 && !teamsOpen,
+		hideTabs: narrow && editing && documents === 1 && !teamsOpen && !mailOpen,
 		collapsible,
 		collapsed: collapsible && !expanded,
 	};
