@@ -35,7 +35,7 @@ then use it here.
 `dark`), `server-config` (JSON) and `locale` as attributes, and `config` as a property. It emits
 four bubbling, composed events: `notebook-ready` (`{ user }`), `notebook-navigate`
 (`{ notebookId, sectionId, pageId }`), and the cancelable `notebook-open-file`
-(`{ name, mime, kind, bytes }`) and `notebook-export` (`{ fileName, mime, bytes, kind }`), whose
+(`{ id, name, mime, kind, bytes }`, `id` the container) and `notebook-export` (`{ fileName, mime, bytes, kind }`), whose
 default is a download. The props every binding forwards are `NotebookProps` in `ooxml-ui`'s
 `notebook/bind.ts`; `pickNotebookProps` copies exactly its data props, and a test fails when a
 new one is not picked.

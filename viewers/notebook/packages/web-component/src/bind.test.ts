@@ -102,6 +102,7 @@ describe('bindNotebook', () => {
 		const ready = { user: { id: 'u-ada', name: 'Ada' } };
 		const navigated = { notebookId: 'n1', sectionId: 's1', pageId: 'p1' };
 		const file: NotebookOpenFileDetail = {
+			id: 'c1',
 			name: 'plan.xlsx',
 			mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 			kind: 'xlsx',

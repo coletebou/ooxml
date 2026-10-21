@@ -27,7 +27,7 @@ All events bubble and cross shadow roots (`composed`).
 | -------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `notebook-ready`     | `{ user: { id, name } }`            | The notebook list is loaded and a notebook (if any) is open.                                                                                                                            |
 | `notebook-navigate`  | `{ notebookId, sectionId, pageId }` | The open notebook, section or page changed.                                                                                                                                             |
-| `notebook-open-file` | `{ name, mime, kind, bytes }`       | A user opened an embedded file. Cancelable: `preventDefault()` to open it yourself; by default it downloads. `kind` is `docx`, `xlsx`, `pptx`, `vsdx` or `other`.                       |
+| `notebook-open-file` | `{ id, name, mime, kind, bytes }`   | A user opened an embedded file. Cancelable: `preventDefault()` to open it yourself; by default it downloads. `kind` is `docx`, `xlsx`, `pptx`, `vsdx` or `other`.                       |
 | `notebook-export`    | `{ fileName, mime, bytes, kind }`   | A page export (`kind: 'docx'`), a notebook archive (`'archive'`) or a downloaded file (`'file'`) is ready. Cancelable: `preventDefault()` to save it yourself; by default it downloads. |
 
 Binding spellings: `onReady`, `onNavigate`, `onOpenFile` and `onExport` in React. The cancelable
