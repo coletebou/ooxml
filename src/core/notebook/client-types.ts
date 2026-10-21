@@ -42,6 +42,8 @@ export interface NotebookState {
 	mode: 'local' | 'server';
 	/** False when the device storage only lasts for this session (no IndexedDB, for example). */
 	persistent: boolean;
+	/** A save the device refused is still outstanding (the status must not say saved). */
+	unsaved: boolean;
 	user: { id: string; name: string; color: string };
 	notebooks: NotebookEntry[];
 	notebookId: string;
@@ -108,7 +110,8 @@ export interface NotebookClient {
 	setNotebookColor: (id: string, color: string) => void;
 	moveNotebook: (id: string, beforeId?: string) => void;
 	/** Moves a notebook to the device's recycle bin; `restoreNotebook` brings it back. */
-	deleteNotebook: (id: string) => Promise<void>;
+	/** False when the notebook stayed: its last changes could not be saved (save-failed says so). */
+	deleteNotebook: (id: string) => Promise<boolean>;
 	restoreNotebook: (id: string) => Promise<void>;
 
 	createSection: (input?: {

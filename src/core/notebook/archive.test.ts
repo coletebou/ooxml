@@ -201,4 +201,26 @@ describe('notebook archive', () => {
 		]);
 		await expect(importNotebookArchive(bytes, { maxMediaBytes: 5 })).rejects.toThrow('more media');
 	});
+
+	it('refuses an archive or a notebook with more items than an archive holds, instead of cutting it', async () => {
+		const zip = new JSZip();
+		const many = Array.from({ length: 500_001 }, () => ({}));
+		zip.file(
+			'notebook.json',
+			JSON.stringify({ format: 'ooxml-notebook', version: 1, sections: many }),
+		);
+		await expect(
+			importNotebookArchive(await zip.generateAsync({ type: 'uint8array' })),
+		).rejects.toThrow(NotebookArchiveError);
+		const snapshot = {
+			name: 'N',
+			color: '#202020',
+			created: 0,
+			sections: [],
+			pages: [],
+			containers: [],
+			strokes: many,
+		} as never;
+		await expect(exportNotebookArchive(snapshot)).rejects.toThrow(NotebookArchiveError);
+	});
 });

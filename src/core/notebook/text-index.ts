@@ -4,6 +4,7 @@
 // and diacritics; snippets are cut from the original text. New code.
 import * as Y from 'yjs';
 import type { PageEntry } from './model';
+import { MAX_ELEMENT_DEPTH } from './model';
 import { type TextBlock, type TodoState, readRichText, textBlocks } from './rich-text';
 import { type NotebookTypes, containerFragment, entityMap } from './schema';
 
@@ -197,7 +198,7 @@ function todoElements(fragment: Y.XmlFragment): Y.XmlElement[] {
 	const out: Y.XmlElement[] = [];
 	const walk = (items: readonly unknown[], depth: number): void => {
 		for (const item of items) {
-			if (!(item instanceof Y.XmlElement) || depth > 12) continue;
+			if (!(item instanceof Y.XmlElement) || depth > MAX_ELEMENT_DEPTH) continue;
 			const todo = item.getAttribute('todo');
 			if (
 				(item.nodeName === 'paragraph' || item.nodeName === 'heading') &&

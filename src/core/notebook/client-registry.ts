@@ -35,6 +35,7 @@ export interface RegistryStoreOptions {
 	firstRunWaitMs?: number;
 	onChange: () => void;
 	onError: (error: unknown, kind: 'load' | 'save') => void;
+	onSaved?: () => void;
 }
 
 export function createRegistryStore(options: RegistryStoreOptions): RegistryStore {
@@ -61,6 +62,7 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 			.then(
 				() => {
 					failed = null;
+					options.onSaved?.();
 				},
 				(error: unknown) => {
 					dirty = true;

@@ -29,7 +29,8 @@ import type { NotebookSnapshot, SnapshotContainer } from './snapshot';
 export const NOTEBOOK_ARCHIVE_FORMAT = 'ooxml-notebook';
 export const NOTEBOOK_ARCHIVE_VERSION = 1;
 const MANIFEST = 'notebook.json';
-const MAX_ITEMS = 50_000;
+/** Sections, pages, containers or strokes an archive holds at most (each); more is refused. */
+const MAX_ITEMS = 500_000;
 
 const EXTENSIONS: Record<string, string> = {
 	'image/png': 'png',
@@ -52,6 +53,9 @@ const mediaName = (c: Container): string => {
 
 /** A notebook snapshot as a zip archive. */
 export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise<Uint8Array> {
+	const counts = [snapshot.sections, snapshot.pages, snapshot.containers, snapshot.strokes];
+	if (counts.some((list) => list.length > MAX_ITEMS))
+		throw new NotebookArchiveError('This notebook holds more items than an archive takes');
 	const zip = new JSZip();
 	const containers = snapshot.containers.map(({ container, content, bytes }) => {
 		const media = bytes ? mediaName(container) : undefined;
@@ -76,10 +80,13 @@ export class NotebookArchiveError extends Error {
 }
 
 type Raw = Record<string, unknown>;
-const records = (value: unknown): Raw[] =>
-	Array.isArray(value)
-		? value.slice(0, MAX_ITEMS).filter((v): v is Raw => !!v && typeof v === 'object')
-		: [];
+const records = (value: unknown): Raw[] => {
+	if (!Array.isArray(value)) return [];
+	// A longer list is refused, not cut short: an import never drops part of a notebook unsaid.
+	if (value.length > MAX_ITEMS)
+		throw new NotebookArchiveError('This archive holds more items than an import takes');
+	return value.filter((v): v is Raw => !!v && typeof v === 'object');
+};
 const num = (value: unknown, fallback = 0): number =>
 	typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 

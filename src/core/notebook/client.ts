@@ -68,6 +68,8 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 
 	// Without a storage the notebooks still live for the session: closing one must not lose it.
 	const storage = options.storage ?? createMemoryStorage();
+	// Saves the device refused and not yet made good (the notebook's and the list's).
+	const unsaved = { notebook: false, registry: false };
 	const registry = createRegistryStore({
 		storage,
 		scope: sanitizeScope(options.scope),
@@ -75,7 +77,19 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		BroadcastChannel: options.BroadcastChannel,
 		now,
 		onChange: () => refresh(),
-		onError: (error, kind) => notice(kind === 'load' ? 'open-failed' : 'save-failed', error),
+		onError: (error, kind) => {
+			if (kind === 'save') {
+				unsaved.registry = true;
+				refresh();
+			}
+			notice(kind === 'load' ? 'open-failed' : 'save-failed', error);
+		},
+		onSaved: () => {
+			if (unsaved.registry) {
+				unsaved.registry = false;
+				refresh();
+			}
+		},
 	});
 	const reg = registry.doc;
 
@@ -88,6 +102,7 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 			loading,
 			mode: config.mode,
 			persistent: storage.persistent?.() ?? true,
+			unsaved: unsaved.notebook || unsaved.registry,
 			user: {
 				...user,
 				color: open?.session.identity.userColor ?? options.user.color ?? DEFAULT_COLOR,
@@ -149,6 +164,7 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 
 	let state = compute();
 	let remembered = '';
+	let mirrored = '';
 	function refresh(): void {
 		if (queued || destroyed) return;
 		queued = true;
@@ -171,15 +187,36 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 			open.session.updatePresence({ pageId: state.pageId });
 		}
 		const entry = readRegistry(reg).find((e) => e.id === open!.id);
+		// Deleted in another tab: leave it, as deleting it here does.
+		if (!entry || entry.deleted) return void leaveDeleted(open.id);
 		const meta = state.notebook;
+		// The list follows the notebook's own name when that changes, not on every refresh: two tabs
+		// whose copies disagree (a sync server away) would otherwise write the list back and forth.
+		const named = meta ? `${open.id}|${meta.name}|${meta.color}` : '';
+		if (named === mirrored) return;
+		mirrored = named;
 		if (
-			entry &&
 			meta &&
 			open.types.meta.size &&
 			!entry.pending &&
 			(entry.name !== meta.name || entry.color !== meta.color)
 		)
 			updateRegistry(reg, open.id, { name: meta.name, color: meta.color });
+	}
+
+	let leaving = '';
+	async function leaveDeleted(id: string): Promise<void> {
+		if (leaving === id) return;
+		leaving = id;
+		const next = readRegistry(reg).find((e) => !e.deleted && e.id !== id);
+		if (next) await switchTo(next.id);
+		else if (open?.id === id) {
+			const previous = open;
+			open = null;
+			await previous.close();
+			refresh();
+		}
+		leaving = '';
 	}
 
 	const discrete = <T>(fn: (o: OpenNotebook) => T, fallback: T): T => {
@@ -238,11 +275,22 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 				saveDelayMs: options.saveDelayMs ?? 400,
 				...(seed ? { seed } : {}),
 				onChange: () => refresh(),
-				onError: (error, kind) =>
+				onError: (error, kind) => {
+					if (kind === 'save') {
+						unsaved.notebook = true;
+						refresh();
+					}
 					notice(
 						kind === 'save' ? 'save-failed' : kind === 'load' ? 'open-failed' : 'sync-error',
 						error,
-					),
+					);
+				},
+				onSaved: () => {
+					if (unsaved.notebook) {
+						unsaved.notebook = false;
+						refresh();
+					}
+				},
 			});
 			if (destroyed) return void (await next.close());
 			if (entry.pending) {
@@ -347,8 +395,16 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		},
 		moveNotebook: (id, beforeId) => void moveInRegistry(reg, id, beforeId),
 		async deleteNotebook(id) {
+			// Its last changes are saved first: a restore would otherwise bring back an older copy.
+			if (open?.id === id) {
+				try {
+					await open.flush();
+				} catch {
+					return false;
+				}
+			}
 			updateRegistry(reg, id, { deleted: now() });
-			if (open?.id !== id) return;
+			if (open?.id !== id) return true;
 			const next = readRegistry(reg).find((e) => !e.deleted);
 			if (next) await switchTo(next.id, undefined, { force: true });
 			else {
@@ -357,6 +413,7 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 				await previous.close();
 				refresh();
 			}
+			return true;
 		},
 		async restoreNotebook(id) {
 			updateRegistry(reg, id, { deleted: null });

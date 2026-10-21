@@ -52,6 +52,8 @@ export interface OpenNotebookOptions {
 	onChange: () => void;
 	/** `load` and `save` are this device's copy failing; `sync` is the room. */
 	onError: (error: unknown, kind: 'load' | 'save' | 'sync') => void;
+	/** A save went through (after one that failed, the changes are kept again). */
+	onSaved?: () => void;
 }
 
 export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNotebook> {
@@ -100,6 +102,7 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 			.then(
 				() => {
 					failed = null;
+					options.onSaved?.();
 				},
 				(error: unknown) => {
 					// Still unsaved: the next change, flush or close tries again.

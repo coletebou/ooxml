@@ -21,6 +21,11 @@ export const MAX_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_TEXT_LENGTH = 200_000;
 /** The deepest list nesting a text box holds: indenting stops there, and every read keeps it. */
 export const MAX_LIST_LEVELS = 32;
+/**
+ * Elements deep a text box's document is read: a list level is a list and its item, plus the blocks
+ * inside the deepest one. Every reader uses it, so what one finds another finds too.
+ */
+export const MAX_ELEMENT_DEPTH = MAX_LIST_LEVELS * 2 + 4;
 
 export type SectionKind = 'section' | 'group';
 

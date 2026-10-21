@@ -408,6 +408,52 @@ describe('notebook client switching and adding', () => {
 	});
 });
 
+describe('notebook client fourth review round', () => {
+	it('keeps a notebook whose last changes cannot be saved instead of deleting it', async () => {
+		const { storage, control } = flaky();
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		const id = client.getState().notebookId;
+		control.fail = true;
+		client.renamePage(client.getState().pageId, 'Unsaved');
+		expect(await client.deleteNotebook(id)).toBe(false);
+		expect(client.getState().notebookId).toBe(id);
+		expect(client.getState().notebooks.map((n) => n.id)).toEqual([id]);
+		await until(() => client.getState().unsaved);
+		control.fail = false;
+		client.renamePage(client.getState().pageId, 'Saved now');
+		await until(() => !client.getState().unsaved);
+		expect(await client.deleteNotebook(id)).toBe(true);
+	});
+
+	it('ticks a to-do nested as deep as the editor allows', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		let block: object = para('deep task', 'open');
+		for (let i = 0; i < 10; i++)
+			block = { type: 'bullet_list', content: [{ type: 'list_item', content: [block] }] };
+		client.addText({ x: 0, y: 0 }, [block as never]);
+		await until(() => client.getState().todos.length === 1);
+		client.setTodo(client.getState().todos[0]!, true);
+		await until(() => client.getState().todos[0]?.done === true);
+	});
+
+	it('leaves a notebook another tab deleted', async () => {
+		const hub = createChannelHub();
+		const ada = start(createMemoryStorage(), hub);
+		await ada.whenReady();
+		await settle(50);
+		const bob = start(createMemoryStorage(), hub);
+		await bob.whenReady();
+		const id = ada.getState().notebookId;
+		await until(() => bob.getState().notebookId === id && !bob.getState().loading);
+		expect(await ada.deleteNotebook(id)).toBe(true);
+		await until(() => bob.getState().notebook === null);
+	});
+});
+
 describe('notebook client with damaged input', () => {
 	it('imports an archive whose text is malformed, keeping what is valid', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());
