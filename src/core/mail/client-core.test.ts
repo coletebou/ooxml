@@ -56,4 +56,25 @@ describe('the bodies of the open conversation', () => {
 		expect(reads).toBe(205);
 		client.destroy();
 	});
+
+	it('keeps the open view as it is while nothing it shows changes', async () => {
+		const client = createMailClient({
+			transport: createMemoryTransport({ messages: longThread(2), now: () => T0 }),
+			threaded: false,
+			setTimeout: () => 0,
+			clearTimeout: () => undefined,
+		});
+		await until(client, (s) => s.status === 'ready' && s.conversations.length === 2);
+		await client.open('m1');
+		const view = client.getState().open;
+		expect(view?.messages[0]?.message?.text).toBe('Message 1');
+		// A message of another conversation flagged: the reading pane has nothing new to show.
+		await client.toggleFlagged(['m0']);
+		expect(client.getState().open).toBe(view);
+		// One of its own: a new view, showing the flag.
+		await client.toggleFlagged(['m1']);
+		expect(client.getState().open).not.toBe(view);
+		expect(client.getState().open?.messages[0]?.summary.keywords.$flagged).toBe(true);
+		client.destroy();
+	});
 });

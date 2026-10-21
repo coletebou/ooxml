@@ -4,7 +4,14 @@
 // rebuilds the derived state when they change and coalesces notifications per tick, like the Teams
 // client. Not exported from the area. New code.
 import { Emitter } from '../collab/emitter';
-import type { MailAction, MailClientOptions, MailNotice, MailState, Targets } from './client-types';
+import type {
+	MailAction,
+	MailClientOptions,
+	MailNotice,
+	MailState,
+	OpenConversationView,
+	Targets,
+} from './client-types';
 import { conversationView, mailboxViews, openConversationView } from './client-views';
 import type { EmailSummary, Mailbox, MailboxRole, MailMessage } from './model';
 import { threadConversations, type Conversation } from './threading';
@@ -57,6 +64,8 @@ export class ClientCore {
 	private current: MailState;
 	private readonly listeners = new Set<() => void>();
 	private scheduled = false;
+	/** The open conversation's last view and what it was made from (`openView`). */
+	private lastOpen: { view: OpenConversationView; from: readonly unknown[] } | null = null;
 
 	constructor(options: MailClientOptions) {
 		this.transport = options.transport;
@@ -143,10 +152,27 @@ export class ClientCore {
 		}
 	}
 
+	/**
+	 * The view of the open `conversation`: the last one made while its messages, their places,
+	 * bodies and errors are all the same, so a change elsewhere in the list (a message of another
+	 * conversation flagged) leaves the reading pane as it is.
+	 */
+	private openView(conversation: Conversation): OpenConversationView {
+		const from: unknown[] = [conversation.id];
+		for (const { email, depth } of conversation.entries)
+			from.push(email, depth, this.bodies.get(email.id), this.bodyErrors.get(email.id));
+		const last = this.lastOpen;
+		if (last?.from.length === from.length && last.from.every((value, i) => value === from[i]))
+			return last.view;
+		const view = openConversationView(conversation, this.bodies, this.bodyErrors);
+		this.lastOpen = { view, from };
+		return view;
+	}
+
 	/** Show the open conversation as the caches hold it now. */
 	showOpen(): void {
 		const open = this.openId ? this.conversationsById.get(this.openId) : undefined;
-		this.patch({ open: open ? openConversationView(open, this.bodies, this.bodyErrors) : null });
+		this.patch({ open: open ? this.openView(open) : null });
 	}
 
 	/**
@@ -192,7 +218,7 @@ export class ClientCore {
 			loaded: emails.length,
 			selection: this.state.selection.filter(exists),
 			focusedId: this.state.focusedId && exists(this.state.focusedId) ? this.state.focusedId : null,
-			open: open ? openConversationView(open, this.bodies, this.bodyErrors) : null,
+			open: open ? this.openView(open) : null,
 		});
 	}
 
