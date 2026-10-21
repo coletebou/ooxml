@@ -89,7 +89,7 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 		const created = createMail(opts);
 		setClient(created);
 		return () => {
-			// The open draft is saved (retried for a while) before the client goes.
+			// The open draft is saved (retried until it is) before the client goes.
 			void releaseMailClient(created);
 			setClient(null);
 		};

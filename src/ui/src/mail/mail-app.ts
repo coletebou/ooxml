@@ -186,7 +186,8 @@ export class MailApp extends MailElement {
 		for (const stop of this.stops) stop();
 		this.stops = [];
 		// Released while still current, so its first try commits what the window holds; any later
-		// tries run in the background, and a new connection or remount never waits for them.
+		// tries run in the background until the draft is saved, and a new connection or remount
+		// never waits for them.
 		if (this.mail) void release(this.mail);
 		this.mail = null;
 		for (const url of this.objectUrls) URL.revokeObjectURL(url);
