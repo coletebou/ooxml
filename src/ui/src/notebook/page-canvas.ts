@@ -95,10 +95,14 @@ export class NotebookPage extends NotebookElement {
 
 	/** Where something new goes on this page: below its content as drawn (text grows as it fills). */
 	nextSpot(): { x: number; y: number } {
+		return belowContent(this.state?.containers ?? [], this.#drawnHeights());
+	}
+
+	#drawnHeights(): Map<string, number> {
 		const drawn = new Map<string, number>();
 		for (const frame of this.renderRoot.querySelectorAll<HTMLElement>('.frame[data-id]'))
 			drawn.set(frame.dataset['id'] ?? '', frame.offsetHeight);
-		return belowContent(this.state?.containers ?? [], drawn);
+		return drawn;
 	}
 
 	/** Add picked files below what is on the page (a drop lands where it was dropped). */
@@ -110,8 +114,18 @@ export class NotebookPage extends NotebookElement {
 		this.renderRoot.querySelector<HTMLInputElement>('input.title')?.focus();
 	}
 
+	// Text boxes grow with their content; the page is sized (and new items placed) from what is drawn.
+	#resized =
+		typeof ResizeObserver === 'function' ? new ResizeObserver(() => this.requestUpdate()) : null;
+
+	protected override updated(): void {
+		for (const frame of this.renderRoot.querySelectorAll('.frame.text'))
+			this.#resized?.observe(frame);
+	}
+
 	override disconnectedCallback(): void {
 		super.disconnectedCallback();
+		this.#resized?.disconnect();
 		for (const asset of this.#assets.values()) if (asset.url) URL.revokeObjectURL(asset.url);
 		this.#assets.clear();
 		this.#bindings.clear();
@@ -175,7 +189,11 @@ export class NotebookPage extends NotebookElement {
 		event.preventDefault();
 		const at = this.#at(event);
 		this.#lastPoint = at;
-		const empty = this.emptyTextIds();
+		// Empty text boxes are swept away, except one a collaborator is in (about to type).
+		const busy = new Set(
+			this.state.peers.filter((p) => p.pageId === this.state?.pageId).map((p) => p.containerId),
+		);
+		const empty = this.emptyTextIds().filter((id) => !busy.has(id));
 		if (empty.length) client.deleteContainers(empty);
 		this.selectedId = '';
 		const id = client.addText({ x: Math.max(0, at.x - 8), y: Math.max(0, at.y - 12) });
@@ -185,11 +203,16 @@ export class NotebookPage extends NotebookElement {
 	async #addFiles(files: readonly File[], at: { x: number; y: number }): Promise<void> {
 		const client = this.client;
 		if (!client || !files.length) return;
+		// Reading the files takes a while; they go to the page they were dropped on, also if the
+		// person moved on (and nowhere when that page is in another notebook by then).
+		const page = this.state?.pageId;
 		const { placed: items, tooLarge } = await placeFiles(files, at);
 		if (tooLarge) this.fire('nb-notice', { code: 'file-too-large' });
 		for (const placed of items) {
 			const id =
-				placed.kind === 'image' ? client.addImage(placed.input) : client.addFile(placed.input);
+				placed.kind === 'image'
+					? client.addImage(placed.input, page)
+					: client.addFile(placed.input, page);
 			if (id) this.selectedId = id;
 		}
 	}
@@ -376,9 +399,10 @@ export class NotebookPage extends NotebookElement {
 	#extent(state: NotebookState): { width: number; height: number } {
 		let right = 960;
 		let bottom = 720;
+		const drawn = this.#drawnHeights();
 		for (const c of state.containers) {
 			right = Math.max(right, c.x + c.width + 320);
-			bottom = Math.max(bottom, c.y + (c.height || 240) + 320);
+			bottom = Math.max(bottom, c.y + (drawn.get(c.id) || c.height || 240) + 320);
 		}
 		for (const s of state.strokes)
 			for (let i = 0; i + 1 < s.points.length; i += 3) {

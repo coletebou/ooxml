@@ -66,3 +66,27 @@ test('two tabs edit one notebook in real time with presence', async ({ context }
 	await bob.keyboard.press('Enter');
 	await expect(ada.locator('notebook-nav li.section')).toHaveCount(2);
 });
+
+// Clicking the page sweeps away empty text boxes, but not one a collaborator just opened to type in.
+test("a click on the page leaves a collaborator's new empty text box alone", async ({
+	context,
+}) => {
+	const storage = `e2e-collab-sweep-${Date.now().toString(36)}`;
+	const ada = await context.newPage();
+	await ada.goto(`/?storage=${storage}&name=Ada`);
+	await expect(ada.locator('notebook-nav')).toContainText('New Section 1');
+	await ada.waitForTimeout(800);
+	const bob = await context.newPage();
+	await bob.goto(`/?storage=${storage}&name=Bob`);
+	await expect(ada.locator('notebook-app .status')).toContainText('1 other person here');
+
+	await bob.locator('notebook-page .surface').click({ position: { x: 160, y: 120 } });
+	await expect(bob.locator('notebook-text .ProseMirror')).toBeFocused();
+	await expect(ada.locator('notebook-page .peer-tag')).toHaveText('Bob is here');
+	// Ada starts a box of her own elsewhere; Bob's empty one stays.
+	await ada.locator('notebook-page .surface').click({ position: { x: 480, y: 360 } });
+	await expect(ada.locator('notebook-page .frame.text')).toHaveCount(2);
+	await expect(bob.locator('notebook-page .frame.text')).toHaveCount(2);
+	await bob.keyboard.type('Still here');
+	await expect(bob.locator('notebook-text').first()).toContainText('Still here');
+});

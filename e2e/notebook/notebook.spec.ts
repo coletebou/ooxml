@@ -161,6 +161,25 @@ test('places an inserted picture below a note that grew past its first height', 
 	expect(picture.y).toBeGreaterThanOrEqual(note.y + note.height);
 });
 
+test('grows the page with a long note, so the space beside its end takes a click', async ({
+	page,
+}) => {
+	await open(page);
+	await typeOnCanvas(page, 'line 1', { x: 60, y: 40 });
+	for (let i = 2; i <= 45; i++) {
+		await page.keyboard.press('Enter');
+		await page.keyboard.type(`line ${i}`);
+	}
+	const note = page.locator('notebook-page .frame.text').first();
+	await note.scrollIntoViewIfNeeded();
+	const box = (await note.boundingBox())!;
+	const surface = (await page.locator('notebook-page .surface').boundingBox())!;
+	expect(surface.y + surface.height).toBeGreaterThan(box.y + box.height);
+	// Beside the last lines, past the page's first height: a click there starts a new text box.
+	await page.mouse.click(box.x + box.width + 120, box.y + box.height - 20);
+	await expect(page.locator('notebook-page .frame.text')).toHaveCount(2);
+});
+
 test('inserts a picture and a live Word document, then exports the page to .docx', async ({
 	page,
 }) => {
