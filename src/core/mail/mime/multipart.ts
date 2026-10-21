@@ -41,24 +41,41 @@ function partEnd(bytes: Uint8Array, start: number, line: number): number {
 /**
  * The body parts of a multipart body. The preamble before the first delimiter and the epilogue
  * after the close delimiter are dropped; a missing close delimiter ends the last part at the end
- * of the body. No delimiter at all gives no parts.
+ * of the body. No delimiter at all gives no parts. Past `limit` parts the rest come back as one
+ * range, from the start of the first of them to the end of the last, so a body of millions of
+ * tiny parts costs no more than `limit` ranges.
  */
-export function splitMultipart(bytes: Uint8Array, boundary: string): MultipartSplit {
+export function splitMultipart(
+	bytes: Uint8Array,
+	boundary: string,
+	limit = Number.POSITIVE_INFINITY,
+): MultipartSplit {
 	const marker = utf8(`--${boundary}`);
 	const parts: Array<readonly [number, number]> = [];
+	/** The parts past `limit`: where the first starts and the last ends. */
+	let rest: [number, number] | null = null;
+	const add = (from: number, to: number): void => {
+		if (parts.length < limit) parts.push([from, to]);
+		else if (rest) rest[1] = to;
+		else rest = [from, to];
+	};
+	const split = (closed: boolean): MultipartSplit => ({
+		parts: rest ? [...parts, rest] : parts,
+		closed,
+	});
 	let start = -1;
 	for (let line = 0; line < bytes.length;) {
 		const lineEnd = bytes.indexOf(LF, line);
 		const end = lineEnd < 0 ? bytes.length : lineEnd;
 		const kind = delimiter(bytes, line, end, marker);
 		if (kind) {
-			if (start >= 0) parts.push([start, partEnd(bytes, start, line)]);
-			if (kind === 'close') return { parts, closed: true };
+			if (start >= 0) add(start, partEnd(bytes, start, line));
+			if (kind === 'close') return split(true);
 			start = lineEnd < 0 ? bytes.length : lineEnd + 1;
 		}
 		if (lineEnd < 0) break;
 		line = lineEnd + 1;
 	}
-	if (start >= 0 && start < bytes.length) parts.push([start, bytes.length]);
-	return { parts, closed: false };
+	if (start >= 0 && start < bytes.length) add(start, bytes.length);
+	return split(false);
 }

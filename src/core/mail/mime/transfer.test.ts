@@ -67,6 +67,24 @@ describe('splitMultipart', () => {
 		expect(parts('--b\none\n--b\ntwo\n--b--', 'b')).toEqual(['one', 'two']);
 	});
 
+	it('tells at most `limit` parts apart and keeps the rest as one range', () => {
+		const body = '--b\r\none\r\n--b\r\ntwo\r\n--b\r\nthree\r\n--b\r\nfour\r\n--b--\r\nepilogue';
+		const bytes = utf8(body);
+		const split = splitMultipart(bytes, 'b', 2);
+		expect(split.closed).toBe(true);
+		expect(split.parts.map(([start, end]) => text(bytes.subarray(start, end)))).toEqual([
+			'one',
+			'two',
+			'three\r\n--b\r\nfour',
+		]);
+		// Millions of empty parts cost one range past the limit, not one each.
+		expect(splitMultipart(utf8(`${'--b\r\n'.repeat(100_000)}--b--`), 'b', 3).parts).toHaveLength(4);
+		expect(splitMultipart(bytes, 'b', 0).parts.map(([s, e]) => text(bytes.subarray(s, e)))).toEqual(
+			['one\r\n--b\r\ntwo\r\n--b\r\nthree\r\n--b\r\nfour'],
+		);
+		expect(splitMultipart(utf8('--b\r\none\r\n--b\r\ntwo'), 'b', 1).parts).toHaveLength(2);
+	});
+
 	it('ends the last part at the end of the body when the close delimiter is missing', () => {
 		const split = splitMultipart(utf8('--b\r\none\r\n--b\r\ntwo\r\n'), 'b');
 		expect(split.closed).toBe(false);

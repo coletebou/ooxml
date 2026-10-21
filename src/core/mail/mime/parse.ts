@@ -94,7 +94,9 @@ function readEntity(
 			content = decodeTransfer(body, encoding);
 		// A boundary cannot end in a space (RFC 2046), and transports strip one from the lines.
 		const boundary = contentType.params.boundary?.trimEnd();
-		const found = boundary ? splitMultipart(content, boundary) : null;
+		// No more parts are told apart than the budget leaves: `readParts` keeps the rest whole.
+		const budget = Math.max(0, state.maxParts - state.parts);
+		const found = boundary ? splitMultipart(content, boundary, budget) : null;
 		if (found && (found.parts.length || found.closed)) split = found;
 		else type = 'text/plain';
 	}
