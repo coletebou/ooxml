@@ -2,7 +2,7 @@
 	"name": "notebook-demos",
 	"version": "0.0.0",
 	"private": true,
-	"description": "The files the OpenNotebook demos share (vite config, theme sync, test hooks). Each demo is its own package beside this one.",
+	"description": "The files the OpenNotes demos share (vite config, theme sync, test hooks). Each demo is its own package beside this one.",
 	"type": "module",
 	"devDependencies": {
 		"@types/node": "^26.6.5",

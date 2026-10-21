@@ -1,11 +1,11 @@
 ---
 layout: home
-title: OpenNotebook
+title: OpenNotes
 titleTemplate: An open-source, local-first notebook app
 description: Notebooks, sections and pages with a free-form canvas of rich text, pictures, embedded Office files and ink, as one web component with a React binding.
 
 hero:
-  name: OpenNotebook
+  name: OpenNotes
   text: A local-first notebook for the web
   tagline: Notebooks, sections and pages, each page a free-form canvas of rich text, pictures, embedded Office files and ink. One web component, a React binding, and the logic in ooxml-core.
   actions:

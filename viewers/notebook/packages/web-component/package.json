@@ -2,7 +2,7 @@
 	"name": "notebook-viewer",
 	"version": "0.0.0",
 	"private": true,
-	"description": "The <notebook-app> element from ooxml-ui/notebook and the wiring every OpenNotebook binding shares",
+	"description": "The <notebook-app> element from ooxml-ui/notebook and the wiring every OpenNotes binding shares",
 	"license": "Apache-2.0",
 	"type": "module",
 	"main": "./src/index.ts",

@@ -18,14 +18,14 @@ IndexedDB storage and translations, plus the binding contract (`applyNotebookPro
 - `packages/web-component`: the private workspace package `notebook-viewer` (never published,
   inlined into every binding). It re-exports `ooxml-ui/notebook` and adds `bindNotebook` and
   `pickNotebookProps` (`src/bind.ts`), the wiring every binding shares.
-- `packages/react`: the React binding, published as `opennotebook-react-viewer`. Other frameworks
-  come later, as `packages/<framework>` published as `opennotebook-<framework>-viewer`.
+- `packages/react`: the React binding, published as `opennotes-react-viewer`. Other frameworks
+  come later, as `packages/<framework>` published as `opennotes-<framework>-viewer`.
 - `docs/`: the VitePress site (`https://christophervr.github.io/ooxml/notebook/`), English only.
 - `demos/notebook/` at the repository root: the React demo (a private workspace package).
 - `e2e/notebook/` at the repository root: the Playwright specs (`bun run test:browser`, config in
   this folder), run against the React demo. Each spec isolates its notebooks with `?storage=`.
 
-The product name is **OpenNotebook** and the packages are `opennotebook-*`. Never add or fork
+The product name is **OpenNotes** and the packages are `opennotes-*`. Never add or fork
 logic here that belongs in the core or in `ooxml-ui`: if one lacks something, change it there,
 then use it here.
 
@@ -79,8 +79,8 @@ exactly those versions.
 
 ## Releases
 
-`opennotebook-react-viewer` is released by the repository's own flow (`scripts/viewer-packages.mjs`,
-`scripts/release-plan.mjs`): its own version and tag `opennotebook-react-viewer@<version>`, and
+`opennotes-react-viewer` is released by the repository's own flow (`scripts/viewer-packages.mjs`,
+`scripts/release-plan.mjs`): its own version and tag `opennotes-react-viewer@<version>`, and
 a change to `packages/web-component`, `scripts/build-packages.mjs` or `tsconfig.release.json`
 releases it too. A package that was never published goes out at its manifest version; npm trusted
 publishing cannot create a package, so the first publish of a new name is a maintainer's manual
@@ -90,7 +90,7 @@ a published manifest (`check:published` and `pack:smoke` fail on them).
 
 ## Honesty
 
-Report unsupported features honestly. OpenNotebook is an independent project, not a replacement
+Report unsupported features honestly. OpenNotes is an independent project, not a replacement
 for any commercial notebook app. It does not import legacy binary notebook files, it is local
 first (notebooks live in the browser's IndexedDB), and collaboration goes through the `collab`
 area's Yjs sessions (`BroadcastChannel` between tabs, or a y-websocket server). There is no

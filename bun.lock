@@ -58,7 +58,7 @@
       "name": "notebook-demo-react",
       "version": "0.0.0",
       "dependencies": {
-        "opennotebook-react-viewer": "workspace:*",
+        "opennotes-react-viewer": "workspace:*",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
       },
@@ -740,13 +740,13 @@
       },
     },
     "viewers/notebook/docs": {
-      "name": "opennotebook-docs",
+      "name": "opennotes-docs",
       "devDependencies": {
         "vitepress": "^2.0.0-alpha.20",
       },
     },
     "viewers/notebook/packages/react": {
-      "name": "opennotebook-react-viewer",
+      "name": "opennotes-react-viewer",
       "version": "0.1.0",
       "dependencies": {
         "lit": "^3.3.3",
@@ -3344,9 +3344,9 @@
 
     "ooxml-ui": ["ooxml-ui@workspace:src/ui"],
 
-    "opennotebook-docs": ["opennotebook-docs@workspace:viewers/notebook/docs"],
+    "opennotes-docs": ["opennotes-docs@workspace:viewers/notebook/docs"],
 
-    "opennotebook-react-viewer": ["opennotebook-react-viewer@workspace:viewers/notebook/packages/react"],
+    "opennotes-react-viewer": ["opennotes-react-viewer@workspace:viewers/notebook/packages/react"],
 
     "openteams-angular-viewer": ["openteams-angular-viewer@workspace:viewers/teams/packages/angular"],
 
@@ -4198,9 +4198,9 @@
 
     "notebook-demo-react/react-dom": ["react-dom@19.3.1", "", { "dependencies": { "scheduler": "^0.28.0" }, "peerDependencies": { "react": "^19.3.1" } }, "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ=="],
 
-    "opennotebook-react-viewer/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
+    "opennotes-react-viewer/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
 
-    "opennotebook-react-viewer/react-dom": ["react-dom@19.3.1", "", { "dependencies": { "scheduler": "^0.28.0" }, "peerDependencies": { "react": "^19.3.1" } }, "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ=="],
+    "opennotes-react-viewer/react-dom": ["react-dom@19.3.1", "", { "dependencies": { "scheduler": "^0.28.0" }, "peerDependencies": { "react": "^19.3.1" } }, "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ=="],
 
     "openteams-react-viewer/react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
 
@@ -4564,7 +4564,7 @@
 
     "notebook-demo-react/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
 
-    "opennotebook-react-viewer/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
+    "opennotes-react-viewer/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
 
     "pptx-react-demo/react-dom/scheduler": ["scheduler@0.28.0", "", {}, "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw=="],
 

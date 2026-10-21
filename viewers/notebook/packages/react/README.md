@@ -1,18 +1,18 @@
-# opennotebook-react-viewer
+# opennotes-react-viewer
 
-React binding for **OpenNotebook**, an open-source, local-first notebook app: notebooks, sections
+React binding for **OpenNotes**, an open-source, local-first notebook app: notebooks, sections
 and pages, each page a free-form canvas of rich text, pictures, embedded Office files and ink,
 synced between tabs or through your own y-websocket server. It gives you the complete app as a
 component **and** raw hooks to build your own UI.
 
 [Source](https://github.com/ChristopherVR/ooxml/tree/main/viewers/notebook) | [Documentation](https://christophervr.github.io/ooxml/notebook/) | [Live demo](https://christophervr.github.io/ooxml/notebook/demo/)
 
-Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app) &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; **[OpenNotebook](https://github.com/ChristopherVR/ooxml/tree/main/viewers/notebook#readme)** &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
+Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app) &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; **[OpenNotes](https://github.com/ChristopherVR/ooxml/tree/main/viewers/notebook#readme)** &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
 
 ## Install
 
 ```bash
-npm install opennotebook-react-viewer
+npm install opennotes-react-viewer
 ```
 
 `react` (18 or later) is a peer dependency. The binding's wiring is bundled in; the notebook logic
@@ -25,7 +25,7 @@ comes from [`ooxml-core`](https://www.npmjs.com/package/ooxml-core) (`ooxml-core
 The full app (give its parent a height):
 
 ```tsx
-import { Notebook } from 'opennotebook-react-viewer';
+import { Notebook } from 'opennotes-react-viewer';
 
 <Notebook
 	userName="Ada"
@@ -40,7 +40,7 @@ import { Notebook } from 'opennotebook-react-viewer';
 Or your own markup over the raw client (state in, plain actions out):
 
 ```tsx
-import { useNotebook } from 'opennotebook-react-viewer';
+import { useNotebook } from 'opennotes-react-viewer';
 
 const { client, state } = useNotebook({ user: { name: 'Ada' }, storageName: 'ada-notes' });
 state?.pages.map((p) => <button onClick={() => client?.selectPage(p.id)}>{p.title}</button>);
@@ -53,7 +53,7 @@ works.
 
 ## Honest limits
 
-OpenNotebook is an independent project, not a replacement for any commercial notebook app. It
+OpenNotes is an independent project, not a replacement for any commercial notebook app. It
 does not import legacy binary notebook files. There is **no authentication and no end-to-end
 encryption**: anyone who reaches a notebook's room can edit it, and a sync server can read it. See
 the [limitations](https://christophervr.github.io/ooxml/notebook/limitations).

@@ -1,12 +1,12 @@
 # Getting started
 
-OpenNotebook is an open-source, local-first notebook app: notebooks hold sections (and section
+OpenNotes is an open-source, local-first notebook app: notebooks hold sections (and section
 groups), sections hold pages with subpages, and every page is a free-form canvas of rich-text
 containers, pictures, embedded Office files and ink. You install the React binding, mount one
 component, and get the whole app; or use its raw hook to build your own UI over the same client.
 
 ::: warning An early implementation
-OpenNotebook is an independent project. It is not a replacement for any commercial notebook app,
+OpenNotes is an independent project. It is not a replacement for any commercial notebook app,
 makes no claim of feature parity with one, and does not open legacy binary notebook files. See
 [Limitations](/limitations) before you rely on it.
 :::
@@ -14,12 +14,12 @@ makes no claim of feature parity with one, and does not open legacy binary noteb
 ## 1. Install the binding
 
 ```bash
-npm install opennotebook-react-viewer react
+npm install opennotes-react-viewer react
 ```
 
 | Package                     | For       | Peer dependency |
 | --------------------------- | --------- | --------------- |
-| `opennotebook-react-viewer` | React 18+ | `react`         |
+| `opennotes-react-viewer` | React 18+ | `react`         |
 
 The binding is self-contained: its thin wiring is bundled in, and
 [`ooxml-core`](https://www.npmjs.com/package/ooxml-core) (the notebook logic) and
@@ -30,7 +30,7 @@ then, any framework can use the element directly (below).
 ## 2. Mount it
 
 ```tsx
-import { Notebook } from 'opennotebook-react-viewer';
+import { Notebook } from 'opennotes-react-viewer';
 
 export function Notes() {
 	return (
@@ -86,7 +86,7 @@ as `?token=`. The list of notebooks itself is per device and never goes to a ser
 The binding also exposes the raw client: state in, plain actions out.
 
 ```tsx
-import { useNotebook } from 'opennotebook-react-viewer';
+import { useNotebook } from 'opennotes-react-viewer';
 
 const options = { user: { id: 'u-ada', name: 'Ada' }, storageName: 'ada-notes' };
 

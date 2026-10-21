@@ -18,7 +18,7 @@
 		"useDefineForClassFields": false,
 		"paths": {
 			"notebook-viewer": ["./packages/web-component/src/index.ts"],
-			"opennotebook-react-viewer": ["./packages/react/src/index.ts"]
+			"opennotes-react-viewer": ["./packages/react/src/index.ts"]
 		}
 	},
 	"include": [

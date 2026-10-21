@@ -1,6 +1,6 @@
 # OOXML Office application
 
-The suite mounts the real Word, Excel, PowerPoint, Visio, OpenTeams and OpenNotebook components in one application. `apps/office-suite/src` owns host UI and framework wiring; `src/ui/src/suite` owns browser document persistence. Office parsing, editing and serialization remain in `src/core`.
+The suite mounts the real Word, Excel, PowerPoint, Visio, OpenTeams and OpenNotes components in one application. `apps/office-suite/src` owns host UI and framework wiring; `src/ui/src/suite` owns browser document persistence. Office parsing, editing and serialization remain in `src/core`.
 
 ## Account and workspace UI
 

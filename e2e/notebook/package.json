@@ -2,7 +2,7 @@
 	"name": "notebook-e2e",
 	"version": "0.0.0",
 	"private": true,
-	"description": "The OpenNotebook browser tests. Playwright is configured and run from viewers/notebook (bun run test:browser); these are the packages the specs import.",
+	"description": "The OpenNotes browser tests. Playwright is configured and run from viewers/notebook (bun run test:browser); these are the packages the specs import.",
 	"type": "module",
 	"devDependencies": {
 		"@playwright/test": "^1.64.1",

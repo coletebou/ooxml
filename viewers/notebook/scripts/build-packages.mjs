@@ -7,7 +7,7 @@ import { rollup } from 'rollup';
 import { dts } from 'rollup-plugin-dts';
 
 /**
- * Builds the published framework packages (`opennotebook-<framework>-viewer`; React today).
+ * Builds the published framework packages (`opennotes-<framework>-viewer`; React today).
  * Adapted from the teams viewer's `scripts/build-packages.mjs`. The private web component
  * (`notebook-viewer`, `packages/web-component`) is inlined into every bundle; everything a manifest
  * declares (`ooxml-core`, `ooxml-ui`, `lit` and the framework peer) stays an import, so a tarball

@@ -2,7 +2,7 @@
 
 # OOXML Office
 
-**Word, Excel, PowerPoint, Visio, OpenTeams and OpenNotebook in one local-first workspace, in the browser or on the desktop.**
+**Word, Excel, PowerPoint, Visio, OpenTeams and OpenNotes in one local-first workspace, in the browser or on the desktop.**
 
 [**Open the app**](https://christophervr.github.io/ooxml/) &nbsp;&middot;&nbsp;
 [**Suite overview**](../../.github/README.md#ooxml-office-the-whole-suite-in-one-app) &nbsp;&middot;&nbsp;

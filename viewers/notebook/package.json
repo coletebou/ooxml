@@ -2,7 +2,7 @@
 	"name": "notebook-viewer-workspace",
 	"version": "0.0.0",
 	"private": true,
-	"description": "OpenNotebook: an open-source, local-first notebook app (notebooks, sections, pages and a free-form canvas with ink) built on ooxml-core",
+	"description": "OpenNotes: an open-source, local-first notebook app (notebooks, sections, pages and a free-form canvas with ink) built on ooxml-core",
 	"license": "Apache-2.0",
 	"type": "module",
 	"scripts": {

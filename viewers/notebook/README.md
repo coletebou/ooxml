@@ -1,6 +1,6 @@
 <div align="center">
 
-# OpenNotebook
+# OpenNotes
 
 **An open-source, local-first notebook app: notebooks, sections and pages, each page a free-form canvas of rich text, pictures, embedded Office files and ink. One web component and a React binding.**
 An early, independent implementation: not a replacement for any commercial notebook app.
@@ -14,11 +14,11 @@ An early, independent implementation: not a replacement for any commercial noteb
 [**Getting started**](#getting-started) &nbsp;&middot;&nbsp;
 [**Packages**](#packages)
 
-Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app) &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; **[OpenNotebook](https://github.com/ChristopherVR/ooxml/tree/main/viewers/notebook#readme)** &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
+Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app) &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; **[OpenNotes](https://github.com/ChristopherVR/ooxml/tree/main/viewers/notebook#readme)** &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
 
 </div>
 
-## Why OpenNotebook?
+## Why OpenNotes?
 
 - **Local first.** Notebooks live in the browser's IndexedDB. No account and no server are needed, and tabs of one browser share a notebook in real time.
 - **Your sync server, if you want one.** Point it at any y-websocket server and people on other machines edit the same notebook, with presence.
@@ -45,7 +45,7 @@ Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https:/
 ### 1. Install
 
 ```bash
-npm install opennotebook-react-viewer react
+npm install opennotes-react-viewer react
 ```
 
 The binding is self-contained and installs [`ooxml-core`](https://www.npmjs.com/package/ooxml-core) and [`ooxml-ui`](https://www.npmjs.com/package/ooxml-ui) as regular dependencies.
@@ -53,7 +53,7 @@ The binding is self-contained and installs [`ooxml-core`](https://www.npmjs.com/
 ### 2. Mount the notebook
 
 ```tsx
-import { Notebook } from 'opennotebook-react-viewer';
+import { Notebook } from 'opennotes-react-viewer';
 
 export function Notes() {
 	return (
@@ -110,7 +110,7 @@ See the [React guide](https://christophervr.github.io/ooxml/notebook/frameworks/
 
 | Package                     | What it is                                        | Peer dependency |
 | --------------------------- | ------------------------------------------------- | --------------- |
-| `opennotebook-react-viewer` | React 18+ component and hooks (`packages/react`). | `react`         |
+| `opennotes-react-viewer` | React 18+ component and hooks (`packages/react`). | `react`         |
 
 The workspace also holds **private** packages that are never published: `notebook-viewer` (`packages/web-component`, the shared binding wiring, inlined into the binding at build time), the demo and the browser tests.
 
@@ -142,7 +142,7 @@ The demo reads `?name=` (default `Ada`), `?locale=`, `?storage=` (the IndexedDB 
 
 ## Releasing
 
-`opennotebook-react-viewer` is released by this repository's automated flow from Conventional Commits, with its own version and tag (`opennotebook-react-viewer@<version>`). See [docs/releasing.md](../../docs/releasing.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md).
+`opennotes-react-viewer` is released by this repository's automated flow from Conventional Commits, with its own version and tag (`opennotes-react-viewer@<version>`). See [docs/releasing.md](../../docs/releasing.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Documentation
 

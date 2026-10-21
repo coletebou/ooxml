@@ -52,7 +52,7 @@ export function sharedConfig(port: number): UserConfig {
 					? []
 					: [
 							{ find: /^notebook-viewer$/, replacement: local('web-component/src/index.ts') },
-							{ find: /^opennotebook-react-viewer$/, replacement: local('react/src/index.ts') },
+							{ find: /^opennotes-react-viewer$/, replacement: local('react/src/index.ts') },
 						]),
 			],
 		},

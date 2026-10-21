@@ -1,13 +1,13 @@
 {
-	"name": "opennotebook-react-viewer",
+	"name": "opennotes-react-viewer",
 	"version": "0.1.0",
-	"description": "React component and hooks for OpenNotebook, the open-source, local-first notebook app. Self-contained: includes the <notebook-app> wiring.",
+	"description": "React component and hooks for OpenNotes, the open-source, local-first notebook app. Self-contained: includes the <notebook-app> wiring.",
 	"keywords": [
 		"collaboration",
 		"local-first",
 		"note-taking",
 		"notebook",
-		"opennotebook",
+		"opennotes",
 		"react",
 		"yjs"
 	],

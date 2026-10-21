@@ -167,7 +167,7 @@
 	{
 		"name": "viewer: notebook",
 		"color": "e1d5f5",
-		"description": "OpenNotebook viewer, demos and tests"
+		"description": "OpenNotes viewer, demos and tests"
 	},
 	{
 		"name": "stale",

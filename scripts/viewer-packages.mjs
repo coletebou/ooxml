@@ -128,7 +128,7 @@ export const VIEWER_PACKAGES = {
 		bundled: ['packages/web-component'],
 		globals: ['scripts/build-packages.mjs', 'tsconfig.release.json'],
 		packages: {
-			react: { dir: 'packages/react', npm: 'opennotebook-react-viewer', bundled: true },
+			react: { dir: 'packages/react', npm: 'opennotes-react-viewer', bundled: true },
 		},
 	}),
 };

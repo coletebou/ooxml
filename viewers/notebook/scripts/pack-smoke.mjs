@@ -21,7 +21,7 @@ import { forbiddenManifestEntries, undeclaredImports } from './check-published-r
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repository = path.resolve(root, '..', '..');
 const localOoxml = process.env.NOTEBOOK_SMOKE_LOCAL_OOXML === '1';
-const work = await mkdtemp(path.join(tmpdir(), 'opennotebook-package-smoke-'));
+const work = await mkdtemp(path.join(tmpdir(), 'opennotes-package-smoke-'));
 const npmCli =
 	process.platform === 'win32'
 		? path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
@@ -40,7 +40,7 @@ const run = (command, args, options = {}) => {
 
 const FRAMEWORKS = ['react'];
 const entryOf = () => 'dist/index.js';
-const npmName = (name) => `opennotebook-${name}-viewer`;
+const npmName = (name) => `opennotes-${name}-viewer`;
 /** The subpaths of ooxml-core and ooxml-ui the bindings import. */
 const REQUIRED_SUBPATHS = { 'ooxml-core': ['./notebook'], 'ooxml-ui': ['./notebook'] };
 
@@ -74,7 +74,7 @@ async function inspectTarball(name, packed, directory) {
 	);
 	assert.deepEqual(
 		Object.keys(manifest.dependencies)
-			.filter((dep) => /^(?:@christophervr\/|notebook-|opennotebook-|ooxml-)/u.test(dep))
+			.filter((dep) => /^(?:@christophervr\/|notebook-|opennotes-|ooxml-)/u.test(dep))
 			.sort(),
 		['ooxml-core', 'ooxml-ui'],
 		`${packed.name} may depend on no project package but ooxml-core and ooxml-ui`,
@@ -129,7 +129,7 @@ import {
 	type NotebookClient,
 	type NotebookProps,
 	type NotebookState,
-} from 'opennotebook-react-viewer';
+} from 'opennotes-react-viewer';
 const props: NotebookProps = { userName: 'Ada', storageName: 'notes', theme: 'dark' };
 const options: CreateNotebookOptions = { user: { name: 'Ada' }, storageName: 'notes' };
 const client: NotebookClient | null = null;

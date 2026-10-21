@@ -1,6 +1,6 @@
 # Architecture
 
-OpenNotebook is split the same way as the other products built on
+OpenNotes is split the same way as the other products built on
 [`ooxml`](https://github.com/ChristopherVR/ooxml): the logic lives in `ooxml-core`, the app element
 in `ooxml-ui`, and `viewers/notebook` holds only the framework binding, the demo, the browser tests
 and this site.
@@ -12,7 +12,7 @@ and this site.
 | Collaboration       | `ooxml-core/collab`                                       | Yjs sessions, transports (`BroadcastChannel`, WebSocket), awareness, assets  |
 | App                 | `ooxml-ui/notebook` (`src/ui/src/notebook`)               | `<notebook-app>` and its parts, IndexedDB storage, translations              |
 | Binding wiring      | `packages/web-component` here (private `notebook-viewer`) | `bindNotebook` and `pickNotebookProps`, inlined into every binding           |
-| Bindings            | `packages/react` here                                     | a lifecycle adapter plus raw hooks, published as `opennotebook-react-viewer` |
+| Bindings            | `packages/react` here                                     | a lifecycle adapter plus raw hooks, published as `opennotes-react-viewer` |
 
 The core's own description of the area, with the shared document layout and the deterministic
 structure rules, is

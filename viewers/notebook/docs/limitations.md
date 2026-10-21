@@ -1,11 +1,11 @@
 # Limitations
 
-OpenNotebook is an early implementation. This page lists what it does not do, so you can decide
+OpenNotes is an early implementation. This page lists what it does not do, so you can decide
 before you rely on it.
 
 ## An independent notebook app
 
-OpenNotebook is not a replacement for any commercial notebook app, is not affiliated with one and
+OpenNotes is not a replacement for any commercial notebook app, is not affiliated with one and
 makes no claim of feature parity. It implements:
 
 - notebooks, section groups, sections with colours, and pages with two levels of subpages;
@@ -25,7 +25,7 @@ notebooks.
 ## Files and formats
 
 - **No import of legacy binary notebook files.** The binary formats of other notebook apps are
-  not read. What OpenNotebook opens and writes is its own notebook archive (a zip with
+  not read. What OpenNotes opens and writes is its own notebook archive (a zip with
   `notebook.json` and the media) and, one way, a page exported to `.docx`.
 - **Page export to Word is a flowing document.** Page positions do not survive; containers are
   written in reading order (top to bottom, then left to right). Ink becomes one picture, not
@@ -67,5 +67,5 @@ notebooks.
 
 ## Bindings
 
-Only React has a binding so far (`opennotebook-react-viewer`). Other frameworks can use the
+Only React has a binding so far (`opennotes-react-viewer`). Other frameworks can use the
 `<notebook-app>` element from `ooxml-ui/notebook` directly until their bindings exist.

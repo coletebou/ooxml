@@ -1,16 +1,16 @@
 # React
 
-`opennotebook-react-viewer` (peer: `react` 18 or later) gives you the whole app as `<Notebook />`
+`opennotes-react-viewer` (peer: `react` 18 or later) gives you the whole app as `<Notebook />`
 and the raw client as hooks.
 
 ```bash
-npm install opennotebook-react-viewer react
+npm install opennotes-react-viewer react
 ```
 
 ## The component
 
 ```tsx
-import { Notebook } from 'opennotebook-react-viewer';
+import { Notebook } from 'opennotes-react-viewer';
 
 export function Notes({ user }: { user: { id: string; name: string } }) {
 	return (
@@ -61,7 +61,7 @@ Every prop is optional:
 
 ```tsx
 import { useMemo } from 'react';
-import { useNotebook, type CreateNotebookOptions } from 'opennotebook-react-viewer';
+import { useNotebook, type CreateNotebookOptions } from 'opennotes-react-viewer';
 
 function Outline({ userId }: { userId: string }) {
 	const options = useMemo<CreateNotebookOptions>(

@@ -8,7 +8,7 @@ import {
 	useNotebook,
 	type CreateNotebookOptions,
 	type NotebookTheme,
-} from 'opennotebook-react-viewer';
+} from 'opennotes-react-viewer';
 import { useEffect, useMemo, useState } from 'react';
 import {
 	currentHostClass,

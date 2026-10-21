@@ -1,4 +1,4 @@
-opennotebook-react-viewer
+opennotes-react-viewer
 Copyright ChristopherVR. Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 This package bundles the notebook-viewer wiring (Apache-2.0) and consumes ooxml-core and ooxml-ui

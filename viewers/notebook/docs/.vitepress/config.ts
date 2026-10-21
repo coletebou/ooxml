@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress';
 // Adapted from the teams viewer's docs/.vitepress/config.ts. English only for this first cut; the
 // accent is the notebook's product colour (docs/pages-design.md at the repository root).
 export default defineConfig({
-	title: 'OpenNotebook',
+	title: 'OpenNotes',
 	description:
 		'An open-source, local-first notebook app: notebooks, sections and pages with a free-form canvas of rich text, pictures, embedded Office files and ink, with a React binding.',
 	lang: 'en-US',
@@ -29,7 +29,7 @@ export default defineConfig({
 			},
 		],
 		['meta', { property: 'og:type', content: 'website' }],
-		['meta', { property: 'og:title', content: 'OpenNotebook documentation' }],
+		['meta', { property: 'og:title', content: 'OpenNotes documentation' }],
 		[
 			'meta',
 			{
@@ -92,7 +92,7 @@ export default defineConfig({
 
 		footer: {
 			message:
-				'Released under the Apache-2.0 License. OpenNotebook is an independent project, not affiliated with any commercial notebook product.',
+				'Released under the Apache-2.0 License. OpenNotes is an independent project, not affiliated with any commercial notebook product.',
 			copyright: 'Copyright © 2026 ChristopherVR',
 		},
 	},
