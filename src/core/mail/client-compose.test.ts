@@ -350,6 +350,41 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('says why it does not send while a file uploads, once each time it is asked', async () => {
+		const { client, control, notices, sent } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Two files' });
+		const stillUploading: MailNotice = { kind: 'warning', action: 'upload', uploading: 1 };
+		// Asked while a file uploads (Ctrl+Enter: the button is off meanwhile).
+		control.uploads.holding = true;
+		const first = client.attach([file('one.txt')]);
+		expect(await client.send()).toBe(false);
+		expect(notices).toEqual([stillUploading]);
+		control.uploads.release();
+		await first;
+		// Asked while the draft saves, and a file added before that save is over.
+		control.saves.holding = true;
+		const saving = client.saveDraft();
+		const sending = client.send();
+		control.uploads.holding = true;
+		const second = client.attach([file('two.txt')]);
+		control.saves.release();
+		await saving;
+		expect(await sending).toBe(false);
+		expect(notices).toEqual([stillUploading, stillUploading]);
+		control.uploads.release();
+		await second;
+		expect(await client.send()).toBe(true);
+		expect(notices.slice(2)).toEqual([{ kind: 'done', action: 'sent', count: 1 }]);
+		const [message] = await sent();
+		expect(message?.attachments.map((attachment) => attachment.name)).toEqual([
+			'one.txt',
+			'two.txt',
+		]);
+		client.destroy();
+	});
+
 	it('gives way to another message only once the one on its way is sent', async () => {
 		const { client, control, sent } = setup();
 		await until(client, (s) => s.status === 'ready');

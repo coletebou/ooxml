@@ -135,8 +135,9 @@ export type MailNotice =
 	/** What an iCalendar import could not represent, one line per problem. */
 	| { kind: 'warning'; action: 'eventsImported'; unsupported: readonly string[] }
 	/**
-	 * The compose window stays open, and nothing opens in its place, while files are still uploading
-	 * into its draft (`compose`, `editDraft` and `closeCompose` resolve false).
+	 * The compose window stays open, nothing opens in its place and its message is not sent while
+	 * files are still uploading into its draft (`compose`, `editDraft`, `closeCompose` and `send`
+	 * resolve false).
 	 */
 	| { kind: 'warning'; action: 'upload'; uploading: number };
 
@@ -242,7 +243,7 @@ export interface MailClient {
 	saveDraft(): Promise<void>;
 	/**
 	 * True when the message was handed to the server. False, the window left as it is, while a file
-	 * is still uploading: sent then, the message would go without it.
+	 * is still uploading (a notice says so): sent then, the message would go without it.
 	 */
 	send(): Promise<boolean>;
 	discardDraft(): Promise<void>;

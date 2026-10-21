@@ -105,6 +105,12 @@ export function createCompose(core: ClientCore): ComposeActions {
 		return true;
 	};
 
+	/** Refuses what would leave out the `uploading` files still on their way, and says why. */
+	const stillUploading = (uploading: number): false => {
+		core.notice({ kind: 'warning', action: 'upload', uploading });
+		return false;
+	};
+
 	const start = (draft: Draft, mode: ComposeState['mode']): void => {
 		autosave.opened(draft);
 		core.patch({
@@ -142,10 +148,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 		}
 		// Closing now would leave the file out: `attach` finds no window to add it to.
 		const uploading = compose()?.uploading ?? 0;
-		if (uploading) {
-			core.notice({ kind: 'warning', action: 'upload', uploading });
-			return false;
-		}
+		if (uploading) return stillUploading(uploading);
 		autosave.cancel();
 		core.patch({ compose: null });
 		return true;
@@ -240,8 +243,9 @@ export function createCompose(core: ClientCore): ComposeActions {
 		},
 		async send() {
 			const current = compose();
+			if (!current || sending) return false;
 			// Not while a file uploads: it would be left out, with no window left to add it to.
-			if (!current || sending || current.uploading) return false;
+			if (current.uploading) return stillUploading(current.uploading);
 			const recipients = draftRecipients(current.draft);
 			if (!recipients.length || recipients.some((r) => !ADDRESS.test(r.email))) {
 				setCompose({ status: 'error', error: 'invalid' });
@@ -257,7 +261,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (latest.uploading) {
 				// A file added while the last save finished: not yet either, and the edits keep saving.
 				if (autosave.unsaved()) autosave.schedule();
-				return false;
+				return stillUploading(latest.uploading);
 			}
 			sending = deliver(latest);
 			try {

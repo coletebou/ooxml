@@ -460,29 +460,42 @@ describe('<mail-app>', () => {
 		await until(() => state(app).compose?.draft.attachments.length === 1);
 	});
 
-	it('says a file is still uploading when New message cannot replace the window yet', async () => {
+	it('says a file is still uploading when New message or Ctrl+Enter cannot act yet', async () => {
 		const base = createMemoryTransport(createDemoSeed({ now: Date.UTC(2026, 9, 20) }));
 		let uploaded = (): void => {};
+		const sent: Draft[] = [];
 		const transport: MailTransport = {
 			...base,
 			async upload(bytes, type) {
 				await new Promise<void>((resolve) => (uploaded = resolve));
 				return base.upload(bytes, type);
 			},
+			send(draft) {
+				sent.push(draft);
+				return base.send(draft);
+			},
 		};
 		const app = await mount({ kind: 'transport', transport });
 		await app.client!.compose('new');
+		app.client!.updateDraft({ to: [{ name: '', email: 'bob@example.com' }], subject: 'Hi' });
 		const { session } = state(app).compose!;
 		const file = { name: 'big.bin', type: '', bytes: new Uint8Array(2) };
 		const attaching = app.client!.attach([file]);
 		inner<HTMLButtonElement>(app, '.topbar .primary')!.click();
 		await until(() => app.toasts.length === 1);
+		// The Send button is off while the file uploads; the shortcut says why it does nothing.
+		app.dispatchEvent(key('Enter', { ctrlKey: true }));
+		await until(() => app.toasts.length === 2);
 		await app.updateComplete;
 		const toasts = [...app.shadowRoot!.querySelectorAll('.toast > span')];
-		expect(toasts.map((toast) => toast.textContent)).toEqual([
-			'A file is still uploading. Try again once it is in the message.',
-		]);
+		expect(toasts.map((toast) => toast.textContent)).toEqual(
+			Array.from(
+				{ length: 2 },
+				() => 'A file is still uploading. Try again once it is in the message.',
+			),
+		);
 		expect(state(app).compose).toMatchObject({ session, uploading: 1 });
+		expect(sent).toEqual([]);
 		uploaded();
 		await attaching;
 	});
