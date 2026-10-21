@@ -71,10 +71,9 @@ export class MailMessageList extends MailElement {
 
 	override connectedCallback(): void {
 		super.connectedCallback();
-		if (typeof ResizeObserver !== 'undefined')
-			this.observer = new ResizeObserver(() => {
-				this.height = this.viewport?.clientHeight ?? 0;
-			});
+		// Connected again after a move in the page (an app moves with its panes): its viewport, drawn
+		// before, is followed again, at the size it has where it is now.
+		if (this.hasUpdated) this.follow();
 	}
 
 	override disconnectedCallback(): void {
@@ -83,11 +82,20 @@ export class MailMessageList extends MailElement {
 	}
 
 	protected override firstUpdated(): void {
+		this.follow();
+	}
+
+	/** Follow the height of the viewport, which sets how many rows are drawn. */
+	private follow(): void {
 		const viewport = this.viewport;
-		if (viewport) {
-			this.observer?.observe(viewport);
-			this.height = viewport.clientHeight;
+		if (!viewport) return;
+		if (typeof ResizeObserver !== 'undefined') {
+			this.observer ??= new ResizeObserver(() => {
+				this.height = this.viewport?.clientHeight ?? 0;
+			});
+			this.observer.observe(viewport);
 		}
+		this.height = viewport.clientHeight;
 	}
 
 	protected override updated(changed: PropertyValues<this>): void {
