@@ -1,7 +1,8 @@
 import { createMailClient } from './client';
+import type { MailNotice } from './client-types';
 import { createMemoryTransport } from './memory-transport';
 import { until } from './test-support/client';
-import type { MailQueryPage, MailTransport } from './transport';
+import { MailTransportError, type MailQueryPage, type MailTransport } from './transport';
 
 const T0 = Date.UTC(2026, 0, 5, 9, 0, 0);
 
@@ -66,6 +67,55 @@ describe('the message list', () => {
 		// Asked again from where it ended, it would get the same first page for ever.
 		expect(ids()).toEqual(['m0', 'm1']);
 		expect(client.getState()).toMatchObject({ loaded: 2, total: 7 });
+		client.destroy();
+	});
+});
+
+describe('changes to messages the list holds', () => {
+	it('fetches a changed message on a later load when fetching it at the change failed', async () => {
+		const memory = createMemoryTransport({
+			now: () => T0,
+			messages: ['m0', 'm1'].map((id, i) => ({
+				id,
+				mailboxId: 'inbox',
+				from: { name: 'Ada', email: 'ada@example.com' },
+				subject: `Message ${i}`,
+				receivedAt: T0 - i * 60_000,
+			})),
+		});
+		let offline = false;
+		const transport: MailTransport = {
+			...memory,
+			async summaries(ids) {
+				if (offline) throw new MailTransportError('network', 'The server cannot be reached.');
+				return memory.summaries(ids);
+			},
+		};
+		const client = createMailClient({ transport, threaded: false });
+		const notices: MailNotice[] = [];
+		client.onNotice((notice) => notices.push(notice));
+		await until(client, (s) => s.status === 'ready');
+		const listed = () => client.getState().conversations.map((c) => [c.id, c.flagged]);
+		// Flagged elsewhere while its summary cannot be fetched: the change feed moves past it, and
+		// the list keeps what it shows.
+		offline = true;
+		await memory.update({ m1: { keywords: { $flagged: true } } });
+		await vi.waitFor(() =>
+			expect(notices).toContainEqual(expect.objectContaining({ kind: 'error' })),
+		);
+		expect(listed()).toEqual([
+			['m0', false],
+			['m1', false],
+		]);
+		// Once it can be fetched, the next change brings it too, though only another message changed.
+		offline = false;
+		await memory.update({ m0: { keywords: { $seen: true } } });
+		await vi.waitFor(() =>
+			expect(listed()).toEqual([
+				['m0', false],
+				['m1', true],
+			]),
+		);
 		client.destroy();
 	});
 });

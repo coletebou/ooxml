@@ -1,8 +1,10 @@
 // Loading what the client shows: the session, the folders, the message list of a folder or a
 // search (newest first, page after page, summaries fetched in batches), and the transport's change
-// feed, which refreshes what changed and re-runs the list. Stale responses from an earlier folder
-// or search are dropped by a generation counter; a connection that failed is made again on
-// request, one attempt at a time. New code.
+// feed, which refreshes what changed and re-runs the list. A changed message whose summary could
+// not be fetched again is fetched by the next list load that holds it, cached or not: the feed has
+// moved past the change. Stale responses from an earlier folder or search are dropped by a
+// generation counter; a connection that failed is made again on request, one attempt at a time.
+// New code.
 import type { ClientCore } from './client-core';
 import { errorCode } from './client-core';
 import { parseSearch } from './search';
@@ -38,6 +40,8 @@ export function createListLoader(core: ClientCore): ListLoader {
 	let flushing: unknown;
 	let connected = false;
 	let connecting: Promise<void> | undefined;
+	/** Cached messages the change feed said changed, whose summaries could not be fetched again. */
+	const stale = new Set<string>();
 
 	const query = (): MailQuery => {
 		const text = core.state.query;
@@ -89,8 +93,11 @@ export function createListLoader(core: ClientCore): ListLoader {
 		try {
 			const result = await queryList(() => mine === generation && !core.destroyed);
 			if (!result) return;
-			const ids = options.refetch ? result.ids : result.ids.filter((id) => !core.emails.has(id));
+			const ids = options.refetch
+				? result.ids
+				: result.ids.filter((id) => !core.emails.has(id) || stale.has(id));
 			await fetchSummaries(ids);
+			for (const id of ids) stale.delete(id);
 			if (mine !== generation || core.destroyed) return;
 			core.listIds = [...result.ids];
 			core.patch({ loading: false, total: result.total });
@@ -118,8 +125,10 @@ export function createListLoader(core: ClientCore): ListLoader {
 		if (!known.length) return;
 		try {
 			await fetchSummaries(known);
+			for (const id of known) stale.delete(id);
 			core.rebuild();
 		} catch (error) {
+			for (const id of known) stale.add(id);
 			core.fail('load', error);
 		}
 	};
