@@ -7,6 +7,45 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-react-viewer@1.0.0) - 2026-10-22
+
+### Features
+
+- **docx:** Take the shared collaboration contract in <docx-editor> ([58e5caa](https://github.com/ChristopherVR/ooxml/commit/58e5caa1103f2129b32976cf1def24ebd031cad9))
+- **docx:** Add navigation, status and full toolbar blocks to bindings ([d3ff60f](https://github.com/ChristopherVR/ooxml/commit/d3ff60f9c90291d11d7ff59b8ffcea96dc9bc464))
+- **docx:** Make the building blocks read-only unless canEdit is true ([f4f4227](https://github.com/ChristopherVR/ooxml/commit/f4f4227e43b8b6f9463f0b81fc23a925cb62dc01))
+
+### Bug Fixes
+
+- **docx:** Name the toolbar openers apart from the host options ([d5bc691](https://github.com/ChristopherVR/ooxml/commit/d5bc691e2aaa946147e55edf590a61f64c7a671a))
+
+### Documentation
+
+- **docx:** Document the building blocks and list them in the sidebar ([4b98e67](https://github.com/ChristopherVR/ooxml/commit/4b98e671c708d3e5ea286bd4797e29d88bfe1303))
+- Align the building-block pages with the code ([37ab0f6](https://github.com/ChristopherVR/ooxml/commit/37ab0f6b89ff2a9a9ec14ace28bf320af01ff03a))
+
+## [0.6.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-react-viewer@0.6.0) - 2026-10-21
+
+### Features
+
+- **docx:** Expose composable editor building blocks ([79bf480](https://github.com/ChristopherVR/ooxml/commit/79bf4801d8efb256a3e3e6fa81cca2613e6fd0fd))
+- **docx:** Add native framework building blocks ([77db7c6](https://github.com/ChristopherVR/ooxml/commit/77db7c6a9965a6851fd0ee42488228a7931a632e))
+- **docx:** Inherit shared office themes across editor blocks ([3adb658](https://github.com/ChristopherVR/ooxml/commit/3adb658f212e93a49beec631a618c8802b0c183a))
+
+### Bug Fixes
+
+- **deps:** Align private bindings with their react test host ([f4152ef](https://github.com/ChristopherVR/ooxml/commit/f4152ef04ccdc3e5c9d21ecf59f485b56de2ec52))
+- **ui:** Harden composition lifecycle and consumer checks ([6aa52be](https://github.com/ChristopherVR/ooxml/commit/6aa52be88175ca4f46f6f3b1c223ef06a8f1f915))
+- **ui:** Preserve live formula drafts and runtime compatibility ([3a7d4f1](https://github.com/ChristopherVR/ooxml/commit/3a7d4f184658c4d69b04bbd36bab7afa3896dd9e))
+
+### Styling
+
+- Fix the oxfmt and oxlint warnings in the viewers ([db0314f](https://github.com/ChristopherVR/ooxml/commit/db0314f319e3d0508960872260792215477d9ca5))
+
+### Dependencies
+
+- **deps:** Declare native adapter development dependencies ([b5f9957](https://github.com/ChristopherVR/ooxml/commit/b5f9957a65d934ebb4d40ed02bb872dcd24575fb))
+
 ## [0.5.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-react-viewer@0.5.0) - 2026-10-10
 
 ### Features

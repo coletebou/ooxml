@@ -1,5 +1,6 @@
 import type { VisioGridSteps } from 'ooxml-core/visio/ui';
 import type { ViewerController, ViewerState } from './controller';
+import { planDeleteSelection } from './viewer-delete';
 import {
 	editErrorMessage,
 	isEditCancellation,
@@ -7,8 +8,6 @@ import {
 	visioQuarterTurnCommand,
 	visioRotationShape,
 	visioSelectionIsOnPage,
-	visioWithCalloutLeaders,
-	visioWithDataGraphics,
 } from 'ooxml-core/visio/ui';
 import { RIBBON_ACTION_EVENT, type VisioRibbonAction, type CanvasTool } from './ribbon-action';
 import type { RibbonCommand } from './ribbon-parts';
@@ -42,6 +41,8 @@ import { ViewerTextFeatures } from './viewer-text-features';
 
 export type { CanvasTool } from './ribbon-action';
 interface CommandHost {
+	/** True when a host capability refuses the action (`customization.capabilities`). */
+	blocked?(action: VisioRibbonAction): boolean;
 	root: ShadowRoot;
 	viewport: HTMLElement;
 	rulers: Rulers;
@@ -289,6 +290,7 @@ export class ViewerCommands {
 	}
 	/** Run one typed action, exactly as a ribbon control or shortcut would. */
 	run(action: VisioRibbonAction): void {
+		if (this.host.blocked?.(action)) return;
 		routeRibbonAction(this.#targets, action);
 	}
 	wire(): () => void {
@@ -416,7 +418,7 @@ export class ViewerCommands {
 		this.host.toolChanged?.();
 	}
 	#canEdit(state: ViewerState): boolean {
-		return state.edit.sourceAvailable && !state.loading && !state.edit.busy;
+		return state.canEdit && state.edit.sourceAvailable && !state.loading && !state.edit.busy;
 	}
 	#history(key: 'undo' | 'redo'): void {
 		const { controller } = this.host;
@@ -427,32 +429,9 @@ export class ViewerCommands {
 	#delete(): void {
 		const state = this.host.controller.state;
 		if (this.#tool === 'connection-point' && this.#points.deleteSelected()) return;
-		const shapes = state.selectedShapes;
-		const page = state.document?.pages[state.pageIndex];
-		const pageId = page?.id;
-		if (
-			!shapes.length ||
-			pageId === undefined ||
-			!this.#canEdit(state) ||
-			shapes.some((shape) => shape.pageId && shape.pageId !== pageId)
-		)
-			return;
-		void this.#edit(
-			() =>
-				this.host.controller.applyEdits(
-					// Keep generated graphics and callout leaders with their deleted owners.
-					visioWithCalloutLeaders(
-						page!,
-						visioWithDataGraphics(
-							page!,
-							shapes.map((shape) => shape.id),
-						),
-					).map((shapeId) => ({ type: 'delete-shape', pageId, shapeId })),
-				),
-			shapes.length === 1
-				? `Deleted ${shapes[0]!.name || `shape ${shapes[0]!.id}`}.`
-				: `Deleted ${shapes.length} shapes.`,
-		);
+		const plan = planDeleteSelection(state);
+		if (!plan || !this.#canEdit(state)) return;
+		void this.#edit(() => this.host.controller.applyEdits(plan.edits), plan.message);
 	}
 	#insertPage(): void {
 		const state = this.host.controller.state;
@@ -647,7 +626,8 @@ export class ViewerCommands {
 		const box = (name: string) =>
 			root.querySelector<RibbonCommand & { checked: boolean }>(`[data-check="${name}"]`)!;
 		const editing = this.#canEdit(state);
-		if (this.#tool !== 'pointer' && !state.edit.sourceAvailable) this.#tool = 'pointer';
+		if (this.#tool !== 'pointer' && (!state.canEdit || !state.edit.sourceAvailable))
+			this.#tool = 'pointer';
 		const page = state.document?.pages[state.pageIndex];
 		const rotating =
 			editing &&

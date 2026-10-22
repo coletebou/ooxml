@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { changedSince, plan } from './ci-plan.mjs';
-import { argumentBatches } from './verify-arguments.mjs';
+import { argumentBatches, FORMATTER_CHECK } from './verify-arguments.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -82,7 +82,7 @@ for (const file of present) {
 	byViewer.set(dir, [...(byViewer.get(dir) ?? []), dir === '.' ? file : relative(dir, file)]);
 }
 for (const [dir, list] of byViewer)
-	for (const command of argumentBatches('bunx oxfmt --check', list)) add(command, dir);
+	for (const command of argumentBatches(FORMATTER_CHECK, list)) add(command, dir);
 
 if (p.build) {
 	add('bun run build');
@@ -107,6 +107,7 @@ if (p.pptx.run) {
 	add('bun run build:packages', 'viewers/pptx');
 	add('bun run typecheck', 'viewers/pptx');
 	add('bun run check:viewer-props', 'viewers/pptx');
+	add('bun run check:tree-shaking', 'viewers/pptx');
 	for (const leg of p.pptx.tests)
 		if (leg === 'react18') add('bun run test:react18', 'viewers/pptx/packages/react');
 		else add('bun run test', `viewers/pptx/packages/${leg}`);

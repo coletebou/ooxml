@@ -1,0 +1,21 @@
+# Codex profile for the gpt61sol and gpt6sol seats of hydra-review.yml: GPT-6.1 Sol on Bedrock
+# Mantle (the built-in amazon-bedrock provider) in us-east-1. The workflow copies it from the base
+# commit into a private CODEX_HOME, and the autoreview helper stages only model, model_provider,
+# model_reasoning_effort, service_tier, model_catalog_json and the AWS region from it; each seat
+# also sets its model, effort and service tier on the command line.
+#
+# No credential lives here. The provider authenticates with the Bedrock API key in the
+# AWS_BEARER_TOKEN_BEDROCK environment variable, which the workflow sets from the repository secret
+# of the same name.
+model = "openai.gpt-6.1-sol"
+model_provider = "amazon-bedrock"
+model_reasoning_effort = "max"
+service_tier = "ultrafast"
+
+# Codex 0.162.1's bundled catalogue does not list the Ultrafast tier for GPT-6.1 Sol, and Codex
+# drops a tier its catalogue does not advertise without a word. This copy adds it; the helper copies
+# it byte for byte into the reviewer runtime. The path resolves against this file's directory.
+model_catalog_json = "autoreview-bedrock.models.json"
+
+[model_providers.amazon-bedrock.aws]
+region = "us-east-1"

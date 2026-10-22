@@ -1,5 +1,6 @@
 export * from './backstage/templates';
 export * from './commands';
+export * from './customization';
 export * from './commands/alignment';
 export * from './commands/cells';
 export * from './commands/cf-presets';
@@ -57,3 +58,4 @@ export * from './theme/css-vars';
 export * from './theme/defaults';
 export * from './theme/element';
 export * from './theme/types';
+export { selectionFormatting } from './selection-format';

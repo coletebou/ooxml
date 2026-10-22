@@ -1,0 +1,16 @@
+# Codex profile for the astra6 seat of hydra-review.yml: GPT-6 Astra on Bedrock Mantle (the
+# built-in amazon-bedrock provider) in us-east-1, Standard tier. The workflow copies it from the
+# base commit into a private CODEX_HOME, and the autoreview helper stages only model,
+# model_provider, model_reasoning_effort, service_tier and the AWS region from it; the seat also
+# sets its model, effort and service tier on the command line.
+#
+# No credential lives here. The provider authenticates with the Bedrock API key in the
+# AWS_BEARER_TOKEN_BEDROCK environment variable, which the workflow sets from the repository secret
+# of the same name.
+model = "openai.gpt-6-astra"
+model_provider = "amazon-bedrock"
+model_reasoning_effort = "high"
+service_tier = "default"
+
+[model_providers.amazon-bedrock.aws]
+region = "us-east-1"

@@ -1,6 +1,6 @@
 {
 	"name": "ooxml-mcp",
-	"version": "0.1.16",
+	"version": "0.1.19",
 	"homepage": "https://github.com/ChristopherVR/ooxml/tree/main/mcp#readme",
 	"bugs": {
 		"url": "https://github.com/ChristopherVR/ooxml/issues"
@@ -32,16 +32,16 @@
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.32.1",
-		"ooxml-core": "*"
+		"ooxml-core": "workspace:*"
 	},
 	"devDependencies": {
 		"zod": "^4.6.7"
 	},
 	"peerDependencies": {
-		"docx-viewer-mcp": "^0.1.10",
-		"pptx-viewer-mcp": ">=2.6.0 <3",
-		"visio-viewer-mcp": "^0.3.4",
-		"xlsx-viewer-mcp": "^0.1.10"
+		"docx-viewer-mcp": "workspace:*",
+		"pptx-viewer-mcp": "workspace:*",
+		"visio-viewer-mcp": "workspace:*",
+		"xlsx-viewer-mcp": "workspace:*"
 	},
 	"peerDependenciesMeta": {
 		"docx-viewer-mcp": {

@@ -7,6 +7,41 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-vanilla-viewer@1.1.0) - 2026-10-22
+
+### Features
+
+- **xlsx:** Let hosts own the data-validation alert in building blocks ([fcbe367](https://github.com/ChristopherVR/ooxml/commit/fcbe367f5cfe366cc425796e3fdff9c31aa99e25))
+
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-vanilla-viewer@1.0.0) - 2026-10-22
+
+### Features
+
+- **xlsx:** Complete the building-block toolbar and add vanilla ([af8114f](https://github.com/ChristopherVR/ooxml/commit/af8114ff92e023858cd5a6d2a9922d6dbb2ee111))
+- **xlsx:** Make the building blocks read-only unless canEdit is true ([efe6158](https://github.com/ChristopherVR/ooxml/commit/efe6158de251e1e34694335292755cfec96d640b))
+
+### Bug Fixes
+
+- **xlsx:** Name the share opener like the other building blocks ([1346849](https://github.com/ChristopherVR/ooxml/commit/1346849e085724ef8a4810cf540f8d802fd47cee))
+
+## [0.7.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-vanilla-viewer@0.7.0) - 2026-10-21
+
+### Features
+
+- **xlsx:** Expose composable spreadsheet building blocks ([9aef499](https://github.com/ChristopherVR/ooxml/commit/9aef499f76196be6dd008ae873ac8f0d4caeeb58))
+- **xlsx:** Add native framework building blocks ([9689a65](https://github.com/ChristopherVR/ooxml/commit/9689a6520682e9db18f8cbee78d8434ad114b097))
+- **xlsx:** Share office themes across editor building blocks ([a791ec2](https://github.com/ChristopherVR/ooxml/commit/a791ec2e68956921006c719397803e603286a8c0))
+
+### Bug Fixes
+
+- **deps:** Align private bindings with their react test host ([f4152ef](https://github.com/ChristopherVR/ooxml/commit/f4152ef04ccdc3e5c9d21ecf59f485b56de2ec52))
+- **ui:** Harden composition lifecycle and consumer checks ([6aa52be](https://github.com/ChristopherVR/ooxml/commit/6aa52be88175ca4f46f6f3b1c223ef06a8f1f915))
+- **ui:** Preserve live formula drafts and runtime compatibility ([3a7d4f1](https://github.com/ChristopherVR/ooxml/commit/3a7d4f184658c4d69b04bbd36bab7afa3896dd9e))
+
+### Styling
+
+- Fix the oxfmt and oxlint warnings in the viewers ([db0314f](https://github.com/ChristopherVR/ooxml/commit/db0314f319e3d0508960872260792215477d9ca5))
+
 ## [0.6.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-vanilla-viewer@0.6.0) - 2026-10-10
 
 ### Features

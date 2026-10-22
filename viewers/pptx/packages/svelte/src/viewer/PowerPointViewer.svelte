@@ -16,6 +16,7 @@
 		buildUserFontFaceStyles,
 		attachViewerHyperlinks,
 		INSPECTOR_PANEL_DEFAULT_WIDTH,
+		resolveCollaborationConfig,
 		resolveViewerRootOptions,
 		themeToCssVars,
 	} from 'ooxml-ui/pptx';
@@ -349,7 +350,8 @@
 	class:pptx-svelte-show-guides={parityUi.showGuides}
 	class:pptx-svelte-reduced-motion={parityUi.preferences.reducedMotion}
 	style={rootStyle}
-	data-pptx-editor-chrome
+	data-pptx-theme-root
+ data-pptx-editor-chrome
 	data-pptx-ribbon-scope={ribbonScope}
 	role="region"
 	aria-label={t('pptx.titleBar.defaultFileName')}
@@ -397,7 +399,7 @@
 			ondismissall={() => compatToasts.dismissAll()}
 		/>
 	{/if}
-	{#if vm.versionHistoryOpen}<VersionHistoryPanel filePath={props.filePath} onclose={() => (vm.versionHistoryOpen = false)} onrestore={(bytes) => loader.load(bytes)} />{/if}
+	{#if vm.versionHistoryOpen}<VersionHistoryPanel filePath={props.filePath} storage={props.storage} onclose={() => (vm.versionHistoryOpen = false)} onrestore={(bytes) => loader.load(bytes)} />{/if}
 	{#if vm.signatureWarningOpen}<SignatureStrippedDialog signatureCount={loader.digitalSignatureCount} onclose={vm.closeSignatureWarning} />{/if}
 	<ViewerParityOverlays ui={parityUi} {editor} {exportUi} slides={vm.displaySlides} canvasSize={loader.canvasSize} mediaDataUrls={loader.mediaDataUrls} current={viewer.current} fullscreen={viewer.isFullscreen} locale={themeLocale.effectiveLocale} themeKey={themeLocale.themeKey} themeCatalog={themeLocale.catalog} onsetthemekey={(key) => themeLocale.setThemeKey(key)} availableLocales={props.availableLocales} onsetlocale={(code) => themeLocale.setLocale(code)} onselectslide={(index) => viewer.goTo(index)} onmoveslide={vm.deck.moveSlide} optionsState={vm.optionsState} autosaveRecovery={vm.autosaveRecovery} {aiEnabled} collabActive={vm.collab.active} />
 	<ViewerMain
@@ -437,7 +439,7 @@
 		/>
 	{/if}
 	{#if showToolbar && vm.chromeVisible && customization.isPanelVisible('statusBar')}
-		<ViewerStatusBar {vm} {showNotes} {hiddenActions} collaboration={props.collaboration} />
+		<ViewerStatusBar {vm} {showNotes} {hiddenActions} collaboration={resolveCollaborationConfig(props.collaboration)} />
 	{/if}
 	<CollaborationChrome
 		{collab}
@@ -457,6 +459,7 @@
 
 <style>
 	.pptx-svelte-viewer {
+ font-family: var(--pptx-font, var(--office-font, system-ui, sans-serif));
 		position: relative;
 		display: flex;
 		flex-direction: column;
@@ -468,8 +471,8 @@
 		 * and clips text). Mirrors the React `theme.css` rule. */
 		-webkit-text-size-adjust: none;
 		text-size-adjust: none;
-		background: var(--pptx-background, #11111b);
-		color: var(--pptx-foreground, #e2e8f0);
+		background: var(--pptx-background, var(--office-background, #ffffff));
+		color: var(--pptx-foreground, var(--office-foreground, #1f2937));
 		outline: none;
 		overflow: hidden;
 		/* Own stacking context: the slide's selection handles and overlays (z-index 57 to 61)

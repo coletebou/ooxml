@@ -7,6 +7,26 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/visio-viewer-mcp@1.0.0) - 2026-10-22
+
+### Features
+
+- **visio:** Complete the building blocks in every framework ([0a69177](https://github.com/ChristopherVR/ooxml/commit/0a6917719b5040587c0a37dfe3b37a875b7d2a05))
+
+### Bug Fixes
+
+- **visio:** Ship the toolbar controls with the svelte package ([709fafa](https://github.com/ChristopherVR/ooxml/commit/709fafa524945526e613472143abf41054131332))
+
+### Refactor
+
+- **mcp:** Register every format's tools through core automation ([9a28bfa](https://github.com/ChristopherVR/ooxml/commit/9a28bfa684167472fff27f04a371c37d494a5fd5))
+
+## [0.4.0](https://github.com/ChristopherVR/ooxml/releases/tag/visio-viewer-mcp@0.4.0) - 2026-10-21
+
+### Features
+
+- **visio:** Add native framework building block integrations ([689e934](https://github.com/ChristopherVR/ooxml/commit/689e9340824a41e32a5024938e16b483e34c4452))
+
 ## [0.3.5](https://github.com/ChristopherVR/ooxml/releases/tag/visio-viewer-mcp@0.3.5) - 2026-10-20
 
 ### Dependencies

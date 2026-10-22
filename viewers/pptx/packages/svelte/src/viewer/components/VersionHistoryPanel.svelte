@@ -4,10 +4,10 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import X from '@lucide/svelte/icons/x';
 	import { deleteAutosaveSnapshot, formatBackstageSize, formatRelativeTime, formatVersionTimestamp, getAutosaveSnapshot } from 'ooxml-ui/pptx';
-import type { AutosaveRecord } from 'ooxml-ui/pptx';
+import type { AutosaveRecord, DocumentStorage } from 'ooxml-ui/pptx';
 	import { useTranslator } from '../../i18n/context';
 
-	const { filePath, onclose, onrestore }: { filePath?: string; onclose: () => void; onrestore: (data: Uint8Array) => void | Promise<void> } = $props();
+	const { filePath, storage, onclose, onrestore }: { filePath?: string; storage?: DocumentStorage; onclose: () => void; onrestore: (data: Uint8Array) => void | Promise<void> } = $props();
 	const t = useTranslator();
 	let version = $state<AutosaveRecord>();
 	let loading = $state(true);
@@ -15,7 +15,7 @@ import type { AutosaveRecord } from 'ooxml-ui/pptx';
 
 	$effect(() => {
 		loading = true;
-		void (filePath ? getAutosaveSnapshot(filePath) : Promise.resolve(undefined)).then((record) => {
+		void (filePath ? getAutosaveSnapshot(filePath, storage) : Promise.resolve(undefined)).then((record) => {
 			version = record;
 			loading = false;
 			return record;
@@ -37,7 +37,7 @@ import type { AutosaveRecord } from 'ooxml-ui/pptx';
 		if (!version) {return;}
 		busy = true;
 		try {
-			await deleteAutosaveSnapshot(version.key);
+			await deleteAutosaveSnapshot(version.key, storage);
 			version = undefined;
 		} catch {
 			// Keep the entry visible so deletion can be retried.
@@ -61,5 +61,5 @@ import type { AutosaveRecord } from 'ooxml-ui/pptx';
 </aside>
 
 <style>
-	.history{position:absolute;inset:0 0 0 auto;z-index:80;display:flex;width:min(320px,100%);flex-direction:column;border-left:1px solid var(--pptx-border,#3f3f52);background:var(--pptx-background,#171722);color:var(--pptx-foreground,#e2e8f0);box-shadow:-18px 0 48px #0005;font-family:Aptos,"Segoe UI",sans-serif}.history>header{display:flex;height:48px;align-items:center;gap:9px;padding:0 12px;border-bottom:1px solid var(--pptx-border,#3f3f52)}h2{flex:1;margin:0;font-size:14px;font-weight:600}.history>header .icon{display:inline-flex}.history button{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:0;border-radius:6px;background:transparent;color:inherit}.history>header button{width:30px;height:30px}.history button:hover{background:var(--pptx-accent,#343447)}.content{flex:1;overflow:auto}.empty{margin:0;padding:34px 16px;text-align:center;color:var(--pptx-muted-foreground,#9ca3af);font-size:12px}article{padding:14px;border-bottom:1px solid var(--pptx-border,#3f3f52)}article>div{display:flex;justify-content:space-between;gap:12px}strong{font-size:12px;font-weight:500}small,article>p{color:var(--pptx-muted-foreground,#9ca3af);font-size:10px}article>p{margin:5px 0 0}footer{display:flex;gap:6px;margin-top:12px}footer button{padding:6px 9px;font-size:10px}.restore{background:color-mix(in srgb,var(--pptx-primary,#c43e1c) 20%,transparent)!important;color:var(--pptx-primary,#f97350)!important}.delete{color:#f87171!important}button:disabled{opacity:.45}@media(max-width:600px){.history{position:fixed;top:auto;height:min(72dvh,560px);border-top:1px solid var(--pptx-border,#3f3f52);border-left:0;box-shadow:0 -18px 48px #0007}}
+	.history{position:absolute;inset:0 0 0 auto;z-index:80;display:flex;width:min(320px,100%);flex-direction:column;border-left:1px solid var(--pptx-border, var(--office-border, #d1d5db));background:var(--pptx-background, var(--office-background, #ffffff));color:var(--pptx-foreground, var(--office-foreground, #1f2937));box-shadow:-18px 0 48px #0005;font-family:Aptos,"Segoe UI",sans-serif}.history>header{display:flex;height:48px;align-items:center;gap:9px;padding:0 12px;border-bottom:1px solid var(--pptx-border, var(--office-border, #d1d5db))}h2{flex:1;margin:0;font-size:14px;font-weight:600}.history>header .icon{display:inline-flex}.history button{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:0;border-radius:6px;background:transparent;color:inherit}.history>header button{width:30px;height:30px}.history button:hover{background:var(--pptx-accent, var(--office-selected, #e5e7eb))}.content{flex:1;overflow:auto}.empty{margin:0;padding:34px 16px;text-align:center;color:var(--pptx-muted-foreground, var(--office-muted-foreground, #6b7280));font-size:12px}article{padding:14px;border-bottom:1px solid var(--pptx-border, var(--office-border, #d1d5db))}article>div{display:flex;justify-content:space-between;gap:12px}strong{font-size:12px;font-weight:500}small,article>p{color:var(--pptx-muted-foreground, var(--office-muted-foreground, #6b7280));font-size:10px}article>p{margin:5px 0 0}footer{display:flex;gap:6px;margin-top:12px}footer button{padding:6px 9px;font-size:10px}.restore{background:color-mix(in srgb,var(--pptx-primary, var(--office-accent, #2563eb)) 20%,transparent)!important;color:var(--pptx-primary, var(--office-accent, #2563eb))!important}.delete{color:#f87171!important}button:disabled{opacity:.45}@media(max-width:600px){.history{position:fixed;top:auto;height:min(72dvh,560px);border-top:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-left:0;box-shadow:0 -18px 48px #0007}}
 </style>

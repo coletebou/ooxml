@@ -20,11 +20,14 @@ import { ReviewController } from './review-controller';
 import { EditorChrome } from './editor-chrome';
 import { dispatchDocumentError } from './editor-host';
 import { routeRibbonAction } from './ribbon-router';
+import { attachSurfaceNavigation } from './surface-navigation';
 import { documentWordCount } from 'ooxml-core/docx/ui';
 import { PageNavigator } from './page-navigator';
 import { HeadingNavigator } from './heading-navigator';
 import { applyViewOptions } from './view-options';
+import { wordRegionContext } from './customization-apply';
 import { attachEditorInteractions } from './editor-interactions';
+import { attachCanvasClick } from './canvas-click';
 
 /** Element-level operations the chrome needs; they stay on the element because they are public API. */
 export interface ShellApi {
@@ -48,12 +51,12 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 		locale: () => core.locale,
 		readOnly: () => core.readOnly,
 		setReadOnly: (readOnly) => {
-			api.setReadOnly(readOnly);
-			emit(element, 'readonly-change', readOnly);
+			core.reportReadOnly(() => api.setReadOnly(readOnly));
 		},
 		newDocument: () => api.setDocumentModel(createDocument()),
 		load: (bytes) => api.load(bytes),
 		save: () => api.saveBytes(),
+		storage: () => core.storage,
 		saveStateChanged: (state) => {
 			if (state !== 'saving') core.dirtyState.set(state === 'dirty');
 		},
@@ -97,6 +100,8 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 			host().hiddenActions = ids as RibbonActionId[];
 			emit(element, 'ribbon-customize', host().hiddenActions);
 		},
+		customization: () => core.viewOptions.customization,
+		regionContext: (region) => wordRegionContext(core, region),
 		reportError: (error) => dispatchDocumentError(element, error),
 	});
 }
@@ -104,8 +109,9 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 /** Builds the shadow-DOM shell (ribbon, canvas, panels, chrome) once; later calls are no-ops. */
 export function buildShell(core: EditorCore, api: ShellApi): void {
 	const { element, shell } = core;
-	if (shell.toolbar) {
+	if (shell.paper) {
 		attachPrintEditing(core);
+		if (core.surfaceOnly) attachSurface(core);
 		return;
 	}
 	element.classList.add('dve-host');
@@ -114,8 +120,8 @@ export function buildShell(core: EditorCore, api: ShellApi): void {
 	style.textContent = editorStyleText;
 	const frame = document.createElement('section');
 	frame.className = 'dve-frame';
-	const toolbar = createRibbon(core.locale);
-	on(toolbar, 'ribbon-action', (event) => routeRibbonAction(core, event.detail));
+	const toolbar = core.surfaceOnly ? undefined : createRibbon(core.locale);
+	if (toolbar) on(toolbar, 'ribbon-action', (event) => routeRibbonAction(core, event.detail));
 	const canvas = document.createElement('main');
 	canvas.className = 'dve-canvas';
 	const paper = document.createElement('div');
@@ -148,6 +154,17 @@ export function buildShell(core: EditorCore, api: ShellApi): void {
 		{ passive: true },
 	);
 	shell.printLayout = printLayout;
+	if (core.surfaceOnly) {
+		frame.append(canvas);
+		root.append(style, frame);
+		Object.assign(shell, { canvas, paper });
+		attachPrintEditing(core);
+		attachCanvasClick(core);
+		attachSurface(core);
+		applyShellLabels(element, paper, core.locale);
+		return;
+	}
+	if (!toolbar) return;
 	shell.navigator = new PageNavigator({
 		pages: () => printLayout.pageElements(),
 		pageSnapshot: (index) => printLayout.pageSnapshot(index),
@@ -221,6 +238,7 @@ export function buildShell(core: EditorCore, api: ShellApi): void {
 	// After the toolbar is registered: the File tab label is localized through the shell.
 	chrome.setLocale(core.locale);
 	applyViewOptions(core);
+	chrome.applyCustomization();
 	attachEditorInteractions(core, frame);
 	element.setAttribute('role', 'region');
 	applyShellLabels(element, paper, core.locale);
@@ -234,6 +252,11 @@ export function applyRibbonAddIns(core: EditorCore): void {
 	syncRibbonAddIns(toolbar, core.ribbonAddIns, { panelClass: 'ribbon-panel' });
 	// Equal tabs keep their panels; only new panels change what fits.
 	if (toolbar.querySelector('[data-add-in]') !== before) refitRibbon(toolbar);
+}
+
+/** Read-only navigation for the surface; reconnection binds it again. */
+function attachSurface(core: EditorCore): void {
+	core.shell.surfaceNavigation ??= attachSurfaceNavigation(core);
 }
 
 /** A disconnected editor releases input listeners; reconnection binds the retained shell again. */

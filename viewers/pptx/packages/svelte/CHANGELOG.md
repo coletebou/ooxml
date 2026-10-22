@@ -7,6 +7,90 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [Unreleased]
+
+### Documentation
+
+- Point script, e2e and plan references at real paths ([eec05e2](https://github.com/ChristopherVR/ooxml/commit/eec05e293e6149c0ecf2dd3c863694721949294a))
+
+## [4.46.0](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-svelte-viewer@4.46.0) - 2026-10-22
+
+### Features
+
+- **pptx:** Confirm owner write-back and report its status ([2cb779f](https://github.com/ChristopherVR/ooxml/commit/2cb779f606c7d8d0778c11be830433fc93f728c3))
+
+### Documentation
+
+- **pptx:** Sync english docs with the monorepo layout and apis ([4b89444](https://github.com/ChristopherVR/ooxml/commit/4b89444ac835ae6ed61ef1f6f7a3fc0d23aac7f5))
+- **pptx:** Fix demo paths and shared facade wording in package readmes ([4caf3d2](https://github.com/ChristopherVR/ooxml/commit/4caf3d2471527b484f1e1b6b2d3f5add11a92048))
+
+## [4.45.0](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-svelte-viewer@4.45.0) - 2026-10-22
+
+### Features
+
+- **automation:** Define word, excel and visio tools once in core ([bed1839](https://github.com/ChristopherVR/ooxml/commit/bed18392fec1f07fa9a0c1eabf8a7c1bb25b0387))
+- **pptx:** Report the shared collaboration state from every binding ([62752ef](https://github.com/ChristopherVR/ooxml/commit/62752efd7b2f9df8372db485cd23c2a6ed5f15ee))
+- **automation:** Propose xlsx edits as a reviewable diff ([0e13837](https://github.com/ChristopherVR/ooxml/commit/0e13837c6fdf0766e21aa8a31ef69737df8ab203))
+- **automation:** Add xlsx_propose_edits and xlsx_apply_proposal tools ([8c7500d](https://github.com/ChristopherVR/ooxml/commit/8c7500df317f1cffa3016705369e52b0a5ad0218))
+- **pptx:** Define the powerpoint tools as shared automation tools ([88acafd](https://github.com/ChristopherVR/ooxml/commit/88acafd82419de2cefbebd4b91b935c378f8c772))
+- **pptx:** Connect through a provider, webrtc or same-browser room ([4ae5288](https://github.com/ChristopherVR/ooxml/commit/4ae528882a33ec93730f30bf642589a00b6edf06))
+
+### Bug Fixes
+
+- **pptx:** Render flowChart connector presets as shapes, not lines ([978593a](https://github.com/ChristopherVR/ooxml/commit/978593a0d0067d97105fd98b8d640dc929ec9f2b))
+- **pptx:** Paint picture fills inherited from layout placeholders ([71b8196](https://github.com/ChristopherVR/ooxml/commit/71b81964ca4b19ef9cc143fa970479614426bd9d))
+
+## [4.44.0](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-svelte-viewer@4.44.0) - 2026-10-21
+
+### Features
+
+- **opc:** Name the check a zip package failed ([5125361](https://github.com/ChristopherVR/ooxml/commit/5125361f7787c1edf9863ccf85d0666a56610d1b))
+- **xml:** Throw a typed error when a part breaks a parse limit ([40e73f6](https://github.com/ChristopherVR/ooxml/commit/40e73f6e0ddb045ef5a3b960e26cfc07a1fc6d45))
+- **automation:** List and fill Word form fields from document bytes ([548ca2d](https://github.com/ChristopherVR/ooxml/commit/548ca2d53b2828bc69681e154e8bd668cfacf90b))
+
+### Bug Fixes
+
+- **chart:** Scale and draw series with very many points ([778a3e9](https://github.com/ChristopherVR/ooxml/commit/778a3e973b5d948e15ef2d0de6ac70a4243feb5a))
+- **docx:** Add no folder entries to a saved package ([9688c30](https://github.com/ChristopherVR/ooxml/commit/9688c30da93a3a73436a248b59b5a64d71fc7585))
+- **xml:** Keep the line break after the declaration of a part ([9af3e23](https://github.com/ChristopherVR/ooxml/commit/9af3e23b3c33368027123f1363c9d1236cc8230e))
+- **docx:** Keep markers and smart tags in place in a rebuilt paragraph ([8ddce70](https://github.com/ChristopherVR/ooxml/commit/8ddce70d17ba25ff6a1887f91c907ecba70a9b1f))
+- **text:** Keep unchanged words between far-apart edits in a diff ([3cf0b04](https://github.com/ChristopherVR/ooxml/commit/3cf0b0495a5c3c2d339b22c5db2b547c14921fbd))
+- **pptx:** Render weight-named font families at their weight ([7188288](https://github.com/ChristopherVR/ooxml/commit/718828829585145b461742c04e030fe3fbbd2d52))
+- **color:** Require each palette variant to name its step ([70d7d9a](https://github.com/ChristopherVR/ooxml/commit/70d7d9a949e9dc5289bacf33bf63bd9af4c9f258))
+- **color:** Require each palette variant to name its step ([3135862](https://github.com/ChristopherVR/ooxml/commit/3135862978fd352498d977335777555ba519428a))
+- **svelte:** Offer every text warp and store the real preset ([4e97248](https://github.com/ChristopherVR/ooxml/commit/4e972480510b2e83a4418b72ee1280c1601a0472))
+- **pptx:** Render flowChart connector presets as shapes, not lines ([08399ae](https://github.com/ChristopherVR/ooxml/commit/08399aea49db3270d6ef9c9c163c0ea3b6f8e23f))
+- **pptx:** Paint picture fills inherited from layout placeholders ([70bf7f9](https://github.com/ChristopherVR/ooxml/commit/70bf7f91beda9ae8e4d70472134222afc873dc68))
+
+### Refactor
+
+- **svelte:** Render Help and Record through the shared section ([98fb9b1](https://github.com/ChristopherVR/ooxml/commit/98fb9b170750ab5eb8581b6085cf482bedbfc5af))
+- **svelte:** Draw the inspector theme colours on the shared grid ([d7917a1](https://github.com/ChristopherVR/ooxml/commit/d7917a14c91955a0a0c16a453ddbdbbad25b864b))
+
+## [4.43.0](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-svelte-viewer@4.43.0) - 2026-10-21
+
+### Features
+
+- **xlsx:** Expand workbook inspection and cell reads ([#117](https://github.com/ChristopherVR/ooxml/issues/117)) ([481bcc2](https://github.com/ChristopherVR/ooxml/commit/481bcc265611822a628c121f00897ec6b3e95cd6))
+- **pptx:** Add layout-inheriting text placeholders ([#113](https://github.com/ChristopherVR/ooxml/issues/113)) ([a9bb079](https://github.com/ChristopherVR/ooxml/commit/a9bb07957fcf9aa1a12406911726211b415c690a))
+
+### Bug Fixes
+
+- **pptx:** Inherit shared office themes across native viewers ([8ae64f7](https://github.com/ChristopherVR/ooxml/commit/8ae64f7f72ea70c323fef9b6c712697c6c54aeb6))
+
+### Performance
+
+- **xlsx:** Keep comments and cdata on the XML fast path ([#119](https://github.com/ChristopherVR/ooxml/issues/119)) ([ee7212a](https://github.com/ChristopherVR/ooxml/commit/ee7212afc204e15b5977d215f5cc61c99aaf4bc3))
+
+### Dependencies
+
+- **deps:** Update emf-converter to 4.21.0 ([#106](https://github.com/ChristopherVR/ooxml/issues/106)) ([641ae31](https://github.com/ChristopherVR/ooxml/commit/641ae316b7de07ed6f3c5158e8b154c991e1b719))
+- **deps:** Update dev tools and fix svelte type checks ([#107](https://github.com/ChristopherVR/ooxml/issues/107)) ([550eac2](https://github.com/ChristopherVR/ooxml/commit/550eac24d469d14245a0ac71789e01c8d5fb50f9))
+
+### Chores
+
+- Integrate latest main before full verification ([3bec814](https://github.com/ChristopherVR/ooxml/commit/3bec814857ae675f31eba14fcec59a3db4e1cb77))
+
 ## [4.42.1](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-svelte-viewer@4.42.1) - 2026-10-20
 
 ### Bug Fixes

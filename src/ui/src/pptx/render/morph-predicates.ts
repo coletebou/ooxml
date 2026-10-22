@@ -82,8 +82,13 @@ export function conflictingMorphNames(a: PptxElement, b: PptxElement): boolean {
 
 /** The media part an image/picture element paints (path, else data URL). */
 export function mediaIdentity(el: PptxElement): string | undefined {
-	const props = el as { imagePath?: string; imageData?: string };
-	return props.imagePath ?? props.imageData ?? undefined;
+	const props = el as {
+		imagePath?: string;
+		imageData?: string;
+		svgPath?: string;
+		svgData?: string;
+	};
+	return props.imagePath ?? props.imageData ?? props.svgPath ?? props.svgData ?? undefined;
 }
 
 /** Euclidean distance between two elements' top-left corners (slide space). */
@@ -91,6 +96,21 @@ export function centreDistance(a: PptxElement, b: PptxElement): number {
 	const dx = a.x - b.x;
 	const dy = a.y - b.y;
 	return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Whether both elements are pictures painting provably different images. Two
+ * nearby pictures of different artwork are not the same object, and pairing
+ * them spins and stretches one into the other (a rotated icon turning into an
+ * unrelated flat picture). Unknown media on either side vetoes nothing.
+ */
+export function differentMedia(a: PptxElement, b: PptxElement): boolean {
+	if (a.type !== 'picture' && a.type !== 'image') {
+		return false;
+	}
+	const aMedia = mediaIdentity(a);
+	const bMedia = mediaIdentity(b);
+	return Boolean(aMedia) && Boolean(bMedia) && aMedia !== bMedia;
 }
 
 /** Whether two elements are the same kind of picture painting the same media. */
@@ -160,8 +180,21 @@ export function appearanceSignature(el: PptxElement): string {
  * two can never disagree about what "a counterpart in place" is.
  */
 export function proximityAccepts(a: PptxElement, b: PptxElement): boolean {
-	if (a.type !== b.type || differentText(a, b) || conflictingMorphNames(a, b)) {
+	if (
+		a.type !== b.type ||
+		differentText(a, b) ||
+		conflictingMorphNames(a, b) ||
+		differentMedia(a, b)
+	) {
 		return false;
+	}
+	// Unrelated artwork can occupy the same box. A wheel SVG near an incoming animated
+	// picture must not lend it its rotation (#105). Replaced pictures with explicit
+	// identity are handled by the earlier name, creation-id and native-id passes.
+	if (a.type === 'picture' || a.type === 'image') {
+		const fromMedia = mediaIdentity(a);
+		const toMedia = mediaIdentity(b);
+		if (fromMedia && toMedia && fromMedia !== toMedia) return false;
 	}
 	const ratio = (p: number, q: number): number => Math.max(p, q, 1) / Math.max(Math.min(p, q), 1);
 	if (

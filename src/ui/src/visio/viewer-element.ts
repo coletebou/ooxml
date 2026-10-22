@@ -7,7 +7,7 @@ import { selectedShape } from './shape-inspector';
 import { wireViewerInputs } from './viewer-input';
 import { viewerStyles } from './styles';
 import { canvasAndRibbonStyles, visioThemeAliases } from './styles/index';
-import { installOfficeUiTheme } from '../theme';
+import { installOfficeUiThemeFor } from '../theme';
 import { createRibbon } from './ribbon';
 import { wireInlineGalleries } from './ribbon-inline-galleries';
 import { syncRibbonAddIns, type RibbonAddInTab } from '../ribbon/add-in-tabs';
@@ -28,12 +28,26 @@ import { createShapesStrip, createShapesWindow } from './shapes-window';
 import { createBackstage, type BackstagePage } from './backstage';
 import type { CreateVsdxOptions } from 'ooxml-core/visio';
 import { ViewerBackstage } from './viewer-backstage';
-import { ViewerPointerGestures } from './viewer-pointer-gestures';
+import type { ViewerPointerGestures } from './viewer-pointer-gestures';
 import { createSizePosition, ViewerSizePosition } from './viewer-size-position';
 import { createContextMenus, wireContextMenus } from './viewer-context-menu';
+import {
+	applyVisioCommandVisibility,
+	quickAccessShown,
+	syncVisioHostMenu,
+	ViewerCustomizationState,
+	visioActionBlocked,
+} from './viewer-customization';
+import type { VisioCustomization } from 'ooxml-core/visio/ui';
 import { ViewerMiniToolbar } from './viewer-mini-toolbar';
 import { ViewerLivePreview } from './viewer-live-preview';
-import { ViewerAutoRecover, indexedDbRecoveryStore } from './viewer-autorecover';
+import {
+	ViewerAutoRecover,
+	indexedDbRecoveryStore,
+	storageRecoveryStore,
+} from './viewer-autorecover';
+import type { DocumentStorage } from 'ooxml-core/embedding';
+import { announceFileCommand } from './viewer-file-commands';
 import { RecoverDialog } from './viewer-recover-dialog';
 import { wireTellMe } from './viewer-tell-me';
 import { createPanZoom, ViewerPanZoom } from './viewer-pan-zoom';
@@ -44,16 +58,18 @@ import {
 	type StatusBarTheme,
 } from './viewer-options';
 import { ViewerShare } from './viewer-share';
+import type { VisioCollaborationOptions, VisioCollaborationState } from './collaboration-types';
 import { wireStencil } from './viewer-stencil';
 import { createRulers, type Rulers } from './viewer-ruler';
-import { ViewerInlineText } from './viewer-inline-text';
+import type { ViewerInlineText } from './viewer-inline-text';
+import { createCanvasEditing } from './canvas-editing';
 import { ViewerChrome, viewerChromeTemplate } from './viewer-chrome';
 import { ViewerCanvas } from './viewer-canvas';
 import { ViewerCommands } from './viewer-commands';
 import { ViewerPresentation } from './viewer-presentation';
-import { ViewerLineEndpoints } from './viewer-line-endpoints';
-import { ViewerRotationHandle } from './viewer-rotation-handle';
-import { ViewerResizeHandles } from './viewer-resize-handles';
+import type { ViewerLineEndpoints } from './viewer-line-endpoints';
+import type { ViewerRotationHandle } from './viewer-rotation-handle';
+import type { ViewerResizeHandles } from './viewer-resize-handles';
 import { editErrorMessage } from 'ooxml-core/visio/ui';
 import { registerViewerControls } from './office-ui';
 import { exportPageSvg, type SvgExportOptions, type SvgExportResult } from './export-svg';
@@ -68,6 +84,81 @@ const BaseElement = (
 	typeof HTMLElement === 'undefined' ? class {} : HTMLElement
 ) as typeof HTMLElement;
 export class VisioViewerElement extends BaseElement {
+	/** False while the drawing cannot be edited: `canEdit`, `readOnly`, a `viewer` role or `capabilities.edit`. */
+	get canEdit(): boolean {
+		return this.controller.canEdit;
+	}
+	set canEdit(value: boolean) {
+		this.controller.canEdit = value;
+	}
+	/**
+	 * The host customisation (`VisioCustomization`): `capabilities`, `backstage.extraPages` and
+	 * `contextMenu.extraCommands`. Applied when the object identity changes; null restores the
+	 * defaults.
+	 */
+	get customization(): VisioCustomization | null {
+		return this.#custom.input;
+	}
+	set customization(value: VisioCustomization | null | undefined) {
+		this.#assertAlive();
+		if (!this.#custom.set(value ?? null)) return;
+		this.controller.setCapabilityReadOnly(!this.#custom.resolved.canEdit);
+		applyVisioCommandVisibility(this.#root, this.#custom.resolved);
+		this.#backstage.refreshCustomization();
+		renderTitleBar(
+			this.#titleBar,
+			this.controller.state,
+			this.#fileName,
+			this.#profile.profile,
+			quickAccessShown(this.#behaviour, this.#custom.resolved),
+		);
+	}
+	readonly #custom = new ViewerCustomizationState();
+	/**
+	 * The inverse of `canEdit`: true makes the drawing read-only and wins over `canEdit`. A
+	 * collaboration `viewer` role also reads as read-only, and turning this off never lifts it.
+	 */
+	get readOnly(): boolean {
+		return this.controller.readOnly;
+	}
+	set readOnly(value: boolean) {
+		this.controller.readOnly = value;
+	}
+	/**
+	 * Shares the open drawing in a room (the shared embedding contract of `ooxml-core/collab`):
+	 * while set, the drawing is shared and one loaded later rejoins; null leaves the room.
+	 */
+	get collaboration(): VisioCollaborationOptions | null {
+		return this.#share.wanted;
+	}
+	set collaboration(value: VisioCollaborationOptions | null | undefined) {
+		this.#share.want(value ?? null);
+	}
+	/**
+	 * Host-owned storage (`ooxml-core/embedding`). When set, File > Save and the Quick Access Save
+	 * hand the drawing to `storage.save()` and mark it saved instead of downloading a copy, File >
+	 * Open asks `storage.open()` when it has one, and AutoRecover keeps its copies through the
+	 * storage's recovery methods (when it has all three) instead of IndexedDB. The cancelable
+	 * `file-command` event still fires first.
+	 */
+	get storage(): DocumentStorage | null {
+		return this.#storage ?? null;
+	}
+	set storage(value: DocumentStorage | null | undefined) {
+		this.#storage = value ?? undefined;
+	}
+	/** What `collaboration-change` last reported. */
+	get collaborationState(): VisioCollaborationState {
+		return this.#share.state;
+	}
+	/** Leaves the room and clears `collaboration`. A host-owned session stays alive. */
+	stopCollaboration(): void {
+		this.#share.stop();
+	}
+	/** Restarts the connection, keeping the shared drawing and queued offline changes. */
+	reconnectCollaboration(): void {
+		this.#share.reconnect();
+	}
 	static observedAttributes = ['lang', 'locale'];
 	#overflow: { refit(): void } | undefined;
 	readonly controller = new ViewerController(createWorkerParser());
@@ -91,6 +182,7 @@ export class VisioViewerElement extends BaseElement {
 	#pointer: ViewerPointerGestures;
 	#sizePosition: ViewerSizePosition;
 	#fileName = '';
+	#storage: DocumentStorage | undefined;
 	#loadToken = 0;
 	#findBar: FindBar;
 	#replace: ViewerReplace;
@@ -122,7 +214,7 @@ export class VisioViewerElement extends BaseElement {
 		this.#root = this.attachShadow({ mode: 'open' });
 		// Shared Office controls must be defined before the static template upgrades them.
 		registerViewerControls();
-		installOfficeUiTheme();
+		installOfficeUiThemeFor(this);
 		// This template is static, never document content.
 		this.#root.innerHTML = `<style>${visioThemeAliases}${viewerStyles}${canvasAndRibbonStyles}</style>${viewerChromeTemplate}`;
 		const workspace = this.#root.querySelector('.workspace')!;
@@ -149,10 +241,11 @@ export class VisioViewerElement extends BaseElement {
 			this.#status.textContent = message;
 		};
 		const recoverDialog = new RecoverDialog(this.#root, say, () => this.#locale());
+		const browserStore = indexedDbRecoveryStore();
 		this.#recover = new ViewerAutoRecover(
 			this.controller,
 			() => this.#fileName,
-			indexedDbRecoveryStore(),
+			() => storageRecoveryStore(this.#storage) ?? browserStore,
 			(offer) => recoverDialog.show(offer),
 		);
 		this.#mini = new ViewerMiniToolbar(this.#root, this.#toolbar);
@@ -169,10 +262,23 @@ export class VisioViewerElement extends BaseElement {
 				this.#render(this.controller.state);
 			},
 		);
-		this.#edit = new ViewerInlineText(this.#viewport, this.controller, (message) => {
+		const announce = (message: string): void => {
 			this.#announcement = message;
 			this.#status.textContent = message;
+		};
+		// The same gestures the standalone building-block canvas uses; here the ribbon owns the tool.
+		const editing = createCanvasEditing(this.#viewport, this.controller, {
+			pointerActive: () => this.#commands.tool === 'pointer',
+			announce,
+			snap: (page, ids, delta) =>
+				this.#commands.layoutCommands.guides.snap(page, ids, delta, this.#commands.gridStep),
+			clearSnap: () => this.#commands.layoutCommands.guides.clearHints(),
 		});
+		this.#edit = editing.edit;
+		this.#pointer = editing.pointer;
+		this.#lineEndpoints = editing.lineEndpoints;
+		this.#rotationHandle = editing.rotation;
+		this.#resizeHandles = editing.resize;
 		// Selecting text in the editor shows the Mini Toolbar over it; collapsing the selection hides it.
 		this.#edit.onSelection = (at) => (at ? this.#mini.showAt(at.x, at.y) : this.#mini.hide());
 		this.#notes = this.#root.querySelector('.backstage-notes ul')!;
@@ -195,6 +301,7 @@ export class VisioViewerElement extends BaseElement {
 		});
 		this.#presentation = new ViewerPresentation(this.#root, this.controller);
 		this.#commands = new ViewerCommands({
+			blocked: (action) => visioActionBlocked(this.#custom.resolved, action),
 			root: this.#root,
 			viewport: this.#viewport,
 			controller: this.controller,
@@ -231,7 +338,7 @@ export class VisioViewerElement extends BaseElement {
 				this.controller.state,
 				this.#fileName,
 				this.#profile.profile,
-				this.#behaviour,
+				quickAccessShown(this.#behaviour, this.#custom.resolved),
 			);
 		this.#profile = new ViewerProfile(
 			this.#root,
@@ -249,50 +356,24 @@ export class VisioViewerElement extends BaseElement {
 				this.#applyBehaviour();
 			},
 		);
-		this.#pointer = new ViewerPointerGestures(this.#viewport, this.controller, {
-			active: () => this.#commands.tool === 'pointer',
-			announce: (message) => {
-				this.#announcement = message;
-				this.#status.textContent = message;
-			},
-			snap: (page, ids, delta) =>
-				this.#commands.layoutCommands.guides.snap(page, ids, delta, this.#commands.gridStep),
-			clearSnap: () => this.#commands.layoutCommands.guides.clearHints(),
-		});
-		this.#lineEndpoints = new ViewerLineEndpoints(this.#viewport, this.controller, {
-			active: () => this.#commands.tool === 'pointer',
-			announce: (message) => {
-				this.#announcement = message;
-				this.#status.textContent = message;
-			},
-		});
-		this.#rotationHandle = new ViewerRotationHandle(this.#viewport, this.controller, {
-			active: () => this.#commands.tool === 'pointer',
-			announce: (message) => {
-				this.#announcement = message;
-				this.#status.textContent = message;
-			},
-		});
-		this.#resizeHandles = new ViewerResizeHandles(this.#viewport, this.controller, {
-			active: () => this.#commands.tool === 'pointer',
-			announce: (message) => {
-				this.#announcement = message;
-				this.#status.textContent = message;
-			},
-		});
 		this.#share = new ViewerShare(this.#root, this.controller, () => this.#profile.profile);
+		this.#share.onChange = (detail) =>
+			this.dispatchEvent(
+				new CustomEvent('collaboration-change', { detail, bubbles: true, composed: true }),
+			);
+		this.#share.onError = (error) =>
+			this.dispatchEvent(
+				new CustomEvent('document-error', { detail: error, bubbles: true, composed: true }),
+			);
 		this.#backstage = new ViewerBackstage({
 			root: this.#root,
 			viewport: this.#viewport,
 			fileName: () => this.#fileName,
 			load: (source) => this.load(source),
 			createBlankDrawing: () => this.createBlankDrawing(),
-			exportVsdx: () => {
-				const saved = this.controller.exportVsdx();
-				// File > Save made a copy as a file: the AutoRecover copy has done its job.
-				this.#recover.saved();
-				return saved;
-			},
+			exportVsdx: () => this.controller.exportVsdx(),
+			// A downloaded copy exists as a file: the AutoRecover copy has done its job.
+			downloaded: () => this.#recover.saved(),
 			exportSvg: () => this.exportSvg(),
 			exportPicture: async (format) => {
 				const { document: model, pageIndex } = this.controller.state;
@@ -318,6 +399,34 @@ export class VisioViewerElement extends BaseElement {
 			noteCount: () => this.#notes.children.length,
 			pageSetup: () =>
 				this.#commands.run({ type: 'page-setup', command: { op: 'dialog', tab: 'print' } }),
+			fileCommand: (command) => announceFileCommand(this, command),
+			storage: () => this.#storage,
+			revision: () => this.controller.state.document,
+			savedToStorage: (name, revision) => {
+				this.#fileName = name;
+				const { state } = this.controller;
+				// The host stored it: the drawing is saved, unless it was edited while the save ran.
+				// Then it stays dirty and keeps its AutoRecover copy, which may hold the newer edits.
+				if (state.document === revision && !state.edit.busy && !state.loading) {
+					this.controller.markClean();
+					this.#recover.saved();
+				}
+				this.#render(this.controller.state);
+			},
+			saveFailed: (error) =>
+				this.dispatchEvent(
+					new CustomEvent('document-error', { detail: error, bubbles: true, composed: true }),
+				),
+			customization: () => this.#custom.resolved,
+			regionContext: (region) => ({
+				region,
+				viewer: this,
+				locale: this.#locale(),
+				canEdit: this.controller.canEdit,
+				pageIndex: this.controller.state.pageIndex,
+				pageCount: this.controller.state.document?.pages.length ?? 0,
+				close: () => this.#backstage.hide(),
+			}),
 		});
 		this.#disposeInputs = this.#wireInputs();
 		this.#unsubscribe = this.controller.subscribe((state) => this.#render(state));
@@ -600,6 +709,7 @@ export class VisioViewerElement extends BaseElement {
 	destroy(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		this.#share.stop();
 		this.#disposeInputs();
 		this.#fontEvents?.removeEventListener('loadingdone', this.#fontsChanged);
 		this.#fontEvents = undefined;
@@ -639,7 +749,7 @@ export class VisioViewerElement extends BaseElement {
 				this.controller.state,
 				this.#fileName,
 				this.#profile.profile,
-				behaviour,
+				quickAccessShown(behaviour, this.#custom.resolved),
 			);
 	}
 	/**
@@ -665,6 +775,7 @@ export class VisioViewerElement extends BaseElement {
 	}
 	connectedCallback(): void {
 		if (this.#disposed) return;
+		installOfficeUiThemeFor(this);
 		// Office Theme: the host's status-bar attribute wins; otherwise the choice saved in Options.
 		const savedTheme = readStatusBarTheme();
 		if (!this.hasAttribute('status-bar') && savedTheme) this.statusBar = savedTheme;
@@ -698,8 +809,12 @@ export class VisioViewerElement extends BaseElement {
 		const disposeMini = this.#mini.wire(this.#viewport);
 		const disposePreview = this.#livePreview.wire();
 		const disposeRecover = this.#recover.wire(this.ownerDocument);
-		const disposeMenus = wireContextMenus(this.#root, this.#viewport, this.controller, (x, y) =>
-			this.#mini.showAt(x, y),
+		const disposeMenus = wireContextMenus(
+			this.#root,
+			this.#viewport,
+			this.controller,
+			(x, y) => this.#mini.showAt(x, y),
+			(menu, target) => syncVisioHostMenu(menu, target, this.#custom.resolved, this.controller),
 		);
 		const disposeTellMe = wireTellMe(this.#root);
 		const disposeGalleries = wireInlineGalleries(this, this.#root);
@@ -798,6 +913,7 @@ export class VisioViewerElement extends BaseElement {
 		if (
 			changed ||
 			!previous ||
+			previous.canEdit !== state.canEdit ||
 			previous.zoom !== state.zoom ||
 			previous.selectedShape !== state.selectedShape ||
 			previous.selectedShapes !== state.selectedShapes ||
@@ -817,7 +933,13 @@ export class VisioViewerElement extends BaseElement {
 		this.#zoomSlider.value = Math.round(state.zoom * 100);
 		this.#zoomSlider.disabled = !page;
 		this.#renderStatus(state);
-		renderTitleBar(this.#titleBar, state, this.#fileName, this.#profile.profile, this.#behaviour);
+		renderTitleBar(
+			this.#titleBar,
+			state,
+			this.#fileName,
+			this.#profile.profile,
+			quickAccessShown(this.#behaviour, this.#custom.resolved),
+		);
 		for (const button of this.#root.querySelectorAll<HTMLButtonElement>('[data-action]'))
 			button.disabled = !page;
 		renderFindBar(this.#findBar, state);

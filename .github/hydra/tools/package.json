@@ -1,0 +1,12 @@
+{
+  "name": "hydra-review-tools",
+  "private": true,
+  "description": "Reviewer CLIs for .github/workflows/hydra-review.yml, installed with npm ci from the lockfile beside this file.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.304",
+    "@openai/codex": "0.162.1"
+  },
+  "allowScripts": {
+    "@anthropic-ai/claude-code@2.1.304": true
+  }
+}
