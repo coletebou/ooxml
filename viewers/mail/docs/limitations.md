@@ -48,6 +48,9 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   submission, counts as sent: should another app have canceled that submission and the server then
   dropped its record, the message is reported sent though it never went (the server holds nothing
   that tells the two apart).
+- **A Drafts folder is needed to save or send**: a message is created in Drafts and moved to Sent
+  as it goes (RFC 8621 7.5.1), so an account whose server has no Drafts folder (most create one)
+  can neither save a draft nor send, and says so.
 - **Unsaved drafts when the app goes away**: if the app is removed, or connects to another mailbox,
   while a draft cannot be saved (offline, over quota), it keeps trying in the background (after 5,
   15 and 40 seconds, then once a minute) until the draft is saved; closing the page before then
