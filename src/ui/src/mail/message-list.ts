@@ -3,6 +3,7 @@
 // thirty. Click opens, Ctrl/Cmd+click toggles, Shift+click extends the selection; rows drag onto a
 // folder to move. Keyboard shortcuts are the app's (see keyboard.ts).
 import { html, nothing, type PropertyValues } from 'lit';
+import { live } from 'lit/directives/live.js';
 import { repeat } from 'lit/directives/repeat.js';
 import type { ConversationView } from 'ooxml-core/mail';
 import { defineOnce, MailElement, mailStyles } from './base';
@@ -160,7 +161,7 @@ export class MailMessageList extends MailElement {
 		>
 			<input
 				type="checkbox"
-				.checked=${selected}
+				.checked=${live(selected)}
 				aria-label=${this.t('list.select', { subject })}
 				@click=${(e: MouseEvent) => {
 					e.stopPropagation();

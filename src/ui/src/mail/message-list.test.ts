@@ -55,4 +55,35 @@ describe('<mail-message-list>', () => {
 		list.remove();
 		expect(watching()).toHaveLength(0);
 	});
+
+	it('shows a row still selected after a Shift+click on its checkbox keeps it in the range', async () => {
+		const row = (id: string) => ({
+			id,
+			emailIds: [id],
+			latestId: id,
+			subject: `Subject ${id}`,
+			participants: [{ name: 'Ada', email: 'ada@example.com' }],
+			recipients: [],
+			preview: '',
+			date: 0,
+			count: 1,
+			unread: 0,
+			flagged: false,
+			hasAttachment: false,
+			draft: false,
+		});
+		const list = document.createElement('mail-message-list') as MailMessageList;
+		list.conversations = ['a', 'b', 'c'].map(row);
+		list.selection = ['a', 'b', 'c'];
+		list.height = 600;
+		document.body.append(list);
+		await list.updateComplete;
+		// The host extends the selection by a range, which keeps the clicked row in it.
+		list.addEventListener('mail-select-range', () => (list.selection = [...list.selection]));
+		const box = list.shadowRoot!.querySelectorAll<HTMLInputElement>('input[type=checkbox]')[1]!;
+		expect(box.checked).toBe(true);
+		box.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+		await list.updateComplete;
+		expect(box.checked).toBe(true);
+	});
 });
