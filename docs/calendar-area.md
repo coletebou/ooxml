@@ -109,14 +109,14 @@ a changed occurrence alters that an exception cannot hold. Nothing is dropped si
   only the first reminder relative to the start is kept.
 - All-day dates and floating times are floating in iCalendar: they come back in the importing
   zone, whatever zone they were written from.
-- A local time in the hour a clock change repeats names two instants and the file cannot say
-  which. `zonedToUtc` (moved unchanged from the `teams` area) takes the first in zones behind UTC
-  and the second in zones ahead of it; the same applies when reading.
+- A local time in the hour a clock change repeats names its first occurrence (RFC 5545 3.3.5), in
+  `zonedToUtc` and when a file is read; a time in a gap moves forward. A single event in the
+  second occurrence is written in UTC, which names it; a series keeps local time, which its
+  repeats follow, so only its first occurrence would read an hour early.
 - A zone matched from a VTIMEZONE is checked against the rules of the event's first year; a zone
-  that changed its rules later may drift. The week views (moved unchanged) start every day of a
-  week an hour late when the anchor's day or the week's first day has no midnight (zones that
-  change clocks at midnight, such as America/Santiago on 6 September 2026); the month grid does
-  not.
+  that changed its rules later may drift. Every view builds each day from its own wall date, so a
+  day with no midnight (America/Santiago on 6 September 2026) starts at 01:00 and the days around
+  it at midnight.
 - A zone whose clock changes never settle into a yearly pair (one that follows a lunar calendar,
   say) is written change by change, for a series that does not end through ten years after the
   export; after that its block keeps the last offset.

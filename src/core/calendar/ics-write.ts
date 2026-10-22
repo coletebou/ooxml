@@ -11,7 +11,7 @@ import { timezoneBlocks } from './ics-write-zone';
 import type { CalendarEvent, EventAttendee, EventPerson, RecurringSeries } from './model';
 import { nominalLength, occurrenceEnd } from './occurrences';
 import { ordinalOfDay } from './recurrence-calendar';
-import { MINUTE_MS, isValidZone, zonedParts } from './time-zone';
+import { MINUTE_MS, isValidZone, zonedParts, zonedToUtc } from './time-zone';
 
 const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
 
@@ -77,10 +77,19 @@ function paramValue(text: string): string {
 const tzidParam = (zone: string): string => `TZID=${paramValue(zone)}`;
 
 /** A date-time property: `DTSTART;TZID=America/New_York:20261015T090000`, or `...:...Z` in UTC. */
-export function icsDateTime(name: string, ms: number, zone: string): string {
-	return UTC_ZONES.has(zone)
-		? `${name}:${icsUtc(ms)}`
-		: `${name};${tzidParam(zone)}:${icsLocal(ms, zone)}`;
+/**
+ * A date-time property in the zone, or in UTC: for a UTC zone, and for an instant in the second
+ * occurrence of a repeated hour, which a local time cannot name (it names the first, RFC 5545
+ * 3.3.5). `keepLocal` writes local time even then, for a series whose repeats follow the zone's
+ * clock: only its first occurrence would read an hour early, not half of its repeats.
+ */
+export function icsDateTime(name: string, ms: number, zone: string, keepLocal = false): string {
+	if (UTC_ZONES.has(zone)) return `${name}:${icsUtc(ms)}`;
+	const local = icsLocal(ms, zone);
+	const whole = ms - (((ms % 1000) + 1000) % 1000);
+	if (!keepLocal && zonedToUtc(zonedParts(ms, zone), zone) !== whole)
+		return `${name}:${icsUtc(ms)}`;
+	return `${name};${tzidParam(zone)}:${local}`;
 }
 
 /** `20261015`: the wall date of an instant in a zone. */
@@ -219,7 +228,9 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 	const zone = isValidZone(event.zone) ? event.zone : 'UTC';
 	const at = { ...event, zone };
 	const time = (name: string, ms: number): string =>
-		event.allDay ? `${name};VALUE=DATE:${icsDate(ms, zone)}` : icsDateTime(name, ms, zone);
+		event.allDay
+			? `${name};VALUE=DATE:${icsDate(ms, zone)}`
+			: icsDateTime(name, ms, zone, event.repeat !== 'none');
 	// DTEND must be later than DTSTART (RFC 5545 3.8.2.2). Without it, a timed event ends where it
 	// starts and an all-day one lasts its day (3.6.1), which is what the reader takes it for. A
 	// length in days on the clock is a DURATION, which is nominal for each occurrence (3.8.5.3).

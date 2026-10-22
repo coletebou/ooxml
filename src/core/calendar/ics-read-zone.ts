@@ -6,7 +6,7 @@
 import { type ContentLine, type Component, unescapeText } from './ics-lines';
 import { type Wall, readDateValue, readUtcOffset, wallAsUtc } from './ics-read-time';
 import { daysInMonth, nthWeekdayOfMonth } from './recurrence-calendar';
-import { MINUTE_MS } from './time-zone';
+import { MINUTE_MS, wallToInstant } from './time-zone';
 
 const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 /** The days of a month's first week, and of the whole of the longest month. */
@@ -205,13 +205,9 @@ export function fileZoneOffset(zone: FileZone, instant: number): number {
 }
 
 /**
- * The instant of a wall time in the file's zone. A time in a gap moves forward; a repeated hour is
- * the earlier instant in zones behind UTC and the later one in zones ahead of it, as `zonedToUtc`.
+ * The instant of a wall time in the file's zone, as `zonedToUtc` reads one: a time in a gap moves
+ * forward, and a repeated hour is its first occurrence (RFC 5545 3.3.5).
  */
 export function fileZoneToUtc(zone: FileZone, wall: Wall): number {
-	const naive = wallAsUtc(wall);
-	const guess = naive - fileZoneOffset(zone, naive) * MINUTE_MS;
-	const again = naive - fileZoneOffset(zone, guess) * MINUTE_MS;
-	const exact = [guess, again].filter((t) => t + fileZoneOffset(zone, t) * MINUTE_MS === naive);
-	return exact.length ? Math.min(...exact) : Math.max(guess, again);
+	return wallToInstant(wallAsUtc(wall), (ms) => fileZoneOffset(zone, ms));
 }

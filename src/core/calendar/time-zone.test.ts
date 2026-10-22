@@ -49,6 +49,20 @@ describe('time zones', () => {
 		expect(twice).toBe(Date.UTC(2026, 10, 1, 5, 30));
 	});
 
+	it('takes the first of a repeated hour ahead of UTC too, as RFC 5545 3.3.5 does', () => {
+		// 2026-10-25 02:30 in Berlin happens at 00:30Z (CEST) and again at 01:30Z (CET).
+		const wall = { year: 2026, month: 10, day: 25, hour: 2, minute: 30 };
+		expect(zonedToUtc(wall, 'Europe/Berlin')).toBe(Date.UTC(2026, 9, 25, 0, 30));
+		// 2026-04-05 02:30 in Sydney happens at 15:30Z (AEDT) and again at 16:30Z (AEST).
+		expect(zonedToUtc({ ...wall, month: 4, day: 5 }, 'Australia/Sydney')).toBe(
+			Date.UTC(2026, 3, 4, 15, 30),
+		);
+		// The gap still moves forward: 2026-03-29 02:30 does not exist in Berlin.
+		expect(zonedToUtc({ ...wall, month: 3, day: 29 }, 'Europe/Berlin')).toBe(
+			Date.UTC(2026, 2, 29, 1, 30),
+		);
+	});
+
 	it('keeps the local time of day across daylight saving', () => {
 		const nineBefore = zonedToUtc({ year: 2026, month: 3, day: 7, hour: 9 }, NY);
 		const nineAfter = addDays(nineBefore, 1, NY);

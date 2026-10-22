@@ -1,8 +1,7 @@
 // Time-zone arithmetic on instants (UTC milliseconds) with the platform's IANA data, no library:
 // wall-clock parts of an instant in a zone, the instant of a wall-clock time in a zone (DST gaps
-// move forward; a repeated hour is the earlier instant in zones behind UTC and the later one in
-// zones ahead of it), and day starts and day steps that keep the local time of day across
-// daylight saving changes. Calendar code stores UTC and renders in a zone. DOM-free. Moved from
+// move forward; a repeated hour is its first occurrence, as RFC 5545 3.3.5 reads it), and day
+// starts and day steps that keep the local time of day across daylight saving changes. Calendar code stores UTC and renders in a zone. DOM-free. Moved from
 // src/core/teams/time-zone.ts.
 
 export interface ZonedParts {
@@ -88,6 +87,20 @@ export function offsetMinutes(ms: number, zone: string): number {
 export type WallTime = Pick<ZonedParts, 'year' | 'month' | 'day'> &
 	Partial<Pick<ZonedParts, 'hour' | 'minute' | 'second'>>;
 
+/**
+ * The instant of a wall time `naive` (as if UTC) in a zone whose offset at an instant `offsetAt`
+ * gives, in minutes: of the offsets the zone has within a day of it, the earliest instant whose
+ * clock reads that time, so a repeated hour is its first occurrence (RFC 5545 3.3.5); a time in a
+ * gap, which no clock reads, as the offset before the gap reads it, which moves it forward.
+ */
+export function wallToInstant(naive: number, offsetAt: (ms: number) => number): number {
+	const offsets = new Set([naive - DAY_MS, naive, naive + DAY_MS].map(offsetAt));
+	const reads = [...offsets]
+		.map((offset) => naive - offset * MINUTE_MS)
+		.filter((ms) => ms + offsetAt(ms) * MINUTE_MS === naive);
+	return reads.length ? Math.min(...reads) : naive - offsetAt(naive - DAY_MS) * MINUTE_MS;
+}
+
 /** The instant at which a zone's clocks read this wall time. Out-of-range fields roll over. */
 export function zonedToUtc(wall: WallTime, zone: string): number {
 	const naive = Date.UTC(
@@ -98,13 +111,7 @@ export function zonedToUtc(wall: WallTime, zone: string): number {
 		wall.minute ?? 0,
 		wall.second ?? 0,
 	);
-	const first = naive - offsetMinutes(naive, zone) * MINUTE_MS;
-	const second = naive - offsetMinutes(first, zone) * MINUTE_MS;
-	if (first === second) return first;
-	// Near a transition the two guesses differ: keep the one whose clock shows the wanted hour (the
-	// earlier when both do), else the later one, which moves a time in a gap forward.
-	const exact = [first, second].filter((c) => zonedParts(c, zone).hour === (wall.hour ?? 0));
-	return exact.length ? Math.min(...exact) : Math.max(first, second);
+	return wallToInstant(naive, (ms) => offsetMinutes(ms, zone));
 }
 
 /** The instant of local midnight of the day containing `ms`. */

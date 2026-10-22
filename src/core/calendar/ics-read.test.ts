@@ -318,6 +318,14 @@ describe('an invitation in a zone named by its rules', () => {
 				zonedToUtc({ year: 2026, month, day, hour, minute }, BERLIN),
 			);
 		}
+		// The repeated hour is its first occurrence, in the file's zone as in the platform's.
+		const repeated = ics(
+			'BEGIN:VCALENDAR',
+			...zoneLines,
+			...vevent('UID:x', 'DTSTART;TZID=W. Europe Standard Time:20261025T023000'),
+			'END:VCALENDAR',
+		);
+		expect(parseIcs(repeated).events[0]?.start).toBe(Date.UTC(2026, 9, 25, 0, 30));
 	});
 });
 

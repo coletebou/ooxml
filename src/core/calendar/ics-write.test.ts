@@ -86,6 +86,24 @@ describe('ics values', () => {
 });
 
 describe('eventsToIcs', () => {
+	it('writes a time in the second occurrence of a repeated hour in UTC, so it reads back', () => {
+		// 01:30Z on 2026-10-25 reads 02:30 in Berlin, as 00:30Z does: a local time names the first.
+		const second = Date.UTC(2026, 9, 25, 1, 30);
+		const single = event({ zone: 'Europe/Berlin', start: second, end: second + HOUR_MS });
+		const text = eventsToIcs([single], OPTIONS);
+		expect(text).toContain('\r\nDTSTART:20261025T013000Z\r\n');
+		expect(parseIcs(text).events[0]).toMatchObject({ start: second, end: second + HOUR_MS });
+		// The first occurrence keeps its local time.
+		const first = Date.UTC(2026, 9, 25, 0, 30);
+		expect(eventsToIcs([{ ...single, start: first, end: first + HOUR_MS }], OPTIONS)).toContain(
+			'\r\nDTSTART;TZID=Europe/Berlin:20261025T023000\r\n',
+		);
+		// A series keeps local time, which its repeats follow across the clock changes.
+		expect(eventsToIcs([{ ...single, repeat: 'daily', count: 3 }], OPTIONS)).toContain(
+			'\r\nDTSTART;TZID=Europe/Berlin:20261025T023000\r\n',
+		);
+	});
+
 	it('writes one calendar with an event for each, folded, with CRLF endings', () => {
 		const text = eventsToIcs(
 			[event({ title: 'Ünïcödé '.repeat(30) }), event({ id: 'e2', zone: 'UTC' })],
