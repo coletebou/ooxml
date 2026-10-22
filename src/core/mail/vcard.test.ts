@@ -382,6 +382,55 @@ describe('serializeVCards', () => {
 		expect(parseVCards(text).contacts[0]).toEqual(contact);
 	});
 
+	it('keeps a comma written in a name or an address a comma, never a list separator', () => {
+		// RFC 6350 3.4: an escaped comma is the character; the form edits these fields as text.
+		const read = [
+			'BEGIN:VCARD',
+			'VERSION:4.0',
+			'UID:commas',
+			'FN:Ann Doe',
+			'N:Doe\\, Smith;Ann;Lee,May;;ing. jr,M.Sc.',
+			'ADR;TYPE=home:;;12 Main St\\, Unit 2;Town;;;',
+			'END:VCARD',
+		].join('\r\n');
+		const [card] = parseVCards(read).contacts;
+		expect(card).toMatchObject({
+			familyName: 'Doe, Smith',
+			additionalNames: 'Lee,May',
+			suffix: 'ing. jr,M.Sc.',
+		});
+		expect(card!.addresses[0]!.street).toBe('12 Main St, Unit 2');
+		const text = serializeVCards([card!]);
+		// The lists of additional names and suffixes stay lists.
+		expect(text).toContain('\r\nN:Doe\\, Smith;Ann;Lee,May;;ing. jr,M.Sc.\r\n');
+		expect(text).toContain('\r\nADR;TYPE=home:;;12 Main St\\, Unit 2;Town;;;\r\n');
+		expect(parseVCards(text).contacts[0]).toEqual(card);
+		// A comma typed into the form is the same.
+		const typed = {
+			...emptyContact('u-2', 0),
+			name: 'Bo',
+			givenName: 'Bo, Jr.',
+			addresses: [
+				{
+					type: 'work',
+					poBox: '',
+					extended: 'Suite 200, Building B',
+					street: '1 Long Rd',
+					locality: 'Springfield, East',
+					region: '',
+					postalCode: '',
+					country: '',
+				},
+			],
+		};
+		const written = serializeVCards([typed]);
+		expect(written).toContain('\r\nN:;Bo\\, Jr.;;;\r\n');
+		expect(written).toContain(
+			'\r\nADR;TYPE=work:;Suite 200\\, Building B;1 Long Rd;Springfield\\, East;;;\r\n',
+		);
+		expect(parseVCards(written).contacts[0]).toEqual(typed);
+	});
+
 	it('writes a vCard 3 or 2.1 inline photo, logo, sound or key as a vCard 4 data URI', () => {
 		const { contacts } = parseVCards(
 			[

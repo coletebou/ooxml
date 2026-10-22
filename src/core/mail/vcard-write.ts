@@ -1,8 +1,8 @@
 // vCard 4.0 (RFC 6350) export for the address book: one card per contact, CRLF line ends, folded at
-// 75 octets. Each edited field is escaped as its value type asks (text, the list components of `N`
-// and `ADR`, a URI), and the lines `Contact.extra` keeps follow as read, an inline 3.0 or 2.1
-// photo, logo, sound or key and a quoted-printable 2.1 value written as 4.0 has them
-// (`vcard-legacy.ts`), so `vcard.ts` reads each card back as it was. New code.
+// 75 octets. Each edited field is escaped as its value type asks (text, the lists of `N`, a URI),
+// and the lines `Contact.extra` keeps follow as read, an inline 3.0 or 2.1 photo, logo, sound or
+// key and a quoted-printable 2.1 value written as 4.0 has them (`vcard-legacy.ts`), so `vcard.ts`
+// reads each card back as it was. New code.
 import type { Contact } from './contacts';
 import { vcard4Line } from './vcard-legacy';
 
@@ -17,11 +17,13 @@ const escapeBreaks = (value: string): string =>
 const escapeText = (value: string): string =>
 	escapeBreaks(value).replace(/,/g, '\\,').replace(/;/g, '\\;');
 /**
- * A component of `N` or `ADR`. Commas stay unescaped there: those components are lists (RFC 6350
- * `list-component`), their values separated by commas (`ing. jr,M.Sc.`), so a list read in is
- * written back as a list. An `ORG` component is a single value and is escaped as text.
+ * The additional names, honorific prefixes or suffixes of `N`, which the contact keeps as the
+ * comma-separated list vCard writes (RFC 6350 `list-component`, `ing. jr,M.Sc.`): their commas stay
+ * unescaped, so a list read in is written back as a list. Every other component of `N` and `ADR`,
+ * like an `ORG` one, is a single text the form edits as typed, and is escaped as text: a comma in
+ * `12 Main St, Unit 2` is the character, never the start of a second street.
  */
-const escapeComponent = (value: string): string => escapeBreaks(value).replace(/;/g, '\\;');
+const escapeList = (value: string): string => escapeBreaks(value).replace(/;/g, '\\;');
 /**
  * A URI value (`URL`, RFC 6350 6.7.8), not escaped as text: other readers keep such escapes in the
  * link. A URI holds no line break (dropped) and no backslash (percent-encoded, never an escape).
@@ -84,13 +86,13 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 			`FN:${escapeText(contact.name || [contact.givenName, contact.familyName].filter(Boolean).join(' '))}`,
 		);
 		const name = [
-			contact.familyName,
-			contact.givenName,
-			contact.additionalNames,
-			contact.prefix,
-			contact.suffix,
+			escapeText(contact.familyName),
+			escapeText(contact.givenName),
+			escapeList(contact.additionalNames),
+			escapeList(contact.prefix),
+			escapeList(contact.suffix),
 		];
-		if (name.some(Boolean)) lines.push(`N:${name.map(escapeComponent).join(';')}`);
+		if (name.some(Boolean)) lines.push(`N:${name.join(';')}`);
 		for (const email of contact.emails)
 			lines.push(`EMAIL${typeParam(email.type)}:${escapeText(email.address)}`);
 		for (const phone of contact.phones)
@@ -105,7 +107,7 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 				address.postalCode,
 				address.country,
 			];
-			lines.push(`ADR${typeParam(address.type)}:${parts.map(escapeComponent).join(';')}`);
+			lines.push(`ADR${typeParam(address.type)}:${parts.map(escapeText).join(';')}`);
 		}
 		if (contact.organization || contact.organizationUnits.length)
 			lines.push(

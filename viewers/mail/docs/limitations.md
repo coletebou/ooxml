@@ -12,10 +12,12 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   change stores them all. When the browser does not let the page use local storage at all (it is
   turned off, or the page is in a frame that may not use it), contacts and the calendar are kept
   only until the page is closed, and a notice says so at each change.
-- **Commas in a contact's name and address**: the parts of a vCard's `N` and `ADR` are lists, their
-  values separated by commas (RFC 6350), and they are written back as lists. A comma a card escaped
-  inside one value (`1 Main St\, Apt 2`) is read as the comma it is, and written back as a list
-  separator, which another program may read as two values.
+- **Lists in a contact's name and address**: RFC 6350 lets each part of a vCard's `N` and `ADR`
+  hold several values separated by commas. A contact keeps the additional names, prefixes and
+  suffixes as such lists, but the street, the other address parts and the given and family names as
+  one text each, as the form edits them: a comma in one (`1 Main St\, Apt 2`) is kept and written
+  back escaped, and a card that gave one of them several values (`1 Main St,Apt 2`) is written back
+  with the same text as one value.
 - **No invitations.** Calendar events import and export as iCalendar files, but meeting requests
   and replies (iTIP) are not handled.
 - **iCalendar import is partial**: repeating rules the calendar cannot represent (an interval

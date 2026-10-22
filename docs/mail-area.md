@@ -124,7 +124,10 @@ the host owns and gives to the next client (`ooxml-ui/mail`'s `createMail` does 
 `contacts.ts` is the address book model (every vCard structured component) and its helpers;
 `vcard.ts` reads vCard 4.0, 3.0 and the common 2.1 forms and writes 4.0, keeping every property it
 does not edit verbatim (an inline 3.0 or 2.1 photo, logo, sound or key is written as the 4.0 `data:`
-URI, and a quoted-printable 2.1 value as the text it encodes, `vcard-legacy.ts`). A card without a
+URI, and a quoted-printable 2.1 value as the text it encodes, `vcard-legacy.ts`). The additional
+names, prefixes and suffixes of `N` are kept as the comma-separated lists vCard writes; every other
+`N` and `ADR` component is one text, so a comma in it (`12 Main St\, Unit 2`) is written escaped,
+as read or typed. A card without a
 UID gets an id from a hash of its content, the same
 wherever it stands in a file, and two copies of it are one contact. `record-store.ts` keeps
 contacts and events in memory, optionally persisted to a `Storage`-like object and re-validated
