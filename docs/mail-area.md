@@ -133,7 +133,9 @@ text is still theirs. A card without a
 UID gets an id from a hash of its content, the same
 wherever it stands in a file, and two copies of it are one contact. `record-store.ts` keeps
 contacts and events in memory, optionally persisted to a `Storage`-like object and re-validated
-when read back; a write the storage refuses keeps the change in memory and fails as `storage`.
+when read back. Each change is made to what the storage holds at that moment, and a listing reads
+it again, so two stores on one storage (two tabs) keep each other's changes; a write the storage
+refuses keeps the change in memory, over what the storage gives, and fails as `storage`.
 After each change, saved or not, the client lists what the store holds, and an import goes on past
 a refused write and reports it once. `calendar-store.ts` stores the shared `CalendarEvent`.
 

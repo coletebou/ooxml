@@ -28,32 +28,49 @@ export interface MemoryStoreOptions<T> {
 
 /**
  * A store seeded with `seed`, or with what `storage` holds under `key` once anything was saved.
- * A storage that cannot be read leaves the seed. A write it refuses (quota, storage turned off)
- * keeps the change in memory, so the store still works for the session, and `save` or `remove`
- * rejects with a `storage` error, so that the person can be told; the next write it takes stores
- * every record again.
+ * Each change is made to what the storage holds when it is made, and `list` reads it again, so two
+ * stores on one storage (two tabs, or the suite and the Mail app) keep each other's changes. A
+ * storage that cannot be read leaves what the store holds (the seed at first). A write it refuses
+ * (quota, storage turned off) keeps the change in memory, so the store still works for the
+ * session, and `save` or `remove` rejects with a `storage` error, so that the person can be told;
+ * such changes hold over what the storage gives, and the next write it takes stores them too.
  */
 export function createMemoryRecordStore<T extends { id: string }>(
 	options: MemoryStoreOptions<T> & { key: string; sanitize: (raw: unknown) => T | null },
 ): RecordStore<T> {
-	let records = new Map<string, T>();
-	let loaded = false;
-	try {
-		const text = options.storage?.getItem(options.key);
-		if (text) {
+	/** What the storage holds, or null when it holds nothing yet or cannot be read. */
+	const stored = (): Map<string, T> | null => {
+		try {
+			const text = options.storage?.getItem(options.key);
+			if (!text) return null;
 			const parsed: unknown = JSON.parse(text);
-			if (Array.isArray(parsed))
-				for (const item of parsed) {
-					const record = options.sanitize(item);
-					if (record) records.set(record.id, record);
-				}
-			loaded = true;
+			if (!Array.isArray(parsed)) return null;
+			const out = new Map<string, T>();
+			for (const item of parsed) {
+				const record = options.sanitize(item);
+				if (record) out.set(record.id, record);
+			}
+			return out;
+		} catch {
+			return null;
 		}
-	} catch {
-		records = new Map();
-	}
-	if (!loaded) for (const record of options.seed ?? []) records.set(record.id, record);
-	const persist = (): void => {
+	};
+	let records = stored() ?? new Map((options.seed ?? []).map((record) => [record.id, record]));
+	/** The changes the storage refused, by id (null: removed), applied over what it holds. */
+	const unstored = new Map<string, T | null>();
+	/** What the storage holds now, with the changes it refused. */
+	const current = (): Map<string, T> => {
+		const out = stored() ?? records;
+		for (const [id, record] of unstored)
+			if (record) out.set(id, record);
+			else out.delete(id);
+		return out;
+	};
+	const change = (id: string, record: T | null): void => {
+		records = current();
+		if (record) records.set(id, record);
+		else records.delete(id);
+		unstored.set(id, record);
 		try {
 			options.storage?.setItem(options.key, JSON.stringify([...records.values()]));
 		} catch (cause) {
@@ -63,17 +80,19 @@ export function createMemoryRecordStore<T extends { id: string }>(
 				{ cause },
 			);
 		}
+		unstored.clear();
 	};
 	return {
-		list: async () => [...records.values()],
+		async list() {
+			records = current();
+			return [...records.values()];
+		},
 		async save(record) {
-			records.set(record.id, record);
-			persist();
+			change(record.id, record);
 			return record;
 		},
 		async remove(id) {
-			records.delete(id);
-			persist();
+			change(id, null);
 		},
 	};
 }

@@ -60,6 +60,45 @@ describe('createMemoryRecordStore', () => {
 		]);
 	});
 
+	it('applies each change to what the storage holds, so another tab keeps its changes', async () => {
+		// Two tabs (or the suite and the Mail app) open the same address book.
+		const backing = storage();
+		const first = store(backing);
+		const second = store(backing);
+		await first.save({ id: 'a', text: 'From the first' });
+		await second.save({ id: 'b', text: 'From the second' });
+		await second.save({ id: 'c', text: 'To remove' });
+		const third = store(backing);
+		await first.remove('c');
+		await third.save({ id: 'd', text: 'From the third' });
+		const all = [
+			{ id: 'a', text: 'From the first' },
+			{ id: 'b', text: 'From the second' },
+			{ id: 'd', text: 'From the third' },
+		];
+		expect(backing.stored()).toEqual(all);
+		expect(await second.list()).toEqual(all);
+		// A change the storage refused still holds, over what another tab stores meanwhile.
+		backing.full = true;
+		await expect(first.save({ id: 'e', text: 'Only in memory' })).rejects.toMatchObject({
+			code: 'storage',
+		});
+		backing.full = false;
+		await second.save({ id: 'f', text: 'Stored meanwhile' });
+		expect(await first.list()).toEqual([
+			...all,
+			{ id: 'f', text: 'Stored meanwhile' },
+			{ id: 'e', text: 'Only in memory' },
+		]);
+		await first.remove('a');
+		expect(backing.stored()).toEqual([
+			{ id: 'b', text: 'From the second' },
+			{ id: 'd', text: 'From the third' },
+			{ id: 'f', text: 'Stored meanwhile' },
+			{ id: 'e', text: 'Only in memory' },
+		]);
+	});
+
 	it('stores what a working storage takes, and reads it back', async () => {
 		const backing = storage();
 		const notes = store(backing, [{ id: 'seed', text: 'Seeded' }]);

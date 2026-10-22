@@ -11,7 +11,9 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   kept only until the page is closed, and a notice says so; once there is room again, the next
   change stores them all. When the browser does not let the page use local storage at all (it is
   turned off, or the page is in a frame that may not use it), contacts and the calendar are kept
-  only until the page is closed, and a notice says so at each change.
+  only until the page is closed, and a notice says so at each change. Two tabs open on one account
+  (or the suite and the Mail app) keep each other's changes, but a tab shows what another changed
+  only at its own next change, or once it is opened again.
 - **No invitations.** Calendar events import and export as iCalendar files, but meeting requests
   and replies (iTIP) are not handled.
 - **iCalendar import is partial**: repeating rules the calendar cannot represent (an interval
