@@ -9,13 +9,8 @@ import type { BroadcastChannelConstructor } from '../collab/broadcast-transport'
 import { type CollabSession, createCollabSession } from '../collab/session';
 import { transportProvider } from '../collab/transport-provider';
 import { type RegistryEntry, readRegistry, unregisterNotebook } from './registry';
-import {
-	type NotebookStorage,
-	REGISTRY_KEY,
-	mergeIntoStorage,
-	notebookKey,
-	tabCopies,
-} from './storage';
+import { removeNotebookCopy } from './journal';
+import { type NotebookStorage, REGISTRY_KEY, mergeIntoStorage, tabCopies } from './storage';
 import { registryRoomId } from './sync';
 
 const REGISTRY_STORAGE_ORIGIN = Symbol('ooxml-core:notebook:registry-storage');
@@ -94,7 +89,10 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 		for (const entry of readRegistry(doc)) {
 			if (!entry.deleted || entry.deleted > cutoff) continue;
 			unregisterNotebook(doc, entry.id);
-			await storage?.remove(notebookKey(entry.id)).catch((error) => options.onError(error, 'save'));
+			if (storage)
+				await removeNotebookCopy(storage, entry.id).catch((error) =>
+					options.onError(error, 'save'),
+				);
 		}
 	};
 

@@ -126,4 +126,19 @@ describe('notebook IndexedDB storage', () => {
 			else delete (globalThis as { indexedDB?: unknown }).indexedDB;
 		}
 	});
+
+	it('reads the keys of one prefix and their bytes together, and no others', async () => {
+		const factory = new IDBFactory();
+		const storage = createIndexedDbStorage('test-notebooks-prefix', factory);
+		await storage.save('notebook:n1:b:1', new Uint8Array([1]));
+		await storage.save('notebook:n1:u:2', new Uint8Array([2]));
+		await storage.save('notebook:n10:u:3', new Uint8Array([3]));
+		await storage.save('notebook:n1', new Uint8Array([4]));
+		const read = await storage.loadPrefix('notebook:n1:');
+		expect(read.map(([k, bytes]) => [k, [...bytes]]).sort()).toEqual([
+			['notebook:n1:b:1', [1]],
+			['notebook:n1:u:2', [2]],
+		]);
+		storage.close();
+	});
 });

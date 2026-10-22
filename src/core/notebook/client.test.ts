@@ -708,6 +708,52 @@ describe('notebook client twelfth review round', () => {
 	});
 });
 
+describe('notebook client saves', () => {
+	it('writes only what changed, not the pictures already stored', async () => {
+		const inner = createMemoryStorage();
+		const written: number[] = [];
+		const storage: NotebookStorage = {
+			...inner,
+			save: async (key, bytes) => {
+				if (key.startsWith('notebook:')) written.push(bytes.length);
+				return inner.save(key, bytes);
+			},
+			update: (key, change) =>
+				inner.update(key, (stored) => {
+					const out = change(stored);
+					if (key.startsWith('notebook:')) written.push(out.length);
+					return out;
+				}),
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		client.addImage({
+			x: 0,
+			y: 0,
+			width: 100,
+			height: 100,
+			name: 'big.png',
+			mime: 'image/png',
+			bytes: new Uint8Array(1_000_000).fill(7),
+		});
+		await client.flush();
+		written.length = 0;
+		client.renamePage(client.getState().pageId, 'One more letter');
+		await client.flush();
+		expect(written.length).toBeGreaterThan(0);
+		expect(Math.max(...written)).toBeLessThan(10_000);
+		// And the notebook reads back whole.
+		const id = client.getState().notebookId;
+		await client.destroy();
+		const again = start(storage, createChannelHub());
+		await again.whenReady();
+		await until(() => again.getState().notebookId === id && !again.getState().loading);
+		expect(again.getState().page?.title).toBe('One more letter');
+		expect(again.getState().containers).toHaveLength(1);
+	});
+});
+
 describe('notebook client with damaged input', () => {
 	it('imports an archive whose text is malformed, keeping what is valid', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());

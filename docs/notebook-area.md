@@ -90,6 +90,16 @@ a week later.
 the editor's sync plugin), so undo never reverts a collaborator's work. Discrete actions are one
 step each; typing merges into steps of half a second.
 
+## On the device
+
+Each notebook is kept in the injected storage as a log (`journal.ts`): bases (whole states) and
+entries (what one save changed), each under a key of its own, so a save writes only its changes and
+clients on one storage that cannot reach each other never write over each other's saves. A
+compaction stores one base made from the live document (deleted content is left out, which merging
+stored updates would keep) and then removes only the keys it read or wrote, so another client's
+newer save always stays and no lock is needed. This needs `loadPrefix` (one-step reads of a key
+range); a storage without it keeps each notebook as one copy merged on every save.
+
 ## The device's notebooks
 
 The list of notebooks is a small Yjs document of its own (`registry.ts`), saved in the injected

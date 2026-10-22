@@ -91,8 +91,10 @@ manifest declares (`ooxml-core`, `ooxml-ui`, `lit` and the framework peer).
 ## Storage and sync
 
 - **On the device.** One Yjs document per notebook and one for the device's list of notebooks,
-  stored as whole states in IndexedDB (`storageName`), saved shortly after each change and when
-  the page is hidden.
+  in IndexedDB (`storageName`), saved shortly after each change and when the page is hidden. A
+  notebook is kept as a log: a save writes only what changed (a keystroke, not the pictures and
+  files on the page), and the log is folded into one copy from time to time, which also leaves
+  deleted content out. Tabs that cannot reach each other never write over each other's saves.
 - **Local mode** (the default) needs no server: tabs of one browser share a notebook, and the list
   of notebooks, over `BroadcastChannel`.
 - **Server mode** speaks the y-websocket wire format to `<syncUrl>/<room>`, one room per notebook

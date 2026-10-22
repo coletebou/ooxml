@@ -1,17 +1,13 @@
 // One open notebook: its Y.Doc restored from storage, a collab session in the notebook's room, a
-// debounced save of the whole state after every change, one undo manager for the notebook (local
+// debounced save of what changed (see `journal.ts`), one undo manager for the notebook (local
 // edits only, so undo never reverts a collaborator), and the text index for search and to-dos.
 // Writes never wait for the room: the notebook is local-first and Yjs merges offline edits when
 // the connection returns. New code.
 import * as Y from 'yjs';
 import { type CollabSession, createCollabSession } from '../collab/session';
 import { transportProvider } from '../collab/transport-provider';
-import {
-	type NotebookStorage,
-	mergeIntoStorage,
-	notebookKey,
-	tabCopies as rescued,
-} from './storage';
+import { notebookCopy } from './journal';
+import { type NotebookStorage, notebookKey, tabCopies as rescued } from './storage';
 import {
 	NOTEBOOK_ORIGIN,
 	NOTEBOOK_SEED_ORIGIN,
@@ -72,9 +68,9 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	const doc = new Y.Doc();
 	const types = notebookTypes(doc);
 	const key = notebookKey(id);
+	const copy = storage && notebookCopy(storage, id);
 	try {
-		const bytes = await storage?.load(key);
-		if (bytes?.length) Y.applyUpdate(doc, bytes, NOTEBOOK_STORAGE_ORIGIN);
+		await copy?.load(doc, NOTEBOOK_STORAGE_ORIGIN);
 		// What a closed copy of this notebook could not save in this tab comes back, to save again.
 		const kept = storage && rescued(storage).get(key);
 		if (kept) Y.applyUpdate(doc, kept);
@@ -102,19 +98,20 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let saving: Promise<void> = Promise.resolve();
-	let dirty = !!options.seed || !!(storage && rescued(storage).has(key));
+	// The updates not saved yet; a new notebook's first content and a copy this tab kept were
+	// written before anything listened, so they start as the whole state.
+	let pending: Uint8Array[] =
+		options.seed || (storage && rescued(storage).has(key)) ? [Y.encodeStateAsUpdate(doc)] : [];
 	let closed = false;
 	let failed: unknown = null;
 	const save = (): Promise<void> => {
 		clearTimeout(timer);
 		timer = undefined;
-		if (!storage || !dirty) return saving;
-		dirty = false;
-		const ours = Y.encodeStateAsUpdate(doc);
+		if (!copy || !pending.length) return saving;
+		const changes = pending.length === 1 ? pending[0]! : Y.mergeUpdates(pending);
+		pending = [];
 		saving = saving
-			// Merged with what is stored, which another client (a tab cut off from the sync server)
-			// may have changed.
-			.then(() => mergeIntoStorage(storage, key, ours))
+			.then(() => copy.save(doc, changes))
 			.then(
 				() => {
 					failed = null;
@@ -123,22 +120,23 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 				},
 				(error: unknown) => {
 					// Still unsaved: the next change, flush or close tries again.
-					dirty = true;
+					pending.unshift(changes);
 					failed = error;
 					options.onError(error, 'save');
 				},
 			);
 		return saving;
 	};
-	const onUpdate = (_update: Uint8Array, origin: unknown): void => {
+	const onUpdate = (update: Uint8Array, origin: unknown): void => {
+		// Local edits and collaborators' (this device may not have those yet); never what was read.
 		if (origin !== NOTEBOOK_STORAGE_ORIGIN) {
-			dirty = true;
+			if (copy) pending.push(update);
 			if (!closed && timer === undefined) timer = setTimeout(save, options.saveDelayMs);
 		}
 		options.onChange();
 	};
 	doc.on('update', onUpdate);
-	if (dirty) void save();
+	if (pending.length) void save();
 
 	const roomId = notebookRoomId(id);
 	const session = createCollabSession<NotebookPresence>({

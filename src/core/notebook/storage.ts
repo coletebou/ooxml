@@ -1,6 +1,7 @@
-// Where a notebook keeps its documents on the device. The client stores whole Yjs states (one for
-// the registry, one per notebook) under string keys and never needs more than this, so a host can
-// back it with IndexedDB (the UI's adapter, profile-scoped like the suite), a file, or memory.
+// Where a notebook keeps its documents on the device. The client stores Yjs states under string
+// keys (the registry, and each notebook as a log or one copy, see `journal.ts`) and never needs
+// more than this, so a host can back it with IndexedDB (the UI's adapter, profile-scoped like the
+// suite), a file, or memory.
 // New code.
 import * as Y from 'yjs';
 
@@ -23,6 +24,13 @@ export interface NotebookStorage {
 	 * reach each other may interleave.
 	 */
 	update?: (key: string, change: (stored: Uint8Array | null) => Uint8Array) => Promise<void>;
+	/**
+	 * Every key that starts with `prefix`, with its bytes, read in one step (one IndexedDB
+	 * transaction), so a key another client removes meanwhile cannot go missing between listing and
+	 * reading. With it a notebook is kept as a log that saves only its changes (see `journal.ts`);
+	 * without it, as one copy merged on every save.
+	 */
+	loadPrefix?: (prefix: string) => Promise<[string, Uint8Array][]>;
 }
 
 export const REGISTRY_KEY = 'registry';
@@ -30,7 +38,7 @@ export const notebookKey = (id: string): string => `notebook:${id}`;
 
 /** In-memory storage (tests, and hosts without persistence). */
 export function createMemoryStorage(): NotebookStorage &
-	Required<Pick<NotebookStorage, 'update'>> & { readonly keys: () => string[] } {
+	Required<Pick<NotebookStorage, 'update' | 'loadPrefix'>> & { readonly keys: () => string[] } {
 	const data = new Map<string, Uint8Array>();
 	return {
 		load: async (key) => data.get(key)?.slice() ?? null,
@@ -38,6 +46,10 @@ export function createMemoryStorage(): NotebookStorage &
 		remove: async (key) => void data.delete(key),
 		update: async (key, change) =>
 			void data.set(key, change(data.get(key)?.slice() ?? null).slice()),
+		loadPrefix: async (prefix) =>
+			[...data]
+				.filter(([key]) => key.startsWith(prefix))
+				.map(([key, bytes]): [string, Uint8Array] => [key, bytes.slice()]),
 		persistent: () => false,
 		keys: () => [...data.keys()],
 	};

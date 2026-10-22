@@ -12,6 +12,7 @@ export interface IndexedDbStorage extends NotebookStorage {
 	/** False when IndexedDB was unavailable and documents live in memory only. */
 	readonly persistent: () => boolean;
 	update: NonNullable<NotebookStorage['update']>;
+	loadPrefix: NonNullable<NotebookStorage['loadPrefix']>;
 	close: () => void;
 }
 
@@ -101,6 +102,32 @@ export function createIndexedDbStorage(
 		async save(key, bytes) {
 			if (!persistent || !(await open())) return memory.save(key, bytes);
 			await run('readwrite', (store) => store.put(bytes, key));
+		},
+		async loadPrefix(prefix) {
+			const opened = persistent ? await open() : null;
+			if (!opened) return memory.loadPrefix(prefix);
+			// Keys and values from one transaction, so they always belong together; the reads are
+			// queued from the listing's own event, while the transaction is still active.
+			return new Promise<[string, Uint8Array][]>((resolve, reject) => {
+				const tx = opened.transaction(STORE, 'readonly');
+				const store = tx.objectStore(STORE);
+				const out: [string, Uint8Array][] = [];
+				const Range = (globalThis as { IDBKeyRange?: typeof IDBKeyRange }).IDBKeyRange;
+				const listed = store.getAllKeys(Range?.bound(prefix, `${prefix}\uffff`));
+				listed.onsuccess = () => {
+					for (const k of listed.result) {
+						if (typeof k !== 'string' || !k.startsWith(prefix)) continue;
+						const read = store.get(k);
+						read.onsuccess = () => {
+							const bytes = bytesOf(read.result);
+							if (bytes) out.push([k, bytes]);
+						};
+					}
+				};
+				tx.oncomplete = () => resolve(out);
+				tx.onabort = tx.onerror = () =>
+					reject(tx.error ?? new Error('IndexedDB transaction failed'));
+			});
 		},
 		async update(key, change) {
 			const opened = persistent ? await open() : null;
