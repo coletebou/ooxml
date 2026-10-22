@@ -302,9 +302,12 @@ test('a viewer test file, its MCP server and its docs run only what they can bre
 });
 
 test('a product editor in ooxml-ui checks its own viewer; shared ui checks every viewer', () => {
-	const editor = plan(['src/ui/src/docx/model-adapter.ts'], { testFiles: 1 });
-	assert.deepEqual(viewers(editor), ['docx']);
+	const editor = plan(['src/ui/src/visio/binding.ts'], { testFiles: 1 });
+	// The notebook shows Visio drawings in its pages with this editor.
+	assert.deepEqual(viewers(editor).sort(), ['notebook', 'visio']);
 	assert.equal(editor.pptx.run, false);
+	const own = plan(['src/ui/src/notebook/notebook-app.ts'], { testFiles: 1 });
+	assert.deepEqual(viewers(own), ['notebook']);
 	const ribbon = plan(['src/ui/src/ribbon/ribbon.ts'], { testFiles: 1 });
 	assert.deepEqual(viewers(ribbon), MATRIX_VIEWERS);
 	assert.equal(ribbon.pptx.run, true);
@@ -354,6 +357,24 @@ test('a notebook packaging script runs its script tests and the package smoke on
 		'bun run build:packages',
 		'bun run check:published',
 		'bun run pack:smoke:local',
+	]);
+});
+
+test('the editors the notebook embeds check the notebook viewer too', () => {
+	for (const [file, owner] of [
+		['src/ui/src/docx/model-adapter.ts', 'docx'],
+		['src/ui/src/xlsx/building-blocks.ts', 'xlsx'],
+		['src/ui/src/visio/binding.ts', 'visio'],
+		['src/ui/src/teams/app/presentation-preview.ts', 'teams'],
+	]) {
+		const result = plan([file], { testFiles: 1 });
+		assert.deepEqual(viewers(result).sort(), [owner, 'notebook'].sort(), file);
+		const notebook = result.viewers.find((viewer) => viewer.name === 'notebook').verify;
+		assert.ok(notebook.includes('bun run typecheck') && notebook.includes('test:browser'), file);
+	}
+	// Another product's own editor does not.
+	assert.deepEqual(viewers(plan(['src/ui/src/notebook/page-canvas.ts'], { testFiles: 1 })), [
+		'notebook',
 	]);
 });
 

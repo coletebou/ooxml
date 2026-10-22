@@ -344,8 +344,14 @@ export function pptxPlan(files, { everything, reaches }) {
 	};
 }
 
-/** The product editors in `src/ui/src/<product>/`; each belongs to one viewer only. */
+/** The product editors in `src/ui/src/<product>/`; each belongs to its own viewer. */
 const UI_PRODUCT = /^src\/ui\/src\/(docx|xlsx|visio|teams|notebook|pptx)\//;
+/**
+ * Viewers that also show other products' editors from ooxml-ui, and so check their changes: the
+ * notebook embeds the Word, Excel and Visio editors and Teams' presentation preview. The preview's
+ * PowerPoint renderer is left to the pptx jobs, as it is for the Teams viewer.
+ */
+const UI_EMBEDS = { notebook: ['docx', 'xlsx', 'visio', 'teams'] };
 /** The groups a change to a viewer's (or its engine's) source reaches. */
 const SOURCE_GROUPS = ['types', 'unit', 'browser', 'packages'];
 
@@ -376,7 +382,7 @@ export function viewerGroups(name, files, { everything }) {
 			if (isTestFile(file)) continue;
 			// A product editor belongs to its own viewer; everything else in ooxml-ui is shared.
 			const product = UI_PRODUCT.exec(file)?.[1];
-			if (product && product !== name) continue;
+			if (product && product !== name && !UI_EMBEDS[name]?.includes(product)) continue;
 			add(...SOURCE_GROUPS);
 			wholeBrowserSuite = true;
 			continue;
