@@ -1,0 +1,34 @@
+From: =?UTF-8?Q?Ren=C3=A9e_Dupont?= <renee@example.fr>
+To: "Lovelace, Ada" <ada@example.com>, bob@example.org
+Cc: Team: carol@example.net, Dan <dan@example.net>;
+Subject: =?UTF-8?Q?R=C3=A9union_de_l'=C3=A9quipe?=
+ =?UTF-8?Q?_=E2=82=AC_budget?=
+Date: Tue, 06 Jan 2026 14:30:00 +0100
+Message-ID: <alt-1@example.fr>
+In-Reply-To: <note-1@example.com>
+References: <root@example.com>
+ <note-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1_alt"
+
+This is a multi-part message in MIME format.
+
+--b1_alt
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Bonjour =C3=A0 tous,
+
+Le budget est de 1=E2=82=AC. Cette ligne est tr=C3=A8s longue et elle est cou=
+p=C3=A9e par un saut de ligne doux.
+
+=C3=80 bient=C3=B4t
+--b1_alt
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><p>Bonjour =C3=A0 tous,</p><p>Le budget est de 1=E2=82=AC.</p></b=
+ody></html>
+--b1_alt--
+
+Epilogue text that readers ignore.

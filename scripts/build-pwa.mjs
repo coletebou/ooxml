@@ -10,6 +10,7 @@ const products = [
 	['powerpoint', 'OOXML PowerPoint', 'pptx', '#c43e1c'],
 	['visio', 'OOXML Visio', 'vsdx', '#3955a3'],
 	['teams', 'OOXML Teams', 'teams', '#6264a7'],
+	['mail', 'OOXML Mail', 'mail', '#1f6feb'],
 ];
 function icon(size, color) {
 	const rgb = color.match(/\w\w/g).map((v) => parseInt(v, 16));

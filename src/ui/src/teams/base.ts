@@ -5,7 +5,13 @@
 import { unsafeCSS, type CSSResult, type PropertyDeclarations, type PropertyValues } from 'lit';
 import type { MessageParams } from 'ooxml-core/i18n';
 import { OfficeElement, controlStyles } from '../base';
-import { inheritLocale, LOCALE_HOST, pushLocale, type LocaleHost } from './i18n/runtime';
+import {
+	inheritLocale,
+	LOCALE_HOST,
+	localeWritten,
+	pushLocale,
+	type LocaleHost,
+} from './i18n/runtime';
 import { teamsI18n, type TeamsI18n, type TeamsKey, type TeamsPluralKey } from './i18n/translator';
 import resetCss from './reset.css?raw';
 
@@ -56,7 +62,15 @@ export class TeamsElement extends OfficeElement {
 		inheritLocale(this as unknown as LocaleHost);
 	}
 
+	// Lit's setter calls this for every write, an unchanged value too: a locale set here is its own.
+	override requestUpdate(...args: Parameters<OfficeElement['requestUpdate']>): void {
+		if (args[0] === 'locale') localeWritten(this as unknown as LocaleHost);
+		super.requestUpdate(...args);
+	}
+
 	protected override update(changed: PropertyValues): void {
+		// A locale cleared on the element: the enclosing one again, before this update draws.
+		if (changed.has('locale') && !this.locale) inheritLocale(this as unknown as LocaleHost);
 		super.update(changed);
 		const label = this.hostLabel();
 		if (label !== undefined) this.setAttribute('aria-label', label);

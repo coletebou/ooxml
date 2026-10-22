@@ -1,0 +1,13 @@
+/* <mail-html-frame>: the message body on paper, sized to its content by the element. */
+:host {
+	display: block;
+}
+iframe {
+	display: block;
+	width: 100%;
+	min-height: 4em;
+	border: 0;
+	border-radius: var(--office-radius-md);
+	background: var(--office-paper);
+	color-scheme: light;
+}

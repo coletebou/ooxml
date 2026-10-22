@@ -1,6 +1,7 @@
 import { $, apps, badge, escape } from './ui.js';
 import { currentProfile } from './profile-state.js';
 import { icon } from './icons.js';
+import { listsEveryKind, product } from './product.js';
 
 const key = () => `suite-favourites-${currentProfile().id}`;
 function favourites() {
@@ -27,9 +28,7 @@ export function renderLibrary(files, filter) {
 		.filter(
 			(d) =>
 				!d.parent &&
-				(!document.body.dataset.product ||
-					document.body.dataset.product === 'teams' ||
-					d.kind === document.body.dataset.product) &&
+				(listsEveryKind || d.kind === product) &&
 				(filter === 'favourites'
 					? saved.has(d.id)
 					: !filter || filter === 'files' || d.kind === filter) &&
@@ -49,7 +48,6 @@ export function renderLibrary(files, filter) {
 						? 'What will you work on?'
 						: `Welcome back, ${profile.name.split(' ')[0]}.`;
 	// An app's own view keeps its create tile; the other library views show files only.
-	const product = document.body.dataset.product;
 	for (const button of $('create-row').querySelectorAll('button'))
 		button.hidden = button.dataset.create
 			? (!!product && button.dataset.create !== product) ||

@@ -81,21 +81,6 @@ export const deFiles: Record<keyof typeof enFiles, string> = {
 	'preview.waitSave':
 		'Warten Sie, bis die Kopie der Arbeitsmappe gespeichert ist, oder brechen Sie das Speichern ab.',
 
-	'pptx.badSize': 'Die Präsentation hat eine ungültige Foliengröße',
-	'pptx.canvas': 'Folienansicht zur Navigation',
-	'pptx.hidden': '(ausgeblendet)',
-	'pptx.navigation': 'Foliennavigation',
-	'pptx.next': 'Nächste Folie',
-	'pptx.noSlides': 'Die Präsentation enthält keine Folien',
-	'pptx.notes': 'Sprechernotizen',
-	'pptx.previous': 'Vorherige Folie',
-	'pptx.readingView':
-		'Leseansicht. Animationen, Übergänge und Bearbeitung sind nicht verfügbar. Layout und Schriftarten können von PowerPoint abweichen.',
-	'pptx.slide': 'Folie {n}',
-	'pptx.slideOf': 'Folie {n} von {total}',
-	'pptx.slideText': 'Folientext',
-	'pptx.warnings': 'Kompatibilitätswarnungen',
-
 	'tab.openDocument': 'Dokument öffnen',
 	'tab.openFailed': 'Die Registerkarte konnte nicht geöffnet werden',
 	'tab.opening': 'Registerkarte wird geöffnet...',

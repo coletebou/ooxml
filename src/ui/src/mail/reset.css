@@ -1,0 +1,51 @@
+/* The shared basics of every mail element: box sizing, inherited fonts on controls and the focus
+   ring. Colours, spacing and radii come from the ooxml-ui tokens. */
+:host {
+	box-sizing: border-box;
+	font-family: var(--office-font);
+	color: var(--office-foreground);
+}
+*,
+*::before,
+*::after {
+	box-sizing: inherit;
+}
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+button {
+	cursor: pointer;
+}
+button:disabled {
+	cursor: default;
+	opacity: 0.5;
+}
+:focus-visible {
+	outline: var(--office-focus-width) solid var(--office-ring);
+	outline-offset: var(--office-focus-offset);
+}
+[hidden] {
+	display: none !important;
+}
+.icon {
+	width: var(--office-icon-size-md);
+	height: var(--office-icon-size-md);
+	flex: none;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.5;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+.sr-only {
+	position: absolute;
+	width: var(--office-space-px);
+	height: var(--office-space-px);
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

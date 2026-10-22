@@ -135,6 +135,20 @@ export const VIEWERS = {
 		before: { types: ['bun run build:packages'], browser: ['bun run build:packages'] },
 		specFilter: true,
 	},
+	mail: {
+		name: 'mail',
+		dir: 'viewers/mail',
+		// No `pack:smoke` yet: like Teams' it would install ooxml-ui from npm, and `ooxml-ui/mail`
+		// is only there once an ooxml-ui release includes it.
+		groups: {
+			types: ['bun run typecheck'],
+			unit: ['bun run test'],
+			scripts: ['bun run test:scripts'],
+			browser: [PLAYWRIGHT_INSTALL, 'bun run test:browser'],
+			packages: ['bun run build:packages', 'bun run check:published'],
+		},
+		specFilter: true,
+	},
 };
 /** The order a viewer's check groups run in. */
 const GROUP_ORDER = ['format', 'types', 'unit', 'scripts', 'docs', 'mcp', 'browser', 'packages'];
@@ -163,13 +177,24 @@ const VIEWER_INERT = /^viewers\/[^/]+\/([^/]+\.md|LICENSE|NOTICE|\.gitignore|\.g
 const viewerOfFile = (file) => /^(?:viewers|demos|e2e)\/([^/]+)\//.exec(file)?.[1];
 
 /** The area a format owns: only its own viewer can break. */
-const AREA_CONSUMERS = { docx: [], xlsx: [], visio: [], teams: [], pptx: [] };
+const AREA_CONSUMERS = {
+	docx: [],
+	xlsx: [],
+	visio: [],
+	teams: [],
+	pptx: [],
+	mail: [],
+	calendar: [],
+};
 const AREA_VIEWERS = {
 	docx: ['docx'],
 	xlsx: ['xlsx'],
 	visio: ['visio'],
 	teams: ['teams'],
 	pptx: ['pptx'],
+	mail: ['mail'],
+	// The shared calendar is read by the two products with a calendar.
+	calendar: ['teams', 'mail'],
 };
 
 /** Which external viewers a change under `src/core/<area>/` can break. Shared areas can break all of them. */
@@ -334,7 +359,7 @@ export function pptxPlan(files, { everything, reaches }) {
 }
 
 /** The product editors in `src/ui/src/<product>/`; each belongs to one viewer only. */
-const UI_PRODUCT = /^src\/ui\/src\/(docx|xlsx|visio|teams|pptx)\//;
+const UI_PRODUCT = /^src\/ui\/src\/(docx|xlsx|visio|teams|pptx|mail)\//;
 /** The groups a change to a viewer's (or its engine's) source reaches. */
 const SOURCE_GROUPS = ['types', 'unit', 'browser', 'packages'];
 

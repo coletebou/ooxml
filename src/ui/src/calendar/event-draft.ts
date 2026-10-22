@@ -1,0 +1,272 @@
+// An event as an edit form holds it, and back. Start and end are wall-clock date and time input
+// values in the calendar's zone (all-day dates in the event's own zone); an all-day event's end date
+// is its last day, stored as the start of the day after it (the model's exclusive end). Moving the
+// start keeps the length. `buildEvent` turns a draft into the `CalendarEvent` to store or names what
+// keeps it from being saved. A repeating event is edited as a whole series, which keeps the day it
+// ends on. DOM-free. New code.
+import {
+	DAY_MS,
+	dayMatchesOrdinal,
+	MINUTE_MS,
+	offsetMinutes,
+	zonedParts,
+	zonedToUtc,
+	type CalendarEvent,
+	type Repeat,
+} from 'ooxml-core/calendar';
+import { dateValue, daysBetween, fromInputs, shiftDate, timeValue } from './zoned-input';
+
+/** The fields of an event form as they are being edited. */
+export interface EventDraft {
+	/** The stored event being edited; null for a new one. */
+	original: CalendarEvent | null;
+	title: string;
+	allDay: boolean;
+	/** `YYYY-MM-DD` and `HH:MM`; for an all-day event `endDate` is its last day. */
+	startDate: string;
+	startTime: string;
+	endDate: string;
+	endTime: string;
+	location: string;
+	description: string;
+	repeat: Repeat;
+}
+
+/**
+ * What keeps a draft from being saved: no title, no valid times, an end before the start, or a
+ * series that would start after the day it ends.
+ */
+export type DraftIssue = 'title' | 'when' | 'order' | 'series';
+
+const NEW_LENGTH = 30 * MINUTE_MS;
+
+/** The instant of a timed draft's date and time; an empty time is no time at all. */
+const instant = (date: string, time: string, zone: string): number | null =>
+	time ? fromInputs(date, time, zone) : null;
+
+/** 9:00 on the day of `ms` in the zone, where a timed event starts when all day is unticked. */
+const nineOn = (ms: number, zone: string): number => {
+	const p = zonedParts(ms, zone);
+	return zonedToUtc({ year: p.year, month: p.month, day: p.day, hour: 9 }, zone);
+};
+
+/**
+ * A draft of a new event at `start` (a whole day when `allDay`), in the calendar's zone. A timed
+ * one ends half an hour later, on the next day when that runs past midnight.
+ */
+export function newDraft(start: number, allDay: boolean, zone: string): EventDraft {
+	const begin = allDay ? nineOn(start, zone) : start;
+	return {
+		original: null,
+		title: '',
+		allDay,
+		startDate: dateValue(start, zone),
+		startTime: timeValue(begin, zone),
+		endDate: dateValue(allDay ? start : begin + NEW_LENGTH, zone),
+		endTime: timeValue(begin + NEW_LENGTH, zone),
+		location: '',
+		description: '',
+		repeat: 'none',
+	};
+}
+
+/** A draft of a stored event; timed ones in the calendar's zone, all-day ones on their own dates. */
+export function draftOf(event: CalendarEvent, zone: string): EventDraft {
+	const allDay = event.allDay === true;
+	const at = allDay ? event.zone : zone;
+	const begin = allDay ? nineOn(event.start, event.zone) : event.start;
+	return {
+		original: event,
+		title: event.title,
+		allDay,
+		startDate: dateValue(event.start, at),
+		startTime: timeValue(begin, at),
+		// The last day of an all-day event is the day before its exclusive end.
+		endDate: dateValue(allDay ? Math.max(event.start, event.end - 1) : event.end, at),
+		endTime: timeValue(allDay ? begin + NEW_LENGTH : event.end, at),
+		location: event.location ?? '',
+		description: event.description,
+		repeat: event.repeat,
+	};
+}
+
+/** `next` with its end moved as far as its start moved from `previous`, so the length stays. */
+export function keepLength(next: EventDraft, previous: EventDraft, zone: string): EventDraft {
+	if (next.allDay) {
+		const days = daysBetween(previous.startDate, previous.endDate);
+		const end = days === null ? '' : shiftDate(next.startDate, Math.max(0, days));
+		return end ? { ...next, endDate: end } : next;
+	}
+	const before = instant(previous.startDate, previous.startTime, zone);
+	const after = instant(next.startDate, next.startTime, zone);
+	const end = instant(previous.endDate, previous.endTime, zone);
+	if (before === null || after === null || end === null || before === after) return next;
+	const moved = end + (after - before);
+	return { ...next, endDate: dateValue(moved, zone), endTime: timeValue(moved, zone) };
+}
+
+const SET_HERE = ['allDay', 'location', 'monthlyBy', 'ordinal', 'until', 'count', 'exceptions'];
+
+/** `event` without the optional fields a draft sets itself or may have to drop. */
+function kept(event: CalendarEvent): Partial<CalendarEvent> {
+	const out: Partial<CalendarEvent> = { ...event };
+	for (const key of SET_HERE) delete out[key as keyof CalendarEvent];
+	return out;
+}
+
+/** The time of day `ms` shows on a clock in the zone, in milliseconds since that day's midnight. */
+const clock = (ms: number, zone: string): number => {
+	const p = zonedParts(ms, zone);
+	return ((p.hour * 60 + p.minute) * 60 + p.second) * 1000 + (((ms % 1000) + 1000) % 1000);
+};
+
+/**
+ * The end of a series whose first occurrence moved from `from` to `to`: on its own day, with the
+ * time of day moved as far as the start's, so each day keeps its occurrence on or before it (UNTIL
+ * counts, RFC 5545). A series that only gets a new time, or a whole day instead of one, keeps its
+ * last occurrence; one moved to other days still ends by the same day.
+ */
+function movedUntil(until: number, from: number, to: number, zone: string): number {
+	const shift = clock(to, zone) - clock(from, zone);
+	if (!shift) return until;
+	const day = zonedParts(until, zone);
+	// The new clock time worked out on a clock without a zone (it may fall on the next day or the
+	// one before), then the instant at which the zone's clocks show it.
+	const wall = new Date(Date.UTC(day.year, day.month - 1, day.day) + clock(until, zone) + shift);
+	const at = zonedToUtc(
+		{
+			year: wall.getUTCFullYear(),
+			month: wall.getUTCMonth() + 1,
+			day: wall.getUTCDate(),
+			hour: wall.getUTCHours(),
+			minute: wall.getUTCMinutes(),
+			second: wall.getUTCSeconds(),
+		},
+		zone,
+	);
+	return at + wall.getUTCMilliseconds();
+}
+
+type SeriesFields = Pick<CalendarEvent, 'until' | 'count' | 'monthlyBy' | 'ordinal' | 'exceptions'>;
+
+/**
+ * The repeat fields to keep from the stored event: its end (count, or the day it ends on) while it
+ * still repeats, the monthly rule while it stays monthly (the weekday ordinal while the start's
+ * date in the event's zone still fits it: a new time keeps "the last Friday"), and the changed or
+ * cancelled occurrences only while the series keeps its start, repeat and kind.
+ */
+function series(
+	original: CalendarEvent,
+	repeat: Repeat,
+	start: number,
+	allDay: boolean,
+	zone: string,
+): Partial<SeriesFields> {
+	if (repeat === 'none' || original.repeat === 'none') return {};
+	const same = original.repeat === repeat;
+	const moved = start !== original.start || !same || allDay !== (original.allDay === true);
+	const day = zonedParts(start, zone);
+	const ordinal = original.ordinal;
+	const keepOrdinal =
+		ordinal !== undefined &&
+		same &&
+		(!moved || dayMatchesOrdinal(day.year, day.month, day.day, ordinal));
+	return {
+		...(original.until !== undefined
+			? { until: movedUntil(original.until, original.start, start, zone) }
+			: {}),
+		...(original.count !== undefined ? { count: original.count } : {}),
+		...(same && repeat === 'monthly' && original.monthlyBy
+			? { monthlyBy: original.monthlyBy }
+			: {}),
+		...(keepOrdinal ? { ordinal } : {}),
+		...(!moved && original.exceptions?.length ? { exceptions: original.exceptions } : {}),
+	};
+}
+
+/** The other instant at which the zone's clocks show the minute they show at `ms`, or null. */
+function shownAgain(ms: number, zone: string): number | null {
+	const shown = (t: number): string => `${dateValue(t, zone)} ${timeValue(t, zone)}`;
+	const offset = offsetMinutes(ms, zone);
+	for (const near of [ms - DAY_MS / 2, ms + DAY_MS / 2]) {
+		const other = ms + (offset - offsetMinutes(near, zone)) * MINUTE_MS;
+		if (other !== ms && shown(other) === shown(ms)) return other;
+	}
+	return null;
+}
+
+/**
+ * The end the time fields name for a timed draft: of the instants the clocks show it at (two in
+ * the hour a clock change repeats), the first in or after the minute the start shows, and never
+ * before the start itself (the fields show no seconds). An end the clocks show only before that
+ * minute stays before the start.
+ */
+function endAfter(end: number, start: number, zone: string): number {
+	const minute = start - (((start % MINUTE_MS) + MINUTE_MS) % MINUTE_MS);
+	const after = [end, shownAgain(end, zone)].filter((t): t is number => t !== null && t >= minute);
+	return after.length ? Math.max(Math.min(...after), start) : end;
+}
+
+/** Whether the date and time fields of `draft` still show what they showed for the stored event. */
+const shows = (
+	draft: EventDraft,
+	shown: EventDraft,
+	date: 'startDate' | 'endDate',
+	time: 'startTime' | 'endTime',
+): boolean =>
+	draft.allDay === shown.allDay &&
+	draft[date] === shown[date] &&
+	(draft.allDay || draft[time] === shown[time]);
+
+/** The event a draft describes (`newId` names a new one), or the first issue keeping it unsaved. */
+export function buildEvent(
+	draft: EventDraft,
+	zone: string,
+	newId: () => string,
+): { event: CalendarEvent } | { issue: DraftIssue } {
+	const title = draft.title.trim();
+	if (!title) return { issue: 'title' };
+	const original = draft.original;
+	const eventZone = original?.zone ?? zone;
+	const named = draft.allDay
+		? fromInputs(draft.startDate, '', eventZone)
+		: instant(draft.startDate, draft.startTime, zone);
+	const namedEnd = draft.allDay
+		? fromInputs(shiftDate(draft.endDate, 1), '', eventZone)
+		: instant(draft.endDate, draft.endTime, zone);
+	if (named === null || namedEnd === null) return { issue: 'when' };
+	// The time fields show whole minutes. A start or an end they still show as they did for the
+	// stored event keeps its own instant, seconds and all, so a new title alone neither moves an
+	// event that starts at 09:00:30 nor drops the changed occurrences of its series. The order is
+	// checked on those instants: an event can end in the hour a clock change repeats, after its
+	// start, at a time the fields show before it.
+	const shown = original ? draftOf(original, zone) : null;
+	const start =
+		original && shown && shows(draft, shown, 'startDate', 'startTime') ? original.start : named;
+	const end =
+		original && shown && shows(draft, shown, 'endDate', 'endTime')
+			? original.end
+			: draft.allDay
+				? namedEnd
+				: endAfter(namedEnd, start, zone);
+	if (draft.allDay ? end <= start : end < start) return { issue: 'order' };
+	const repeating = original ? series(original, draft.repeat, start, draft.allDay, eventZone) : {};
+	// Starting after the day it ends, the series would have no occurrence to show at all.
+	if (repeating.until !== undefined && repeating.until < start) return { issue: 'series' };
+	const location = draft.location.trim();
+	return {
+		event: {
+			...(original ? kept(original) : {}),
+			id: original?.id ?? newId(),
+			title,
+			description: draft.description,
+			start,
+			end,
+			zone: eventZone,
+			repeat: draft.repeat,
+			...(draft.allDay ? { allDay: true } : {}),
+			...(location ? { location } : {}),
+			...repeating,
+		},
+	};
+}

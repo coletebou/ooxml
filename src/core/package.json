@@ -124,6 +124,16 @@
 			"import": "./dist/collab/index.mjs",
 			"require": "./dist/collab/index.cjs"
 		},
+		"./calendar": {
+			"types": "./dist/calendar/index.d.ts",
+			"import": "./dist/calendar/index.mjs",
+			"require": "./dist/calendar/index.cjs"
+		},
+		"./mail": {
+			"types": "./dist/mail/index.d.ts",
+			"import": "./dist/mail/index.mjs",
+			"require": "./dist/mail/index.cjs"
+		},
 		"./teams": {
 			"types": "./dist/teams/index.d.ts",
 			"import": "./dist/teams/index.mjs",

@@ -6,14 +6,19 @@ export const apps = [
 	{ id: 'vsdx', name: 'Visio', letter: 'V', color: '#3955a3', tag: 'Alpha' },
 ];
 export const teamsApp = { id: 'teams', name: 'Teams', letter: 'T', color: '#6264a7', tag: 'Alpha' };
+export const mailApp = { id: 'mail', name: 'Mail', letter: 'M', color: '#1f6feb', tag: 'Alpha' };
+/** Every app of the suite: the document apps, then Teams and Mail. */
+export const suiteApps = [...apps, teamsApp, mailApp];
+/** The app with `id`; Teams for an id the suite does not know. */
+export const appOf = (id) => suiteApps.find((a) => a.id === id) ?? teamsApp;
 /** A maturity tag, or nothing for an app without one. */
 export const tag = (label) =>
 	label ? `<i class="app-tag" data-tone="${label.toLowerCase()}">${label}</i>` : '';
 export const $ = (id) => document.getElementById(id);
 export const escape = (value) => String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 export const badge = (kind) => {
-	const a = apps.find((a) => a.id === kind);
-	return `<span class="app-badge" style="--app:${a?.color ?? teamsApp.color}">${a?.letter ?? teamsApp.letter}</span>`;
+	const a = appOf(kind);
+	return `<span class="app-badge" style="--app:${a.color}">${a.letter}</span>`;
 };
 export function notify(message) {
 	$('status').textContent = message instanceof Error ? message.message : message;

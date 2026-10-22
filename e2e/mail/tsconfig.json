@@ -1,0 +1,7 @@
+{
+	"extends": "../../viewers/mail/tsconfig.json",
+	// The specs run under Playwright and import what they use; only Node's types are global here,
+	// not the viewer's Vitest globals, which this package does not install.
+	"compilerOptions": { "types": ["node"] },
+	"include": ["./**/*.ts"]
+}

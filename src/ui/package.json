@@ -72,6 +72,11 @@
 			"import": "./dist/teams.js",
 			"default": "./dist/teams.js"
 		},
+		"./mail": {
+			"types": "./dist/mail/index.d.ts",
+			"import": "./dist/mail.js",
+			"default": "./dist/mail.js"
+		},
 		"./suite": {
 			"types": "./dist/suite/index.d.ts",
 			"import": "./dist/suite.js",

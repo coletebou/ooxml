@@ -81,21 +81,6 @@ export const frFiles: Record<keyof typeof enFiles, string> = {
 	'preview.waitSave':
 		"Attendez la fin de l'enregistrement de la copie du classeur ou annulez l'enregistrement.",
 
-	'pptx.badSize': 'La présentation a une taille de diapositive non valide',
-	'pptx.canvas': 'Zone de navigation des diapositives',
-	'pptx.hidden': '(masquée)',
-	'pptx.navigation': 'Navigation dans les diapositives',
-	'pptx.next': 'Diapositive suivante',
-	'pptx.noSlides': 'La présentation ne contient aucune diapositive',
-	'pptx.notes': "Notes de l'orateur",
-	'pptx.previous': 'Diapositive précédente',
-	'pptx.readingView':
-		'Mode lecture. Les animations, les transitions et la modification ne sont pas disponibles. La mise en page et les polices peuvent différer de PowerPoint.',
-	'pptx.slide': 'Diapositive {n}',
-	'pptx.slideOf': 'Diapositive {n} sur {total}',
-	'pptx.slideText': 'Texte de la diapositive',
-	'pptx.warnings': 'Avertissements de compatibilité',
-
 	'tab.openDocument': 'Ouvrir le document',
 	'tab.openFailed': "Impossible d'ouvrir l'onglet",
 	'tab.opening': "Ouverture de l'onglet...",

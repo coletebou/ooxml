@@ -6,7 +6,21 @@ import { assistantEnabled, currentPolicy, loadPolicy } from './ai/policy.js';
 import { mountTabOrder } from './tabs.js';
 import { blankDocument, preloadEditor } from './editors.js';
 import { mountTeams, shareDocument, localDocumentId } from './teams.js';
-import { $, apps, badge, escape, notify, task, download, choose, tag, teamsApp } from './ui.js';
+import { mountMail, preloadMail } from './mail.js';
+import {
+	$,
+	apps,
+	appOf,
+	badge,
+	escape,
+	notify,
+	task,
+	download,
+	choose,
+	tag,
+	teamsApp,
+	mailApp,
+} from './ui.js';
 import { mountThemes } from './themes.js';
 import { mountProfile } from './profile.js';
 import { documentDatabase } from './profile-state.js';
@@ -31,6 +45,9 @@ let files = [],
 	filter = '',
 	teams,
 	teamsTabOpen = false,
+	// The Mail element once it starts mounting: a promise, so two quick clicks mount one.
+	mail,
+	mailTabOpen = false,
 	chatTabOpen = false,
 	chatPage,
 	assistant;
@@ -60,7 +77,7 @@ function renderFiles() {
 	renderLibrary(files, filter);
 	disk?.search(filter);
 	const kind = createKind();
-	$('create-new').hidden = product === 'teams';
+	$('create-new').hidden = product === 'teams' || product === 'mail';
 	$('create-new').innerHTML =
 		`${icon('add')}<span>${kind ? `New ${blankNames[kind].toLowerCase()}` : 'Create'}</span>`;
 }
@@ -78,7 +95,7 @@ function chooseBlank() {
 let applyShell = () => {};
 function renderTabs() {
 	document.body.dataset.view = view;
-	$('tabs').hidden = !teamsTabOpen && !chatTabOpen && !sessions.sessions.size;
+	$('tabs').hidden = !teamsTabOpen && !mailTabOpen && !chatTabOpen && !sessions.sessions.size;
 	$('tabs').innerHTML =
 		(chatTabOpen
 			? `<button role="tab" aria-selected="${view === 'chat'}" data-chat>${icon('spark')}Chat</button>`
@@ -86,6 +103,9 @@ function renderTabs() {
 		`<button role="tab" aria-selected="${view === 'home'}" data-home>Home</button>` +
 		(teamsTabOpen
 			? `<button role="tab" aria-selected="${view === 'teams'}" data-teams>Teams</button>`
+			: '') +
+		(mailTabOpen
+			? `<button role="tab" aria-selected="${view === 'mail'}" data-mail>Mail</button>`
 			: '') +
 		[...sessions.sessions.values()]
 			.map(
@@ -105,6 +125,7 @@ function renderTabs() {
 	$('home').hidden = view !== 'home';
 	$('chat').hidden = view !== 'chat';
 	$('teams-host').hidden = view !== 'teams';
+	$('mail-host').hidden = view !== 'mail';
 	$('editor-area').hidden = view !== 'editor';
 	$('back-teams').hidden = !origins.has(active);
 	$('back-parent').hidden = !sessions.sessions.get(active)?.doc.parent;
@@ -114,7 +135,7 @@ function renderTabs() {
 			: view === 'chat'
 				? 'Chat - OOXML Office'
 				: product
-					? `OOXML ${apps.find((a) => a.id === product)?.name ?? 'Teams'}`
+					? `OOXML ${appOf(product).name}`
 					: 'OOXML Office';
 	for (const button of $('rail').querySelectorAll('button'))
 		button.setAttribute(
@@ -224,6 +245,30 @@ async function showTeams() {
 	renderTabs();
 	history.replaceState(null, '', '#/teams');
 }
+async function showMail() {
+	mailTabOpen = true;
+	view = 'mail';
+	renderTabs();
+	if (!mail) {
+		notify('Opening Mail...');
+		mail = mountMail($('mail-host'), store, open, refresh).then(
+			(element) => {
+				notify(
+					'Mail runs on a demo mailbox in this browser: nothing is sent, and reloading resets it.',
+				);
+				return element;
+			},
+			(error) => {
+				mail = undefined;
+				throw error;
+			},
+		);
+	}
+	await mail;
+	renderTabs();
+	// Mounting can take a moment; a click elsewhere meanwhile keeps its own address.
+	if (view === 'mail') history.replaceState(null, '', '#/mail');
+}
 const blankNames = {
 	docx: 'Document',
 	xlsx: 'Workbook',
@@ -309,7 +354,7 @@ async function share() {
 }
 
 $('rail').innerHTML =
-	`<span class="nav-caption">Workspace</span><button class="ai-only" data-chat data-view="chat">${icon('spark')}<span>Chat</span></button><button data-home data-view="home" aria-current="true">${icon('home')}<span>Home</span></button><button data-library="files">${icon('folder')}<span>My files</span></button><button data-library="favourites">${icon('star')}<span>Favourites</span></button><span class="nav-caption">Apps</span><button data-teams data-view="teams">${badge('teams')}<span>Teams</span>${tag(teamsApp.tag)}</button>` +
+	`<span class="nav-caption">Workspace</span><button class="ai-only" data-chat data-view="chat">${icon('spark')}<span>Chat</span></button><button data-home data-view="home" aria-current="true">${icon('home')}<span>Home</span></button><button data-library="files">${icon('folder')}<span>My files</span></button><button data-library="favourites">${icon('star')}<span>Favourites</span></button><span class="nav-caption">Apps</span><button data-teams data-view="teams">${badge('teams')}<span>Teams</span>${tag(teamsApp.tag)}</button><button data-mail data-view="mail">${badge('mail')}<span>Mail</span>${tag(mailApp.tag)}</button>` +
 	apps
 		.map(
 			(a) =>
@@ -329,7 +374,7 @@ $('create-row').innerHTML =
 				`<button data-create="${a.id}">${badge(a.id)}<span>${blankNames[a.id]}${tag(a.tag)}</span><small>${blankDescriptions[a.id]} in ${a.name}</small></button>`,
 		)
 		.join('') +
-	`<button data-teams>${badge('teams')}<span>Teams${tag(teamsApp.tag)}</span><small>Chat, calls and shared files on your server</small></button><button data-import>${icon('upload')}<span>Open a file</span><small>Bring a .docx, .xlsx, .pptx or .vsdx from this device</small></button>`;
+	`<button data-teams>${badge('teams')}<span>Teams${tag(teamsApp.tag)}</span><small>Chat, calls and shared files on your server</small></button><button data-mail>${badge('mail')}<span>Mail${tag(mailApp.tag)}</span><small>Mail, calendar and contacts on a demo mailbox</small></button><button data-import>${icon('upload')}<span>Open a file</span><small>Bring a .docx, .xlsx, .pptx or .vsdx from this device</small></button>`;
 // Each tile's place in the entrance stagger (styles.css).
 for (const [i, button] of [...$('create-row').children].entries())
 	button.style.setProperty('--i', i);
@@ -346,6 +391,7 @@ document.addEventListener('click', (event) => {
 	if (b.hasAttribute('data-chat')) task(() => showChat());
 	if (b.hasAttribute('data-import')) $('file-input').click();
 	if (b.hasAttribute('data-teams')) task(showTeams);
+	if (b.hasAttribute('data-mail')) task(showMail);
 	if (b.dataset.app) {
 		view = 'home';
 		filter = b.dataset.app;
@@ -461,7 +507,7 @@ document.addEventListener('keydown', (event) => {
 		!event.metaKey &&
 		!event.altKey &&
 		!event.target.closest(
-			'input, textarea, [contenteditable], docx-editor, xlsx-editor, visio-viewer, teams-app, .pptxv',
+			'input, textarea, [contenteditable], docx-editor, xlsx-editor, visio-viewer, teams-app, mail-app, .pptxv',
 		)
 	) {
 		event.preventDefault();
@@ -472,10 +518,13 @@ document.addEventListener('dragover', (event) => {
 	if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
 });
 document.addEventListener('drop', (event) => {
-	if (view !== 'teams' && event.dataTransfer?.files.length) {
-		event.preventDefault();
+	if (!event.dataTransfer?.types.includes('Files')) return;
+	// A file dropped anywhere stays in the suite: the browser would open it in place of the page,
+	// losing Mail's mailbox and any unsaved edit. Teams and Mail take files dropped on their own
+	// targets as attachments; elsewhere a drop imports them.
+	event.preventDefault();
+	if (view !== 'teams' && view !== 'mail' && event.dataTransfer.files.length)
 		task(() => importFiles([...event.dataTransfer.files]));
-	}
 });
 // The home rises into place once; after that, switching back to it is instant (styles.css).
 document.body.classList.add('entering');
@@ -489,7 +538,7 @@ mountProfile({
 	changed: () => renderFiles(),
 });
 $('app-launcher').innerHTML =
-	`<div class="launcher-heading"><h2>Your apps</h2><span>OOXML Office</span></div><div class="launcher-grid"><button class="ai-only" data-chat><span class="app-badge chat-badge">${icon('spark')}</span><span>Chat</span></button>${apps.map((a) => `<button data-app="${a.id}">${badge(a.id)}<span>${a.name}</span></button>`).join('')}<button data-teams>${badge('teams')}<span>Teams</span></button></div>`;
+	`<div class="launcher-heading"><h2>Your apps</h2><span>OOXML Office</span></div><div class="launcher-grid"><button class="ai-only" data-chat><span class="app-badge chat-badge">${icon('spark')}</span><span>Chat</span></button>${apps.map((a) => `<button data-app="${a.id}">${badge(a.id)}<span>${a.name}</span></button>`).join('')}<button data-teams>${badge('teams')}<span>Teams</span></button><button data-mail>${badge('mail')}<span>Mail</span></button></div>`;
 $('app-launcher').addEventListener('click', (event) => {
 	if (event.target.closest('button')) $('app-launcher').hidePopover();
 });
@@ -514,6 +563,7 @@ window.addEventListener('hashchange', () =>
 			await showAttachment(localAttachmentId(location.href));
 		else if (location.hash === '#/teams' || (product === 'teams' && !location.hash))
 			await showTeams();
+		else if (location.hash === '#/mail' || (product === 'mail' && !location.hash)) await showMail();
 		else if (joinRoute()) await showChat(undefined, joinRoute());
 		else if (assistantEnabled() && (chatRoute() || (!product && !location.hash)))
 			await showChat(chatRoute()?.[1]);
@@ -547,6 +597,7 @@ task(async () => {
 	else if (localAttachmentId(location.href)) await showAttachment(localAttachmentId(location.href));
 	else if (location.hash === '#/teams' || (product === 'teams' && !location.hash))
 		await showTeams();
+	else if (location.hash === '#/mail' || (product === 'mail' && !location.hash)) await showMail();
 	else if (joinRoute()) await showChat(undefined, joinRoute());
 	// With the assistant on, the suite opens on chat; a product's own app opens on its files.
 	else if (assistantEnabled() && (chatRoute() || (!product && !location.hash)))
@@ -558,6 +609,7 @@ for (const eventName of ['pointerover', 'focusin'])
 	document.addEventListener(eventName, (event) => {
 		const target = event.target.closest('[data-create], [data-app]');
 		if (target) void preloadEditor(target.dataset.create ?? target.dataset.app)?.catch(() => {});
+		else if (event.target.closest('[data-mail]')) void preloadMail().catch(() => {});
 	});
 
 mountProduct();
@@ -565,24 +617,29 @@ applyShell = mountShell(() => ({
 	view,
 	documents: sessions.sessions.size,
 	teamsOpen: teamsTabOpen,
+	mailOpen: mailTabOpen,
 }));
 mountPwa({ idle: () => sessions.sessions.size === 0 && view === 'home' });
 mountStart();
 mountResources();
 
 disk = mountDiskSearch({ store, open, refresh });
+/** Closes the Teams or Mail tab. The app stays mounted, so reopening it finds it as it was. */
+function closeAppTab(app) {
+	if (app === 'teams') teamsTabOpen = false;
+	else mailTabOpen = false;
+	if (view === app) {
+		view = 'home';
+		history.replaceState(null, '', '#/');
+	}
+	renderTabs();
+}
 const fileActions = mountFileActions({
 	store,
 	sessions,
 	refresh,
-	closeTeams: () => {
-		teamsTabOpen = false;
-		if (view === 'teams') {
-			view = 'home';
-			history.replaceState(null, '', '#/');
-		}
-		renderTabs();
-	},
+	closeTeams: () => closeAppTab('teams'),
+	closeMail: () => closeAppTab('mail'),
 	active: () => active,
 	activate: open,
 	home: () => {

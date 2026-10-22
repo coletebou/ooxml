@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { UserConfig } from 'vite';
 
@@ -6,10 +7,14 @@ import type { UserConfig } from 'vite';
 // resolves ooxml-core and ooxml-ui from their SOURCE when that checkout exists (instant reload when
 // you edit either; otherwise the published packages in node_modules), and the binding packages of
 // this repository from their source too. TEAMS_USE_DIST=1 uses the built packages for both (run
-// `bun run build:packages` first for this repository's own ones).
-const ooxml = fileURLToPath(new URL(process.env.OOXML_DIR ?? '../../', import.meta.url));
+// `bun run build:packages` first for this repository's own ones). OOXML_DIR names another
+// checkout, written with or without a slash at the end.
+const ooxml = resolve(
+	fileURLToPath(new URL('.', import.meta.url)),
+	process.env.OOXML_DIR || '../..',
+);
 const useDist = process.env.TEAMS_USE_DIST === '1';
-const ooxmlSource = !useDist && existsSync(`${ooxml}src/core/teams/index.ts`);
+const ooxmlSource = !useDist && existsSync(`${ooxml}/src/core/teams/index.ts`);
 const local = (path: string): string =>
 	fileURLToPath(new URL(`../../viewers/teams/packages/${path}`, import.meta.url));
 
@@ -33,12 +38,12 @@ export function sharedConfig(port: number): UserConfig {
 			alias: [
 				...(ooxmlSource
 					? [
-							{ find: /^ooxml-core\/(.+)$/, replacement: `${ooxml}src/core/$1` },
-							{ find: /^ooxml-ui$/, replacement: `${ooxml}src/ui/src/index.ts` },
-							{ find: /^ooxml-ui\/teams$/, replacement: `${ooxml}src/ui/src/teams/index.ts` },
+							{ find: /^ooxml-core\/(.+)$/, replacement: `${ooxml}/src/core/$1` },
+							{ find: /^ooxml-ui$/, replacement: `${ooxml}/src/ui/src/index.ts` },
+							{ find: /^ooxml-ui\/teams$/, replacement: `${ooxml}/src/ui/src/teams/index.ts` },
 							{
 								find: /^ooxml-ui\/pptx\/dom$/,
-								replacement: `${ooxml}src/ui/dist/pptx/dom/index.mjs`,
+								replacement: `${ooxml}/src/ui/dist/pptx/dom/index.mjs`,
 							},
 						]
 					: []),

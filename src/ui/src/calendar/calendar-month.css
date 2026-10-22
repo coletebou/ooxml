@@ -1,0 +1,110 @@
+/* The month grid of the shared calendar view (month-grid.ts) and the event chips of the month days
+   and of the all-day row (chip.ts). Loaded with calendar-grid.css, whose private helpers it reads. */
+.month {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	display: grid;
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+	grid-template-rows: auto repeat(6, minmax(6.5em, 1fr));
+}
+.weekday {
+	position: sticky;
+	inset-block-start: 0;
+	z-index: 1;
+	padding: var(--office-space-1) var(--office-space-2);
+	border-block-end: var(--office-border-width) solid var(--_line);
+	background: var(--office-background);
+	color: var(--_subtle);
+	font-size: var(--office-font-size-sm);
+}
+.day {
+	display: flex;
+	flex-direction: column;
+	gap: var(--office-space-0);
+	min-width: 0;
+	padding: var(--office-space-1);
+	overflow: hidden;
+	border-block-end: var(--office-border-width) solid var(--_line);
+	border-inline-start: var(--office-border-width) solid var(--_line);
+}
+.day:nth-of-type(7n + 1) {
+	border-inline-start: 0;
+}
+.day[data-outside='true'] {
+	background: var(--office-surface);
+}
+.day[data-selected='true'] {
+	background: var(--_brand-subtle);
+}
+.date {
+	align-self: flex-start;
+	min-width: 1.8em;
+	padding: 0 var(--office-space-1);
+	border: 0;
+	border-radius: var(--office-radius-full);
+	background: transparent;
+	font-size: var(--office-font-size-sm);
+	line-height: 1.8;
+	white-space: nowrap;
+}
+.day[data-outside='true'] .date {
+	color: var(--_subtle);
+}
+.date[aria-current='date'] {
+	background: var(--_brand);
+	color: var(--_brand-foreground);
+	font-weight: var(--office-font-weight-bold);
+}
+.chip {
+	display: flex;
+	align-items: center;
+	gap: var(--office-space-1);
+	min-width: 0;
+	padding: 0 var(--office-space-1);
+	border: 0;
+	border-inline-start: var(--office-border-width-thick) solid var(--_brand);
+	border-radius: var(--office-radius);
+	background: transparent;
+	font-size: var(--office-font-size-xs);
+	line-height: 1.6;
+	text-align: start;
+	white-space: nowrap;
+}
+.chip[data-all-day='true'] {
+	background: var(--_brand-subtle);
+}
+.chip[data-mine='true'] {
+	background: var(--_mine);
+}
+.chip:hover {
+	background: var(--office-selected);
+}
+.chip-time {
+	flex: none;
+	color: var(--_subtle);
+}
+.chip-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.more {
+	align-self: flex-start;
+	padding: 0 var(--office-space-1);
+	border: 0;
+	background: transparent;
+	color: var(--_subtle);
+	font-size: var(--office-font-size-xs);
+}
+
+@media (max-width: 40em) {
+	.month {
+		grid-template-rows: auto repeat(6, minmax(4.5em, 1fr));
+	}
+	.day {
+		padding: var(--office-space-0);
+	}
+	.chip-time {
+		display: none;
+	}
+}

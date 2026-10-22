@@ -1,0 +1,3 @@
+# Messages keep the line endings they were written with (some CRLF as on the wire, some LF as
+# saved by mail programs); the repository's eol=lf normalisation must not touch them.
+*.eml -text

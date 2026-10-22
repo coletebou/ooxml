@@ -6,6 +6,7 @@ export function mountFileActions({
 	sessions,
 	refresh,
 	closeTeams,
+	closeMail,
 	active,
 	activate,
 	home,
@@ -101,13 +102,19 @@ export function mountFileActions({
 			item('Remove from workspace…', () => remove(id)),
 		]);
 	}
+	/** How to close the Teams or Mail tab `target` is in, or nothing on any other tab. */
+	const appTabClose = (target) => {
+		const tab = target.closest('[data-teams], [data-mail]');
+		return tab && (tab.hasAttribute('data-mail') ? closeMail : closeTeams);
+	};
 	$('tabs').addEventListener('mousedown', (event) => {
 		if (event.button === 1 && event.target.closest('.file-tab')) event.preventDefault();
 	});
 	$('tabs').addEventListener('auxclick', (event) => {
-		if (event.button === 1 && event.target.closest('[data-teams]')) {
+		const close = appTabClose(event.target);
+		if (event.button === 1 && close) {
 			event.preventDefault();
-			closeTeams();
+			close();
 			return;
 		}
 		const tab = event.target.closest('.file-tab');
@@ -116,8 +123,9 @@ export function mountFileActions({
 		task(() => closeTabs([tab.querySelector('[data-open]').dataset.open]));
 	});
 	$('tabs').addEventListener('contextmenu', (event) => {
-		if (event.target.closest('[data-teams]')) {
-			contextMenu(event, [{ label: 'Close', run: closeTeams, error: notify }]);
+		const close = appTabClose(event.target);
+		if (close) {
+			contextMenu(event, [{ label: 'Close', run: close, error: notify }]);
 			return;
 		}
 		const tab = event.target.closest('.file-tab');

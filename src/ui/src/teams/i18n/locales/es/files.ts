@@ -77,21 +77,6 @@ export const esFiles: Record<keyof typeof enFiles, string> = {
 	'preview.title': 'Vista previa del contenido',
 	'preview.waitSave': 'Espera a que termine de guardarse la copia del libro o cancela el guardado.',
 
-	'pptx.badSize': 'La presentación tiene un tamaño de diapositiva no válido',
-	'pptx.canvas': 'Lienzo de navegación de diapositivas',
-	'pptx.hidden': '(oculta)',
-	'pptx.navigation': 'Navegación de diapositivas',
-	'pptx.next': 'Diapositiva siguiente',
-	'pptx.noSlides': 'La presentación no tiene diapositivas',
-	'pptx.notes': 'Notas del orador',
-	'pptx.previous': 'Diapositiva anterior',
-	'pptx.readingView':
-		'Vista de lectura. Las animaciones, las transiciones y la edición no están disponibles. El diseño y las fuentes pueden diferir de PowerPoint.',
-	'pptx.slide': 'Diapositiva {n}',
-	'pptx.slideOf': 'Diapositiva {n} de {total}',
-	'pptx.slideText': 'Texto de la diapositiva',
-	'pptx.warnings': 'Advertencias de compatibilidad',
-
 	'tab.openDocument': 'Abrir documento',
 	'tab.openFailed': 'No se pudo abrir la pestaña',
 	'tab.opening': 'Abriendo pestaña...',

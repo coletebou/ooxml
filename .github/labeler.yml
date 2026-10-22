@@ -79,6 +79,12 @@
           - 'viewers/teams/**'
           - 'demos/teams/**'
           - 'e2e/teams/**'
+'viewer: mail':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'viewers/mail/**'
+          - 'demos/mail/**'
+          - 'e2e/mail/**'
 
 # Cross-cutting
 site:

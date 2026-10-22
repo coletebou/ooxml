@@ -1,0 +1,29 @@
+From: Ada Lovelace <ada@example.com>
+To: Grace Hopper <grace@example.org>
+Subject: Our new logo
+Date: Thu, 08 Jan 2026 10:00:00 +0000
+Message-ID: <related-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-boundary"
+
+--alt-boundary
+Content-Type: text/plain; charset=utf-8
+
+Here is the new logo.
+--alt-boundary
+Content-Type: multipart/related; type="text/html"; boundary="rel-boundary"
+
+--rel-boundary
+Content-Type: text/html; charset=utf-8
+
+<p>Here is the new logo: <img src="cid:logo@example.com" alt="logo"></p>
+--rel-boundary
+Content-Type: image/png
+Content-ID: <logo@example.com>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6
+kgAAAABJRU5ErkJggg==
+--rel-boundary--
+
+--alt-boundary--

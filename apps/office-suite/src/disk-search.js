@@ -1,5 +1,5 @@
 import { $, escape, task, notify, choose, download } from './ui.js';
-import { product } from './product.js';
+import { listsEveryKind, product } from './product.js';
 import {
 	desktop,
 	native,
@@ -89,7 +89,7 @@ export function mountDiskSearch({ store, open, refresh }) {
 						const kind = officeKind(entry.name);
 						if (
 							entry.path.toLowerCase().includes(query) &&
-							(!product || product === 'teams' || kind === product) &&
+							(listsEveryKind || kind === product) &&
 							(!['docx', 'xlsx', 'pptx', 'vsdx'].includes(filter) || kind === filter) &&
 							filter !== 'favourites'
 						)

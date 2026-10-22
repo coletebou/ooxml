@@ -1,5 +1,7 @@
-import { $, apps, badge } from './ui.js';
+import { $, appOf, badge, suiteApps } from './ui.js';
 export const product = document.body.dataset.product || '';
+/** The suite lists every kind of file, and so do Teams and Mail, whose attachments are any kind. */
+export const listsEveryKind = !product || product === 'teams' || product === 'mail';
 export const suiteBase = new URL(
 	document.querySelector('meta[name="ooxml-root"]')?.content || './',
 	location.href,
@@ -10,6 +12,7 @@ export const productPaths = {
 	pptx: 'powerpoint',
 	vsdx: 'visio',
 	teams: 'teams',
+	mail: 'mail',
 };
 export function workspaceUrl(type, id) {
 	const url = new URL(
@@ -40,20 +43,18 @@ export function mountProduct() {
 		const links = document.createElement('details');
 		links.className = 'standalone-links';
 		links.innerHTML = `<summary>Open apps separately</summary>${Object.entries(productPaths)
-			.map(
-				([id, path]) =>
-					`<a href="${new URL(`apps/${path}/`, suiteBase)}">${apps.find((a) => a.id === id)?.name ?? 'Teams'}</a>`,
-			)
+			.map(([id, path]) => `<a href="${new URL(`apps/${path}/`, suiteBase)}">${appOf(id).name}</a>`)
 			.join('')}`;
 		$('app-launcher').append(links);
 		return;
 	}
-	const app = apps.find((a) => a.id === product) ?? { name: 'Teams', id: 'teams' };
+	const app = appOf(product);
 	const brand = document.querySelector('.brand');
 	brand.innerHTML = `${badge(product)}<strong>${app.name}</strong>`;
 	brand.setAttribute('aria-label', `${app.name} home`);
-	for (const button of $('rail').querySelectorAll('[data-app], [data-teams]'))
-		button.hidden = (button.dataset.app || 'teams') !== product;
+	for (const button of $('rail').querySelectorAll('[data-app], [data-teams], [data-mail]'))
+		button.hidden =
+			(button.dataset.app || ('mail' in button.dataset ? 'mail' : 'teams')) !== product;
 	$('app-launcher').innerHTML =
-		`<div class="launcher-heading"><h2>Your apps</h2></div><div class="launcher-grid"><a href="${new URL('?suite', suiteBase)}">OOXML Office</a>${[...apps, { id: 'teams', name: 'Teams' }].map((a) => `<a href="${new URL(`apps/${productPaths[a.id]}/`, suiteBase)}">${badge(a.id)}<span>${a.name}</span></a>`).join('')}</div>`;
+		`<div class="launcher-heading"><h2>Your apps</h2></div><div class="launcher-grid"><a href="${new URL('?suite', suiteBase)}">OOXML Office</a>${suiteApps.map((a) => `<a href="${new URL(`apps/${productPaths[a.id]}/`, suiteBase)}">${badge(a.id)}<span>${a.name}</span></a>`).join('')}</div>`;
 }

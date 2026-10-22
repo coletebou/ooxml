@@ -1,0 +1,170 @@
+// The contact edit form of <mail-contacts>: names, addresses, phones, one postal address, the
+// organisation, birthday, website and note. Each list shows its entries plus one empty row to add
+// another; empty rows are dropped on save. Fields the form does not show are kept as they were.
+import { html } from 'lit';
+import type { Contact, ContactAddress } from 'ooxml-core/mail';
+import type { MailI18n, MailKey } from './i18n/translator';
+
+/** A whole date (`YYYY-MM-DD`): the only birthday a date input can show. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * The input a birthday is shown in: a date input for a whole date, else text, as a date input
+ * shows nothing for a day without a year (`--04-15`) or what a card gave as text, which could then
+ * be neither seen nor cleared.
+ */
+const birthdayType = (birthday: string): string =>
+	!birthday || ISO_DATE.test(birthday) ? 'date' : 'text';
+const EMAIL_TYPES = ['', 'home', 'work', 'other'];
+/** Every phone type the vCard reader recognises. */
+const PHONE_TYPES = ['', 'cell', 'home', 'work', 'fax', 'pager', 'other'];
+const TYPE_LABELS: Record<string, MailKey> = {
+	'': 'contacts.typeNone',
+	home: 'contacts.typeHome',
+	work: 'contacts.typeWork',
+	other: 'contacts.typeOther',
+	cell: 'contacts.typeCell',
+	fax: 'contacts.typeFax',
+	pager: 'contacts.typePager',
+};
+/**
+ * The parts of a postal address besides its type, in the order the form lists them. The apartment
+ * or suite and the PO box show only where the address has one, as vCard 4 advises leaving both
+ * empty (RFC 6350, 6.3.1); shown, they are kept or cleared like the rest, never dropped unseen.
+ */
+const PARTS = [
+	['street', 'contacts.street'],
+	['extended', 'contacts.extendedAddress'],
+	['poBox', 'contacts.poBox'],
+	['locality', 'contacts.city'],
+	['region', 'contacts.region'],
+	['postalCode', 'contacts.postalCode'],
+	['country', 'contacts.country'],
+] as const satisfies readonly (readonly [keyof ContactAddress, MailKey])[];
+type Part = (typeof PARTS)[number][0];
+/** The parts of an address that may run to several lines (RFC 6350 6.3.1: street lines). */
+const MULTILINE: ReadonlySet<Part> = new Set(['street', 'extended']);
+const shownPart = (part: Part, place: Partial<ContactAddress>): boolean =>
+	(part !== 'extended' && part !== 'poBox') || !!place[part];
+
+export interface ContactFormHandlers {
+	save(event: Event): void;
+	cancel(): void;
+}
+
+/** A type picker; a type the form has no option for is offered as it is, so saving keeps it. */
+function typeSelect(name: string, value: string, types: readonly string[], i18n: MailI18n) {
+	const options = types.includes(value) ? types : [...types, value];
+	return html`<select name=${name} aria-label=${i18n.t('contacts.type')}>
+		${options.map((type) => html`<option value=${type} ?selected=${type === value}>${TYPE_LABELS[type] ? i18n.t(TYPE_LABELS[type]) : type}</option>`)}
+	</select>`;
+}
+
+export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactFormHandlers) {
+	const t = i18n.t;
+	const place: Partial<ContactAddress> = contact.addresses[0] ?? {};
+	const emails = [...contact.emails, { type: '', address: '' }];
+	const phones = [...contact.phones, { type: '', number: '' }];
+	const field = (name: string, label: string, value: string, type = 'text') =>
+		html`<label><span>${label}</span><input name=${name} type=${type} .value=${value} /></label>`;
+	// A text input drops line breaks from its value: a street of two lines would lose its break.
+	const lines = (name: string, label: string, value: string) =>
+		html`<label
+			><span>${label}</span><textarea name=${name} rows="2" .value=${value}></textarea>
+		</label>`;
+	// The email and website fields are typed for the keyboard they bring up, not to be checked: a
+	// card's URL without a scheme or an address in quotes would stop Save (the form keeps them as
+	// text, as the event dialog does).
+	return html`<form class="contact-form" novalidate @submit=${handlers.save}>
+		<h2
+			>${contact.name || contact.emails.length ? t('contacts.editTitle') : t('contacts.newTitle')}</h2
+		>
+		<fieldset>
+			<legend>${t('contacts.nameGroup')}</legend>
+			${field('name', t('contacts.displayName'), contact.name)}
+			${field('givenName', t('contacts.givenName'), contact.givenName)}
+			${field('familyName', t('contacts.familyName'), contact.familyName)}
+		</fieldset>
+		<fieldset>
+			<legend>${t('contacts.email')}</legend>
+			${emails.map((email, i) => html`<div class="row"><input name=${`email-${i}`} type="email" .value=${email.address} aria-label=${t('contacts.email')} />${typeSelect(`email-type-${i}`, email.type, EMAIL_TYPES, i18n)}</div>`)}
+		</fieldset>
+		<fieldset>
+			<legend>${t('contacts.phone')}</legend>
+			${phones.map((phone, i) => html`<div class="row"><input name=${`phone-${i}`} type="tel" .value=${phone.number} aria-label=${t('contacts.phone')} />${typeSelect(`phone-type-${i}`, phone.type, PHONE_TYPES, i18n)}</div>`)}
+		</fieldset>
+		<fieldset>
+			<legend>${t('contacts.workGroup')}</legend>
+			${field('organization', t('contacts.organization'), contact.organization)}
+			${field('title', t('contacts.jobTitle'), contact.title)}
+		</fieldset>
+		<fieldset>
+			<legend>${t('contacts.address')}</legend>
+			${PARTS.filter(([part]) => shownPart(part, place)).map(([part, label]) =>
+				MULTILINE.has(part)
+					? lines(part, t(label), place[part] ?? '')
+					: field(part, t(label), place[part] ?? ''),
+			)}
+		</fieldset>
+		<fieldset>
+			<legend>${t('contacts.more')}</legend>
+			${field('birthday', t('contacts.birthday'), contact.birthday, birthdayType(contact.birthday))}
+			${field('url', t('contacts.website'), contact.url, 'url')}
+			<label
+				><span>${t('contacts.note')}</span
+				><textarea name="note" rows="3" .value=${contact.note}></textarea>
+			</label>
+		</fieldset>
+		<footer>
+			<button type="submit" class="primary">${t('contacts.save')}</button>
+			<button type="button" @click=${handlers.cancel}>${t('contacts.cancel')}</button>
+		</footer>
+	</form>`;
+}
+
+/** The contact the form describes, on top of `base` (what the form does not show stays). */
+export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
+	const data = new FormData(form);
+	// A text area's line breaks may come as CRLF: the contact keeps them as line feeds.
+	const value = (name: string): string =>
+		String(data.get(name) ?? '')
+			.replace(/\r\n?/g, '\n')
+			.trim();
+	const rows = (prefix: string): { value: string; type: string }[] =>
+		[...data.keys()]
+			.filter((key) => new RegExp(`^${prefix}-\\d+$`).test(key))
+			.map((key) => ({
+				value: value(key),
+				type: value(key.replace(`${prefix}-`, `${prefix}-type-`)),
+			}))
+			.filter((row) => row.value);
+	const first = base.addresses[0];
+	// The form shows every part the address has, so one whose fields were all cleared goes.
+	const parts = Object.fromEntries(PARTS.map(([part]) => [part, value(part)])) as Record<
+		Part,
+		string
+	>;
+	const keepPlace = Object.values(parts).some(Boolean);
+	// Shown whatever it is (`birthdayType`), it is what the field holds: blank clears it.
+	const birthday = value('birthday');
+	return {
+		...base,
+		name: value('name'),
+		givenName: value('givenName'),
+		familyName: value('familyName'),
+		emails: rows('email').map((row) => ({ type: row.type, address: row.value })),
+		phones: rows('phone').map((row) => ({ type: row.type, number: row.value })),
+		organization: value('organization'),
+		title: value('title'),
+		// The values a card gave a part go along: they are written again only while the part is
+		// still their text (`ContactLists`).
+		addresses: keepPlace
+			? [
+					{ type: first?.type ?? '', ...parts, ...(first?.lists ? { lists: first.lists } : {}) },
+					...base.addresses.slice(1),
+				]
+			: base.addresses.slice(1),
+		birthday,
+		url: value('url'),
+		note: value('note'),
+	};
+}

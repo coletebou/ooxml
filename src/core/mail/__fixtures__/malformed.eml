@@ -1,0 +1,23 @@
+From: Broken Sender <broken@example.com
+To: ,,, valid@example.com, <also@example.com
+Subject: =?utf-8?B?not*valid*base64?= and =?x-unknown?q?caf=E9?=
+Date: not a date
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: text/plain; charset=x-bogus-charset
+Content-Transfer-Encoding: quoted-printable
+
+Caf=E9 with a bad charset, a broken escape =ZZ and a soft break at the end=
+--outer
+Content-Type: application/octet-stream; name="truncated.bin"
+Content-Disposition: attachment; filename="truncated.bin"
+Content-Transfer-Encoding: base64
+
+SGVsbG8sIHdvcmxkIQ==SGVs
+bG8gYWdh
+aW4
+--outer
+Content-Type: multipart/alternative
+
+no boundary here
