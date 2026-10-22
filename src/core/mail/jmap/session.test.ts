@@ -494,6 +494,27 @@ describe('mailAccountId', () => {
 			expect.objectContaining({ code: 'unsupported' }),
 		);
 		expect(mailAccountId(parsed, 'A97813')).toBe('A97813');
+		// An account that names no capability supports none (RFC 8620 2), whatever the server does.
+		for (const capabilities of [{}, undefined]) {
+			const bare = parseJmapSession(
+				{
+					...raw,
+					accounts: {
+						...(raw.accounts as Record<string, unknown>),
+						X2: {
+							name: 'Bare',
+							isPersonal: true,
+							isReadOnly: false,
+							accountCapabilities: capabilities,
+						},
+					},
+				},
+				'https://jmap.example.com/.well-known/jmap',
+			);
+			expect(() => mailAccountId(bare, 'X2'), String(capabilities)).toThrow(
+				expect.objectContaining({ code: 'unsupported' }),
+			);
+		}
 	});
 
 	it('falls back to any account with mail when there is no primary one', () => {

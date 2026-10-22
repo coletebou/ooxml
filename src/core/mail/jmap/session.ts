@@ -253,10 +253,12 @@ export function mailAccountId(session: JmapSession, preferred?: string): string 
 	throw new MailTransportError('unsupported', 'No account on the JMAP server offers mail.');
 }
 
-/** True when the server and the account offer `uri` (an account that lists none inherits all). */
+/**
+ * True when the server and the account offer `uri`. An account supports the methods of the
+ * capabilities it names and no others (RFC 8620 2): one that names none supports none.
+ */
 export function accountHas(session: JmapSession, accountId: string, uri: string): boolean {
 	if (!Object.hasOwn(session.capabilities, uri)) return false;
 	const account = session.accounts[accountId];
-	if (!account) return false;
-	return Object.keys(account.capabilities).length === 0 || Object.hasOwn(account.capabilities, uri);
+	return !!account && Object.hasOwn(account.capabilities, uri);
 }
