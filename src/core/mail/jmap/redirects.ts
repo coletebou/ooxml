@@ -123,7 +123,8 @@ function landedAt(response: Response, hop: Hop): Landed {
  * hides them, `mode.hidden` is set and fetch follows them from then on, so later requests do not
  * ask twice. The request that found that out reached the server, which may have acted on it (a 303
  * after a POST points at its result): it is sent again only when it is a GET or `repeatable`, and
- * fails otherwise.
+ * fails otherwise. Such a request that fetch followed to an error fails the same way, as fetch does
+ * not say whether it went on as a GET.
  */
 export async function followRedirects(
 	first: Hop,
@@ -141,13 +142,9 @@ export async function followRedirects(
 		const response = await send(hop, 'manual');
 		if (response.type === 'opaqueredirect') {
 			mode.hidden = true;
-			if (hop.method === 'GET' || hop.method === 'HEAD' || hop.repeatable) break;
+			if (!changes(hop)) break;
 			// Neither refused nor known to be done: what a request that got no answer is.
-			throw new JmapError(
-				'network',
-				`${what} was redirected after the server got it, and is not sent again.`,
-				{ level: 'http' },
-			);
+			throw redirectedAfter(what);
 		}
 		const to = redirectTarget(response, hop.url);
 		if (to === null) return { response, landed: landedAt(response, hop) };
@@ -163,14 +160,27 @@ export async function followRedirects(
 		// Turned into a GET, a request that changes the server reached it, which may have acted on it
 		// (a 303 after a POST points at its result): what the new address answers, a 404 say, is no
 		// answer to it. Neither refused nor known to be done, as with a redirect fetch hides.
-		if (next.method === 'GET' && hop.method !== 'GET' && hop.method !== 'HEAD' && !hop.repeatable)
-			throw new JmapError(
-				'network',
-				`${what} was redirected after the server got it, and is not sent again.`,
-				{ level: 'http' },
-			);
+		if (next.method === 'GET' && changes(hop)) throw redirectedAfter(what);
 		hop = next;
 	}
 	const response = await send(hop, 'follow');
+	// Followed by fetch, a redirect may have turned it into a GET too, which fetch does not say: an
+	// error from where it ended is no answer to it either.
+	if (response.redirected && !response.ok && changes(hop)) {
+		await discard(response);
+		throw redirectedAfter(what);
+	}
 	return { response, landed: landedAt(response, hop) };
 }
+
+/** A request that may change the server, and that is not sent twice. */
+const changes = (hop: Hop): boolean =>
+	hop.method !== 'GET' && hop.method !== 'HEAD' && !hop.repeatable;
+
+/** A request that changes the server, redirected after it got there: neither refused nor done. */
+const redirectedAfter = (what: string): JmapError =>
+	new JmapError(
+		'network',
+		`${what} was redirected after the server got it, and is not sent again.`,
+		{ level: 'http' },
+	);

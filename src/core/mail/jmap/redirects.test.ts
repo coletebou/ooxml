@@ -194,6 +194,31 @@ describe('a redirect a browser hides, found out once the request reached the ser
 		expect(store.submissions).toHaveLength(1);
 	});
 
+	it('takes no error after a redirect to one for a send, once the browser follows them', async () => {
+		// The session's own redirect showed that this browser hides redirects, so the send goes out
+		// for the browser to follow: its 303 to an address that answers 404 says nothing of the send.
+		const { server, transport, store, modes } = browser();
+		server.sessionUrl = `${ORIGIN}/jmap/session`;
+		server.redirect(`${ORIGIN}/.well-known/jmap`, server.sessionUrl, 307);
+		server.route(
+			(request) => request.url === API && (request.body?.includes('EmailSubmission/set') ?? false),
+			async (request) => {
+				await server.process(request).text();
+				return new Response(null, { status: 303, headers: { Location: `${ORIGIN}/api/gone` } });
+			},
+		);
+		server.route(
+			(request) => request.url === `${ORIGIN}/api/gone`,
+			() => new Response('Not here', { status: 404 }),
+		);
+		const outcome = await transport.send(message).catch((error: unknown) => error);
+		expect(modes.filter((mode) => mode.startsWith('manual '))).toEqual([]);
+		expect(outcome).toMatchObject({ code: 'uncertain', cause: { code: 'network' } });
+		expect(store.submissions).toHaveLength(1);
+		await transport.send(message).catch(() => undefined);
+		expect(store.submissions).toHaveLength(1);
+	});
+
 	it('sends a request that changes the server once, failing as not known to be done', async () => {
 		const { server, transport, store, modes } = browser();
 		// The server sends the message, then answers with a 303 to its result, as HTTP lets it.
