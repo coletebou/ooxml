@@ -153,7 +153,10 @@ const NOWHERE: KeyValueStorage = {
 	},
 };
 
-/** A storage key per account, so two servers never share an address book. */
+/**
+ * A storage key per server address, so two servers never share an address book. Two accounts on
+ * one server, and every transport of a host's own, share one (see the limitations).
+ */
 const accountKey = (config: MailConnection): string =>
 	config.kind === 'jmap' ? `jmap:${config.url.trim().toLowerCase()}` : config.kind;
 
