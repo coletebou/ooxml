@@ -43,6 +43,8 @@ export const enShell = {
 	'notice.eventsImported.other': '{count} events imported.',
 	'notice.contactsSkipped.one': '{count} card in the file could not be read.',
 	'notice.contactsSkipped.other': '{count} cards in the file could not be read.',
+	'notice.contactsPartial.one': 'Part of {count} card in the file could not be read.',
+	'notice.contactsPartial.other': 'Part of {count} cards in the file could not be read.',
 	'notice.unreadable.one': '{names} could not be read.',
 	'notice.unreadable.other': '{count} files could not be read: {names}.',
 	'notice.eventsUnsupported.one':

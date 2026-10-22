@@ -40,9 +40,14 @@ export function noticeText(notice: MailNotice, i18n: MailI18n): string {
 			return i18n.tn('notice.unreadable', notice.names.length, {
 				names: new Intl.ListFormat(i18n.intl, { type: 'conjunction' }).format(notice.names),
 			});
-		return notice.action === 'contactsImported'
-			? i18n.tn('notice.contactsSkipped', notice.skipped)
-			: i18n.tn('notice.eventsUnsupported', notice.unsupported.length);
+		if (notice.action === 'contactsImported')
+			return [
+				notice.skipped ? i18n.tn('notice.contactsSkipped', notice.skipped) : '',
+				notice.partial ? i18n.tn('notice.contactsPartial', notice.partial) : '',
+			]
+				.filter(Boolean)
+				.join(' ');
+		return i18n.tn('notice.eventsUnsupported', notice.unsupported.length);
 	}
 	switch (notice.action) {
 		case 'sent':

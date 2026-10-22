@@ -12,6 +12,19 @@ describe('the words of a warning', () => {
 			expect(noticeText(two, mailI18n(locale)), locale).toMatch(/2.*a\.pdf.*b\.ics/su);
 		}
 	});
+
+	it('says how many cards of a vCard file it could not read, whole or in part, in every locale', () => {
+		const notice = (skipped: number, partial: number) =>
+			({ kind: 'warning', action: 'contactsImported', skipped, partial }) as const;
+		const en = mailI18n('en');
+		expect(noticeText(notice(2, 0), en)).toBe('2 cards in the file could not be read.');
+		expect(noticeText(notice(0, 1), en)).toBe('Part of 1 card in the file could not be read.');
+		expect(noticeText(notice(1, 3), en)).toBe(
+			'1 card in the file could not be read. Part of 3 cards in the file could not be read.',
+		);
+		for (const locale of MAIL_LOCALES)
+			expect(noticeText(notice(0, 3), mailI18n(locale)), locale).toContain('3');
+	});
 });
 
 describe('the words of an error notice', () => {

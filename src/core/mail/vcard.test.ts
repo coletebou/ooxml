@@ -241,6 +241,15 @@ describe('parseVCards', () => {
 		);
 		expect(contacts.map((c) => c.name)).toEqual(['Whole']);
 		expect(skipped).toBe(4);
+		// A line of a card it cannot read: the card is read without it, and counted as read in part.
+		const torn = parseVCards(
+			'BEGIN:VCARD\nFN:Torn\nTEL;TYPE=work\nEND:VCARD\nBEGIN:VCARD\nFN:Fine\nEND:VCARD',
+		);
+		expect(torn.contacts.map((c) => [c.name, c.phones])).toEqual([
+			['Torn', []],
+			['Fine', []],
+		]);
+		expect([torn.skipped, torn.partial]).toEqual([0, 1]);
 	});
 
 	it('reads the first card of a file that starts with a byte order mark', () => {
@@ -342,6 +351,7 @@ describe('serializeVCards', () => {
 				},
 			],
 			skipped: 0,
+			partial: 0,
 		});
 	});
 

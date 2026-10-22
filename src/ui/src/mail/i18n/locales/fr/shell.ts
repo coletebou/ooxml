@@ -45,6 +45,8 @@ export const frShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsImported.other': '{count} événements importés.',
 	'notice.contactsSkipped.one': "{count} fiche du fichier n'a pas pu être lue.",
 	'notice.contactsSkipped.other': "{count} fiches du fichier n'ont pas pu être lues.",
+	'notice.contactsPartial.one': "Une partie de {count} fiche du fichier n'a pas pu être lue.",
+	'notice.contactsPartial.other': "Une partie de {count} fiches du fichier n'a pas pu être lue.",
 	'notice.unreadable.one': "{names} n'a pas pu être lu.",
 	'notice.unreadable.other': "{count} fichiers n'ont pas pu être lus : {names}.",
 	'notice.eventsUnsupported.one':

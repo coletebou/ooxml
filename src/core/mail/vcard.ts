@@ -224,31 +224,43 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 /**
  * Every card in a `.vcf` file. Cards without a `UID` get an id derived from their text, and two
  * copies of one such card are one contact; lines outside a card and cards without `END:VCARD` are
- * counted in `skipped`, never silently lost.
+ * counted in `skipped`, and the cards read without a line they had that could not be read in
+ * `partial`: never silently lost.
  */
-export function parseVCards(text: string): { contacts: Contact[]; skipped: number } {
+export function parseVCards(text: string): {
+	contacts: Contact[];
+	skipped: number;
+	partial: number;
+} {
 	const contacts: Contact[] = [];
 	const copies = new Set<string>();
 	let skipped = 0;
+	let partial = 0;
 	let card: Property[] | null = null;
 	let cardText = '';
+	let torn = false;
 	for (const line of unfold(text)) {
 		const property = parseLine(line);
 		if (!property) {
-			skipped += card ? 0 : 1;
+			if (card) torn = true;
+			else skipped++;
 			continue;
 		}
 		if (property.name === 'BEGIN' && property.value.trim().toUpperCase() === 'VCARD') {
 			if (card) skipped++;
 			card = [];
 			cardText = '';
+			torn = false;
 		} else if (property.name === 'END' && property.value.trim().toUpperCase() === 'VCARD') {
 			if (!card) skipped++;
 			else {
 				const id = contentId(cardText);
 				const contact = toContact(card, id);
 				// A second copy of a card without a UID is the contact the first one gave.
-				if (contact.id !== id || !copies.has(id)) contacts.push(contact);
+				if (contact.id !== id || !copies.has(id)) {
+					contacts.push(contact);
+					if (torn) partial++;
+				}
 				copies.add(id);
 			}
 			card = null;
@@ -258,5 +270,5 @@ export function parseVCards(text: string): { contacts: Contact[]; skipped: numbe
 		} else skipped++;
 	}
 	if (card) skipped++;
-	return { contacts, skipped };
+	return { contacts, skipped, partial };
 }

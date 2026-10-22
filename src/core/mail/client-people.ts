@@ -135,11 +135,12 @@ export function createPeople(core: ClientCore, connect: () => Promise<void>): Pe
 		async importVCards(text) {
 			const contacts = await storeOrFail('contacts');
 			if (!contacts) return 0;
-			const { contacts: read, skipped } = parseVCards(text);
+			const { contacts: read, skipped, partial } = parseVCards(text);
 			let count = 0;
 			await change('contacts', () => saveAll(contacts, read, () => count++));
 			if (count) core.notice({ kind: 'done', action: 'contactsImported', count });
-			if (skipped) core.notice({ kind: 'warning', action: 'contactsImported', skipped });
+			if (skipped || partial)
+				core.notice({ kind: 'warning', action: 'contactsImported', skipped, partial });
 			return count;
 		},
 		exportVCards(ids) {

@@ -45,6 +45,8 @@ export const esShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsImported.other': '{count} eventos importados.',
 	'notice.contactsSkipped.one': 'No se pudo leer {count} tarjeta del archivo.',
 	'notice.contactsSkipped.other': 'No se pudieron leer {count} tarjetas del archivo.',
+	'notice.contactsPartial.one': 'No se pudo leer parte de {count} tarjeta del archivo.',
+	'notice.contactsPartial.other': 'No se pudo leer parte de {count} tarjetas del archivo.',
 	'notice.unreadable.one': 'No se pudo leer {names}.',
 	'notice.unreadable.other': 'No se pudieron leer {count} archivos: {names}.',
 	'notice.eventsUnsupported.one':

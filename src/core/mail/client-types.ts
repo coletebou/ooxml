@@ -130,8 +130,8 @@ export type MailNotice =
 			undo?: () => Promise<void>;
 	  }
 	| { kind: 'error'; action: MailAction; code: MailErrorCode }
-	/** Cards a vCard import could not read. */
-	| { kind: 'warning'; action: 'contactsImported'; skipped: number }
+	/** Cards a vCard import could not read (`skipped`), and cards it read without a line (`partial`). */
+	| { kind: 'warning'; action: 'contactsImported'; skipped: number; partial: number }
 	/** What an iCalendar import could not represent, one line per problem. */
 	| { kind: 'warning'; action: 'eventsImported'; unsupported: readonly string[] }
 	/**
