@@ -172,10 +172,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 				const original = emailId ? await source(emailId) : null;
 				const me = identities().map((identity) => ({ name: identity.name, email: identity.email }));
 				const sent = !!original && filedIn(original, 'sent');
-				// For an answer, the identity the original was sent to, else for a message the person
-				// sent the one it was sent from; else the first.
+				// For a message the person sent, the identity it was sent from; else for an answer, the
+				// one the original was sent to; else the first.
 				const addresses = original
-					? [...original.to, ...original.cc, ...original.bcc, ...(sent ? original.from : [])]
+					? [...(sent ? original.from : []), ...original.to, ...original.cc, ...original.bcc]
 					: [];
 				const { draftHtml } = core.options;
 				const draft = composeDraft(mode, original, {

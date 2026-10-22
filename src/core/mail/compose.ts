@@ -84,11 +84,12 @@ function quoteText(text: string): string {
 }
 
 /**
- * The address a draft is written from: the identity's own, or for a `*@domain` identity the
- * address of that domain the original was written to (To, then Cc, then Bcc), else, for a message
- * the person `sent`, the one it was written from (RFC 8621 section 6 lets such an identity send
- * from any address of the domain). A wildcard is never an address to write from, so without such
- * an original there is none.
+ * The address a draft is written from: the identity's own, or for a `*@domain` identity, for a
+ * message the person `sent`, the one it was written from, else the address of that domain the
+ * original was written to (To, then Cc, then Bcc) (RFC 8621 section 6 lets such an identity send
+ * from any address of the domain). The person's own message is never answered as a colleague it
+ * was written to. A wildcard is never an address to write from, so without such an original there
+ * is none.
  */
 function sender(
 	identity: Identity | null,
@@ -98,7 +99,7 @@ function sender(
 	if (!identity) return undefined;
 	if (!isWildcardAddress(identity.email)) return { name: identity.name, email: identity.email };
 	const own = source && sent ? source.from : [];
-	const addresses = source ? [...source.to, ...source.cc, ...source.bcc, ...own] : [];
+	const addresses = source ? [...own, ...source.to, ...source.cc, ...source.bcc] : [];
 	const covered = addresses.find((address) => identityCovers(identity, address.email));
 	return covered ? { name: identity.name, email: covered.email } : undefined;
 }
@@ -133,7 +134,11 @@ export function replyRecipients(
 ): { to: MailAddress[]; cc: MailAddress[] } {
 	const fromMe = source.from.some((address) => me.some((own) => sameAddress(own, address)));
 	const primary = fromMe ? source.to : source.replyTo.length ? source.replyTo : source.from;
-	if (mode === 'reply') return { to: unique(primary, fromMe ? me : []), cc: [] };
+	// Without the person's own addresses, unless they are all it went to (a note to themselves).
+	if (mode === 'reply') {
+		const to = unique(primary, fromMe ? me : []);
+		return { to: to.length ? to : unique(primary, []), cc: [] };
+	}
 	const to = unique([...primary, ...(fromMe ? [] : source.to)], me);
 	const cc = unique(source.cc, [...me, ...to]);
 	return { to: to.length ? to : unique(primary, []), cc };

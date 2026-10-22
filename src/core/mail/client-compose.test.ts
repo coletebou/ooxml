@@ -980,6 +980,25 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('answers a message the person sent to their other address as the one it was sent from', async () => {
+		const sales = { name: 'Sales', email: 'sales@example.net' };
+		const desk = { name: 'Desk', email: 'desk@example.net' };
+		const { client } = plain({
+			identities: [
+				identityOf('sales', 'Sales', sales.email),
+				identityOf('desk', 'Desk', desk.email),
+			],
+			messages: [
+				{ id: 'note', mailboxId: 'sent', from: sales, to: [desk], subject: 'Note', receivedAt: T0 },
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.compose('reply', 'note')).toBe(true);
+		// Sent from one identity to another: followed up as sent, never from the one it went to.
+		expect(client.getState().compose?.draft).toMatchObject({ identityId: 'sales', to: [desk] });
+		client.destroy();
+	});
+
 	it('answers a received message from an address a wildcard identity covers as received', async () => {
 		const alice = { name: 'Alice', email: 'alice@example.net' };
 		const list = { name: 'Team', email: 'list@other.org' };

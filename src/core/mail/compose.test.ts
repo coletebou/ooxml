@@ -196,12 +196,17 @@ describe('composeDraft', () => {
 			['ben@example.org'],
 			['cy@example.com'],
 		]);
-		// Written to an address of the domain too, it is answered from that one, as one received.
-		const toDesk = message({ from: mine.from, to: [{ name: 'Desk', email: 'desk@example.net' }] });
+		// Written to an address of the domain too, a colleague's, it is still the person's own: from
+		// the address it was sent from, to that colleague, never written as them back to itself.
+		const desk = { name: 'Desk', email: 'desk@example.net' };
+		const toDesk = message({
+			from: mine.from,
+			to: [desk, { name: 'Ben', email: 'ben@example.org' }],
+		});
 		const answer = composeDraft('reply', toDesk, { ...options, sent: true });
 		expect([answer.from?.email, answer.to.map((a) => a.email)]).toEqual([
-			'desk@example.net',
-			['Sales@Example.net'],
+			'Sales@Example.net',
+			['desk@example.net', 'ben@example.org'],
 		]);
 	});
 	it('never answers a received message as the address of the domain it came from', () => {
