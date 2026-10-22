@@ -77,6 +77,11 @@ export interface Contact {
 	extra: readonly string[];
 	/** The family or given names a card gave as several values, as read (see `ContactLists`). */
 	lists?: ContactLists<'familyName' | 'givenName'>;
+	/**
+	 * The ALTID a card gave the N or the BDAY this contact holds: the alternatives of it kept in
+	 * `extra` (another script's spelling) are written back as its alternatives (RFC 6350 5.4).
+	 */
+	altIds?: Readonly<Partial<Record<'N' | 'BDAY', string>>>;
 }
 
 export const MAX_CONTACT_FIELD_CHARS = 2000;
@@ -222,6 +227,10 @@ export function sanitizeContact(raw: unknown): Contact | null {
 		return Object.keys(out).length ? out : null;
 	};
 	const nameLists = lists(value.lists, ['familyName', 'givenName'] as const);
+	const altIds: Partial<Record<'N' | 'BDAY', string>> = {};
+	const rawAlt = (value.altIds ?? {}) as Record<string, unknown>;
+	for (const key of ['N', 'BDAY'] as const)
+		if (typeof rawAlt[key] === 'string' && rawAlt[key]) altIds[key] = clip(rawAlt[key]);
 	return {
 		id,
 		name: clip(value.name),
@@ -259,6 +268,7 @@ export function sanitizeContact(raw: unknown): Contact | null {
 			? value.extra.map(keptLine).filter(Boolean).slice(0, 200)
 			: [],
 		...(nameLists ? { lists: nameLists } : {}),
+		...(Object.keys(altIds).length ? { altIds } : {}),
 	};
 }
 

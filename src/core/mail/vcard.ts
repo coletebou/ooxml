@@ -99,6 +99,11 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 	 * as read, after the field on export, so it reads back the same. One that says nothing is not
 	 * kept.
 	 */
+	/** Remember the ALTID of the property that fills a field (`Contact.altIds`). */
+	const keepAltId = (name: 'N' | 'BDAY', property: Property): void => {
+		const altId = property.params.ALTID?.[0];
+		if (altId) contact.altIds = { ...contact.altIds, [name]: altId };
+	};
 	const fills = (property: Property, says: boolean): boolean => {
 		if (filled.has(property.name)) {
 			extra.push(property.raw);
@@ -135,6 +140,7 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				});
 				const lists = listsOf({ familyName, givenName });
 				if (lists) contact.lists = lists;
+				keepAltId('N', property);
 				break;
 			}
 			case 'EMAIL':
@@ -191,8 +197,10 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				break;
 			case 'BDAY': {
 				const date = normaliseDate(text.trim());
-				if (date) contact.birthday = date;
-				else extra.push(property.raw);
+				if (date) {
+					contact.birthday = date;
+					keepAltId('BDAY', property);
+				} else extra.push(property.raw);
 				break;
 			}
 			default:

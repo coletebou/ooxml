@@ -5,6 +5,7 @@
 // reads each card back as it was. New code.
 import { ADDRESS_PARTS, type Contact } from './contacts';
 import { vcard4Line } from './vcard-legacy';
+import { parseLine } from './vcard-lines';
 
 const encoder = new TextEncoder();
 
@@ -57,6 +58,29 @@ function foldLine(line: string): string {
 	return out.join('\r\n ');
 }
 
+/** The ALTID parameter a regenerated N or BDAY keeps (`Contact.altIds`), when it is a plain name. */
+const altParam = (contact: Contact, name: 'N' | 'BDAY'): string => {
+	const altId = contact.altIds?.[name];
+	return altId && /^[\w.-]{1,64}$/.test(altId) ? `;ALTID=${altId}` : '';
+};
+
+/**
+ * The kept lines a contact writes after its fields. A BDAY kept as read (a text or a birth time)
+ * goes once the contact has a birthday of its own, unless it is an alternative of that one (the
+ * same ALTID): vCard holds one birthday, so a date typed in takes its place.
+ */
+function keptLines(contact: Contact): string[] {
+	if (!contact.birthday) return contact.extra.map(vcard4Line);
+	const altId = contact.altIds?.BDAY;
+	return contact.extra
+		.filter((line) => {
+			const property = parseLine(line);
+			if (property?.name !== 'BDAY') return true;
+			return !!altId && property.params.ALTID?.[0] === altId;
+		})
+		.map(vcard4Line);
+}
+
 /** A TYPE parameter for a type that is a name (`work`, `x-desk`); anything else is left out. */
 const typeParam = (type: string): string => (/^[a-z\d-]+$/i.test(type) ? `;TYPE=${type}` : '');
 
@@ -98,7 +122,7 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 			escapeList(contact.prefix),
 			escapeList(contact.suffix),
 		];
-		if (name.some(Boolean)) lines.push(`N:${name.join(';')}`);
+		if (name.some(Boolean)) lines.push(`N${altParam(contact, 'N')}:${name.join(';')}`);
 		for (const email of contact.emails)
 			lines.push(`EMAIL${typeParam(email.type)}:${escapeText(email.address)}`);
 		for (const phone of contact.phones)
@@ -112,11 +136,14 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 				`ORG:${[contact.organization, ...contact.organizationUnits].map(escapeText).join(';')}`,
 			);
 		if (contact.title) lines.push(`TITLE:${escapeText(contact.title)}`);
-		if (contact.birthday) lines.push(birthdayLine(contact.birthday));
+		if (contact.birthday)
+			lines.push(
+				birthdayLine(contact.birthday).replace(/^BDAY/, `BDAY${altParam(contact, 'BDAY')}`),
+			);
 		if (contact.url) lines.push(`URL:${escapeUri(contact.url)}`);
 		if (contact.note) lines.push(`NOTE:${escapeText(contact.note)}`);
 		if (contact.updatedAt) lines.push(`REV:${formatRev(contact.updatedAt)}`);
-		lines.push(...contact.extra.map(vcard4Line), 'END:VCARD');
+		lines.push(...keptLines(contact), 'END:VCARD');
 	}
 	return lines.map(foldLine).join('\r\n') + (lines.length ? '\r\n' : '');
 }

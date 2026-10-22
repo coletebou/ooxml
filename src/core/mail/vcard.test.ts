@@ -491,7 +491,8 @@ describe('serializeVCards', () => {
 		expect(card!.emails.map((e) => e.type)).toEqual(['x-school']);
 		const text = serializeVCards([card!]);
 		for (const line of [
-			'N:Yamada;Taro;;;',
+			// Still alternatives of one name: both keep their ALTID.
+			'N;ALTID=1:Yamada;Taro;;;',
 			'N;ALTID=1;LANGUAGE=ja:山田;太郎;;;',
 			'TEL;TYPE=video:+1 555 0100',
 			'EMAIL;TYPE=x-school:taro@school.example',
@@ -502,6 +503,27 @@ describe('serializeVCards', () => {
 		// A date written as a date-time at midnight is the date.
 		const midnight = read.replace('BDAY:19961022T140000', 'BDAY:1996-10-22T00:00:00Z');
 		expect(parseVCards(midnight).contacts[0]!.birthday).toBe('1996-10-22');
+	});
+
+	it('writes one birthday: a date typed in takes the place of the one a card gave as text', () => {
+		const card = (bday: string) =>
+			parseVCards(`BEGIN:VCARD\r\nVERSION:4.0\r\nUID:b\r\nFN:A\r\n${bday}\r\nEND:VCARD\r\n`)
+				.contacts[0]!;
+		const bdays = (text: string) => text.split('\r\n').filter((line) => /^BDAY[;:]/.test(line));
+		for (const kept of ['BDAY;VALUE=text:circa 1800', 'BDAY:19961022T140000']) {
+			const read = card(kept);
+			expect(bdays(serializeVCards([read]))).toEqual([kept]);
+			expect(bdays(serializeVCards([{ ...read, birthday: '1800-01-01' }]))).toEqual([
+				'BDAY:18000101',
+			]);
+		}
+		// Alternatives of one birthday stay together, and stored contacts keep what ties them.
+		const both = card('BDAY;ALTID=1:19850412\r\nBDAY;ALTID=1;VALUE=text;LANGUAGE=en:April 12');
+		const stored = sanitizeContact(JSON.parse(JSON.stringify(both)))!;
+		expect(bdays(serializeVCards([stored]))).toEqual([
+			'BDAY;ALTID=1:19850412',
+			'BDAY;ALTID=1;VALUE=text;LANGUAGE=en:April 12',
+		]);
 	});
 
 	it('reads the zone offset of a revision time', () => {
