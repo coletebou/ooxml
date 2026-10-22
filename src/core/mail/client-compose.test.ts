@@ -320,6 +320,19 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('does not open a sent message kept in Drafts and Sent at once as a draft', async () => {
+		// A server that files by labels can keep a sent message in both, no longer a draft.
+		const { client, notices, memory } = setup();
+		await until(client, (s) => s.status === 'ready');
+		await memory.update({ old: { keywords: { [DRAFT]: false }, mailboxIds: { sent: true } } });
+		expect(await memory.message('old')).toMatchObject({ mailboxIds: ['drafts', 'sent'] });
+		expect(await client.editDraft('old')).toBe(false);
+		expect(notices).toEqual([{ kind: 'error', action: 'open', code: 'invalid' }]);
+		expect(client.getState().compose).toBeNull();
+		expect(await memory.message('old')).toMatchObject({ mailboxIds: ['drafts', 'sent'] });
+		client.destroy();
+	});
+
 	it('marks as saved only what the server saved, not edits made while it was saving', async () => {
 		const { client, control, drafts } = setup();
 		await until(client, (s) => s.status === 'ready');
