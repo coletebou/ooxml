@@ -18,6 +18,7 @@ import {
 	type JmapAuth,
 	type KeyValueStorage,
 	type MailClient,
+	type MailSession,
 	type MailTransport,
 	type QuoteFormat,
 } from 'ooxml-core/mail';
@@ -52,7 +53,16 @@ export type {
 export type MailConnection =
 	| { kind: 'demo'; seed?: DemoSeedOptions }
 	| { kind: 'jmap'; url: string; auth: JmapAuth }
-	| { kind: 'transport'; transport: MailTransport };
+	| {
+			kind: 'transport';
+			transport: MailTransport;
+			/**
+			 * Whose address book and calendar the transport reaches, as you name its account (a user
+			 * id, say): they are kept in the browser per account. Without it, under who the session
+			 * says signed in (`MailSession.user`), and where it says nobody, in memory only.
+			 */
+			storageKey?: string;
+	  };
 
 const sameSeed = (a: DemoSeedOptions = {}, b: DemoSeedOptions = {}): boolean =>
 	a.now === b.now &&
@@ -82,7 +92,7 @@ export function sameMailConnection(
 		case 'jmap':
 			return b.kind === 'jmap' && a.url === b.url && sameAuth(a.auth, b.auth);
 		case 'transport':
-			return b.kind === 'transport' && a.transport === b.transport;
+			return b.kind === 'transport' && a.transport === b.transport && a.storageKey === b.storageKey;
 	}
 }
 
@@ -154,11 +164,23 @@ const NOWHERE: KeyValueStorage = {
 };
 
 /**
- * A storage key per server address, so two servers never share an address book. Two accounts on
- * one server, and every transport of a host's own, share one (see the limitations).
+ * The storage key of an account's address book and calendar, so two people never share one: a
+ * server's address, who signed in (the session's user, else the user name of the credentials) and
+ * the account; for a transport of the host's own, the key it names (`storageKey`), else who
+ * signed in and the account. Null when nothing says whose they are: they are kept in memory only.
  */
-const accountKey = (config: MailConnection): string =>
-	config.kind === 'jmap' ? `jmap:${config.url.trim().toLowerCase()}` : config.kind;
+export function accountKey(
+	config: MailConnection,
+	session: Pick<MailSession, 'account' | 'user'>,
+): string | null {
+	if (config.kind === 'demo') return null;
+	if (config.kind === 'transport') {
+		if (config.storageKey) return `transport:${config.storageKey}`;
+		return session.user ? `transport:${session.user}:${session.account.id}` : null;
+	}
+	const user = session.user || (config.auth.type === 'basic' ? config.auth.username : '');
+	return user ? `jmap:${config.url.trim().toLowerCase()}:${user}:${session.account.id}` : null;
+}
 
 /**
  * A mail client for `options.config` (the demo mailbox by default). Destroying it closes the
@@ -166,11 +188,6 @@ const accountKey = (config: MailConnection): string =>
  */
 export function createMail(options: MailOptions = {}): MailClient {
 	const config = options.config ?? { kind: 'demo' };
-	// Only a real account keeps its address book and calendar; the demo never touches storage.
-	const persisted = (name: string) => {
-		const storage = options.storage === undefined ? (browserStorage() ?? NOWHERE) : options.storage;
-		return { ...(storage ? { storage } : {}), key: `ooxml-mail:${name}:${accountKey(config)}` };
-	};
 	let transport: MailTransport;
 	let contacts = options.contacts;
 	let calendar = options.calendar;
@@ -184,15 +201,26 @@ export function createMail(options: MailOptions = {}): MailClient {
 			config.kind === 'jmap'
 				? createJmapTransport({ url: config.url, auth: config.auth })
 				: config.transport;
-		contacts ??= createMemoryContactStore(persisted('contacts'));
-		calendar ??= createMemoryCalendarStore(persisted('calendar'));
 	}
+	// Only a real account keeps its address book and calendar, opened once the session says whose
+	// it is; the demo never touches storage.
+	const openStores = (session: MailSession) => {
+		const key = accountKey(config, session);
+		const storage = options.storage === undefined ? (browserStorage() ?? NOWHERE) : options.storage;
+		const persisted = (name: string) =>
+			key && storage ? { storage, key: `ooxml-mail:${name}:${key}` } : {};
+		return {
+			contacts: createMemoryContactStore(persisted('contacts')),
+			calendar: createMemoryCalendarStore(persisted('calendar')),
+		};
+	};
 	return createMailClient({
 		transport,
 		// The host's transport may outlive this client: a remounted app or a hook makes another on it.
 		closeTransport: config.kind !== 'transport',
-		contacts,
-		calendar,
+		...(contacts ? { contacts } : {}),
+		...(calendar ? { calendar } : {}),
+		...(config.kind === 'demo' ? {} : { openStores }),
 		// Answers, forwards and reopened drafts start with every part of an HTML body, cleaned.
 		draftHtml,
 		...(options.quoteFormat ? { quoteFormat: options.quoteFormat } : {}),

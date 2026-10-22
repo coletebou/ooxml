@@ -187,6 +187,7 @@ export function createListLoader(core: ClientCore): ListLoader {
 			// Destroyed meanwhile: subscribing now would outlive the client.
 			if (core.destroyed) return;
 			core.setMailboxes(mailboxes);
+			core.session = session;
 			const inbox = mailboxes.find((mailbox) => mailbox.role === 'inbox') ?? mailboxes[0];
 			core.patch({
 				account: session.account,

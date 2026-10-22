@@ -15,7 +15,12 @@ import type {
 import { conversationView, mailboxViews, openConversationView } from './client-views';
 import type { EmailSummary, Mailbox, MailboxRole, MailMessage } from './model';
 import { threadConversations, type Conversation } from './threading';
-import { isMailTransportError, type MailErrorCode, type MailTransport } from './transport';
+import {
+	isMailTransportError,
+	type MailErrorCode,
+	type MailSession,
+	type MailTransport,
+} from './transport';
 
 const BODY_CACHE = 200;
 
@@ -60,6 +65,8 @@ export class ClientCore {
 	conversations: Conversation[] = [];
 	conversationsById = new Map<string, Conversation>();
 	openId: string | null = null;
+	/** The session of the last connection that worked, null before one has. */
+	session: MailSession | null = null;
 	destroyed = false;
 	private current: MailState;
 	private readonly listeners = new Set<() => void>();

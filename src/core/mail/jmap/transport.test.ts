@@ -15,6 +15,8 @@ describe('connect', () => {
 		const session = await transport.connect();
 		expect(transport.kind).toBe('jmap');
 		expect(session.account).toEqual({ id: 'A13824', name: 'john@example.com' });
+		// Who signed in, which the address book kept in the browser goes by.
+		expect(session.user).toBe('john@example.com');
 		expect(session.canSend).toBe(true);
 		expect(session.identities.map((identity) => identity.id)).toEqual([
 			'XD-3301-222-11_22AAz',

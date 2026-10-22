@@ -6,7 +6,7 @@
 import { eventsToIcs } from '../calendar/ics-write';
 import { parseIcs } from '../calendar/ics-read';
 import { errorCode, type ClientCore } from './client-core';
-import type { MailClient } from './client-types';
+import type { MailClient, MailClientOptions } from './client-types';
 import { sortContacts } from './contacts';
 import type { RecordStore } from './record-store';
 import { parseVCards, serializeVCards } from './vcard';
@@ -57,8 +57,15 @@ async function saveAll<T extends { id: string }>(
 }
 
 export function createPeople(core: ClientCore): PeopleLoader {
-	const contacts = core.options.contacts;
-	const calendar = core.options.calendar;
+	type Stores = Pick<MailClientOptions, 'contacts' | 'calendar'>;
+	let opened: Stores | null = null;
+	/** The host's own stores, else, once a connection worked, those opened for its account. */
+	const stores = (): { contacts: Stores['contacts']; calendar: Stores['calendar'] } => {
+		const { contacts, calendar, openStores } = core.options;
+		if (!opened && core.session && openStores && !(contacts && calendar))
+			opened = openStores(core.session);
+		return { contacts: contacts ?? opened?.contacts, calendar: calendar ?? opened?.calendar };
+	};
 
 	const guard = async (action: Book, run: () => Promise<void>): Promise<void> => {
 		try {
@@ -69,10 +76,12 @@ export function createPeople(core: ClientCore): PeopleLoader {
 	};
 	const loadContacts = (): Promise<void> =>
 		guard('contacts', async () => {
+			const { contacts } = stores();
 			if (contacts) core.patch({ contacts: sortContacts(await contacts.list()) });
 		});
 	const loadEvents = (): Promise<void> =>
 		guard('calendar', async () => {
+			const { calendar } = stores();
 			if (!calendar) return;
 			const events = await calendar.list();
 			core.patch({ events: [...events].sort((a, b) => a.start - b.start) });
@@ -90,9 +99,10 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			await Promise.all([loadContacts(), loadEvents()]);
 		},
 		saveContact: (contact) =>
-			change('contacts', () => contacts?.save({ ...contact, updatedAt: core.now() })),
-		deleteContact: (id) => change('contacts', () => contacts?.remove(id)),
+			change('contacts', () => stores().contacts?.save({ ...contact, updatedAt: core.now() })),
+		deleteContact: (id) => change('contacts', () => stores().contacts?.remove(id)),
 		async importVCards(text) {
+			const { contacts } = stores();
 			if (!contacts) return 0;
 			const { contacts: read, skipped } = parseVCards(text);
 			let count = 0;
@@ -107,9 +117,10 @@ export function createPeople(core: ClientCore): PeopleLoader {
 				core.state.contacts.filter((contact) => !wanted || wanted.has(contact.id)),
 			);
 		},
-		saveEvent: (event) => change('calendar', () => calendar?.save(event)),
-		deleteEvent: (id) => change('calendar', () => calendar?.remove(id)),
+		saveEvent: (event) => change('calendar', () => stores().calendar?.save(event)),
+		deleteEvent: (id) => change('calendar', () => stores().calendar?.remove(id)),
 		async importIcs(text, zone) {
+			const { calendar } = stores();
 			if (!calendar) return 0;
 			let count = 0;
 			let unsupported: string[] = [];

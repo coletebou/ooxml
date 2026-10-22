@@ -137,7 +137,10 @@ when read back. Each change is made to what the storage holds at that moment, an
 it again, so two stores on one storage (two tabs) keep each other's changes; a write the storage
 refuses keeps the change in memory, over what the storage gives, and fails as `storage`.
 After each change, saved or not, the client lists what the store holds, and an import goes on past
-a refused write and reports it once. `calendar-store.ts` stores the shared `CalendarEvent`.
+a refused write and reports it once. `calendar-store.ts` stores the shared `CalendarEvent`. A
+client given `openStores` opens its address book and calendar once it first connects, from the
+session (the account, and who signed in as `MailSession.user`), so stores can be kept per
+account; `ooxml-ui/mail`'s `createMail` does so.
 
 ## Demo data
 

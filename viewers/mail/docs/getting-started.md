@@ -39,7 +39,11 @@ To use your own server, pass a JMAP connection (see [Connect a JMAP server](./jm
 
 A `MailTransport` of your own goes in as the connection `{ kind: 'transport', transport }`. It
 stays yours: the app never closes it, so close it yourself once you are done with it (see
-[Architecture](./architecture#transports)).
+[Architecture](./architecture#transports)). The address book and the calendar are kept in the
+browser per account: give the connection a `storageKey` naming whose account the transport
+reaches (`{ kind: 'transport', transport, storageKey: userId }`), or have its session say who
+signed in (`MailSession.user`); with neither, they last until the page is closed. A JMAP
+connection goes by its session's user name.
 
 ## Build your own UI
 

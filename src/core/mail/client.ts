@@ -26,11 +26,14 @@ export function createMailClient(options: MailClientOptions): MailClient {
 		onNotice: (listener) => core.notices.on('notice', listener),
 		async refresh() {
 			// Until a connection works there is no account, identity or change feed to reload with:
-			// connect again instead (joining an attempt under way).
-			const mail = list.connected()
-				? Promise.all([list.loadMailboxes(), list.loadList({ refetch: true })])
-				: list.connect();
-			await Promise.all([mail, loadPeople()]);
+			// connect again instead (joining an attempt under way), and only then load the address
+			// book and the calendar, whose stores may be opened for the account (`openStores`).
+			if (!list.connected()) {
+				await list.connect();
+				await loadPeople();
+				return;
+			}
+			await Promise.all([list.loadMailboxes(), list.loadList({ refetch: true }), loadPeople()]);
 		},
 		async selectMailbox(id) {
 			if (!core.mailboxes.some((mailbox) => mailbox.id === id)) return;

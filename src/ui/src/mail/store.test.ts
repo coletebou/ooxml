@@ -13,6 +13,7 @@ import {
 import { editorHtml } from './compose-editor';
 import { DraftPictures } from './compose-pictures';
 import {
+	accountKey,
 	createMail,
 	followQuoteFormat,
 	sameMailConnection,
@@ -121,6 +122,13 @@ describe('sameMailConnection', () => {
 			),
 		).toBe(false);
 		expect(sameMailConnection({ kind: 'transport', transport }, { kind: 'demo' })).toBe(false);
+		// The same transport for another account's address book is another connection.
+		expect(
+			sameMailConnection(
+				{ kind: 'transport', transport, storageKey: 'kim' },
+				{ kind: 'transport', transport, storageKey: 'lee' },
+			),
+		).toBe(false);
 	});
 });
 
@@ -146,6 +154,28 @@ describe('sameMailOptions', () => {
 			null,
 		])
 			expect(sameMailOptions(options, other)).toBe(false);
+	});
+});
+
+describe('accountKey', () => {
+	const account = { id: 'A1', name: 'Kim' };
+	it('keys a server account by who signed in, else by the user name of the credentials', () => {
+		const bearer = jmap({ type: 'bearer', token: 't' });
+		expect(accountKey(bearer, { account, user: 'kim@example.com' })).toBe(
+			'jmap:https://mail.example.com:kim@example.com:A1',
+		);
+		const basic = jmap({ type: 'basic', username: 'kim', password: 'p' });
+		expect(accountKey(basic, { account })).toBe('jmap:https://mail.example.com:kim:A1');
+		// A token alone says nothing of whose the account is: nothing is stored then.
+		expect(accountKey(bearer, { account })).toBeNull();
+	});
+
+	it("keys a transport of the host's own by the key it names, else by who signed in", () => {
+		const own: MailConnection = { kind: 'transport', transport: createMemoryTransport() };
+		expect(accountKey({ ...own, storageKey: 'kim' }, { account })).toBe('transport:kim');
+		expect(accountKey(own, { account, user: 'lee' })).toBe('transport:lee:A1');
+		expect(accountKey(own, { account })).toBeNull();
+		expect(accountKey({ kind: 'demo' }, { account, user: 'lee' })).toBeNull();
 	});
 });
 
@@ -250,9 +280,14 @@ describe('createMail on the browser storage', () => {
 
 	const names = (mail: ReturnType<typeof createMail>): string[] =>
 		mail.getState().contacts.map((contact) => contact.name);
-	const open = (storage?: null) => {
+	// A transport of the host's own, which names the account its address book belongs to.
+	const open = (storage?: null, storageKey: string | null = 'host-account') => {
 		const mail = createMail({
-			config: { kind: 'transport', transport: createMemoryTransport() },
+			config: {
+				kind: 'transport',
+				transport: createMemoryTransport(),
+				...(storageKey === null ? {} : { storageKey }),
+			},
 			...(storage === null ? { storage } : {}),
 		});
 		const notices: MailNotice[] = [];
@@ -262,7 +297,7 @@ describe('createMail on the browser storage', () => {
 
 	it('reads a full storage, and says that a change it refuses is not stored', async () => {
 		const ada = { ...emptyContact('ada', 0), name: 'Ada' };
-		localStorage.setItem('ooxml-mail:contacts:transport', JSON.stringify([ada]));
+		localStorage.setItem('ooxml-mail:contacts:transport:host-account', JSON.stringify([ada]));
 		vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
 			throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
 		});
@@ -290,6 +325,33 @@ describe('createMail on the browser storage', () => {
 		} finally {
 			mail.destroy();
 		}
+	});
+
+	it('keeps each account apart, and in memory only when nothing says whose they are', async () => {
+		const first = open(undefined, 'kim').mail;
+		try {
+			await vi.waitFor(() => expect(first.getState().status).toBe('ready'));
+			await first.saveContact({ ...emptyContact('ada', 0), name: 'Ada' });
+		} finally {
+			first.destroy();
+		}
+		expect(Object.keys(localStorage)).toEqual(['ooxml-mail:contacts:transport:kim']);
+		// Another account on the same kind of transport sees none of them.
+		for (const key of ['lee', null]) {
+			const { mail, notices } = open(undefined, key);
+			try {
+				await vi.waitFor(() => expect(mail.getState().status).toBe('ready'));
+				expect(names(mail)).toEqual([]);
+				await mail.saveContact({ ...emptyContact('grace', 0), name: 'Grace' });
+				expect(notices.filter((notice) => notice.kind === 'error')).toEqual([]);
+			} finally {
+				mail.destroy();
+			}
+		}
+		expect(Object.keys(localStorage).sort()).toEqual([
+			'ooxml-mail:contacts:transport:kim',
+			'ooxml-mail:contacts:transport:lee',
+		]);
 	});
 
 	it('says nothing for a host that keeps them in memory only', async () => {

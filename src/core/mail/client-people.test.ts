@@ -233,3 +233,58 @@ describe('a change the storage does not take', () => {
 		client.destroy();
 	});
 });
+
+describe('stores opened for the account', () => {
+	const kim = { ...emptyContact('kim', 0), name: 'Kim' };
+
+	it('opens the address book and calendar once connected, for the session that signed in', async () => {
+		const transport = createMemoryTransport();
+		const opened: unknown[] = [];
+		const client = createMailClient({
+			transport,
+			openStores: (session) => {
+				opened.push(session.account);
+				return {
+					contacts: createMemoryContactStore({ seed: [kim] }),
+					calendar: createMemoryCalendarStore({ seed: [STAND_UP] }),
+				};
+			},
+		});
+		await until(client, (s) => s.status === 'ready' && s.contacts.length === 1);
+		expect(opened).toEqual([client.getState().account]);
+		expect(client.getState().events).toEqual([STAND_UP]);
+		await client.saveContact({ ...emptyContact('lee', 0), name: 'Lee' });
+		await client.refresh();
+		expect(client.getState().contacts.map((c) => c.name)).toEqual(['Kim', 'Lee']);
+		expect(opened).toHaveLength(1);
+		client.destroy();
+	});
+
+	it("uses the host's own stores first, and opens none before a connection works", async () => {
+		const own = createMemoryContactStore({ seed: [kim] });
+		const base = createMemoryTransport();
+		let down = true;
+		const transport = {
+			...base,
+			connect: () =>
+				down ? Promise.reject(new MailTransportError('network', 'Offline.')) : base.connect(),
+		};
+		const opened: unknown[] = [];
+		const client = createMailClient({
+			transport,
+			contacts: own,
+			openStores: (session) => {
+				opened.push(session.account.id);
+				return { calendar: createMemoryCalendarStore({ seed: [STAND_UP] }) };
+			},
+		});
+		await until(client, (s) => s.status === 'error');
+		expect([opened, client.getState().events]).toEqual([[], []]);
+		down = false;
+		await client.refresh();
+		expect(opened).toHaveLength(1);
+		expect(client.getState().contacts.map((c) => c.name)).toEqual(['Kim']);
+		expect(client.getState().events).toEqual([STAND_UP]);
+		client.destroy();
+	});
+});

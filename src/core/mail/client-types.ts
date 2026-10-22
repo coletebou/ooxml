@@ -15,7 +15,7 @@ import type {
 	Mailbox,
 	MailMessage,
 } from './model';
-import type { MailErrorCode, MailTransport } from './transport';
+import type { MailErrorCode, MailSession, MailTransport } from './transport';
 
 export type MailStatus = 'connecting' | 'ready' | 'error' | 'closed';
 
@@ -179,6 +179,12 @@ export interface MailClientOptions {
 	closeTransport?: boolean;
 	contacts?: ContactStore;
 	calendar?: CalendarStore;
+	/**
+	 * The address book and the calendar of the account, opened once, when the client first
+	 * connects (the session says which account it is and who signed in), for stores kept per
+	 * account. `contacts` and `calendar`, when given, are used instead.
+	 */
+	openStores?: (session: MailSession) => { contacts?: ContactStore; calendar?: CalendarStore };
 	/** The words around quoted replies and forwards; English when omitted. */
 	quoteFormat?: QuoteFormat;
 	/**

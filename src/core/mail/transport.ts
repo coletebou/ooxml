@@ -14,6 +14,11 @@ import type {
 
 export interface MailSession {
 	account: MailAccount;
+	/**
+	 * Who signed in, when the server says (a JMAP session's `username`): one account may be shared
+	 * by several people, so what is a person's own, an address book kept in the browser, goes by it.
+	 */
+	user?: string;
 	identities: readonly Identity[];
 	/** False when the server offers no submission (the account is read-only for sending). */
 	canSend: boolean;

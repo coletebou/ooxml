@@ -6,8 +6,10 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   responses, not a running server.
 - **Contacts and the calendar are local** to the browser (the demo keeps them in memory; with a
   server they are kept in local storage). JMAP for contacts and calendars is not used yet. They are
-  kept per server address, not per account: two accounts on one server in the same browser profile
-  share them (as do all custom transports). When local storage is full, a change or an import is
+  kept per account (the server's address, who signed in and the account), so they open once the
+  account has connected; a connection that does not say who signed in (a token whose session names
+  no user, a transport of your own given no `storageKey`) keeps them only until the page is closed.
+  When local storage is full, a change or an import is
   kept only until the page is closed, and a notice says so; once there is room again, the next
   change stores them all. When the browser does not let the page use local storage at all (it is
   turned off, or the page is in a frame that may not use it), contacts and the calendar are kept

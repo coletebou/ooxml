@@ -138,6 +138,7 @@ export function createJmapTransport(options: JmapTransportOptions): MailTranspor
 			const list = await remember(loadIdentities(signal));
 			return {
 				account: { id: accountId, name: session.accounts[accountId]?.name ?? accountId },
+				...(session.username ? { user: session.username } : {}),
 				identities: list,
 				canSend: list.length > 0,
 			};
