@@ -213,6 +213,41 @@ describe('saveDraft', () => {
 describe('send', () => {
 	const reply: Draft = { ...draft, id: 'old-draft', replyToEmailId: 'original' };
 
+	it('keeps each change it asks for within the objects the server takes in one set', async () => {
+		const { server, transport, store } = mail();
+		const core = (server.session.capabilities as Record<string, Record<string, unknown>>)[
+			'urn:ietf:params:jmap:core'
+		]!;
+		core.maxObjectsInSet = 1;
+		expect(await transport.send(reply)).toMatchObject({ id: expect.any(String) });
+		const sizes = server.argsOf('Email/set').map((args) =>
+			['create', 'update', 'destroy'].reduce((n, key) => {
+				const value = args[key] as unknown;
+				return (
+					n +
+					(Array.isArray(value)
+						? value.length
+						: value && typeof value === 'object'
+							? Object.keys(value).length
+							: 0)
+				);
+			}, 0),
+		);
+		expect(sizes.every((n) => n <= 1)).toBe(true);
+		// A set whose changes come by reference holds what its echo hands on.
+		const echoed = server
+			.argsOf('Core/echo')
+			.map(
+				(args) =>
+					(Array.isArray(args.destroy) ? args.destroy.length : 0) +
+					(args.update && typeof args.update === 'object' ? Object.keys(args.update).length : 0),
+			);
+		expect(echoed.every((n) => n <= 1)).toBe(true);
+		// Cleaned up all the same: the draft gone, the original answered.
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(store.emails.get('original')?.keywords).toMatchObject({ $answered: true });
+	});
+
 	it('creates, submits, files in Sent, drops the draft and marks the original in one request', async () => {
 		const { server, transport, store } = mail();
 		expect(await transport.send(reply)).toEqual({ id: 'E1' });

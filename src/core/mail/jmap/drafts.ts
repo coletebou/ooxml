@@ -94,17 +94,33 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				return false;
 			}));
 
+	/** Destroys and updates, as many in one set as the server takes (`maxObjectsInSet`). */
 	const tidy = async (destroy: readonly string[], update: Readonly<Record<string, Patch>>) => {
-		if (!destroy.length && !Object.keys(update).length) return;
-		const { result, calls } = await client.request((builder, accountId) =>
-			builder.call('Email/set', {
-				accountId,
-				destroy: destroy.length ? destroy : undefined,
-				update: Object.keys(update).length ? update : undefined,
-			}),
+		const changes: (readonly [string, Patch | null])[] = [
+			...destroy.map((id) => [id, null] as const),
+			...Object.entries(update),
+		];
+		if (!changes.length) return;
+		await client.batch(
+			changes,
+			(limits) => limits.maxObjectsInSet,
+			(builder, accountId, chunk) => {
+				const gone = chunk.flatMap(([id, patch]) => (patch ? [] : [id]));
+				const changed = chunk.flatMap(([id, patch]) => (patch ? [[id, patch] as const] : []));
+				return builder.call('Email/set', {
+					accountId,
+					destroy: gone.length ? gone : undefined,
+					update: changed.length ? Object.fromEntries(changed) : undefined,
+				});
+			},
+			(result, call) => {
+				result.get(call);
+			},
 		);
-		result.get(calls);
 	};
+
+	/** The objects one set may hold (`maxObjectsInSet`, RFC 8620 2): changes past it go in batches. */
+	const maxObjects = async (): Promise<number> => (await client.session()).limits.maxObjectsInSet;
 
 	/**
 	 * Which of `ids` are still drafts, as `editDraft` opens them: marked `$draft`, or filed in Drafts
@@ -250,7 +266,8 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			}
 			const limit = await maxCalls();
 			// Created, submitted and cleaned up in one request of four calls when it is taken.
-			const gated = cleanUp && limit >= 4 && (await canGate());
+			const fits = destroy.length + Object.keys(marks).length <= (await maxObjects());
+			const gated = cleanUp && fits && limit >= 4 && (await canGate());
 			const submit = (builder: JmapRequestBuilder, accountId: string, emailId: string) =>
 				builder.call('EmailSubmission/set', {
 					accountId,
