@@ -135,6 +135,20 @@ export class MailCompose extends MailElement {
 		return this.renderRoot.querySelectorAll<MailRecipients>('mail-recipients');
 	}
 
+	protected override willUpdate(changed: PropertyValues<this>): void {
+		super.willUpdate(changed);
+		// Sending, the fields take nothing (`inert`): the focus goes to the window first, so the
+		// browser does not drop it out of the app, where the shortcuts no longer reach.
+		const was = changed.get('compose') as ComposeState | null | undefined;
+		if (this.compose?.status === 'sending' && was?.status !== 'sending') {
+			const section = this.renderRoot.querySelector<HTMLElement>('section');
+			const fields = this.renderRoot.querySelector('.fields');
+			// The element of this window that holds the focus, an address field's host included.
+			const focused = (this.renderRoot as ShadowRoot).activeElement;
+			if (section && focused && fields?.contains(focused)) section.focus();
+		}
+	}
+
 	protected override updated(changed: PropertyValues<this>): void {
 		const compose = this.compose;
 		const editor = this.editor;
@@ -259,7 +273,8 @@ export class MailCompose extends MailElement {
 		if (files?.length) {
 			event.preventDefault();
 			this.dragging = false;
-			void this.files.read(files);
+			// Being sent, the message takes no more files (the browser still does not open them).
+			if (this.compose?.status !== 'sending') void this.files.read(files);
 		} else if (this.editor && dropClean(event, this.editor, this.moving, this.pictures))
 			this.inserted();
 	}
@@ -278,10 +293,12 @@ export class MailCompose extends MailElement {
 		if (!compose) return nothing;
 		const draft = compose.draft;
 		const title = this.t(TITLES[compose.mode]);
+		const sending = compose.status === 'sending';
 		return html`<section
 			class=${`compose${this.dragging ? ' dragging' : ''}`}
 			role="dialog"
 			aria-label=${title}
+			tabindex="-1"
 			@dragover=${(e: DragEvent) => {
 				if (!e.dataTransfer?.types.includes('Files')) return;
 				e.preventDefault();
@@ -301,36 +318,38 @@ export class MailCompose extends MailElement {
 					>${icon('close')}</button
 				>
 			</header>
-			${fromPicker(this.identities, draft, this.i18n, (change) => this.change(change))}
-			<div class="row">
-				${this.field(this.t('compose.to'), 'to', draft.to)}
-				<span class="cc-toggles">
-					${this.showCc ? nothing : html`<button type="button" @click=${() => (this.showCc = true)}>${this.t('compose.cc')}</button>`}
-					${this.showBcc ? nothing : html`<button type="button" @click=${() => (this.showBcc = true)}>${this.t('compose.bcc')}</button>`}
-				</span>
+			<div class="fields" ?inert=${sending}>
+				${fromPicker(this.identities, draft, this.i18n, (change) => this.change(change))}
+				<div class="row">
+					${this.field(this.t('compose.to'), 'to', draft.to)}
+					<span class="cc-toggles">
+						${this.showCc ? nothing : html`<button type="button" @click=${() => (this.showCc = true)}>${this.t('compose.cc')}</button>`}
+						${this.showBcc ? nothing : html`<button type="button" @click=${() => (this.showBcc = true)}>${this.t('compose.bcc')}</button>`}
+					</span>
+				</div>
+				${this.showCc ? this.field(this.t('compose.cc'), 'cc', draft.cc) : nothing}
+				${this.showBcc ? this.field(this.t('compose.bcc'), 'bcc', draft.bcc) : nothing}
+				<input
+					class="subject"
+					.value=${draft.subject}
+					placeholder=${this.t('compose.subject')}
+					aria-label=${this.t('compose.subject')}
+					@input=${(e: Event) => this.change({ subject: (e.currentTarget as HTMLInputElement).value })}
+				/>
+				${formatBar(this.i18n, (command, value) => this.format(command, value))}
+				<div
+					class="editor"
+					contenteditable="true"
+					role="textbox"
+					aria-multiline="true"
+					aria-label=${this.t('compose.body')}
+					@input=${() => this.edited()}
+					@paste=${(e: ClipboardEvent) => pasteClean(e, this.ownerDocument, this.pictures) && this.inserted()}
+					@dragstart=${() => (this.moving = true)}
+					@dragend=${() => (this.moving = false)}
+				></div>
+				${fileList(listedFiles(draft.attachments, this.pictures.shown), this.i18n, (blobId) => this.detach(blobId))}
 			</div>
-			${this.showCc ? this.field(this.t('compose.cc'), 'cc', draft.cc) : nothing}
-			${this.showBcc ? this.field(this.t('compose.bcc'), 'bcc', draft.bcc) : nothing}
-			<input
-				class="subject"
-				.value=${draft.subject}
-				placeholder=${this.t('compose.subject')}
-				aria-label=${this.t('compose.subject')}
-				@input=${(e: Event) => this.change({ subject: (e.currentTarget as HTMLInputElement).value })}
-			/>
-			${formatBar(this.i18n, (command, value) => this.format(command, value))}
-			<div
-				class="editor"
-				contenteditable="true"
-				role="textbox"
-				aria-multiline="true"
-				aria-label=${this.t('compose.body')}
-				@input=${() => this.edited()}
-				@paste=${(e: ClipboardEvent) => pasteClean(e, this.ownerDocument, this.pictures) && this.inserted()}
-				@dragstart=${() => (this.moving = true)}
-				@dragend=${() => (this.moving = false)}
-			></div>
-			${fileList(listedFiles(draft.attachments, this.pictures.shown), this.i18n, (blobId) => this.detach(blobId))}
 			${composeFooter(compose, this.readingFiles, this.i18n, this.footer)}
 		</section>`;
 	}

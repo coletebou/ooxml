@@ -282,6 +282,38 @@ describe('<mail-compose>', () => {
 		expect(seen[2]).toEqual(['mail-files-unreadable', { names: ['c.pdf'] }]);
 	});
 
+	it('takes no edits while its message is being sent, and keeps the focus in the window', async () => {
+		const editing = composeState({ to: [{ name: '', email: 'ada@example.com' }], text: 'Hi' });
+		const el = await mount(editing);
+		const seen = record(el, 'mail-draft-change', 'mail-draft-attach');
+		const root = el.shadowRoot!;
+		const editor = root.querySelector<HTMLElement>('.editor')!;
+		expect(root.activeElement).toBe(editor);
+		el.compose = { ...editing, status: 'sending' };
+		await settle(el);
+		const section = root.querySelector<HTMLElement>('section')!;
+		// Typed after Send, words would be lost when the window closes: nothing takes them.
+		expect(root.querySelector('.fields')!.hasAttribute('inert')).toBe(true);
+		expect(root.activeElement).toBe(section);
+		expect(root.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')!.disabled).toBe(
+			true,
+		);
+		dropFiles(el, {
+			name: 'a.txt',
+			type: 'text/plain',
+			arrayBuffer: async () => new ArrayBuffer(1),
+		});
+		await settle(el);
+		expect([el.readingFiles, seen]).toEqual([false, []]);
+		// Should the send fail, the window is the person's again.
+		el.compose = { ...editing, status: 'error', error: 'network' };
+		await settle(el);
+		expect(root.querySelector('.fields')!.hasAttribute('inert')).toBe(false);
+		expect(root.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')!.disabled).toBe(
+			false,
+		);
+	});
+
 	it('never hands the files read for one draft to the next one', async () => {
 		const el = await mount(composeState());
 		const seen = record(el, 'mail-draft-attach');

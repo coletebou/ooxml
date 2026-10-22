@@ -33,6 +33,7 @@ export function composeFooter(
 		<button
 			type="button"
 			class="icon-button"
+			?disabled=${compose.status === 'sending'}
 			aria-label=${i18n.t('compose.attach')}
 			title=${i18n.t('compose.attach')}
 			@click=${(e: Event) =>
