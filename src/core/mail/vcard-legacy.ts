@@ -73,13 +73,27 @@ function basicStamp(value: string): string | null {
 const uriValue = (param: string): string =>
 	/^\s*VALUE\s*=\s*URL\s*$/i.test(param) ? 'VALUE=uri' : param;
 
+/** A 2.1 encoding written alone, as 2.1 lets a parameter be (`;QUOTED-PRINTABLE`, `;8BIT`). */
+const BARE_ENCODING = /^\s*(?:QUOTED-PRINTABLE|BASE64|8BIT|7BIT)\s*$/i;
+
+/**
+ * A line's parameters as 4.0 writes them, which are only `name=value` (RFC 6350 5.6): a type 2.1
+ * writes alone (`;WORK`) as `TYPE=work`, an encoding written alone left out, and a link's value
+ * type as `uri`.
+ */
+const params4 = (params: readonly string[]): string[] =>
+	params.flatMap((param) => {
+		if (param.includes('=')) return [uriValue(param)];
+		return BARE_ENCODING.test(param) ? [] : [`TYPE=${param.trim().toLowerCase()}`];
+	});
+
 /**
  * A kept line as vCard 4.0 writes it: an inline binary value as a `data:` URI, with the line's
  * group and its other parameters; a GEO of two decimals as `geo:<latitude>,<longitude>`, so too;
  * a quoted-printable one as the text it encodes, a line break in it as `\n` (RFC 6350 3.4),
  * without the encoding and the charset (4.0 is UTF-8 alone, 3.1); a link's 2.1 value type, URL,
  * as `uri`; a birthday or anniversary in the extended date and time format in the basic one;
- * any other line as it is.
+ * a type 2.1 writes alone as `TYPE=` (`params4`); any other line as it is.
  */
 export function vcard4Line(line: string): string {
 	const property = parseLine(line);
@@ -88,7 +102,9 @@ export function vcard4Line(line: string): string {
 	const geo = property.name === 'GEO' ? DECIMAL_GEO.exec(decodeValue(property)) : null;
 	if (geo) {
 		// The value is a URI now, which is what 4.0 takes it as: a VALUE that says float goes.
-		const kept = parts.params.filter((param) => !/^\s*(?:ENCODING|CHARSET|VALUE)\s*=/i.test(param));
+		const kept = params4(
+			parts.params.filter((param) => !/^\s*(?:ENCODING|CHARSET|VALUE)\s*=/i.test(param)),
+		);
 		return `${[parts.name, ...kept].join(';')}:geo:${geo[1]},${geo[2]}`;
 	}
 	const dated =
@@ -97,8 +113,8 @@ export function vcard4Line(line: string): string {
 	const stamp = dated ? basicStamp(decodeValue(property)) : null;
 	if (stamp) {
 		// 4.0 reads it as date-and-or-time, its default: a 3.0 VALUE=date-time goes.
-		const kept = parts.params.filter(
-			(param) => !/^\s*(?:(?:ENCODING|CHARSET|VALUE)\s*=|QUOTED-PRINTABLE\s*$)/i.test(param),
+		const kept = params4(
+			parts.params.filter((param) => !/^\s*(?:ENCODING|CHARSET|VALUE)\s*=/i.test(param)),
 		);
 		return `${[parts.name, ...kept].join(';')}:${stamp}`;
 	}
@@ -112,15 +128,13 @@ export function vcard4Line(line: string): string {
 		BINARY.has(property.name) &&
 		(encoding === 'B' || encoding === 'BASE64' || types.some(base64) || (quoted && !link));
 	if (!inline) {
-		const params = parts.params.map(uriValue);
+		const params = params4(parts.params);
 		if (!quoted)
-			return params.some((param, i) => param !== parts.params[i])
+			return params.join(';') !== parts.params.join(';')
 				? `${[parts.name, ...params].join(';')}:${parts.value}`
 				: line;
-		// The bare 2.1 parameter (`;QUOTED-PRINTABLE`) goes with ENCODING; the text is 2.1's.
-		const kept = params.filter(
-			(param) => !/^\s*(?:(?:ENCODING|CHARSET)\s*=|QUOTED-PRINTABLE\s*$)/i.test(param),
-		);
+		// The encoding and the charset go (`params4` drops a bare `;QUOTED-PRINTABLE`); the text is 2.1's.
+		const kept = params.filter((param) => !/^\s*(?:ENCODING|CHARSET)\s*=/i.test(param));
 		const text = escape21(decodeValue(property)).replace(/\r\n|\r|\n/g, '\\n');
 		return `${[parts.name, ...kept].join(';')}:${text}`;
 	}

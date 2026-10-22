@@ -55,6 +55,28 @@ describe('vcard4Line', () => {
 		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
 	});
 
+	it('writes a bare 2.1 parameter as the TYPE it stands for, and drops a bare encoding', () => {
+		// 2.1 writes a type alone (`;WORK`); 4.0 takes only `name=value` (RFC 6350 5.6).
+		expect(vcard4Line('URL;WORK:http://b.example')).toBe('URL;TYPE=work:http://b.example');
+		expect(vcard4Line('NOTE;HOME;ENCODING=QUOTED-PRINTABLE:a=3Db')).toBe('NOTE;TYPE=home:a=b');
+		expect(vcard4Line('item1.X-ABLABEL;WORK;8BIT:Office')).toBe('item1.X-ABLABEL;TYPE=work:Office');
+		expect(vcard4Line('GEO;HOME:37.38;-122.08')).toBe('GEO;TYPE=home:geo:37.38,-122.08');
+		// A card's second website, kept as read: valid 4.0, and the same again once read back.
+		const card = [
+			'BEGIN:VCARD',
+			'VERSION:2.1',
+			'UID:u',
+			'FN:Ada',
+			'URL;HOME:http://a.example',
+			'URL;WORK:http://b.example',
+			'END:VCARD',
+			'',
+		].join('\r\n');
+		const text = serializeVCards(parseVCards(card).contacts);
+		expect(text).toContain('\r\nURL;TYPE=work:http://b.example\r\n');
+		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
+	});
+
 	it('keeps every line that is neither an inline binary value nor quoted-printable as it is', () => {
 		for (const line of [
 			'PHOTO:data:image/jpeg;base64,/9j/4AAQ',
