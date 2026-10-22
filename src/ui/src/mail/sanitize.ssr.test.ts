@@ -7,6 +7,7 @@ describe('the message sanitiser without a DOM', () => {
 		expect(typeof document).toBe('undefined');
 		const empty = {
 			sheets: [],
+			sheetMedia: [],
 			body: '',
 			htmlAttributes: {},
 			bodyAttributes: {},

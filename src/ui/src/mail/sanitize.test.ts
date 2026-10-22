@@ -196,6 +196,29 @@ describe('sanitizeEmailHtml', () => {
 		expect(sheets).toEqual(['p{color:red}', 'q{color:green}/* note*/', 'b{color:blue}']);
 	});
 
+	it('keeps the media a style element applies to, and the frame applies its sheet only there', () => {
+		const { content, doc } = frame(
+			'<style media="print">.screen{display:none}</style><style>p{color:red}</style>' +
+				'<style media=\'screen and (min-width:"1px")\'>b{}</style><p class="screen">x</p>',
+		);
+		expect(content.sheets).toEqual(['.screen{display:none}', 'p{color:red}', 'b{}']);
+		expect(content.sheetMedia).toEqual(['print', '', 'screen and (min-width:"1px")']);
+		const styles = [...doc.querySelectorAll('style')].slice(1);
+		expect(styles.map((style) => style.getAttribute('media'))).toEqual([
+			'print',
+			null,
+			'screen and (min-width:"1px")',
+		]);
+		expect(styles.map((style) => style.textContent)).toEqual(content.sheets);
+		// A part sent on its own keeps the media of its own style elements.
+		const parts = ['<style media="print">i{}</style><p>a</p>', '<style>u{}</style><p>b</p>'];
+		const joined = sanitizeMessageHtml(
+			{ html: parts.join(''), htmlParts: parts },
+			{ allowRemote: false },
+		);
+		expect(joined.sheetMedia).toEqual(['print', '']);
+	});
+
 	it('names the cid parts the body and its styles load, found or not', () => {
 		const { cids } = clean(
 			'<style>p{background:url(cid:Back@X)}</style><p>x</p><img src="cid:logo@x"><a href="cid:file@x">file</a>',

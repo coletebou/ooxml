@@ -36,6 +36,12 @@ export interface SanitizedHtml {
 	 * end, such as a selector without its block, cannot reach into the next.
 	 */
 	sheets: readonly string[];
+	/**
+	 * The media each sheet's `<style>` applies to, by its `media` attribute (`print`), `''` where it
+	 * names none: the frame writes it on the sheet's own `<style>`, so a sheet for print never
+	 * styles the message on screen.
+	 */
+	sheetMedia: readonly string[];
 	/** The body markup, cleaned. */
 	body: string;
 	/**
@@ -248,13 +254,21 @@ export function sanitizeEmailHtml(html: string, options: SanitizeOptions): Sanit
 function cleanText(html: string, options: SanitizeOptions, taken: Taken): SanitizedHtml {
 	const purify = instance();
 	if (!purify || typeof DOMParser === 'undefined')
-		return { sheets: [], body: '', htmlAttributes: {}, bodyAttributes: {}, blocked: 0, cids: [] };
+		return {
+			sheets: [],
+			sheetMedia: [],
+			body: '',
+			htmlAttributes: {},
+			bodyAttributes: {},
+			blocked: 0,
+			cids: [],
+		};
 	pass = { options, blocked: 0, cids: new Set() };
 	try {
 		const parsed = new DOMParser().parseFromString(html, 'text/html');
-		const sheets = [...parsed.querySelectorAll('style')].map((style) =>
-			cleanCss(style.textContent ?? ''),
-		);
+		const styles = [...parsed.querySelectorAll('style')];
+		const sheets = styles.map((style) => cleanCss(style.textContent ?? ''));
+		const sheetMedia = styles.map((style) => style.getAttribute('media') ?? '');
 		const htmlAttributes = cleanAttributes(
 			purify,
 			parsed.documentElement,
@@ -264,7 +278,15 @@ function cleanText(html: string, options: SanitizeOptions, taken: Taken): Saniti
 		const bodyAttributes = cleanAttributes(purify, parsed.body, BODY_ATTRIBUTES, taken.body);
 		const body = purify.sanitize(parsed.body.innerHTML, PURIFY);
 		const { blocked, cids } = pass;
-		return { sheets, body, htmlAttributes, bodyAttributes, blocked, cids: [...cids] };
+		return {
+			sheets,
+			sheetMedia,
+			body,
+			htmlAttributes,
+			bodyAttributes,
+			blocked,
+			cids: [...cids],
+		};
 	} finally {
 		pass = null;
 	}
@@ -290,6 +312,7 @@ export interface MessageHtml {
 export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptions): SanitizedHtml {
 	const parts = message.htmlParts?.length ? message.htmlParts : [message.html ?? ''];
 	const sheets: string[] = [];
+	const sheetMedia: string[] = [];
 	const htmlAttributes: Partial<Record<HtmlAttribute, string>> = {};
 	const bodyAttributes: Partial<Record<BodyAttribute, string>> = {};
 	const taken: Taken = { html: new Set(), body: new Set() };
@@ -300,11 +323,12 @@ export function sanitizeMessageHtml(message: MessageHtml, options: SanitizeOptio
 		const clean = cleanText(part, options, taken);
 		// One at a time: a message may hold more style elements than a call takes arguments.
 		for (const sheet of clean.sheets) sheets.push(sheet);
+		for (const media of clean.sheetMedia) sheetMedia.push(media);
 		body += clean.body;
 		Object.assign(htmlAttributes, clean.htmlAttributes);
 		Object.assign(bodyAttributes, clean.bodyAttributes);
 		blocked += clean.blocked;
 		for (const cid of clean.cids) cids.add(cid);
 	}
-	return { sheets, body, htmlAttributes, bodyAttributes, blocked, cids: [...cids] };
+	return { sheets, sheetMedia, body, htmlAttributes, bodyAttributes, blocked, cids: [...cids] };
 }
