@@ -109,6 +109,13 @@ export class NotebookInk extends NotebookElement {
 		}
 		const points = this.live;
 		this.live = null;
+		// The line runs on to where it was lifted, at the pressure it had (a pen reports none then).
+		if (points && event.type === 'pointerup') {
+			const [x, y] = this.#point(event);
+			const at = points.length - 3;
+			if (at >= 0 && (points[at] !== x || points[at + 1] !== y))
+				points.push(x, y, points[at + 2] ?? 0.5);
+		}
 		if (points && points.length >= 3 && (this.tool === 'pen' || this.tool === 'highlighter'))
 			this.fire('nb-stroke', {
 				tool: this.tool,

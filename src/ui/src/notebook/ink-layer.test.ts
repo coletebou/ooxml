@@ -80,4 +80,26 @@ describe('<notebook-ink> pen', () => {
 		expect(strokes).toHaveLength(1);
 		ink.remove();
 	});
+
+	it('ends the stroke where it is lifted, at the pressure it had', async () => {
+		const ink = await layer('pen');
+		const strokes: { points: number[] }[] = [];
+		ink.addEventListener('nb-stroke', (e) => strokes.push((e as CustomEvent).detail));
+		const svg = ink.shadowRoot!.querySelector('svg')!;
+		const pen = (type: string, x: number, y: number, pressure: number) =>
+			new PointerEvent(type, {
+				bubbles: true,
+				button: 0,
+				pointerId: 1,
+				pointerType: 'pen',
+				clientX: x,
+				clientY: y,
+				pressure,
+			});
+		svg.dispatchEvent(pen('pointerdown', 10, 10, 0.3));
+		svg.dispatchEvent(pen('pointermove', 20, 10, 0.3));
+		svg.dispatchEvent(pen('pointerup', 40, 10, 0));
+		expect(strokes[0]?.points).toEqual([10, 10, 0.3, 20, 10, 0.3, 40, 10, 0.3]);
+		ink.remove();
+	});
 });
