@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import JSZip from 'jszip';
 import { type Page, expect, test } from '@playwright/test';
 import { WORD_MIME, wordFile } from './support/word-file';
 
@@ -219,4 +220,36 @@ test('inserts a picture and a live Word document, then exports the page to .docx
 	expect(file.suggestedFilename()).toBe('Report.docx');
 	const bytes = readFileSync((await file.path())!);
 	expect(bytes.subarray(0, 2).toString()).toBe('PK');
+});
+
+test('exports a picture in its own shape after its frame was resized to another', async ({
+	page,
+}) => {
+	await open(page);
+	await ribbonTab(page, 'Insert');
+	const pictures = page.waitForEvent('filechooser');
+	await command(page, 'picture');
+	// An 8 by 8 picture, placed in a square frame.
+	await (await pictures).setFiles({ name: 'dot.png', mimeType: 'image/png', buffer: PNG });
+	const frame = page.locator('notebook-page .frame.image');
+	await expect(frame.locator('img')).toHaveCount(1);
+	await frame.click();
+	const handle = (await frame.locator('.resize').boundingBox())!;
+	await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(handle.x + handle.width / 2 + 120, handle.y + handle.height / 2, {
+		steps: 6,
+	});
+	await page.mouse.up();
+	const box = (await frame.boundingBox())!;
+	expect(box.width / box.height).toBeGreaterThan(3);
+	const download = page.waitForEvent('download');
+	await page.locator('notebook-nav .switch').click();
+	await page.getByRole('menuitem', { name: 'Export page as a Word document' }).click();
+	const zip = await JSZip.loadAsync(readFileSync((await (await download).path())!));
+	const xml = await zip.file('word/document.xml')!.async('string');
+	const extent = /<wp:extent cx="(\d+)" cy="(\d+)"/u.exec(xml);
+	expect(extent).not.toBeNull();
+	// Square in Word too, as the page draws it (contained in the wide frame).
+	expect(Number(extent![1])).toBe(Number(extent![2]));
 });

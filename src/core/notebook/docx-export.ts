@@ -12,6 +12,7 @@ import {
 	type PendingMediaPart,
 } from '../docx/model';
 import type { Paragraph } from '../docx/model-paragraph';
+import { containRect } from '../geometry/fit';
 import { signedTwips } from '../units/units';
 import type { TextRun } from '../docx/model-run';
 import { ensureListDefinition } from '../docx/numbering-editing';
@@ -57,8 +58,20 @@ export type RasterRequest =
 	| { kind: 'image'; bytes: Uint8Array; mime: string; width: number; height: number };
 
 export interface PageExportOptions {
-	/** Draw ink (and pictures Word cannot show, such as WebP) as PNG. Without it they are skipped. */
+	/**
+	 * Draw ink (and pictures Word cannot show, such as WebP) as PNG, a picture in its own shape
+	 * within its frame as the page shows it. Without it they are skipped.
+	 */
 	rasterize?: (request: RasterRequest) => Promise<ExportPicture | null>;
+	/**
+	 * The size a picture is drawn at by itself (its pixels), so one in a frame of another shape is
+	 * written in its own shape within the frame, as the page shows it. Without it (or when it gives
+	 * `null`) a picture is written at its frame's size.
+	 */
+	measure?: (picture: {
+		bytes: Uint8Array;
+		mime: string;
+	}) => Promise<{ width: number; height: number } | null>;
 	/** The line written for an embedded file. Default `Attached file: <name>`. */
 	fileLabel?: (file: { name: string; size: number }) => string;
 	/** Text width in CSS px; wider pictures are scaled down. Default 624 (Letter, 1 inch margins). */
@@ -247,7 +260,13 @@ export async function exportPageToDocx(
 				height: item.height,
 			};
 			let mime = item.mime;
-			if (!(mime in WORD_PICTURES)) {
+			if (mime in WORD_PICTURES) {
+				const natural = await options.measure?.({ bytes: item.bytes, mime }).catch(() => null);
+				if (natural) {
+					const at = containRect(natural, item);
+					picture = { bytes: item.bytes, width: at.width, height: at.height };
+				}
+			} else {
 				picture = options.rasterize
 					? await options.rasterize({
 							kind: 'image',

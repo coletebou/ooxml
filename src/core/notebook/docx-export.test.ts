@@ -293,6 +293,44 @@ describe('page export to .docx', () => {
 		expect(start('one')).toEqual([0, null]);
 	});
 
+	it('writes a picture in its own shape within a frame of another shape', async () => {
+		const picture = (name: string, mime: string, width: number, height: number) => ({
+			kind: 'image' as const,
+			x: 0,
+			y: width,
+			width,
+			height,
+			name,
+			mime,
+			alt: '',
+			bytes: png(1),
+		});
+		const { bytes } = await exportPageToDocx(
+			{
+				title: 'Shapes',
+				items: [
+					picture('wide.png', 'image/png', 100, 100),
+					picture('kept.png', 'image/png', 90, 30),
+				],
+			},
+			{
+				// Both pictures are 200 by 100 pixels; the first frame was resized to a square.
+				measure: async () => ({ width: 200, height: 100 }),
+			},
+		);
+		const sizes = paragraphs((await loadDocx(bytes)).model)
+			.map((p) => p.runs[0]?.image)
+			.filter((image) => !!image)
+			.map((image) => [image!.title, image!.widthPx, image!.heightPx]);
+		expect(sizes).toEqual(
+			expect.arrayContaining([
+				['wide.png', 100, 50],
+				['kept.png', 60, 30],
+			]),
+		);
+		expect(sizes).toHaveLength(2);
+	});
+
 	it('restarts each separate numbered list nested in one item', async () => {
 		const para = (t: string): RichNode => ({
 			type: 'paragraph',

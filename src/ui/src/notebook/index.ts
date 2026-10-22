@@ -23,7 +23,7 @@ export {
 	DEFAULT_NOTEBOOK_DATABASE,
 	type IndexedDbStorage,
 } from './storage';
-export { rasterize } from './raster';
+export { measurePicture, rasterize } from './raster';
 export {
 	NOTEBOOK_LOCALES,
 	NOTEBOOK_MESSAGES,

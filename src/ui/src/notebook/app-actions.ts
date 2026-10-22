@@ -20,7 +20,7 @@ import type { AppHost } from './app-host';
 import { addPage, addSection } from './app-nav';
 import { belowContent } from './page-files';
 import { formatCreated, notebookI18n } from './i18n/translator';
-import { downloadBytes, rasterize } from './raster';
+import { downloadBytes, measurePicture, rasterize } from './raster';
 import { strokeWidthOf } from './ribbon';
 import type { NotebookExportDetail, NotebookOpenFileDetail } from './notebook-app';
 
@@ -152,6 +152,7 @@ export async function exportPage(app: AppHost): Promise<void> {
 			untitled: app.tr('page.untitled'),
 			fileLabel: (f) => app.tr('export.file', { name: f.name }),
 			rasterize,
+			measure: measurePicture,
 		});
 		save(app, file, 'docx');
 		const skipped = file.report.skipped.length;
