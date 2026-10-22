@@ -101,6 +101,8 @@ export class NotebookInk extends NotebookElement {
 		if (event.pointerId !== this.#pointer) return;
 		this.#pointer = -1;
 		if (this.tool === 'eraser') {
+			// The way from the last move to where it was lifted (lost capture reports no position).
+			if (event.type === 'pointerup') this.#erase(event);
 			if (this.erased.size) this.fire('nb-erase', { ids: [...this.erased] });
 			this.erased = new Set();
 			return;
@@ -116,7 +118,9 @@ export class NotebookInk extends NotebookElement {
 			} satisfies StrokeDetail);
 	}
 
-	#cancel(): void {
+	/** Only the drawing pointer's cancel ends the gesture (a palm rejected beside a pen is another). */
+	#cancel(event: PointerEvent): void {
+		if (event.pointerId !== this.#pointer) return;
 		this.#pointer = -1;
 		this.live = null;
 		this.erased = new Set();
@@ -130,7 +134,7 @@ export class NotebookInk extends NotebookElement {
 			@pointerdown=${(e: PointerEvent) => this.#down(e)}
 			@pointermove=${(e: PointerEvent) => this.#move(e)}
 			@pointerup=${(e: PointerEvent) => this.#up(e)}
-			@pointercancel=${() => this.#cancel()}
+			@pointercancel=${(e: PointerEvent) => this.#cancel(e)}
 			@lostpointercapture=${(e: PointerEvent) => (e.pointerId === this.#pointer ? this.#up(e) : undefined)}
 		>
 			${this.strokes.map((s) =>
