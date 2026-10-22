@@ -7,6 +7,7 @@ import { messageFromDraft } from './memory-messages';
 import type { MemoryState } from './memory-state';
 import {
 	ANSWERED,
+	DRAFT,
 	FORWARDED,
 	isWildcardAddress,
 	type Draft,
@@ -29,9 +30,15 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 		const own = { name: identity.name, email: identity.email };
 		return [draft.from, own].find((address) => address && !isWildcardAddress(address.email));
 	};
-	/** Removes the saved draft that a save or a send replaces; returns its id for the change feed. */
+	/**
+	 * Removes the saved draft that a save or a send replaces; returns its id for the change feed.
+	 * Only a draft goes: another message stored under that id (a draft from before a reload names
+	 * one this transport may have given another message) stays, as a JMAP server's would.
+	 */
 	const dropDraft = (draft: Draft): string[] =>
-		draft.id && messages.delete(draft.id) ? [draft.id] : [];
+		draft.id && messages.get(draft.id)?.keywords[DRAFT] && messages.delete(draft.id)
+			? [draft.id]
+			: [];
 	/**
 	 * A new id for what `draft` becomes: never one stored, and never the draft's own, which may be
 	 * gone already (deleted, or from before a reload): `dropDraft` would take the new copy with it.

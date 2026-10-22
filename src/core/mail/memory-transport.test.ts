@@ -199,6 +199,20 @@ describe('createMemoryTransport', () => {
 		expect((await fresh.query({ mailboxId: 'sent' })).ids).toEqual([sent.id]);
 	});
 
+	it('replaces only a draft: another message under the old id of a draft stays', async () => {
+		// A draft from before a reload names `m1`, which this transport's Inbox message is called.
+		const transport = createMemoryTransport({
+			messages: [
+				{ id: 'm1', mailboxId: 'inbox', from: ada, to: [me], subject: 'Mine', receivedAt: 0 },
+			],
+		});
+		const draft = { to: [me], cc: [], bcc: [], subject: 'Kept', text: 'Body', attachments: [] };
+		await transport.saveDraft({ ...draft, id: 'm1' });
+		await transport.send({ ...draft, id: 'm1' });
+		expect(await transport.message('m1')).toMatchObject({ subject: 'Mine' });
+		expect((await transport.query({ mailboxId: 'inbox' })).ids).toContain('m1');
+	});
+
 	it('saves and sends a draft that has only HTML with the text of its HTML as its plain text', async () => {
 		const transport = createMemoryTransport();
 		const html = '<p>See you at <b>noon</b>.</p>';
