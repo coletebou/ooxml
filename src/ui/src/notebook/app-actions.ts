@@ -236,11 +236,23 @@ export function applyLink(app: AppHost, href: string | null, text = ''): void {
 	onText(app, setLink(href, text));
 }
 
+/** Inputs nobody types in (a to-do's checkbox): the app's shortcuts, undo first, still work there. */
+const NOT_TEXT = new Set([
+	'checkbox',
+	'radio',
+	'button',
+	'submit',
+	'reset',
+	'range',
+	'color',
+	'file',
+]);
+
 const inField = (event: KeyboardEvent): boolean =>
 	event.composedPath().some((n) => {
 		const el = n as HTMLElement;
 		return (
-			el.tagName === 'INPUT' ||
+			(el.tagName === 'INPUT' && !NOT_TEXT.has((el as HTMLInputElement).type)) ||
 			el.tagName === 'TEXTAREA' ||
 			el.isContentEditable === true ||
 			el.tagName === 'NOTEBOOK-TEXT'

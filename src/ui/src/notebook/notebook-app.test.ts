@@ -2,7 +2,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { loadDocx } from 'ooxml-core/docx';
 import { getIcon } from '../icons';
 import { TextSelection } from 'prosemirror-state';
-import { applyLink, exportNotebook, openLinkDialog, runCommand } from './app-actions';
+import { appKeys, applyLink, exportNotebook, openLinkDialog, runCommand } from './app-actions';
 import { notebookMenuAt } from './app-nav';
 import { type NotebookApp, type NotebookExportDetail, defineNotebookApp } from './notebook-app';
 import type { NotebookText } from './text-container';
@@ -351,6 +351,19 @@ describe('<notebook-app>', () => {
 		expect(done()).toEqual([false]);
 		press(0);
 		await until(() => done()[0] === true);
+	});
+
+	it('undoes with the keyboard while a to-do checkbox has the focus', async () => {
+		app = await mount();
+		const undo = vi.spyOn(app.client!, 'undo');
+		const box = document.createElement('input');
+		box.type = 'checkbox';
+		document.body.append(box);
+		box.addEventListener('keydown', (e) => appKeys(app, e));
+		box.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+		box.remove();
+		expect(undo).toHaveBeenCalled();
+		undo.mockRestore();
 	});
 
 	it('shows the navigation pane to rename the notebook when it was hidden', async () => {
