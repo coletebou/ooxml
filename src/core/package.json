@@ -1,6 +1,6 @@
 {
 	"name": "ooxml-core",
-	"version": "1.20.0",
+	"version": "1.23.0",
 	"description": "Shared OOXML logic for the Word, PowerPoint and Excel viewers: everything except the UI",
 	"keywords": [
 		"charts",
@@ -83,6 +83,11 @@
 			"types": "./dist/ribbon/index.d.ts",
 			"import": "./dist/ribbon/index.mjs",
 			"require": "./dist/ribbon/index.cjs"
+		},
+		"./embedding": {
+			"types": "./dist/embedding/index.d.ts",
+			"import": "./dist/embedding/index.mjs",
+			"require": "./dist/embedding/index.cjs"
 		},
 		"./diagram": {
 			"types": "./dist/diagram/index.d.ts",
@@ -233,6 +238,11 @@
 			"types": "./dist/docx/ui/index.d.ts",
 			"import": "./dist/docx/ui/index.mjs",
 			"require": "./dist/docx/ui/index.cjs"
+		},
+		"./visio/collab": {
+			"types": "./dist/visio/collab/index.d.ts",
+			"import": "./dist/visio/collab/index.mjs",
+			"require": "./dist/visio/collab/index.cjs"
 		},
 		"./visio/ui": {
 			"types": "./dist/visio/ui/index.d.ts",

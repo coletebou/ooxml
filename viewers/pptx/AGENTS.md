@@ -127,7 +127,7 @@ How they connect:
 | How a correctly parsed element is drawn, laid out, hit-tested, animated or exported; any UI decision 2+ bindings need | `src/ui/src/pptx/render/`                                                   |
 | Template/JSX wiring, framework reactivity, binding-only chrome                                                        | `packages/{react,vue,angular,svelte,vanilla}/src/` (all five)               |
 | UI strings                                                                                                            | `src/ui/src/pptx/i18n/` + `packages/locales/src/<locale>/`                  |
-| AI/MCP tool functions                                                                                                 | `packages/tools/src/`                                                       |
+| MCP tool definitions (names, schemas, the tool functions) and their registration                                      | `src/core/pptx/automation/` at the root (`catalogue/` for the MCP list)     |
 | Tool schemas and DOM-free document operations                                                                         | `src/core/pptx/automation/schemas/` and `src/core/pptx/editor/` at the root |
 | A demo app, or a browser test and its fixtures                                                                        | `demos/pptx/demo-*` / `e2e/pptx/` at the root                               |
 
@@ -259,7 +259,7 @@ binding, at about a fifth of the cost. Run another binding with `--project=<name
 ### `@local-only` e2e tests and the pre-push hook
 
 A few e2e specs do real-time video capture and reliably crash the hosted CI
-runner rather than just failing (see `e2e/export-raster-tiling.spec.ts`), so
+runner rather than just failing (see `e2e/pptx/export-raster-tiling.spec.ts`), so
 they carry the Playwright tag `@local-only` and are excluded from CI via
 `grepInvert` in `playwright.config.ts`. Run them with `bun run
 e2e:local-only` before pushing a change to export or video code. The

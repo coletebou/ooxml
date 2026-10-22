@@ -20,6 +20,7 @@ import {
 	definePptxRibbonGroup,
 	definePptxRibbonToggle,
 	definePptxSearchField,
+	definePptxColorGrid,
 	definePptxSelect,
 	definePptxSwitch,
 } from './office-aliases';
@@ -69,6 +70,7 @@ export type {
 	PptxUiChartFormatPaneElement,
 } from './chart-format-pane';
 export type { CompatToastsRequestEvent, PptxUiCompatToastsElement } from './office-alias-types';
+export type { PptxUiColorGridElement } from './office-aliases';
 export type { DialogFooterRequestEvent, PptxUiDialogFooterElement } from './office-alias-types';
 export type { MobileBarRequestEvent, PptxUiMobileBarElement } from './mobile-bar';
 export type { MobileInsertRequestEvent, PptxUiMobileInsertElement } from './mobile-insert';
@@ -148,6 +150,7 @@ export type {
 
 const controls = [
 	['pptx-ui-search', definePptxSearchField],
+	['pptx-ui-color-grid', definePptxColorGrid],
 	['pptx-ui-checkbox', definePptxCheckbox],
 	['pptx-ui-radio', definePptxRadio],
 	['pptx-ui-switch', definePptxSwitch],
@@ -205,12 +208,13 @@ export function registerPptxWebControls(): void {
 	if (typeof window === 'undefined' || !window.customElements) {
 		return;
 	}
-	installOfficeUiTheme(document);
 	const registry = window.customElements;
+	// Refuse an incompatible earlier definition before anything is written to the document.
 	assertWebControlContract(
 		registry,
 		controls.map(([name]) => name),
 	);
+	installOfficeUiTheme(document);
 	if (!document.getElementById('pptx-ui-control-hosts')) {
 		const style = document.createElement('style');
 		style.id = 'pptx-ui-control-hosts';
