@@ -334,6 +334,17 @@ describe('<notebook-app>', () => {
 		expect(app.page()!.shadowRoot!.activeElement).not.toBe(title);
 	});
 
+	it('shows the navigation pane to rename the notebook when it was hidden', async () => {
+		app = await mount();
+		app.navOpen = false;
+		await app.updateComplete;
+		expect(app.nav()).toBeNull();
+		notebookMenuAt(app, 10, 10);
+		app.menu!.spec.run('rename');
+		await until(() => app.nav()?.shadowRoot?.querySelector('input.rename'));
+		expect(app.navOpen).toBe(true);
+	});
+
 	it('keeps editing when Escape cancels an input method candidate', async () => {
 		app = await mount();
 		const page = app.page()!;

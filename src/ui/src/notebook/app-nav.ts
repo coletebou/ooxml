@@ -12,13 +12,24 @@ import {
 } from './menus';
 import type { NavItemKind } from './nav-pane';
 
+/** Renaming happens in the navigation pane, so a hidden one is shown first (File, Rename). */
+async function startRename(app: AppHost, kind: NavItemKind, id: string): Promise<void> {
+	if (!app.navOpen) {
+		app.navOpen = true;
+		await app.updateComplete;
+	}
+	const nav = app.nav();
+	await nav?.updateComplete;
+	nav?.startRename(kind, id);
+}
+
 export function menuContext(app: AppHost): MenuContext | null {
 	if (!app.client || !app.state) return null;
 	return {
 		client: app.client,
 		state: app.state,
 		t: (key, params) => app.tr(key, params),
-		rename: (kind, id) => app.nav()?.startRename(kind, id),
+		rename: (kind, id) => void startRename(app, kind, id),
 		deleted: (kind, batch, id) => app.noticeDeleted(kind, batch, id),
 	};
 }
