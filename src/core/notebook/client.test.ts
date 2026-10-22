@@ -736,6 +736,103 @@ describe('notebook client changes made while a notebook is closed', () => {
 	});
 });
 
+describe('notebook client renames while opening', () => {
+	it('keeps a rename made while the notebook was still opening', async () => {
+		const inner = createMemoryStorage();
+		let hold: Promise<void> | null = null;
+		let release = (): void => undefined;
+		const storage: NotebookStorage = {
+			...inner,
+			load: async (key) => {
+				if (hold && key.startsWith('notebook:')) await hold;
+				return inner.load(key);
+			},
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		const first = client.getState().notebookId;
+		const other = await client.createNotebook({ name: 'Before' });
+		await opened(client, other);
+		await client.openNotebook(first);
+		await opened(client, first);
+		hold = new Promise<void>((r) => (release = r));
+		const opening = client.openNotebook(other);
+		await settle(20);
+		client.renameNotebook(other, 'Renamed while opening');
+		hold = null;
+		release();
+		await opening;
+		await opened(client, other);
+		await settle(20);
+		expect(client.getState().notebook?.name).toBe('Renamed while opening');
+	});
+});
+
+describe('notebook client export and purge', () => {
+	it('exports the notebook open when asked, even if another opens while it saves', async () => {
+		const inner = createMemoryStorage();
+		let hold: Promise<void> | null = null;
+		const storage: NotebookStorage = {
+			...inner,
+			save: async (key, bytes) => {
+				if (hold && key.includes(':u:')) await hold;
+				return inner.save(key, bytes);
+			},
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		const first = client.getState().notebookId;
+		const other = await client.createNotebook({ name: 'Other' });
+		await opened(client, other);
+		await client.openNotebook(first);
+		await opened(client, first);
+		client.renamePage(client.getState().pageId, 'Exported page');
+		let release = (): void => undefined;
+		hold = new Promise<void>((r) => (release = r));
+		const exporting = client.exportNotebook();
+		const switching = client.openNotebook(other);
+		hold = null;
+		release();
+		const file = await exporting;
+		await switching;
+		const zip = await JSZip.loadAsync(file.bytes);
+		expect(await zip.file('notebook.json')!.async('string')).toContain('Exported page');
+	});
+
+	it('keeps a notebook listed in the bin when its stored copy could not be removed', async () => {
+		const day = 24 * 60 * 60 * 1000;
+		const inner = createMemoryStorage();
+		let now = 1_000_000;
+		const first = start(inner, createChannelHub(), { now: () => now });
+		await first.whenReady();
+		await settle();
+		const doomed = await first.createNotebook({ name: 'Doomed' });
+		await opened(first, doomed);
+		await first.deleteNotebook(doomed);
+		await first.flush();
+		await first.destroy();
+		now += 8 * day;
+		const failing: NotebookStorage = {
+			...inner,
+			remove: async () => {
+				throw new Error('disk busy');
+			},
+		};
+		const second = start(failing, createChannelHub(), { now: () => now });
+		await second.whenReady();
+		await settle();
+		await second.flush().catch(() => undefined);
+		await second.destroy();
+		// The next start, able to remove it, finds it still listed and purges it then.
+		const third = start(inner, createChannelHub(), { now: () => now });
+		await third.whenReady();
+		await settle(20);
+		expect(inner.keys().some((k) => k.startsWith(`notebook:${doomed}`))).toBe(false);
+	});
+});
+
 describe('notebook client flush', () => {
 	it('flushes without an error when a list it could not read has nothing unsaved', async () => {
 		const inner = createMemoryStorage();

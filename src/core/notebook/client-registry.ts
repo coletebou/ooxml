@@ -88,11 +88,15 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 		const cutoff = options.now() - PURGE_AFTER_MS;
 		for (const entry of readRegistry(doc)) {
 			if (!entry.deleted || entry.deleted > cutoff) continue;
+			// Its stored copy goes first: when that fails, the entry stays listed (in the bin) and the
+			// next start tries again, rather than the copy staying on the device unlisted for good.
+			try {
+				if (storage) await removeNotebookCopy(storage, entry.id);
+			} catch (error) {
+				options.onError(error, 'save');
+				continue;
+			}
 			unregisterNotebook(doc, entry.id);
-			if (storage)
-				await removeNotebookCopy(storage, entry.id).catch((error) =>
-					options.onError(error, 'save'),
-				);
 		}
 	};
 

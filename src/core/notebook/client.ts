@@ -302,16 +302,18 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 				},
 			});
 			if (destroyed) return void (await next.close());
-			if (entry.pending.name || entry.pending.color) {
+			// Read again: a rename or recolour made while the notebook was opening is in the list now.
+			const latest = readRegistry(reg).find((e) => e.id === id) ?? entry;
+			if (latest.pending.name || latest.pending.color) {
 				structure.writeMeta(next.seed, {
-					...(entry.pending.name ? { name: entry.name } : {}),
-					...(entry.pending.color ? { color: entry.color } : {}),
+					...(latest.pending.name ? { name: latest.name } : {}),
+					...(latest.pending.color ? { color: latest.color } : {}),
 				});
 				updateRegistry(reg, id, { pending: false });
 			}
 			open = next;
-			sectionId = entry.lastSection;
-			pageId = entry.lastPage;
+			sectionId = latest.lastSection;
+			pageId = latest.lastPage;
 			focused = '';
 		} catch (error) {
 			notice('open-failed', error);
@@ -573,10 +575,12 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 			}
 		},
 		async exportNotebook() {
-			if (!open) throw new Error('No notebook is open');
+			// The notebook open when asked: another may be opened while this one saves.
+			const notebook = open;
+			if (!notebook) throw new Error('No notebook is open');
 			// The archive is built from the open document; a save that failed was announced already.
-			await open.flush().catch(() => undefined);
-			return exportArchive(open);
+			await notebook.flush().catch(() => undefined);
+			return exportArchive(notebook);
 		},
 		async importNotebook(bytes) {
 			let snapshot;
