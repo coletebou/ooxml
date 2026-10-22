@@ -43,7 +43,12 @@ export function createIndexedDbStorage(
 					if (!request.result.objectStoreNames.contains(STORE))
 						request.result.createObjectStore(STORE);
 				};
-				request.onsuccess = () => resolve(request.result);
+				request.onsuccess = () => {
+					// Another tab upgrading or deleting the database is not blocked by this one: the
+					// connection closes, and what is saved after that fails and says so.
+					request.result.onversionchange = () => request.result.close();
+					resolve(request.result);
+				};
 				request.onerror = () => resolve(null);
 				request.onblocked = () => resolve(null);
 			} catch {

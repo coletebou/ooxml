@@ -72,4 +72,18 @@ describe('notebook IndexedDB storage', () => {
 		expect(await createIndexedDbStorage(name, null).load('k')).toEqual(new Uint8Array([5]));
 		expect(await createIndexedDbStorage(`${name}-other`, null).load('k')).toBeNull();
 	});
+
+	it('lets another tab delete or upgrade the database while it is open', async () => {
+		const factory = new IDBFactory();
+		const storage = createIndexedDbStorage('test-notebooks-versionchange', factory);
+		await storage.save('registry', new Uint8Array([1]));
+		const outcome = await new Promise<string>((resolve) => {
+			const request = factory.deleteDatabase('test-notebooks-versionchange');
+			request.onsuccess = () => resolve('deleted');
+			request.onblocked = () => resolve('blocked');
+		});
+		expect(outcome).toBe('deleted');
+		// What this tab saves afterwards fails, rather than recreating the deleted database.
+		await expect(storage.save('registry', new Uint8Array([2]))).rejects.toThrow();
+	});
 });

@@ -1,5 +1,27 @@
-import { isEntityId } from 'ooxml-core/notebook';
-import { notebookNames, notebookScope } from './store';
+import { IDBFactory } from 'fake-indexeddb';
+import { createMemoryStorage, isEntityId } from 'ooxml-core/notebook';
+import type { NotebookClient, NotebookStorage } from 'ooxml-core/notebook';
+import { vi } from 'vitest';
+import { createNotebook, notebookNames, notebookScope } from './store';
+
+/** The registry channel a client created through `createNotebook` listens on. */
+async function registryChannel(options: Parameters<typeof createNotebook>[0]): Promise<string> {
+	const names: string[] = [];
+	class Channel {
+		onmessage = null;
+		constructor(name: string) {
+			names.push(name);
+		}
+		postMessage(): void {}
+		close(): void {}
+	}
+	const client: NotebookClient = createNotebook({ ...options, BroadcastChannel: Channel });
+	await client.whenReady();
+	await client.destroy();
+	const found = names.find((name) => name.includes('nb-registry'));
+	if (!found) throw new Error('no registry channel');
+	return found;
+}
 
 describe('notebook store helpers', () => {
 	it('gives every database name its own scope, also names that clean up alike', () => {
@@ -17,5 +39,42 @@ describe('notebook store helpers', () => {
 			group: expect.any(String),
 		});
 		expect(notebookNames().section).toBe('New Section');
+	});
+
+	it('gives a storage the host passes in its own notebook list, not the default database one', async () => {
+		const ownDefault = await registryChannel({ storage: createMemoryStorage() });
+		const byName = await registryChannel({});
+		expect(ownDefault).not.toBe(byName);
+		const a = createMemoryStorage();
+		const b = createMemoryStorage();
+		const sameA = [await registryChannel({ storage: a }), await registryChannel({ storage: a })];
+		expect(sameA[0]).toBe(sameA[1]);
+		expect(await registryChannel({ storage: b })).not.toBe(sameA[0]);
+		// A storage that names where its bytes go shares the list of the database of that name.
+		const named: NotebookStorage = { ...createMemoryStorage(), id: 'notes.ada' };
+		expect(await registryChannel({ storage: named })).toBe(
+			await registryChannel({ storageName: 'notes.ada' }),
+		);
+	});
+
+	it('closes the database it opened when the client is destroyed', async () => {
+		const factory = new IDBFactory();
+		vi.stubGlobal('indexedDB', factory);
+		try {
+			const name = `nb-close-${Math.random().toString(36).slice(2)}`;
+			const client = createNotebook({ storageName: name });
+			await client.whenReady();
+			await client.flush();
+			await client.destroy();
+			// An open connection would block the delete (a host removing a signed-out profile).
+			const outcome = await new Promise<string>((resolve) => {
+				const request = factory.deleteDatabase(name);
+				request.onsuccess = () => resolve('deleted');
+				request.onblocked = () => resolve('blocked');
+			});
+			expect(outcome).toBe('deleted');
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

@@ -7,6 +7,7 @@
 import {
 	type NotebookClient,
 	type NotebookClientOptions,
+	type NotebookStorage,
 	createNotebookClient,
 } from 'ooxml-core/notebook';
 import { sha256 } from 'ooxml-core/digest';
@@ -56,12 +57,40 @@ export function notebookScope(storageName: string): string {
 	return `nb-${hex}`;
 }
 
+// Storages a host passed in without an id: each gets its own scope, kept while the object lives.
+const objectScopes = new WeakMap<NotebookStorage, string>();
+
+/**
+ * The scope for a storage the host passed in: by its `id` (where its bytes go, as a database name
+ * does), else one of its own, so two custom storages never share a notebook list.
+ */
+function storageScope(storage: NotebookStorage): string {
+	if (storage.id) return notebookScope(storage.id);
+	let scope = objectScopes.get(storage);
+	if (!scope) {
+		let hex = '';
+		for (const byte of crypto.getRandomValues(new Uint8Array(16)))
+			hex += byte.toString(16).padStart(2, '0');
+		scope = `nb-${hex}`;
+		objectScopes.set(storage, scope);
+	}
+	return scope;
+}
+
 /** `createNotebookClient` with this browser's IndexedDB storage, user id and localized names. */
 export function createNotebook(options: CreateNotebookOptions = {}): NotebookClient {
-	const { storageName = DEFAULT_NOTEBOOK_DATABASE, locale, user, ...rest } = options;
-	return createNotebookClient({
-		storage: createIndexedDbStorage(storageName),
-		scope: notebookScope(storageName),
+	const {
+		storageName = DEFAULT_NOTEBOOK_DATABASE,
+		locale,
+		user,
+		storage,
+		scope,
+		...rest
+	} = options;
+	const own = storage ? null : createIndexedDbStorage(storageName);
+	const client = createNotebookClient({
+		storage: storage ?? own!,
+		scope: scope ?? (storage ? storageScope(storage) : notebookScope(storageName)),
 		names: notebookNames(locale),
 		...rest,
 		user: {
@@ -70,4 +99,16 @@ export function createNotebook(options: CreateNotebookOptions = {}): NotebookCli
 			...(user?.color ? { color: user.color } : {}),
 		},
 	});
+	if (!own) return client;
+	// The database this client opened is closed with it, so a restart does not leave connections
+	// behind that block another tab's upgrade or a host deleting a signed-out profile's database.
+	const destroy = client.destroy;
+	client.destroy = async () => {
+		try {
+			await destroy();
+		} finally {
+			own.close();
+		}
+	};
+	return client;
 }
