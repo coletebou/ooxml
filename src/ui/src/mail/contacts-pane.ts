@@ -143,7 +143,6 @@ export class MailContacts extends MailElement {
 
 	private detail(contact: Contact) {
 		const addresses = contactAddresses(contact);
-		const place = contact.addresses[0];
 		const line = (label: string, value: string) =>
 			value ? html`<dt>${label}</dt><dd>${value}</dd>` : nothing;
 		return html`<article class="detail">
@@ -191,7 +190,13 @@ export class MailContacts extends MailElement {
 							>`,
 				)}
 				${contact.phones.map((phone) => html`<dt>${this.t('contacts.phone')}</dt><dd>${phone.number}${phone.type ? html` <small>${phone.type}</small>` : nothing}</dd>`)}
-				${place ? line(this.t('contacts.address'), postalLine(place)) : nothing}
+				${contact.addresses.map((place) => {
+					const text = postalLine(place);
+					return text
+						? html`<dt>${this.t('contacts.address')}</dt
+								><dd>${text}${place.type ? html` <small>${place.type}</small>` : nothing}</dd>`
+						: nothing;
+				})}
 				${line(this.t('contacts.birthday'), contact.birthday)}
 				${line(this.t('contacts.website'), contact.url)}
 				${line(this.t('contacts.note'), contact.note)}

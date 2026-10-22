@@ -117,6 +117,18 @@ describe('<mail-contacts>', () => {
 		expect(seen.map((c) => c.addresses)).toEqual([[place({ poBox: 'PO Box 7' })]]);
 	});
 
+	it('shows every postal address of a contact, each with its label', async () => {
+		const home = place({ type: 'home', street: 'Elm St 2', locality: 'Springfield' });
+		const work = place({ type: 'work', street: 'Main St 1', locality: 'Shelbyville' });
+		const el = await mount([contact('ada', 'Ada', { addresses: [home, work] })]);
+		const shown = [...el.shadowRoot!.querySelectorAll('.detail dt')]
+			.filter((dt) => dt.textContent === 'Address')
+			.map((dt) => dt.nextElementSibling!.textContent!.replace(/\s+/g, ' ').trim());
+		expect(shown).toHaveLength(2);
+		expect(shown[0]).toMatch(/^Elm St 2.*Springfield.* home$/);
+		expect(shown[1]).toMatch(/^Main St 1.*Shelbyville.* work$/);
+	});
+
 	it('shows the PO box and the apartment line an address has, and only then', async () => {
 		const full = place({ poBox: 'PO Box 7', extended: 'Suite 2', street: 'Main St 1' });
 		const el = await mount([
