@@ -107,4 +107,23 @@ describe('notebook IndexedDB storage', () => {
 		tabA.close();
 		tabB.close();
 	});
+
+	it('keeps the notebooks in memory where reading IndexedDB itself throws', async () => {
+		const own = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+		Object.defineProperty(globalThis, 'indexedDB', {
+			configurable: true,
+			get: () => {
+				throw new DOMException('The operation is insecure.', 'SecurityError');
+			},
+		});
+		try {
+			const storage = createIndexedDbStorage('test-notebooks-blocked');
+			await storage.save('registry', new Uint8Array([4]));
+			expect(await storage.load('registry')).toEqual(new Uint8Array([4]));
+			expect(storage.persistent()).toBe(false);
+		} finally {
+			if (own) Object.defineProperty(globalThis, 'indexedDB', own);
+			else delete (globalThis as { indexedDB?: unknown }).indexedDB;
+		}
+	});
 });

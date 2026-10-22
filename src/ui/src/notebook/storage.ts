@@ -21,6 +21,15 @@ const wrap = <T>(request: IDBRequest<T>): Promise<T> =>
 		request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
 	});
 
+/** The browser's IndexedDB; reading it throws where storage is blocked (some third-party frames). */
+function browserIndexedDb(): IDBFactory | undefined {
+	try {
+		return globalThis.indexedDB;
+	} catch {
+		return undefined;
+	}
+}
+
 const memories = new Map<string, ReturnType<typeof createMemoryStorage>>();
 
 export function createIndexedDbStorage(
@@ -28,7 +37,7 @@ export function createIndexedDbStorage(
 	/** The IndexedDB to use; omitted means the browser's, `null` means none (memory only). */
 	idb?: IDBFactory | null,
 ): IndexedDbStorage {
-	const factory = idb === undefined ? globalThis.indexedDB : (idb ?? undefined);
+	const factory = idb === undefined ? browserIndexedDb() : (idb ?? undefined);
 	// Without IndexedDB the notebooks live in memory for the tab: a new client (the app moved in
 	// the DOM, another user name) finds them again under the same database name.
 	const memory = memories.get(name) ?? createMemoryStorage();
