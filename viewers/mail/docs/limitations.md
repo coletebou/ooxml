@@ -18,8 +18,8 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   only at its own next change, or once it is opened again.
 - **No invitations.** Calendar events import and export as iCalendar files, but meeting requests
   and replies (iTIP) are not handled. An invitation imports as the event it describes; a reply, a
-  counterproposal, a refresh request or occurrences added to a series (`METHOD:ADD`) import
-  nothing, and the import says so.
+  counterproposal, a refresh request, a cancellation (`METHOD:CANCEL`: delete the event yourself)
+  or occurrences added to a series (`METHOD:ADD`) import nothing, and the import says so.
 - **iCalendar import is partial**: repeating rules the calendar cannot represent (an interval
   greater than one, several weekdays) import their first occurrence and say so.
 - **Repeating events change as a whole series**: editing or deleting one occurrence changes them

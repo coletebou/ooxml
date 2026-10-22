@@ -175,6 +175,19 @@ describe('parseIcs: scheduling messages', () => {
 				`METHOD:${method} answers an invitation and holds no event to import`,
 			]);
 		}
+		// A cancellation, of the whole meeting or of an attendee, holds no event to keep either.
+		const cancelled = parseIcs(
+			calendar(
+				'METHOD:CANCEL',
+				...vevent('UID:abc@example.com', 'DTSTART:20261020T090000Z', 'SEQUENCE:1'),
+			),
+		);
+		expect(cancelled).toEqual({
+			events: [],
+			unsupported: [
+				'METHOD:CANCEL cancels a meeting of an invitation, so nothing is imported: delete it if you hold it',
+			],
+		});
 		// Occurrences added to a series would replace the series they belong to.
 		expect(parseIcs(calendar('METHOD:ADD', ...event))).toEqual({
 			events: [],

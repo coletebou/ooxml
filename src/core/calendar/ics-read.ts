@@ -68,6 +68,11 @@ const NOT_EVENTS = new Map<string, string>([
 		(method) => [method, 'answers an invitation and holds no event to import'] as const,
 	),
 	['ADD', 'adds occurrences to an event it does not hold, so nothing is imported'],
+	// Read as events, a cancellation would replace the meeting it cancels with a blank one.
+	[
+		'CANCEL',
+		'cancels a meeting of an invitation, so nothing is imported: delete it if you hold it',
+	],
 ]);
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
