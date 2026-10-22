@@ -106,6 +106,33 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 		result.get(calls);
 	};
 
+	/**
+	 * Which of `ids` are still drafts, as `editDraft` opens them: marked `$draft`, or filed in Drafts
+	 * and not in Sent where the account has a Sent folder. Only those are destroyed when a save or a
+	 * send replaces them: another device may have sent the draft since the window opened it, and
+	 * its Sent copy must never go. Nothing is destroyed when the server cannot say.
+	 */
+	const stillDrafts = async (ids: readonly string[]): Promise<string[]> => {
+		if (!ids.length) return [];
+		try {
+			const drafts = await draftsMailbox();
+			const sent = await mailboxes.roleId('sent');
+			const { result, calls } = await client.request((builder, accountId) =>
+				builder.call('Email/get', { accountId, ids, properties: ['keywords', 'mailboxIds'] }),
+			);
+			const list: unknown = result.get(calls).list;
+			return (Array.isArray(list) ? list : []).flatMap((email: unknown) => {
+				if (!isRecord(email) || typeof email.id !== 'string') return [];
+				const keywords = isRecord(email.keywords) ? email.keywords : {};
+				const boxes = isRecord(email.mailboxIds) ? email.mailboxIds : {};
+				const filed = !!sent && boxes[drafts] === true && boxes[sent] !== true;
+				return keywords[DRAFT] === true || filed ? [email.id] : [];
+			});
+		} catch {
+			return [];
+		}
+	};
+
 	/** The calls one request may hold (`maxCallsInRequest`, RFC 8620 2): 16 is only a suggestion. */
 	const maxCalls = async (): Promise<number> => (await client.session()).limits.maxCallsInRequest;
 
@@ -152,14 +179,15 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const identity = pickIdentity(await identitiesOrNone(), draft);
 			const create = emailToCreate(draft, drafts, [DRAFT, SEEN], identity);
 			const previous = draft.id;
+			const replaced = previous === undefined ? [] : await stillDrafts([previous]);
 			// Saved, and the previous one destroyed, in one request of three calls when it is taken.
-			const gated = previous !== undefined && (await maxCalls()) >= 3 && (await canGate());
+			const gated = replaced.length > 0 && (await maxCalls()) >= 3 && (await canGate());
 			const { result, calls } = await client.request((builder, accountId) => {
 				const save = builder.call('Email/set', { accountId, create: { draft: create } });
 				if (!gated) return { save, clean: null };
 				const echo = builder.call('Core/echo', {
 					saved: save.ref('/created/draft/id'),
-					destroy: [previous],
+					destroy: replaced,
 				});
 				return {
 					save,
@@ -167,8 +195,8 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				};
 			});
 			const id = result.created(calls.save, 'draft');
-			if (previous !== undefined && (!calls.clean || result.error(calls.clean)))
-				await quietly(() => tidy([previous], {}));
+			if (replaced.length && (!calls.clean || result.error(calls.clean)))
+				await quietly(() => tidy(replaced, {}));
 			// A message a send left unsure of, saved unchanged, is still that message: its next send,
 			// from the new draft, asks about the first one too.
 			const before = identity ? sendKey(previous, identity.id, create) : '';
@@ -197,7 +225,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 						[patchPath('keywords', DRAFT)]: null,
 					}
 				: { [patchPath('keywords', DRAFT)]: null };
-			const destroy = draft.id === undefined ? [] : [draft.id];
+			const destroy = draft.id === undefined ? [] : await stillDrafts([draft.id]);
 			const marks = markPatches(draft);
 			const cleanUp = destroy.length > 0 || Object.keys(marks).length > 0;
 			const key = sendKey(draft.id, identity.id, create);

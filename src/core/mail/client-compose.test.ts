@@ -320,6 +320,20 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('throws no message away that was sent from elsewhere since its window opened', async () => {
+		const { client, memory } = setup();
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.editDraft('old')).toBe(true);
+		// Sent from another device while the window was open.
+		await memory.update({
+			old: { keywords: { [DRAFT]: false }, mailboxIds: { drafts: false, sent: true } },
+		});
+		await client.discardDraft();
+		expect(client.getState().compose).toBeNull();
+		expect(await memory.message('old')).toMatchObject({ mailboxIds: ['sent'] });
+		client.destroy();
+	});
+
 	it('does not open a sent message kept in Drafts and Sent at once as a draft', async () => {
 		// A server that files by labels can keep a sent message in both, no longer a draft.
 		const { client, notices, memory } = setup();

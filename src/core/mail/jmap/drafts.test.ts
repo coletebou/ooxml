@@ -99,6 +99,20 @@ describe('saveDraft', () => {
 		).toHaveLength(1);
 	});
 
+	it('never destroys a message sent from elsewhere since the window opened it', async () => {
+		// Another device sent the draft in place (RFC 8621 7.5.1): in Sent, no longer a draft.
+		const sent = { mailboxIds: { [SENT]: true as const }, keywords: { $seen: true as const } };
+		const saving = mail();
+		saving.store.emails.set('old-draft', sent);
+		expect(await saving.transport.saveDraft({ ...draft, id: 'old-draft' })).toEqual({ id: 'E1' });
+		expect(saving.store.emails.get('old-draft')).toEqual(sent);
+		const sending = mail();
+		sending.store.emails.set('old-draft', sent);
+		await sending.transport.send({ ...draft, id: 'old-draft' });
+		expect(sending.store.emails.get('old-draft')).toEqual(sent);
+		expect(sending.store.submissions).toHaveLength(1);
+	});
+
 	it('keeps the previous draft when the new one is refused', async () => {
 		const { transport, store } = mail();
 		store.refuseCreate = 'overQuota';

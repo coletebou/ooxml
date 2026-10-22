@@ -49,6 +49,22 @@ export function createCompose(core: ClientCore): ComposeActions {
 		const box = core.mailboxByRole(role);
 		return !!box && listed(message).mailboxIds.includes(box.id);
 	};
+	/**
+	 * Whether a message is a draft to edit or throw away: one marked `$draft`, or filed in Drafts
+	 * where what is sent leaves Drafts (an account without Sent keeps its sent copies there, no
+	 * longer `$draft`) and not in Sent too (a server that files by labels may keep a sent message
+	 * in both).
+	 */
+	const isDraft = (message: EmailSummary): boolean => {
+		const drafts = core.mailboxByRole('drafts');
+		const sent = core.mailboxByRole('sent');
+		const filed =
+			!!drafts &&
+			!!sent &&
+			message.mailboxIds.includes(drafts.id) &&
+			!message.mailboxIds.includes(sent.id);
+		return !!message.keywords[DRAFT] || filed;
+	};
 	/** A message to answer or edit, whole: a body the reading pane holds cut short is read again. */
 	const source = async (emailId: string): Promise<MailMessage> => {
 		const cached = core.bodies.get(emailId);
@@ -183,13 +199,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (compose()?.draft.id === emailId) return true;
 			try {
 				const message = await source(emailId);
-				// Saved, the window replaces the message it opened: only a draft opens so, one marked
-				// `$draft`, or filed in Drafts where what is sent leaves Drafts (an account without Sent
-				// keeps its sent copies there, no longer `$draft`) and not in Sent too (a server that
-				// files by labels may keep a sent message in both).
-				const inDrafts =
-					filedIn(message, 'drafts') && !filedIn(message, 'sent') && !!core.mailboxByRole('sent');
-				if (!listed(message).keywords[DRAFT] && !inDrafts)
+				// Saved, the window replaces the message it opened: only a draft opens so.
+				if (!isDraft(listed(message)))
 					throw new MailTransportError('invalid', 'Only a draft opens to edit.');
 				const identity = writtenAs(identities(), message);
 				if (!(await close())) return false;
@@ -289,7 +300,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 			core.patch({ compose: null });
 			if (!id) return;
 			try {
-				await core.transport.destroy([id]);
+				// As it is now: sent from another device since the window opened it, it is no draft,
+				// and its Sent copy stays.
+				const [now] = await core.transport.summaries([id]);
+				if (now && isDraft(now)) await core.transport.destroy([id]);
 				core.notice({ kind: 'done', action: 'discarded', count: 1 });
 			} catch (error) {
 				core.fail('delete', error);
