@@ -5,7 +5,7 @@ import {
 	searchContacts,
 	sortContacts,
 } from './contacts';
-import { parseVCards, serializeVCards } from './vcard';
+import { decodeVCardBytes, parseVCards, serializeVCards } from './vcard';
 
 // RFC 6350 section 8, as printed (folded lines included).
 const RFC_EXAMPLE = [
@@ -524,6 +524,44 @@ describe('serializeVCards', () => {
 			'BDAY;ALTID=1:19850412',
 			'BDAY;ALTID=1;VALUE=text;LANGUAGE=en:April 12',
 		]);
+	});
+
+	it('reads the bytes of a vCard file in the charset each line names', () => {
+		const latin1 = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0));
+		// A vCard 2.1 file from an older phone: Latin-1 bytes, said so line by line.
+		const file = latin1(
+			[
+				'BEGIN:VCARD',
+				'VERSION:2.1',
+				'N;CHARSET=ISO-8859-1:Müller;André',
+				'FN;CHARSET=ISO-8859-1;ENCODING=8BIT:André Müller',
+				'NOTE;CHARSET=ISO-8859-1:Café au lait, ',
+				' très bien',
+				'ADR;CHARSET=ISO-8859-1;ENCODING=QUOTED-PRINTABLE:;;Stra=DFe 1;K=F6ln;;;',
+				'END:VCARD',
+				'',
+			].join('\r\n'),
+		);
+		const [card] = parseVCards(decodeVCardBytes(file)).contacts;
+		expect(card).toMatchObject({
+			name: 'André Müller',
+			familyName: 'Müller',
+			givenName: 'André',
+			note: 'Café au lait, très bien',
+		});
+		expect(card!.addresses[0]).toMatchObject({ street: 'Straße 1', locality: 'Köln' });
+		// UTF-8, with or without its mark, and UTF-16 with its mark, read as written.
+		const utf8 = new TextEncoder().encode('BEGIN:VCARD\r\nFN:Zoë\r\nEND:VCARD\r\n');
+		expect(decodeVCardBytes(utf8)).toBe('BEGIN:VCARD\r\nFN:Zoë\r\nEND:VCARD\r\n');
+		expect(decodeVCardBytes(Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8]))).toBe(
+			'BEGIN:VCARD\r\nFN:Zoë\r\nEND:VCARD\r\n',
+		);
+		const utf16 = Uint8Array.from([
+			0xff,
+			0xfe,
+			...[...'FN:Zoë'].flatMap((c) => [c.charCodeAt(0), 0]),
+		]);
+		expect(decodeVCardBytes(utf16)).toBe('FN:Zoë');
 	});
 
 	it('reads the zone offset of a revision time', () => {

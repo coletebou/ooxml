@@ -151,3 +151,50 @@ export function decodeValue(property: Property): string {
 	if (!isQuotedPrintable(property)) return property.value;
 	return decodeCharset(quotedPrintableBytes(property.value), property.params.CHARSET?.[0]);
 }
+
+const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
+/** The CHARSET a content line's parameters name (`N;CHARSET=ISO-8859-1:...`), from its bytes. */
+function lineCharset(line: Uint8Array): string | null {
+	// The parameters are ASCII and end at the first colon outside quotes; 512 bytes is plenty.
+	let head = '';
+	for (let i = 0; i < line.length && i < 512; i++) {
+		const byte = line[i]!;
+		if (byte === 0x3a) break;
+		head += String.fromCharCode(byte);
+	}
+	return /;CHARSET=("?)([\w.:-]+)\1/i.exec(head)?.[2] ?? null;
+}
+
+/**
+ * A vCard file's bytes as text. A byte order mark says the encoding (UTF-8, UTF-16); a file that
+ * is valid UTF-8, as vCard 4 always is (RFC 6350 3.1), reads as UTF-8. Otherwise, as an older
+ * vCard 2.1 or 3.0 file from a phone may be, each line reads in the CHARSET its parameters name
+ * (a folded line in that of the line it continues), else as unlabelled MIME text: UTF-8 when it is
+ * valid, else windows-1252.
+ */
+export function decodeVCardBytes(bytes: Uint8Array): string {
+	if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
+		return new TextDecoder('utf-8').decode(bytes.subarray(3));
+	if (bytes[0] === 0xff && bytes[1] === 0xfe)
+		return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+	if (bytes[0] === 0xfe && bytes[1] === 0xff)
+		return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+	try {
+		return utf8Strict.decode(bytes);
+	} catch {
+		// Not UTF-8: read line by line below.
+	}
+	const out: string[] = [];
+	let charset: string | null = null;
+	let start = 0;
+	for (let i = 0; i <= bytes.length; i++) {
+		if (i < bytes.length && bytes[i] !== 0x0a) continue;
+		const line = bytes.subarray(start, i);
+		const folded = line[0] === 0x20 || line[0] === 0x09;
+		if (!folded) charset = lineCharset(line);
+		out.push(decodeCharset(line, charset));
+		start = i + 1;
+	}
+	return out.join('\n');
+}

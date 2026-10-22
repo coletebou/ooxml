@@ -7,6 +7,7 @@ import { keyed } from 'lit/directives/keyed.js';
 import {
 	contactAddresses,
 	contactLabel,
+	decodeVCardBytes,
 	emptyContact,
 	searchContacts,
 	type Contact,
@@ -123,7 +124,10 @@ export class MailContacts extends MailElement {
 		const files = [...(input.files ?? [])];
 		input.value = '';
 		if (!files.length) return;
-		const { read: texts, unreadable } = await readEach(files, (file) => file.text());
+		// Bytes, not `file.text()`: a vCard 2.1 file may be in the charset its lines name.
+		const { read: texts, unreadable } = await readEach(files, async (file) =>
+			decodeVCardBytes(new Uint8Array(await file.arrayBuffer())),
+		);
 		if (texts.length) this.emit('mail-import-vcf', { text: texts.join('\r\n') });
 		if (unreadable.length) this.emit('mail-files-unreadable', { names: unreadable });
 	}

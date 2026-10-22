@@ -16,6 +16,7 @@ import {
 } from './vcard-lines';
 
 export { serializeVCards } from './vcard-write';
+export { decodeVCardBytes } from './vcard-lines';
 
 /**
  * The components of `parts` a card gave several values (`Line 1,Line 2`), each list unescaped;

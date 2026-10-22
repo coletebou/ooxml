@@ -199,6 +199,25 @@ describe('<mail-contacts>', () => {
 		expect(picker.multiple).toBe(true);
 	});
 
+	it('reads a vCard file from an older phone in the charset it names', async () => {
+		const el = await mount([contact('ada', 'Ada')]);
+		const picker = el.shadowRoot!.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const card =
+			'BEGIN:VCARD\r\nVERSION:2.1\r\nFN;CHARSET=ISO-8859-1:André Müller\r\nEND:VCARD\r\n';
+		const latin1 = Uint8Array.from(card, (c) => c.charCodeAt(0));
+		Object.defineProperty(picker, 'files', {
+			value: [new File([latin1], 'old.vcf')],
+			configurable: true,
+		});
+		const imported: string[] = [];
+		el.addEventListener('mail-import-vcf', (e) =>
+			imported.push((e as CustomEvent<{ text: string }>).detail.text),
+		);
+		picker.dispatchEvent(new Event('change'));
+		await vi.waitFor(() => expect(imported).toHaveLength(1));
+		expect(parseVCards(imported[0]!).contacts.map((c) => c.name)).toEqual(['André Müller']);
+	});
+
 	it('imports the vCard files it can read and names those it cannot', async () => {
 		const el = await mount([contact('ada', 'Ada')]);
 		const picker = el.shadowRoot!.querySelector<HTMLInputElement>('input[type="file"]')!;
