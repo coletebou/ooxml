@@ -7,6 +7,13 @@ import type { MailI18n, MailKey } from './i18n/translator';
 
 /** A whole date (`YYYY-MM-DD`): the only birthday a date input can show. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * The input a birthday is shown in: a date input for a whole date, else text, as a date input
+ * shows nothing for a day without a year (`--04-15`) or what a card gave as text, which could then
+ * be neither seen nor cleared.
+ */
+const birthdayType = (birthday: string): string =>
+	!birthday || ISO_DATE.test(birthday) ? 'date' : 'text';
 const EMAIL_TYPES = ['', 'home', 'work', 'other'];
 /** Every phone type the vCard reader recognises. */
 const PHONE_TYPES = ['', 'cell', 'home', 'work', 'fax', 'pager', 'other'];
@@ -100,7 +107,7 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 		</fieldset>
 		<fieldset>
 			<legend>${t('contacts.more')}</legend>
-			${field('birthday', t('contacts.birthday'), ISO_DATE.test(contact.birthday) ? contact.birthday : '', 'date')}
+			${field('birthday', t('contacts.birthday'), contact.birthday, birthdayType(contact.birthday))}
 			${field('url', t('contacts.website'), contact.url, 'url')}
 			<label
 				><span>${t('contacts.note')}</span
@@ -137,7 +144,8 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 		string
 	>;
 	const keepPlace = Object.values(parts).some(Boolean);
-	const birthday = value('birthday') || (ISO_DATE.test(base.birthday) ? '' : base.birthday);
+	// Shown whatever it is (`birthdayType`), it is what the field holds: blank clears it.
+	const birthday = value('birthday');
 	return {
 		...base,
 		name: value('name'),

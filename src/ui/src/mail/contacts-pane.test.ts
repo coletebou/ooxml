@@ -117,6 +117,23 @@ describe('<mail-contacts>', () => {
 		expect(seen.map((c) => c.addresses)).toEqual([[place({ poBox: 'PO Box 7' })]]);
 	});
 
+	it('shows a birthday without a year where it can be changed or cleared', async () => {
+		const el = await mount([contact('ada', 'Ada', { birthday: '--04-15' })]);
+		const seen = saved(el);
+		await click(el, 'Edit');
+		// A date input cannot show a day without a year: the field is text, with the day in it.
+		expect([field(el, 'birthday').type, field(el, 'birthday').value]).toEqual(['text', '--04-15']);
+		await click(el, 'Save');
+		await click(el, 'Edit');
+		field(el, 'birthday').value = '';
+		await click(el, 'Save');
+		expect(seen.map((c) => c.birthday)).toEqual(['--04-15', '']);
+		// A whole date is a date input, as before.
+		const dated = await mount([contact('bob', 'Bob', { birthday: '1990-04-15' })]);
+		await click(dated, 'Edit');
+		expect(field(dated, 'birthday').type).toBe('date');
+	});
+
 	it('shows every postal address of a contact, each with its label', async () => {
 		const home = place({ type: 'home', street: 'Elm St 2', locality: 'Springfield' });
 		const work = place({ type: 'work', street: 'Main St 1', locality: 'Shelbyville' });
