@@ -9,8 +9,8 @@ import {
 	type NotebookClientOptions,
 	type NotebookStorage,
 	createNotebookClient,
+	scopeDigest,
 } from 'ooxml-core/notebook';
-import { sha256 } from 'ooxml-core/digest';
 import { notebookI18n } from './i18n/translator';
 import { createIndexedDbStorage, DEFAULT_NOTEBOOK_DATABASE, notebookUserId } from './storage';
 
@@ -51,10 +51,7 @@ export function notebookNames(
  * and `notes/ada`), which would mix their notebooks.
  */
 export function notebookScope(storageName: string): string {
-	let hex = '';
-	for (const byte of sha256(new TextEncoder().encode(storageName)).subarray(0, 16))
-		hex += byte.toString(16).padStart(2, '0');
-	return `nb-${hex}`;
+	return scopeDigest(storageName);
 }
 
 // Storages a host passed in without an id: each gets its own scope, kept while the object lives.

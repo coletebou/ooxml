@@ -4,6 +4,7 @@ import { loadDocx } from '../docx/parse';
 import { createNotebookClient } from './client';
 import type { NotebookClient, NotebookClientOptions } from './client-types';
 import { type NotebookStorage, REGISTRY_KEY, createMemoryStorage } from './storage';
+import { sanitizeScope } from './sync';
 import { createChannelHub, settle } from './test-support/channel';
 
 const clients: NotebookClient[] = [];
@@ -655,6 +656,17 @@ describe('notebook client twelfth review round', () => {
 				.pages.map((p) => p.title)
 				.sort(),
 		).toEqual(['From A', 'From B']);
+	});
+
+	it('gives every scope its own room, also scopes that are not plain ids', () => {
+		const scopes = ['alice@example.com', 'bob@example.com', 'x'.repeat(60), `${'x'.repeat(60)}y`];
+		const rooms = scopes.map(sanitizeScope);
+		expect(new Set(rooms).size).toBe(scopes.length);
+		for (const room of rooms)
+			expect(room && room.length <= 48 && /^[\w-]+$/u.test(room)).toBe(true);
+		expect(sanitizeScope('profile-1')).toBe('profile-1');
+		expect(sanitizeScope('')).toBe('');
+		expect(sanitizeScope(7)).toBe('');
 	});
 });
 

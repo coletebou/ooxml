@@ -14,6 +14,7 @@ import {
 	createWebSocketTransport,
 	roomUrl,
 } from '../collab/websocket-transport';
+import { sha256 } from '../digest/sha256';
 import { isEntityId } from './model';
 
 export type NotebookSyncConfig =
@@ -66,7 +67,19 @@ export function createNotebookTransport(
 	});
 }
 
-/** A scope string usable in room ids (a suite profile id, for example). */
+/** A scope for any text (a database name, an e-mail address): a digest of all of it. */
+export function scopeDigest(text: string): string {
+	let hex = '';
+	for (const byte of sha256(new TextEncoder().encode(text)).subarray(0, 16))
+		hex += byte.toString(16).padStart(2, '0');
+	return `nb-${hex}`;
+}
+
+/**
+ * A scope usable in room ids. A short id (a suite profile id, for example) is kept as it is; any
+ * other text is replaced by its digest, so two different scopes never share a room.
+ */
 export function sanitizeScope(scope: unknown): string {
-	return typeof scope === 'string' && isEntityId(scope) ? scope.slice(0, 48) : '';
+	if (typeof scope !== 'string' || !scope) return '';
+	return isEntityId(scope) && scope.length <= 48 ? scope : scopeDigest(scope);
 }
