@@ -514,6 +514,7 @@ export class NotebookPage extends NotebookElement {
 							.tool=${inkTool}
 							.color=${this.inkColor}
 							.width=${this.inkWidth}
+							.zoom=${this.zoom}
 							.locale=${this.locale}
 							@nb-stroke=${(e: CustomEvent<StrokeDetail>) => this.client?.addStroke(e.detail)}
 							@nb-erase=${(e: CustomEvent<{ ids: string[] }>) => this.client?.eraseStrokes(e.detail.ids)}

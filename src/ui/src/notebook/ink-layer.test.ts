@@ -102,4 +102,18 @@ describe('<notebook-ink> pen', () => {
 		expect(strokes[0]?.points).toEqual([10, 10, 0.3, 20, 10, 0.3, 40, 10, 0.3]);
 		ink.remove();
 	});
+
+	it('reads pointer positions at the page zoom it is given', async () => {
+		const ink = await layer('pen');
+		ink.zoom = 2;
+		await ink.updateComplete;
+		const strokes: { points: number[] }[] = [];
+		ink.addEventListener('nb-stroke', (e) => strokes.push((e as CustomEvent).detail));
+		const svg = ink.shadowRoot!.querySelector('svg')!;
+		svg.dispatchEvent(pointer('pointerdown', 20, 40));
+		svg.dispatchEvent(pointer('pointermove', 60, 40));
+		svg.dispatchEvent(pointer('pointerup', 60, 40));
+		expect(strokes[0]?.points).toEqual([10, 20, 0.5, 30, 20, 0.5]);
+		ink.remove();
+	});
 });

@@ -27,6 +27,7 @@ export class NotebookInk extends NotebookElement {
 		tool: { type: String },
 		color: { type: String },
 		width: { type: Number },
+		zoom: { type: Number },
 		live: { state: true },
 		erased: { state: true },
 	};
@@ -35,6 +36,8 @@ export class NotebookInk extends NotebookElement {
 	declare tool: InkToolName | '';
 	declare color: string;
 	declare width: number;
+	/** The page's zoom: pointer positions are divided by it to get page pixels. */
+	declare zoom: number;
 	declare live: number[] | null;
 	declare erased: ReadonlySet<string>;
 	#pointer = -1;
@@ -47,6 +50,7 @@ export class NotebookInk extends NotebookElement {
 		this.tool = '';
 		this.color = '#202020';
 		this.width = 2;
+		this.zoom = 1;
 		this.live = null;
 		this.erased = new Set();
 	}
@@ -56,9 +60,10 @@ export class NotebookInk extends NotebookElement {
 	}
 
 	#point(event: PointerEvent): [number, number, number] {
-		const svgEl = this.renderRoot.querySelector('svg')!;
-		const rect = svgEl.getBoundingClientRect();
-		const scale = svgEl.clientWidth ? rect.width / svgEl.clientWidth : 1;
+		// The zoom the page applies, as the page itself reads its points: an SVG's own layout size
+		// is not reported alike by every browser (0 in some).
+		const rect = this.renderRoot.querySelector('svg')!.getBoundingClientRect();
+		const scale = this.zoom > 0 ? this.zoom : 1;
 		const pressure = event.pointerType === 'mouse' || !event.pressure ? 0.5 : event.pressure;
 		return [(event.clientX - rect.left) / scale, (event.clientY - rect.top) / scale, pressure];
 	}
