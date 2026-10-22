@@ -4,6 +4,8 @@
 // starts and day steps that keep the local time of day across daylight saving changes. Calendar code stores UTC and renders in a zone. DOM-free. Moved from
 // src/core/teams/time-zone.ts.
 
+import { zoneFormatter } from './zone-formatters';
+
 export interface ZonedParts {
 	year: number;
 	/** 1-12. */
@@ -22,13 +24,12 @@ export const DAY_MS = 86_400_000;
 /** The furthest instant from 1970, before or after, that a `Date` holds (ECMA-262 21.4.1.1). */
 export const MAX_INSTANT = 8.64e15;
 
-const formatters = new Map<string, Intl.DateTimeFormat>();
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function isValidZone(zone: unknown): zone is string {
 	if (typeof zone !== 'string' || zone.length === 0 || zone.length > 64) return false;
 	try {
-		return Boolean(formatter(zone));
+		return Boolean(zoneFormatter(zone));
 	} catch {
 		return false;
 	}
@@ -44,28 +45,9 @@ export function localZone(): string {
 	}
 }
 
-function formatter(zone: string): Intl.DateTimeFormat {
-	let f = formatters.get(zone);
-	if (!f) {
-		f = new Intl.DateTimeFormat('en-US', {
-			timeZone: zone,
-			hourCycle: 'h23',
-			year: 'numeric',
-			month: 'numeric',
-			day: 'numeric',
-			hour: 'numeric',
-			minute: 'numeric',
-			second: 'numeric',
-			weekday: 'short',
-		});
-		formatters.set(zone, f);
-	}
-	return f;
-}
-
 export function zonedParts(ms: number, zone: string): ZonedParts {
 	const out: Record<string, string> = {};
-	for (const part of formatter(zone).formatToParts(new Date(ms))) out[part.type] = part.value;
+	for (const part of zoneFormatter(zone).formatToParts(new Date(ms))) out[part.type] = part.value;
 	return {
 		year: Number(out.year),
 		month: Number(out.month),
