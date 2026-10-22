@@ -161,10 +161,22 @@ function readExdates(c: Component, start: Time, ctx: ReadContext, label: string)
 	return out;
 }
 
-/** Minutes before the start of the first reminder (VALARM) that is relative to the start. */
+/**
+ * Minutes before the start of the first reminder (VALARM) that is relative to the start and alerts
+ * the person: one shown (DISPLAY, or no ACTION), or a sound, which is shown instead. An email or any
+ * other action is no reminder this calendar keeps, and a reminder's repeats are not kept: each is
+ * reported (RFC 5545 3.6.6).
+ */
 function readReminder(c: Component, ctx: ReadContext): number | undefined {
 	let reminder: number | undefined;
 	for (const alarm of c.components.filter((x) => x.name === 'VALARM')) {
+		const action = one(alarm, 'ACTION')?.value.trim().toUpperCase() || 'DISPLAY';
+		if (action !== 'DISPLAY' && action !== 'AUDIO') {
+			ctx.note(`ACTION:${action} reminders are not imported`);
+			continue;
+		}
+		if (action === 'AUDIO') ctx.note('A sound reminder is imported as one the calendar shows');
+		if (one(alarm, 'REPEAT')) ctx.note('A reminder is imported without its repeats');
 		const trigger = one(alarm, 'TRIGGER');
 		const relative =
 			trigger && param(trigger, 'VALUE') !== 'DATE-TIME' && param(trigger, 'RELATED') !== 'END';

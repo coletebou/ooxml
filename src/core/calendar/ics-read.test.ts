@@ -1033,6 +1033,32 @@ describe('what is not an event', () => {
 		]);
 	});
 
+	it('takes only a reminder that alerts, and says what it does not keep of others', () => {
+		const alarm = (...lines: string[]) => ['BEGIN:VALARM', ...lines, 'END:VALARM'];
+		const { events, unsupported } = parseIcs(
+			calendar(
+				...vevent(
+					'UID:a',
+					'DTSTART:20261020T090000Z',
+					// An email two days before is no reminder this calendar shows: the alert after it is.
+					...alarm('ACTION:EMAIL', 'TRIGGER:-P2D', 'ATTENDEE:mailto:ada@example.com'),
+					...alarm('ACTION:DISPLAY', 'TRIGGER:-PT15M', 'DESCRIPTION:Soon'),
+				),
+				...vevent(
+					'UID:b',
+					'DTSTART:20261021T090000Z',
+					...alarm('ACTION:AUDIO', 'TRIGGER:-PT10M', 'REPEAT:2', 'DURATION:PT5M'),
+				),
+			),
+		);
+		expect(events.map((event) => event.reminder)).toEqual([15, 10]);
+		expect(unsupported).toEqual([
+			'ACTION:EMAIL reminders are not imported',
+			'A sound reminder is imported as one the calendar shows',
+			'A reminder is imported without its repeats',
+		]);
+	});
+
 	it('never throws on broken input and reports what it skipped', () => {
 		const broken = parseIcs(
 			'BEGIN:VCALENDAR\nthis is not a line\nBEGIN:VEVENT\nSUMMARY:No start\nEND:VEVENT\nBEGIN:VEVENT\nUID:x\nDTSTART:20261340T250000Z\nEND:VEVENT\nBEGIN:VEVENT\nUID:ok\nDTSTART:20261020T090000Z',
