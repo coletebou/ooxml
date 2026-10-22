@@ -85,13 +85,15 @@ export function createNotebook(options: CreateNotebookOptions = {}): NotebookCli
 		user,
 		storage,
 		scope,
+		names,
 		...rest
 	} = options;
 	const own = storage ? null : createIndexedDbStorage(storageName);
 	const client = createNotebookClient({
 		storage: storage ?? own!,
 		scope: scope ?? (storage ? storageScope(storage) : notebookScope(storageName)),
-		names: notebookNames(locale),
+		// Names the host gives win over the language's defaults, one by one.
+		names: { ...notebookNames(locale), ...names },
 		...rest,
 		user: {
 			id: user?.id ?? notebookUserId(),

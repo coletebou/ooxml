@@ -32,6 +32,19 @@ describe('notebook store helpers', () => {
 		expect(notebookScope('notes.ada')).toBe(scopes[0]);
 	});
 
+	it('keeps the language names for what a partial host override leaves out', async () => {
+		const client = createNotebook({
+			storage: createMemoryStorage(),
+			locale: 'de',
+			names: { section: 'Kapitel' },
+		});
+		await client.whenReady();
+		await vi.waitFor(() => expect(client.getState().notebook).not.toBeNull());
+		expect(client.getState().notebook?.name).toBe('Mein Notizbuch');
+		expect(client.getState().sections[0]?.name).toMatch(/^Kapitel/u);
+		await client.destroy();
+	});
+
 	it('names new items in the language asked for', () => {
 		expect(notebookNames('de')).toEqual({
 			notebook: 'Mein Notizbuch',
@@ -80,7 +93,7 @@ describe('notebook store helpers', () => {
 
 	it('saves on leaving the page until the client is destroyed', async () => {
 		const storage = createMemoryStorage();
-		const saves = vi.spyOn(storage, 'update');
+		const saves = vi.spyOn(storage, 'save');
 		const client = createNotebook({ storage, saveDelayMs: 60_000 });
 		await client.whenReady();
 		await client.flush();
