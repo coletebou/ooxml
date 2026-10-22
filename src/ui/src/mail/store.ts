@@ -179,7 +179,20 @@ export function accountKey(
 		return session.user ? `transport:${session.user}:${session.account.id}` : null;
 	}
 	const user = session.user || (config.auth.type === 'basic' ? config.auth.username : '');
-	return user ? `jmap:${config.url.trim().toLowerCase()}:${user}:${session.account.id}` : null;
+	return user ? `jmap:${serverKey(config.url)}:${user}:${session.account.id}` : null;
+}
+
+/**
+ * A server's address as one key: its scheme and host in lower case, which ignore case, its path and
+ * query as written, which do not (RFC 3986 6.2.2.1); an address that is no URL, trimmed.
+ */
+function serverKey(url: string): string {
+	try {
+		const parsed = new URL(url.trim());
+		return `${parsed.origin}${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}`;
+	} catch {
+		return url.trim();
+	}
 }
 
 /**

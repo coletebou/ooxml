@@ -168,6 +168,18 @@ describe('accountKey', () => {
 		expect(accountKey(basic, { account })).toBe('jmap:https://mail.example.com:kim:A1');
 		// A token alone says nothing of whose the account is: nothing is stored then.
 		expect(accountKey(bearer, { account })).toBeNull();
+		// The scheme and the host ignore case; the path and the query do not (RFC 3986 6.2.2.1).
+		const at = (url: string) =>
+			accountKey(
+				{ kind: 'jmap', url, auth: { type: 'bearer', token: 't' } },
+				{ account, user: 'kim' },
+			);
+		expect(at(' HTTPS://Mail.Example.COM/jmap/Kim?Tenant=A ')).toBe(
+			'jmap:https://mail.example.com/jmap/Kim?Tenant=A:kim:A1',
+		);
+		expect(at('https://mail.example.com/jmap/kim')).not.toBe(
+			at('https://mail.example.com/jmap/Kim'),
+		);
 	});
 
 	it("keys a transport of the host's own by the key it names, else by who signed in", () => {
