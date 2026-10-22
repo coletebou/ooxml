@@ -111,6 +111,9 @@ interface ListContext {
 	kind: 'bullet' | 'decimal';
 }
 
+/** The text height of a Letter page with 1 inch margins, in CSS px (9 in at 96 px). */
+const MAX_PICTURE_HEIGHT = 864;
+
 class Writer {
 	readonly blocks: Block[] = [];
 	readonly media = new Map<string, PendingMediaPart>();
@@ -206,9 +209,17 @@ class Writer {
 		}
 	}
 
-	picture(picture: ExportPicture, mime: string, name: string, alt: string, maxWidth: number): void {
+	picture(
+		picture: ExportPicture,
+		mime: string,
+		name: string,
+		alt: string,
+		maxWidth: number,
+		maxHeight = MAX_PICTURE_HEIGHT,
+	): void {
 		const ext = WORD_PICTURES[mime] ?? 'png';
-		const scale = picture.width > maxWidth ? maxWidth / picture.width : 1;
+		// Within the text width and a page's height (a tall picture would run off the page).
+		const scale = Math.min(1, maxWidth / picture.width, maxHeight / picture.height);
 		const partName = `word/media/notebook-${this.media.size + 1}.${ext}`;
 		const contentType = mime in WORD_PICTURES ? mime : 'image/png';
 		this.media.set(partName, { bytes: picture.bytes, contentType });

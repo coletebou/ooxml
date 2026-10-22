@@ -331,6 +331,28 @@ describe('page export to .docx', () => {
 		expect(sizes).toHaveLength(2);
 	});
 
+	it('fits a tall picture within the page height as well as its width', async () => {
+		const { bytes } = await exportPageToDocx({
+			title: 'Tall',
+			items: [
+				{
+					kind: 'image',
+					x: 0,
+					y: 0,
+					width: 300,
+					height: 3000,
+					name: 'tall.png',
+					mime: 'image/png',
+					alt: '',
+					bytes: png(1),
+				},
+			],
+		});
+		const image = paragraphs((await loadDocx(bytes)).model).find((p) => p.runs[0]?.image)!.runs[0]!
+			.image!;
+		expect([image.widthPx, image.heightPx]).toEqual([86, 864]);
+	});
+
 	it('restarts each separate numbered list nested in one item', async () => {
 		const para = (t: string): RichNode => ({
 			type: 'paragraph',
