@@ -26,6 +26,18 @@ const cases = [
 		header: `Basic ${BASIC_VALUE}`,
 		secrets: ['pässwörd-SECRET-2', 'SECRET-2', BASIC_VALUE, 'joe@example.com:pässwörd'],
 	},
+	{
+		name: 'bearer function',
+		auth: { type: 'bearer', token: () => 'tok-SECRET-3' } satisfies JmapAuth,
+		header: 'Bearer tok-SECRET-3',
+		secrets: ['tok-SECRET-3', 'SECRET-3'],
+	},
+	{
+		name: 'bearer async function',
+		auth: { type: 'bearer', token: async () => 'tok-SECRET-4' } satisfies JmapAuth,
+		header: 'Bearer tok-SECRET-4',
+		secrets: ['tok-SECRET-4', 'SECRET-4'],
+	},
 ];
 
 const draft: Draft = {
@@ -145,5 +157,47 @@ describe('a bearer token a header cannot carry', () => {
 		expect(error).toMatchObject({ code: 'unauthorized' });
 		for (const text of texts(error)) expect(text).not.toContain('SECRET');
 		expect(server.requests).toEqual([]);
+	});
+});
+
+describe('a bearer token from a function', () => {
+	it('is asked for before each request, so a token refreshed meanwhile goes with the next', async () => {
+		let token = 'tok-OLD-SECRET';
+		const { server, transport } = setup({ auth: { type: 'bearer', token: () => token } });
+		installMailStore(server);
+		await transport.connect();
+		const first = server.requests.length;
+		token = 'tok-NEW-SECRET';
+		await transport.mailboxes();
+		const headers = server.requests.map((request) => request.headers.authorization);
+		expect(headers.slice(0, first).every((h) => h === 'Bearer tok-OLD-SECRET')).toBe(true);
+		expect(headers.slice(first)).toEqual(['Bearer tok-NEW-SECRET']);
+		// Both are scrubbed from what an error says: the one sent last and the one before.
+		server.route(
+			(request) => request.method === 'POST',
+			() => new Response('denied tok-OLD-SECRET and tok-NEW-SECRET', { status: 500 }),
+		);
+		const error = await failure(transport.mailboxes());
+		for (const text of texts(error)) expect(text).not.toContain('SECRET');
+	});
+
+	it('that fails, or gives what a header cannot carry, sends nothing and is not quoted', async () => {
+		const failing = [
+			() => {
+				throw new Error('refresh failed with rt-SECRET');
+			},
+			async () => Promise.reject(new Error('refresh failed with rt-SECRET')),
+			() => '',
+			() => 'line\nbreak-SECRET',
+			() => 42 as unknown as string,
+		];
+		for (const token of failing) {
+			const server = createFakeServer();
+			const { transport } = setup({ server, auth: { type: 'bearer', token } });
+			const error = await failure(transport.connect());
+			expect(error).toMatchObject({ code: 'unauthorized' });
+			for (const text of texts(error)) expect(text).not.toContain('SECRET');
+			expect(server.requests).toEqual([]);
+		}
 	});
 });

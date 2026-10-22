@@ -92,6 +92,23 @@ describe('sameMailConnection', () => {
 		expect(sameMailConnection(jmap({ type: 'bearer', token: 't' }), other)).toBe(false);
 	});
 
+	it('keeps a server whose token comes from one function, whatever token it gives', () => {
+		let token = 't';
+		const current = () => token;
+		const by = (given: () => string) => jmap({ type: 'bearer', token: given });
+		expect(sameMailConnection(by(current), by(current))).toBe(true);
+		token = 'u';
+		expect(sameMailConnection(by(current), by(current))).toBe(true);
+		// Another function, or a token in its place, is another connection.
+		expect(
+			sameMailConnection(
+				by(current),
+				by(() => token),
+			),
+		).toBe(false);
+		expect(sameMailConnection(by(current), jmap({ type: 'bearer', token: 'u' }))).toBe(false);
+	});
+
 	it('compares a transport of your own by identity', () => {
 		const transport = createMemoryTransport();
 		expect(

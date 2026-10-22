@@ -10,30 +10,58 @@ import { followRedirects, type Hop, type Landed, type RedirectMode } from './red
 
 export { discard, isSafeUrl } from './redirects';
 
+/**
+ * A bearer token, or a function that gives the current one (it may be async). The function is
+ * asked before each request, so a token refreshed meanwhile goes with the next one: a host whose
+ * tokens expire keeps its connection, and what the client holds (an open draft), by giving the
+ * same function each time.
+ */
+export type JmapToken = string | (() => string | Promise<string>);
+
 /** Credentials for every request. They are never logged, stored or put in a URL or an error. */
 export type JmapAuth =
-	| { type: 'bearer'; token: string }
+	| { type: 'bearer'; token: JmapToken }
 	| { type: 'basic'; username: string; password: string };
 
 const utf8 = new TextEncoder();
 
 function secretsOf(auth: JmapAuth): string[] {
-	if (auth.type === 'bearer') return [auth.token];
+	if (auth.type === 'bearer') return typeof auth.token === 'string' ? [auth.token] : [];
 	const pair = `${auth.username}:${auth.password}`;
 	return [auth.password, pair, encodeBase64(utf8.encode(pair))];
 }
 
-/** The `Authorization` value: `Bearer <token>` or `Basic base64(user:password)` over UTF-8. */
-export function authorization(auth: JmapAuth): string {
+/** The token a bearer gives now; a function that fails or gives no text is refused, unquoted. */
+async function currentToken(token: JmapToken): Promise<string> {
+	if (typeof token === 'string') return token;
+	try {
+		const value: unknown = await token();
+		if (typeof value === 'string') return value;
+	} catch {
+		// Not kept as the cause: what the host's function throws may quote what it refreshes with.
+	}
+	throw new MailTransportError('unauthorized', 'The access token could not be read.');
+}
+
+/**
+ * The `Authorization` value: `Bearer <token>` or `Basic base64(user:password)` over UTF-8. `seen`
+ * learns each token read, so that errors are scrubbed of it.
+ */
+export async function authorization(
+	auth: JmapAuth,
+	seen?: (secret: string) => void,
+): Promise<string> {
 	if (auth.type === 'basic')
 		return `Basic ${encodeBase64(utf8.encode(`${auth.username}:${auth.password}`))}`;
+	const token = await currentToken(auth.token);
+	if (token) seen?.(token);
 	// A header error message would quote the token, so refuse what a header cannot carry first.
-	if (!auth.token || /[^\x21-\x7e]/.test(auth.token))
+	if (!token || /[^\x21-\x7e]/.test(token))
 		throw new MailTransportError(
 			'unauthorized',
 			'The access token is empty or not printable ASCII.',
 		);
-	return `Bearer ${auth.token}`;
+	return `Bearer ${token}`;
 }
 
 export interface JmapHttpOptions {
@@ -157,7 +185,9 @@ function linkSignals(
 }
 
 export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
-	const redact = createRedactor(secretsOf(options.auth));
+	/** Every secret sent so far: each token a function gave is scrubbed from errors too. */
+	const secrets = new Set(secretsOf(options.auth));
+	const redact: Redact = (text) => createRedactor([...secrets])(text);
 	/** Learnt once: a platform that hides redirects hides them from every request. */
 	const redirects: RedirectMode = { hidden: false };
 
@@ -172,7 +202,10 @@ export function createJmapHttp(options: JmapHttpOptions): JmapHttp {
 		if (typeof doFetch !== 'function')
 			throw new MailTransportError('unsupported', 'This platform has no fetch.');
 		const headers = hop.credentials
-			? { ...hop.headers, Authorization: authorization(options.auth) }
+			? {
+					...hop.headers,
+					Authorization: await authorization(options.auth, (secret) => secrets.add(secret)),
+				}
 			: { ...hop.headers };
 		try {
 			return await doFetch(hop.url, {

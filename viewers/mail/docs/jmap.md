@@ -37,6 +37,27 @@ The token or password lives only in the connection object you pass. OpenMail nev
 storage, never puts it in a URL and never includes it in an error message or a log. Keeping it
 across visits (and how) is the host page's decision.
 
+A token that expires can be given as a function that returns the current one (it may be async).
+OpenMail asks it before each request, so a token refreshed meanwhile goes with the next request
+and nothing connects again: the open conversation and the draft being written stay. Give the same
+function each time (in React, keep it stable, for example with `useCallback`). A new token or a new
+function is a new connection: it starts again from the server's folders, and the draft that was
+open is saved with the credentials it was written under, which fails if they have expired.
+
+```ts
+let token = await signIn();
+const config = {
+	kind: 'jmap',
+	url: 'https://mail.example.com',
+	auth: { type: 'bearer', token: () => token },
+};
+// Later, once the token is refreshed, the next request sends the new one:
+token = await refreshToken();
+```
+
+A function that throws, or gives no text, fails the request as `unauthorized` without sending it;
+what it threw is not passed on, as it may quote what the token is refreshed with.
+
 ## What is not proven yet
 
 The client is tested against the worked examples of RFC 8620 and RFC 8621 and recorded responses

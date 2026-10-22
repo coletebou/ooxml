@@ -44,7 +44,10 @@ export type {
 /**
  * Where the mail comes from: the built-in demo mailbox (in memory, nothing leaves the page), a JMAP
  * server (RFC 8620, RFC 8621), or a transport of your own. A transport of your own stays yours to
- * close: every client made on it leaves it open, so the next one can use it.
+ * close: every client made on it leaves it open, so the next one can use it. A bearer token that
+ * expires is best given as a function returning the current one, the same function each time: it
+ * is asked before each request, so a refreshed token keeps the connection and the open draft,
+ * where a new token or function connects again.
  */
 export type MailConnection =
 	| { kind: 'demo'; seed?: DemoSeedOptions }
