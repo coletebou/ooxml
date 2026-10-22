@@ -535,7 +535,13 @@ mountProfile({
 	beforeSwitch: async () => {
 		for (const id of sessions.sessions.keys()) await sessions.save(id);
 		teams?.client?.flushStorage();
-		await notebook?.client?.flush();
+		// The page reloads for the other profile, so notes this device cannot save yet would be
+		// lost: the switch waits until they are saved (the notebook says why they are not).
+		await notebook?.client?.flush().catch(() => {
+			throw new Error(
+				'Your latest notebook changes could not be saved on this device, so the profile was not switched. Free some storage space and try again.',
+			);
+		});
 	},
 	changed: () => renderFiles(),
 });

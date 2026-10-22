@@ -708,6 +708,24 @@ describe('notebook client twelfth review round', () => {
 	});
 });
 
+describe('notebook client flush', () => {
+	it('flushes without an error when a list it could not read has nothing unsaved', async () => {
+		const inner = createMemoryStorage();
+		const storage: NotebookStorage = {
+			...inner,
+			load: async (key) => {
+				if (key === REGISTRY_KEY) throw new Error('read failed');
+				return inner.load(key);
+			},
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		// A host waiting for the flush (before switching profiles) is not held up for good.
+		await expect(client.flush()).resolves.toBeUndefined();
+	});
+});
+
 describe('notebook client undo of new items', () => {
 	it('undoes making a section, with the page it came with', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());

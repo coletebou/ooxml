@@ -135,14 +135,17 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 		},
 		async flush() {
 			await save();
-			if (failed) throw failed;
+			// Only changes that are still unsaved fail it: a list that could not be read, with nothing
+			// changed since, has nothing to lose.
+			if (failed && dirty) throw failed;
 		},
 		async destroy() {
 			if (destroyed) return;
 			destroyed = true;
 			await save();
 			// The device refused the list's last save: the tab keeps a copy for the next client.
-			if (failed && storage) tabCopies(storage).set(REGISTRY_KEY, Y.encodeStateAsUpdate(doc));
+			if (failed && dirty && storage)
+				tabCopies(storage).set(REGISTRY_KEY, Y.encodeStateAsUpdate(doc));
 			session?.destroy();
 			doc.destroy();
 		},
