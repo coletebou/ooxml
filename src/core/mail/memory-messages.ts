@@ -230,14 +230,17 @@ export function messageFromRaw(
 	id: string,
 	options: { mailboxId: string; now: number; blobs: BlobStore },
 ): MailMessage {
-	const parsed = readEmail(bytes);
+	// Copied once and read from the copy: a part read as it was sent (7bit, 8bit, binary) is a view
+	// of the bytes read, so it must not share the caller's.
+	const own = new Uint8Array(bytes);
+	const parsed = readEmail(own);
 	const blobIdOf = (partId: string): string => `${id}-part-${partId}`;
 	for (const attachment of parsed.attachments)
 		options.blobs.set(blobIdOf(attachment.partId), {
 			bytes: attachment.bytes,
 			type: attachment.type,
 		});
-	options.blobs.set(`${id}-raw`, { bytes: new Uint8Array(bytes), type: 'message/rfc822' });
+	options.blobs.set(`${id}-raw`, { bytes: own, type: 'message/rfc822' });
 	return toMailMessage(
 		parsed,
 		{

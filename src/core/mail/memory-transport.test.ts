@@ -266,6 +266,36 @@ describe('createMemoryTransport', () => {
 		expect(new TextDecoder().decode(bytes)).toBe('notes');
 	});
 
+	it('keeps a copy of its own of the parts of a message imported, read as they were sent', async () => {
+		const transport = createMemoryTransport();
+		// An 8bit part is read as it was sent: its bytes are those of the message given.
+		const eml = Buffer.from(
+			[
+				'Subject: Notes',
+				'MIME-Version: 1.0',
+				'Content-Type: multipart/mixed; boundary="b"',
+				'',
+				'--b',
+				'Content-Type: text/plain',
+				'',
+				'See the notes.',
+				'--b',
+				'Content-Type: text/plain; name="notes.txt"',
+				'Content-Disposition: attachment; filename="notes.txt"',
+				'Content-Transfer-Encoding: 8bit',
+				'',
+				'The notes',
+				'--b--',
+				'',
+			].join('\r\n'),
+		);
+		const { id } = await transport.importMessage(eml, 'inbox');
+		eml.fill(0x20);
+		const [file] = (await transport.message(id)).attachments;
+		const bytes = await transport.download(file!.blobId, { type: 'text/plain', name: 'notes.txt' });
+		expect(new TextDecoder().decode(bytes)).toBe('The notes');
+	});
+
 	it('sends a message to yourself where there is no Inbox once, into Sent', async () => {
 		const transport = createMemoryTransport({
 			mailboxes: DEFAULT_MAILBOXES.filter((mailbox) => mailbox.role !== 'inbox'),
