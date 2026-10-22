@@ -112,6 +112,8 @@ export function createMemoryState(options: MemoryTransportOptions): MemoryState 
 	const seeds = options.messages ?? [];
 	const named = new Set(seeds.flatMap((seed) => (seed.id === undefined ? [] : [seed.id])));
 	for (const seed of seeds) {
+		if (seed.id !== undefined && state.messages.has(seed.id))
+			throw new MailTransportError('invalid', `Two messages are seeded as ${seed.id}.`);
 		const id = seed.id ?? state.nextId('m', named);
 		state.messages.set(id, messageFromSeed(seed, id, state.blobs));
 	}

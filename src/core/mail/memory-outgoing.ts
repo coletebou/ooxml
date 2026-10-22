@@ -43,9 +43,17 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 		if (target) messages.set(id!, { ...target, keywords: { ...target.keywords, [keyword]: true } });
 	};
 
+	/** A draft's files must have been uploaded, as a JMAP server asks (`blobNotFound`). */
+	const uploaded = (draft: Draft): void => {
+		const missing = draft.attachments.find((file) => !state.blobs.has(file.blobId));
+		if (missing)
+			throw new MailTransportError('notFound', `The file ${missing.name} was not uploaded.`);
+	};
+
 	return {
 		async saveDraft(draft) {
 			await state.settle();
+			uploaded(draft);
 			const from = senderOf(draft);
 			const id = newId('d', draft);
 			messages.set(
@@ -67,6 +75,7 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 			const recipients = draftRecipients(draft);
 			if (!recipients.length)
 				throw new MailTransportError('invalid', 'The message has no recipients.');
+			uploaded(draft);
 			const from = senderOf(draft);
 			// Every folder it needs is found before anything is stored, so a send that fails stores
 			// nothing. A message to the person's own address arrives in the Inbox too, when there is one.

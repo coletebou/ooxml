@@ -180,6 +180,8 @@ export function createMemoryTransport(options: MemoryTransportOptions = {}): Mem
 			listeners.clear();
 		},
 		deliver(seed) {
+			if (seed.id !== undefined && messages.has(seed.id))
+				throw new MailTransportError('invalid', `A message ${seed.id} is already there.`);
 			const id = seed.id ?? state.nextId('m', messages);
 			messages.set(id, messageFromSeed(seed, id, blobs));
 			state.emailsChanged([id], [], []);

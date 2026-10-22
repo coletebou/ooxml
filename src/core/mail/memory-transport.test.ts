@@ -376,3 +376,52 @@ describe('createMemoryTransport', () => {
 		expect(newest?.subject).toBe('This week: offline-first apps');
 	});
 });
+
+describe('createMemoryTransport refuses what a server would', () => {
+	const draft = (blobId: string) => ({
+		to: [ada],
+		cc: [],
+		bcc: [],
+		subject: 'With a file',
+		text: '',
+		attachments: [{ blobId, name: 'a.txt', type: 'text/plain', size: 5 }],
+	});
+
+	it('saves or sends no draft whose file was never uploaded', async () => {
+		const transport = createMemoryTransport({});
+		for (const write of [
+			() => transport.saveDraft(draft('nope')),
+			() => transport.send(draft('nope')),
+		])
+			await expect(write()).rejects.toMatchObject({ code: 'notFound' });
+		expect(
+			(await transport.query({ mailboxId: 'drafts' }, { position: 0, limit: 10 })).ids,
+		).toEqual([]);
+		expect((await transport.query({ mailboxId: 'sent' }, { position: 0, limit: 10 })).ids).toEqual(
+			[],
+		);
+		// Uploaded first, the same draft is saved and sent.
+		const { blobId } = await transport.upload(new Uint8Array(5), 'text/plain');
+		await expect(transport.saveDraft(draft(blobId))).resolves.toMatchObject({
+			id: expect.any(String),
+		});
+		await expect(transport.send(draft(blobId))).resolves.toMatchObject({ id: expect.any(String) });
+	});
+
+	it('delivers no message under an id another holds, and seeds none twice', async () => {
+		const transport = createMemoryTransport({
+			messages: [{ id: 'a', mailboxId: 'inbox', from: me, subject: 'Original', receivedAt: 1 }],
+		});
+		expect(() =>
+			transport.deliver({ id: 'a', mailboxId: 'archive', from: me, subject: 'New', receivedAt: 2 }),
+		).toThrow(expect.objectContaining({ code: 'invalid' }));
+		expect(await transport.message('a')).toMatchObject({
+			subject: 'Original',
+			mailboxIds: ['inbox'],
+		});
+		const twice = { id: 'b', mailboxId: 'inbox', from: me, subject: 'Twice', receivedAt: 1 };
+		expect(() => createMemoryTransport({ messages: [twice, twice] })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		);
+	});
+});
