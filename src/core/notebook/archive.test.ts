@@ -7,7 +7,13 @@ import { addFile, addImage, addStroke, addText } from './canvas';
 import { NOTEBOOK_ORIGIN, NOTEBOOK_SEED_ORIGIN, notebookTypes } from './schema';
 import { overLimit, readSnapshot, writeSnapshot } from './snapshot';
 import { MAX_INK_POINTS } from './ink';
-import { MAX_ELEMENT_DEPTH, MAX_LIST_LEVELS, MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
+import {
+	MAX_ELEMENT_DEPTH,
+	MAX_FILE_BYTES,
+	MAX_LIST_LEVELS,
+	MAX_TEXT_LENGTH,
+	MAX_TEXT_NODES,
+} from './model';
 import { type NotebookEditContext, addPage, addSection, deletePage, writeMeta } from './structure';
 
 const context = (origin: unknown = NOTEBOOK_ORIGIN, client = 'a'): NotebookEditContext => ({
@@ -338,6 +344,11 @@ describe('notebook archive', () => {
 				containers: [{ container: { ...container, kind: 'text' }, content: [], overLimit: true }],
 			} as never),
 		).rejects.toThrow(NotebookArchiveError);
+		// Nor one larger than an import takes.
+		const tooLarge = { length: MAX_FILE_BYTES + 1 } as unknown as Uint8Array;
+		await expect(
+			exportNotebookArchive({ ...base, containers: [{ container, bytes: tooLarge }] } as never),
+		).rejects.toThrow('larger than an archive takes');
 		// A picture or file whose bytes are not here would make an archive no import opens.
 		for (const kind of ['file', 'image'])
 			await expect(
