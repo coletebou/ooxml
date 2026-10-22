@@ -161,6 +161,34 @@ describe('notebook editor commands', () => {
 		expect(inserted.doc.textContent).toBe('Mail');
 	});
 
+	it('uses the display text given for a selection or a link, keeping its formatting', () => {
+		const bold = {
+			type: 'paragraph',
+			attrs: { todo: null },
+			content: [
+				{ type: 'text', text: 'docs', marks: [{ type: 'bold' }] },
+				{ type: 'text', text: ' here' },
+			],
+		};
+		// A selection gets the link and the new text, in the formatting of its first run.
+		let s = run(state([bold], 1, 5), setLink('https://example.com', 'manual'));
+		expect(s.doc.textContent).toBe('manual here');
+		const linked = s.doc.firstChild!.firstChild!;
+		expect(linked.marks.map((m) => m.type.name).sort()).toEqual(['bold', 'link']);
+		// With the cursor in the link, the whole link is relabelled; the same text changes nothing.
+		s = run(
+			s.apply(s.tr.setSelection(TextSelection.create(s.doc, 3))),
+			setLink('https://example.com', 'guide'),
+		);
+		expect(s.doc.textContent).toBe('guide here');
+		const same = run(state([bold], 1, 5), setLink('https://example.com', 'docs'));
+		expect(same.doc.textContent).toBe('docs here');
+		// Across two paragraphs the text stays, so the paragraphs are not joined.
+		const across = run(state([p('one'), p('two')], 2, 7), setLink('https://example.com', 'x'));
+		expect(across.doc.childCount).toBe(2);
+		expect(activeFormats(state(json(across), 3)).link).toBe('https://example.com');
+	});
+
 	it('autoformats lists, headings and to-dos as you type', () => {
 		expect(types(type(state([p('')]), '* x').doc)).toEqual([
 			'bullet_list',

@@ -227,6 +227,19 @@ export function setLink(href: string | null, text?: string): Command {
 		if (empty && !around) {
 			const label = text?.trim() || value;
 			dispatch(state.tr.insert(from, schema.text(label, [mark])).scrollIntoView());
+			return true;
+		}
+		// New display text replaces the linked text when it is within one block (across blocks it
+		// would join them), keeping the formatting of its first run; unchanged, the runs stay as they are.
+		const label = text?.trim() ?? '';
+		const $from = state.doc.resolve(from);
+		if (
+			label &&
+			label !== state.doc.textBetween(from, to, ' ') &&
+			$from.sameParent(state.doc.resolve(to))
+		) {
+			const kept = type.removeFromSet(state.doc.nodeAt(from)?.marks ?? []);
+			dispatch(state.tr.replaceWith(from, to, schema.text(label, mark.addToSet(kept))));
 		} else dispatch(state.tr.removeMark(from, to, type).addMark(from, to, mark));
 		return true;
 	};
