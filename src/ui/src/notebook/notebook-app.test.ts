@@ -561,6 +561,17 @@ describe('<notebook-app> restarts', () => {
 		await until(() => !!app.state?.page);
 	});
 
+	it('hands no host the old profile client while that one saves its last changes', async () => {
+		app = await mount();
+		const old = app.client!;
+		const done = holdFlush(app, false);
+		app.storageName = `${app.getAttribute('storage-name')}-other`;
+		await app.updateComplete;
+		expect(app.client).toBeNull();
+		done();
+		await until(() => !!app.client && app.client !== old && !!app.state?.page);
+	});
+
 	it('closes the menus and dialogs of a profile it switches away from at once', async () => {
 		app = await mount();
 		holdFlush(app, false);

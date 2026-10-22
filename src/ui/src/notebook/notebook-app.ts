@@ -179,9 +179,12 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		this.focusId = '';
 	}
 
-	/** The core client of the notebooks on screen (for hosts and tests). */
+	/**
+	 * The core client of the notebooks on screen (for hosts and tests); `null` while none are, such
+	 * as during a switch to another profile, while the old one still saves its last changes.
+	 */
 	get client(): NotebookClient | null {
-		return this.#client;
+		return this.#clientKey ? this.#client : null;
 	}
 
 	tr = (key: NotebookKey, params?: MessageParams): string => this.t(key, params);
