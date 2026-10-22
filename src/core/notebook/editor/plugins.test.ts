@@ -39,6 +39,23 @@ describe('text limit', () => {
 		expect(short.apply(short.tr.insertText('6789x')).doc.textContent).toBe('012345');
 	});
 
+	it('stops local edits at the nodes a text box holds, as it does at its text', () => {
+		const para = (text: string) => schema.node('paragraph', { todo: null }, [schema.text(text)]);
+		const doc = schema.node('doc', null, [para('a'), para('b'), para('c')]);
+		// Three paragraphs of one text run each: six nodes.
+		const full = EditorState.create({ schema, doc, plugins: [textLimitPlugin(1000, 6)] });
+		const added = full.apply(full.tr.insert(full.doc.content.size, para('d')));
+		expect(added.doc.childCount).toBe(3);
+		expect(full.apply(full.tr.split(2)).doc.childCount).toBe(3);
+		// Typing into a run adds no node; shrinking and collaborators' changes always apply.
+		expect(full.apply(full.tr.insertText('x', 2)).doc.textContent).toBe('axbc');
+		expect(full.apply(full.tr.delete(0, 3)).doc.childCount).toBe(2);
+		const remote = full.tr
+			.insert(full.doc.content.size, para('d'))
+			.setMeta(ySyncPluginKey, { isChangeOrigin: true });
+		expect(full.apply(remote).doc.childCount).toBe(4);
+	});
+
 	it('applies changes from collaborators and undo whatever their length', () => {
 		const full = state('0123456789');
 		const remote = full.tr.insertText('more').setMeta(ySyncPluginKey, { isChangeOrigin: true });

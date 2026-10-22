@@ -6,6 +6,7 @@
 import { baseKeymap } from 'prosemirror-commands';
 import { inputRules } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
+import type { Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, Plugin, type Transaction } from 'prosemirror-state';
 import type { DecorationAttrs } from 'prosemirror-view';
 import {
@@ -17,7 +18,7 @@ import {
 } from 'y-prosemirror';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
-import { MAX_TEXT_LENGTH } from '../model';
+import { MAX_TEXT_LENGTH, MAX_TEXT_NODES } from '../model';
 import { notebookInputRules } from './input-rules';
 import { type KeymapHandlers, notebookKeymap } from './keymap';
 import { notebookSchema } from './schema';
@@ -34,19 +35,37 @@ export interface NotebookEditorOptions extends KeymapHandlers {
 	plugins?: readonly Plugin[];
 }
 
+/** The nodes in `doc`: blocks, text runs and leaves. */
+function countNodes(doc: ProseMirrorNode): number {
+	let n = 0;
+	doc.descendants(() => {
+		n++;
+	});
+	return n;
+}
+
 /**
- * Local edits stop at the text a container holds (`MAX_TEXT_LENGTH`), so what is typed is what its
- * archive and export keep. Changes from collaborators and undo (through the sync plugin) always
- * apply, or the editor would part from the shared text; shortening is always allowed.
+ * Local edits stop at the text and the nodes a container holds (`MAX_TEXT_LENGTH`,
+ * `MAX_TEXT_NODES`), so what is typed is what its archive and export keep (the editor's nodes are
+ * never fewer than the shared text's). Changes from collaborators and undo (through the sync
+ * plugin) always apply, or the editor would part from the shared text; shortening is always allowed.
  */
-export function textLimitPlugin(limit = MAX_TEXT_LENGTH): Plugin {
+export function textLimitPlugin(limit = MAX_TEXT_LENGTH, nodeLimit = MAX_TEXT_NODES): Plugin {
 	return new Plugin({
 		filterTransaction(tr) {
 			if (!tr.docChanged || tr.getMeta(ySyncPluginKey)) return true;
-			// The document's size bounds its text from above, so most edits pass without counting.
-			if (tr.doc.content.size <= limit) return true;
-			const after = tr.doc.textContent.length;
-			return after <= limit || after <= tr.before.textContent.length;
+			// The document's size bounds its text and its nodes from above, so most edits pass
+			// without counting.
+			const size = tr.doc.content.size;
+			if (size > limit) {
+				const after = tr.doc.textContent.length;
+				if (after > limit && after > tr.before.textContent.length) return false;
+			}
+			if (size > nodeLimit) {
+				const after = countNodes(tr.doc);
+				if (after > nodeLimit && after > countNodes(tr.before)) return false;
+			}
+			return true;
 		},
 	});
 }
