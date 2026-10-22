@@ -287,6 +287,14 @@ describe('notebook archive', () => {
 				containers: [{ container: { ...container, kind: 'text' }, content: [], overLimit: true }],
 			} as never),
 		).rejects.toThrow(NotebookArchiveError);
+		// A picture or file whose bytes are not here would make an archive no import opens.
+		for (const kind of ['file', 'image'])
+			await expect(
+				exportNotebookArchive({
+					...base,
+					containers: [{ container: { ...container, kind }, bytes: null }],
+				} as never),
+			).rejects.toThrow('not on this device');
 		const zip = new JSZip();
 		const points = Array.from({ length: (MAX_INK_POINTS + 1) * 3 }, () => 1);
 		zip.file(

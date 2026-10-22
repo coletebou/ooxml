@@ -61,6 +61,9 @@ export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise
 		throw new NotebookArchiveError('This notebook holds more items than an archive takes');
 	if (snapshot.containers.some((c) => c.overLimit))
 		throw new NotebookArchiveError('A text box holds more text than an archive takes');
+	// An import refuses a picture or file without its bytes, so such an archive would never open.
+	if (snapshot.containers.some((c) => c.container.kind !== 'text' && !c.bytes?.length))
+		throw new NotebookArchiveError('A picture or file of this notebook is not on this device');
 	const files: { name: string; bytes: Uint8Array }[] = [];
 	const containers = snapshot.containers.map(({ container, content, bytes }) => {
 		const media = bytes ? mediaName(container) : undefined;
