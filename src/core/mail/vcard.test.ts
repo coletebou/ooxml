@@ -652,6 +652,7 @@ describe('serializeVCards', () => {
 				'  /9j/4AAQ',
 				'  SkZJRg==',
 				'',
+				'LOGO;VALUE=URL:https://example.com/b.png',
 				'END:VCARD',
 			].join('\r\n'),
 		);
@@ -665,6 +666,7 @@ describe('serializeVCards', () => {
 				'KEY:data:application/pkix-cert;base64,MIIC',
 				'PHOTO;VALUE=uri:https://example.com/a.jpg',
 				'PHOTO:data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+				'LOGO;VALUE=uri:https://example.com/b.png',
 			]),
 		);
 		expect(text).not.toMatch(/ENCODING/i);

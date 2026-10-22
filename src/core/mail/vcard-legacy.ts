@@ -36,12 +36,6 @@ function mediaType(property: string, type: string): string {
 }
 
 /**
- * A kept line as vCard 4.0 writes it: an inline binary value as a `data:` URI, with the line's
- * group and its other parameters; a GEO of two decimals as `geo:<latitude>,<longitude>`, so too;
- * a quoted-printable one as the text it encodes, a line break in it as `\n` (RFC 6350 3.4),
- * without the encoding and the charset (4.0 is UTF-8 alone, 3.1); any other line as it is.
- */
-/**
  * A vCard 2.1 value's text with its backslashes escaped as vCard 4.0 writes them (RFC 6350 3.4):
  * in 2.1 a backslash is itself, but before a semicolon, where both mean a semicolon.
  */
@@ -59,6 +53,17 @@ export function vcard21Line(line: string): string {
 	return `${[parts.name, ...parts.params].join(';')}:${escape21(parts.value)}`;
 }
 
+/** A 2.1 link's value type, `VALUE=URL`, as 4.0 names it: `uri` (RFC 6350 5.2). */
+const uriValue = (param: string): string =>
+	/^\s*VALUE\s*=\s*URL\s*$/i.test(param) ? 'VALUE=uri' : param;
+
+/**
+ * A kept line as vCard 4.0 writes it: an inline binary value as a `data:` URI, with the line's
+ * group and its other parameters; a GEO of two decimals as `geo:<latitude>,<longitude>`, so too;
+ * a quoted-printable one as the text it encodes, a line break in it as `\n` (RFC 6350 3.4),
+ * without the encoding and the charset (4.0 is UTF-8 alone, 3.1); a link's 2.1 value type, URL,
+ * as `uri`; any other line as it is.
+ */
 export function vcard4Line(line: string): string {
 	const property = parseLine(line);
 	const parts = splitContentLine(line);
@@ -79,9 +84,13 @@ export function vcard4Line(line: string): string {
 		BINARY.has(property.name) &&
 		(encoding === 'B' || encoding === 'BASE64' || types.some(base64) || (quoted && !link));
 	if (!inline) {
-		if (!quoted) return line;
+		const params = parts.params.map(uriValue);
+		if (!quoted)
+			return params.some((param, i) => param !== parts.params[i])
+				? `${[parts.name, ...params].join(';')}:${parts.value}`
+				: line;
 		// The bare 2.1 parameter (`;QUOTED-PRINTABLE`) goes with ENCODING; the text is 2.1's.
-		const kept = parts.params.filter(
+		const kept = params.filter(
 			(param) => !/^\s*(?:(?:ENCODING|CHARSET)\s*=|QUOTED-PRINTABLE\s*$)/i.test(param),
 		);
 		const text = escape21(decodeValue(property)).replace(/\r\n|\r|\n/g, '\\n');

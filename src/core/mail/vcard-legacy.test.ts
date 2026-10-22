@@ -79,8 +79,12 @@ describe('vcard4Line', () => {
 		expect(vcard4Line('PHOTO;ENCODING=QUOTED-PRINTABLE;TYPE=GIF:GIF89a=00=FF')).toBe(
 			'PHOTO:data:image/gif;base64,R0lGODlhAP8=',
 		);
+		// A link's 2.1 value type, URL, is the one 4.0 calls uri (RFC 6350 5.2).
 		expect(vcard4Line('PHOTO;VALUE=URL;ENCODING=QUOTED-PRINTABLE:https=3A//example.com/a')).toBe(
-			'PHOTO;VALUE=URL:https://example.com/a',
+			'PHOTO;VALUE=uri:https://example.com/a',
+		);
+		expect(vcard4Line('item2.LOGO;value=url;X-SIZE=4:https://example.com/b')).toBe(
+			'item2.LOGO;VALUE=uri;X-SIZE=4:https://example.com/b',
 		);
 	});
 });
