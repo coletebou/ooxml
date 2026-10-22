@@ -165,7 +165,7 @@ export class NotebookNav extends NotebookElement {
 					e.stopPropagation();
 					if (e.key === 'Enter' && !composing(e))
 						this.#commit(kind, id, (e.target as HTMLInputElement).value);
-					if (e.key === 'Escape') this.editing = null;
+					if (e.key === 'Escape' && !composing(e)) this.editing = null;
 				}}
 				@blur=${(e: Event) => this.#commit(kind, id, (e.target as HTMLInputElement).value)}
 			/>`;

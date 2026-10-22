@@ -334,6 +334,39 @@ describe('<notebook-app>', () => {
 		expect(app.page()!.shadowRoot!.activeElement).not.toBe(title);
 	});
 
+	it('keeps editing when Escape cancels an input method candidate', async () => {
+		app = await mount();
+		const page = app.page()!;
+		app.client!.addText({ x: 40, y: 40 }, [
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'note' }] },
+		]);
+		await until(() => page.shadowRoot!.querySelector<NotebookText>('notebook-text')?.view);
+		const view = page.shadowRoot!.querySelector<NotebookText>('notebook-text')!.view!;
+		const escapes: unknown[] = [];
+		page.addEventListener('nb-text-escape', (e) => escapes.push(e));
+		const escape = (isComposing: boolean) =>
+			view.dom.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Escape', isComposing, bubbles: true, composed: true }),
+			);
+		escape(true);
+		expect(escapes).toHaveLength(0);
+		escape(false);
+		expect(escapes).toHaveLength(1);
+		// The same in a section's name field.
+		const nav = app.nav()!;
+		nav.startRename('section', app.state!.sectionId);
+		await nav.updateComplete;
+		const field = () => nav.shadowRoot!.querySelector<HTMLInputElement>('input.rename');
+		field()!.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }),
+		);
+		await nav.updateComplete;
+		expect(field()).not.toBeNull();
+		field()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await nav.updateComplete;
+		expect(field()).toBeNull();
+	});
+
 	it('keeps a section-tree item in the Tab order when the selected one is folded away', async () => {
 		app = await mount();
 		const client = app.client!;

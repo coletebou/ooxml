@@ -17,6 +17,7 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 import { controlStyles } from '../base';
 import { definer } from '../registry';
 import { NotebookElement } from './base';
+import { composing } from './keys';
 import css from './text-container.css?raw';
 
 export interface TextFocusDetail {
@@ -233,7 +234,8 @@ export class NotebookText extends NotebookElement {
 				),
 				blur: () => (fire('nb-text-blur', { id: this.containerId }), false),
 				keydown: (_view, event) => {
-					if (event.key !== 'Escape') return false;
+					// An input method's Escape cancels its candidate, and the text box stays in editing.
+					if (event.key !== 'Escape' || composing(event) || view.composing) return false;
 					fire('nb-text-escape', { id: this.containerId });
 					return true;
 				},
