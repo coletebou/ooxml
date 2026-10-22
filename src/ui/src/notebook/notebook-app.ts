@@ -275,6 +275,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	#restart(): void {
 		const current = this.#client;
 		if (!current) return this.#start();
+		// Equal settings (a host passing a fresh but equal config object) keep the client.
+		if (this.#key() === this.#clientKey) return;
 		// Another storage is another profile: its notebooks must not stay on screen, so it switches
 		// even when the last save failed (the save-failed notice said so).
 		const profile = this.storageName !== this.#storageName;
@@ -284,6 +286,8 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			this.state = null;
 			this.editor = null;
 			this.formats = null;
+			// No longer shown, so a switch straight back to this profile starts a client to show it.
+			this.#clientKey = '';
 		}
 		// The new client starts either way: a host that turns the sync server off, or switches the
 		// profile, must not keep the old one. What the device refused is kept in the tab and saved by
@@ -297,17 +301,26 @@ export class NotebookApp extends NotebookElement implements AppHost {
 				for (const off of this.#off.splice(0)) off();
 				await current.destroy();
 				if (this.#client !== current) return;
+				// The closed client is no longer the app's, so the next one starts even for equal settings.
+				this.#client = null;
+				this.#clientKey = '';
 				this.#start();
 				this.notify(this.t('notice.save-failed'));
 			},
 		);
 	}
 
+	/** The settings a client is made from, compared to tell whether a new one is needed. */
+	#key(): string {
+		const name = this.userName || readOfficeProfile().displayName || 'Guest';
+		return JSON.stringify([this.userId, name, this.storageName, this.#config()]);
+	}
+
 	#start(): void {
 		const config = this.#config();
 		const profile = readOfficeProfile();
 		const name = this.userName || profile.displayName || 'Guest';
-		const key = JSON.stringify([this.userId, name, this.storageName, config]);
+		const key = this.#key();
 		if (key === this.#clientKey && this.#client) return;
 		this.#stop();
 		this.#clientKey = key;

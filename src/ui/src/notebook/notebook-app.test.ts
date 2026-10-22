@@ -426,3 +426,62 @@ describe('<notebook-app> on a touch screen', () => {
 		await until(() => app.state!.containers.length === 1);
 	});
 });
+
+describe('<notebook-app> restarts', () => {
+	let app: NotebookApp;
+	afterEach(() => app?.remove());
+
+	/** Hold the current client's flush until the returned settle function is called. */
+	const holdFlush = (target: NotebookApp, fail: boolean) => {
+		let settle = (): void => undefined;
+		const held = new Promise<void>((resolve, reject) => {
+			settle = () => (fail ? reject(new Error('quota exceeded')) : resolve());
+		});
+		// Handled here too, so a hold no one waits on is not an unhandled rejection.
+		held.catch(() => undefined);
+		target.client!.flush = () => held;
+		return settle;
+	};
+
+	it('keeps its client for an equal config object, even when the last save fails', async () => {
+		app = await mount();
+		const old = app.client!;
+		holdFlush(app, true)();
+		app.config = { mode: 'local' };
+		await app.updateComplete;
+		await new Promise((r) => setTimeout(r, 20));
+		expect(app.client).toBe(old);
+		// Still subscribed: a change shows.
+		const before = app.state!.pages.length;
+		runCommand(app, 'new-page');
+		await until(() => app.state!.pages.length === before + 1);
+	});
+
+	it('starts a working client after a failed save when the settings changed and came back', async () => {
+		app = await mount();
+		const old = app.client!;
+		const fail = holdFlush(app, true);
+		app.userName = 'Bob';
+		await app.updateComplete;
+		app.userName = 'Ada';
+		await app.updateComplete;
+		fail();
+		await until(() => app.client !== old && !!app.state?.page);
+		const before = app.state!.pages.length;
+		runCommand(app, 'new-page');
+		await until(() => app.state!.pages.length === before + 1);
+	});
+
+	it('shows the notebooks again after switching to another profile and straight back', async () => {
+		app = await mount();
+		const name = app.getAttribute('storage-name')!;
+		const done = holdFlush(app, false);
+		app.storageName = `${name}-other`;
+		await app.updateComplete;
+		expect(app.state).toBeNull();
+		app.storageName = name;
+		await app.updateComplete;
+		done();
+		await until(() => !!app.state?.page);
+	});
+});
