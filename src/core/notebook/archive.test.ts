@@ -226,6 +226,8 @@ describe('notebook archive', () => {
 				JSON.stringify({
 					format: 'ooxml-notebook',
 					version: 1,
+					sections: [{ id: 's1', kind: 'section', name: 'S' }],
+					pages: [{ id: 'p1', sectionId: 's1', title: 'P' }],
 					containers: [{ id: 'c1', pageId: 'p1', kind: 'text', x: 0, y: 0, content }],
 				}),
 			);
@@ -251,6 +253,39 @@ describe('notebook archive', () => {
 		expect(snapshot.containers).toHaveLength(1);
 	});
 
+	it('refuses an archive with a page outside its sections or an item outside its pages', async () => {
+		const archive = async (manifest: Record<string, unknown>) => {
+			const zip = new JSZip();
+			zip.file(
+				'notebook.json',
+				JSON.stringify({ format: 'ooxml-notebook', version: 1, ...manifest }),
+			);
+			return importNotebookArchive(await zip.generateAsync({ type: 'uint8array' }));
+		};
+		const sections = [
+			{ id: 's1', kind: 'section', name: 'S' },
+			{ id: 'g1', kind: 'group', name: 'G' },
+		];
+		const text = { id: 'c1', kind: 'text', x: 0, y: 0, content: [] };
+		await expect(
+			archive({ sections, pages: [{ id: 'p1', sectionId: 'gone', title: 'P' }] }),
+		).rejects.toThrow(NotebookArchiveError);
+		// A group holds sections, not pages.
+		await expect(
+			archive({ sections, pages: [{ id: 'p1', sectionId: 'g1', title: 'P' }] }),
+		).rejects.toThrow(NotebookArchiveError);
+		const pages = [{ id: 'p1', sectionId: 's1', title: 'P' }];
+		await expect(
+			archive({ sections, pages, containers: [{ ...text, pageId: 'p2' }] }),
+		).rejects.toThrow(NotebookArchiveError);
+		await expect(
+			archive({ sections, pages, ink: [{ id: 'i1', pageId: 'p2', points: [1, 2, 0.5] }] }),
+		).rejects.toThrow(NotebookArchiveError);
+		expect(
+			(await archive({ sections, pages, containers: [{ ...text, pageId: 'p1' }] })).pages,
+		).toHaveLength(1);
+	});
+
 	it('reads stroke points as whole triples, so one bad value never shifts the rest', async () => {
 		const zip = new JSZip();
 		zip.file(
@@ -258,6 +293,8 @@ describe('notebook archive', () => {
 			JSON.stringify({
 				format: 'ooxml-notebook',
 				version: 1,
+				sections: [{ id: 's1', kind: 'section', name: 'S' }],
+				pages: [{ id: 'p1', sectionId: 's1', title: 'P' }],
 				// JSON writes a NaN pressure as null; a point without a position is left out.
 				ink: [
 					{ id: 's1', pageId: 'p1', points: [10, 20, null, 30, 40, 0.5, 'x', 1, 0.2, 50, 60, 0.7] },

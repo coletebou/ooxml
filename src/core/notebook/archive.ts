@@ -240,6 +240,16 @@ export async function importNotebookArchive(
 			width: clampNumber(s.width, 0.5, 64, 2),
 			points: inkTriples(s.points as unknown[]),
 		}));
+	// Every page in a section, every item on a page, of the archive: anything else would import
+	// and then never show (and leave the next export unsaid), so the archive is refused.
+	const sectionIds = new Set(sections.filter((x) => x.kind === 'section').map((x) => x.id));
+	const pageIds = new Set(pages.map((p) => p.id));
+	if (
+		pages.some((p) => !sectionIds.has(p.sectionId)) ||
+		containers.some((c) => !pageIds.has(c.container.pageId)) ||
+		strokes.some((x) => !pageIds.has(x.pageId))
+	)
+		throw new NotebookArchiveError('This archive has a page or item outside its sections');
 	return {
 		name: sanitizeName(meta.name, 'Notebook'),
 		color: sanitizeHexColor(meta.color, paletteColor(0)),
