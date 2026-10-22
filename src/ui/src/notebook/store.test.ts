@@ -107,4 +107,22 @@ describe('notebook store helpers', () => {
 		await new Promise((r) => setTimeout(r, 20));
 		expect(saves).not.toHaveBeenCalled();
 	});
+
+	it('saves when the page is hidden, the last moment a phone surely runs it', async () => {
+		const storage = createMemoryStorage();
+		const saves = vi.spyOn(storage, 'save');
+		const client = createNotebook({ storage, saveDelayMs: 60_000 });
+		await client.whenReady();
+		await client.flush();
+		saves.mockClear();
+		client.createPage({ title: 'Pending' });
+		const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.waitFor(() => expect(saves).toHaveBeenCalled());
+		} finally {
+			visibility.mockRestore();
+			await client.destroy();
+		}
+	});
 });

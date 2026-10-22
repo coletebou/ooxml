@@ -102,14 +102,20 @@ export function createNotebook(options: CreateNotebookOptions = {}): NotebookCli
 		},
 	});
 	// Leaving the page (a navigation, the tab closing) need not unmount the binding first, so the
-	// client saves what is pending itself; a failure was already announced as a notice.
+	// client saves what is pending itself; a failure was already announced as a notice. Hiding
+	// the page is the last moment a browser reliably runs code (a phone may then end the tab).
 	const onPageHide = (): void => void client.flush().catch(() => undefined);
+	const onHidden = (): void => {
+		if (globalThis.document?.visibilityState === 'hidden') onPageHide();
+	};
 	globalThis.addEventListener?.('pagehide', onPageHide);
+	globalThis.document?.addEventListener('visibilitychange', onHidden);
 	// The database this client opened is closed with it, so a restart does not leave connections
 	// behind that block another tab's upgrade or a host deleting a signed-out profile's database.
 	const destroy = client.destroy;
 	client.destroy = async () => {
 		globalThis.removeEventListener?.('pagehide', onPageHide);
+		globalThis.document?.removeEventListener('visibilitychange', onHidden);
 		try {
 			await destroy();
 		} finally {
