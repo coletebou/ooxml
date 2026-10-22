@@ -530,6 +530,45 @@ describe('send', () => {
 		expect(store.emails.get('E1')!.mailboxIds).toEqual({ [SENT]: true });
 	});
 
+	it('files the message in the Sent mailbox there is now when the one it knew is gone', async () => {
+		// Sent was made again on another device, and no change said so: the patch naming the old one
+		// is refused, the implicit one and the next. Left as it is, the sent message would still be a
+		// draft, which could be opened and sent again.
+		const { server, transport, store } = mail();
+		expect((await transport.mailboxes()).map((mailbox) => mailbox.id)).toContain(SENT);
+		const remade = 'MBsent2';
+		server.on('Mailbox/get', () => ({
+			state: 'M2',
+			list: MAILBOXES.map((m) => (m.role === 'sent' ? { ...m, id: remade } : m)),
+			notFound: [],
+		}));
+		store.refuseUpdate = (_id, patch) =>
+			Object.hasOwn(patch, `mailboxIds/${SENT}`) ? 'invalidProperties' : null;
+		expect(await transport.send(draft)).toEqual({ id: 'E1' });
+		expect(store.submissions).toHaveLength(1);
+		expect(store.emails.get('E1')).toMatchObject({ mailboxIds: { [remade]: true }, keywords: {} });
+		expect(store.emails.get('E1')!.keywords).not.toHaveProperty('$draft');
+	});
+
+	it('makes again a clean-up the server refused in part in the request that sent', async () => {
+		// The old draft is not destroyed and the message answered not marked, the first time.
+		const { server, transport, store } = mail();
+		const refused = new Set<string>();
+		const once = (target: string) => (id: string) =>
+			id === target && !refused.has(id) && refused.add(id) ? 'forbidden' : null;
+		store.refuseUpdate = once('original');
+		store.refuseDestroy = once('old-draft');
+		await transport.send(reply);
+		expect([...refused].sort()).toEqual(['old-draft', 'original']);
+		expect(server.argsOf('Email/set').at(-1)).toEqual({
+			accountId: 'A13824',
+			destroy: ['old-draft'],
+			update: { original: { 'keywords/$answered': true } },
+		});
+		expect(store.emails.has('old-draft')).toBe(false);
+		expect(store.emails.get('original')!.keywords).toHaveProperty('$answered');
+	});
+
 	it('keeps a sent message in Drafts, no longer a draft, when there is no Sent mailbox', async () => {
 		const { server, transport } = mail();
 		server.on('Mailbox/get', () => ({

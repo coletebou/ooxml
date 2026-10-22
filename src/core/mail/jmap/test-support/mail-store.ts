@@ -21,6 +21,12 @@ export interface MailStore {
 	/** Leave out the implicit `Email/set` response of `onSuccessUpdateEmail`. */
 	skipImplicit: boolean;
 	/**
+	 * The SetError type to refuse an update with (`notUpdated`), the implicit one of
+	 * `onSuccessUpdateEmail` included, or null to apply it; the destroys likewise (`notDestroyed`).
+	 */
+	refuseUpdate: ((id: string, patch: Record<string, unknown>) => string | null) | null;
+	refuseDestroy: ((id: string) => string | null) | null;
+	/**
 	 * Answer a submission with `serverPartialFail` (RFC 8620 3.6.2), `before` recording it or
 	 * `after`, as a server that sent the message and failed then.
 	 */
@@ -68,6 +74,8 @@ export function installMailStore(server: FakeServer): MailStore {
 		refuseCreate: null,
 		refuseSubmission: null,
 		skipImplicit: false,
+		refuseUpdate: null,
+		refuseDestroy: null,
 		failSubmission: null,
 		headerSearch: true,
 		undoStatus: {},
@@ -101,14 +109,19 @@ export function installMailStore(server: FakeServer): MailStore {
 		}
 		for (const [id, patch] of Object.entries(isRecord(args.update) ? args.update : {})) {
 			const email = store.emails.get(real(id) ?? '');
+			const refused = email && store.refuseUpdate?.(id, patch as Record<string, unknown>);
 			if (!email) out.notUpdated = { ...out.notUpdated, [id]: { type: 'notFound' } };
+			else if (refused) out.notUpdated = { ...out.notUpdated, [id]: { type: refused } };
 			else {
 				applyPatch(email, patch as Record<string, unknown>);
 				out.updated = { ...out.updated, [id]: null };
 			}
 		}
 		for (const id of Array.isArray(args.destroy) ? (args.destroy as string[]) : []) {
-			if (store.emails.delete(id)) out.destroyed = [...((out.destroyed as string[]) ?? []), id];
+			const refused = store.emails.has(id) && store.refuseDestroy?.(id);
+			if (refused) out.notDestroyed = { ...out.notDestroyed, [id]: { type: refused } };
+			else if (store.emails.delete(id))
+				out.destroyed = [...((out.destroyed as string[]) ?? []), id];
 			else out.notDestroyed = { ...out.notDestroyed, [id]: { type: 'notFound' } };
 		}
 		return out;
@@ -135,8 +148,13 @@ export function installMailStore(server: FakeServer): MailStore {
 			? args.onSuccessUpdateEmail[`#${creationId}`]
 			: undefined;
 		if (isRecord(onSuccess) && !store.skipImplicit) {
-			applyPatch(store.emails.get(emailId)!, onSuccess);
-			responses.push(['Email/set', { updated: { [emailId]: null } }, call.id]);
+			const refused = store.refuseUpdate?.(emailId, onSuccess);
+			if (refused)
+				responses.push(['Email/set', { notUpdated: { [emailId]: { type: refused } } }, call.id]);
+			else {
+				applyPatch(store.emails.get(emailId)!, onSuccess);
+				responses.push(['Email/set', { updated: { [emailId]: null } }, call.id]);
+			}
 		}
 		return responses;
 	});

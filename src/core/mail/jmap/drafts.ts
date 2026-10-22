@@ -64,6 +64,33 @@ function markPatches(draft: Draft): Record<string, Patch> {
 	return Object.fromEntries(marks);
 }
 
+/** The SetErrors a clean-up takes as done: a message to destroy that is gone already. */
+const tidied = (type: string, key: string): boolean =>
+	key === 'notDestroyed' && type === 'notFound';
+
+/** True when `call`, an `Email/set` of a clean-up, did all it asked: no error, no refused record. */
+function cleaned(result: JmapResult, call: JmapCall): boolean {
+	try {
+		result.set(call, tidied);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Out of Drafts and into Sent, no longer a draft (RFC 8621 7.5.1). Without a Sent folder the
+ * message stays in Drafts rather than in no mailbox at all.
+ */
+const sentPatch = (drafts: string, sent: string | null): Patch =>
+	sent
+		? {
+				[patchPath('mailboxIds', drafts)]: null,
+				[patchPath('mailboxIds', sent)]: true,
+				[patchPath('keywords', DRAFT)]: null,
+			}
+		: { [patchPath('keywords', DRAFT)]: null };
+
 /** True when the implicit `Email/set` of `onSuccessUpdateEmail` moved `id` to Sent. */
 function filed(result: JmapResult, submission: JmapCall, id: string): boolean {
 	const implicit = result.all(submission).find((response) => response[0] === 'Email/set');
@@ -114,7 +141,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				});
 			},
 			(result, call) => {
-				result.get(call);
+				result.set(call, tidied);
 			},
 		);
 	};
@@ -181,6 +208,20 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 		return id;
 	};
 
+	/**
+	 * Files sent message `id` as sent (`patch`). Refused, it is filed once more by the Drafts and Sent
+	 * the account has now: another device may have made them again, and left a draft, the message
+	 * could be opened and sent a second time.
+	 */
+	const fileSent = async (id: string, patch: Patch): Promise<void> => {
+		try {
+			await tidy([], { [id]: patch });
+		} catch {
+			mailboxes.forgetRoles();
+			await tidy([], { [id]: sentPatch(await draftsMailbox(), await mailboxes.roleId('sent')) });
+		}
+	};
+
 	const identitiesOrNone = async (): Promise<readonly Identity[]> => {
 		try {
 			return await options.identities();
@@ -232,15 +273,7 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			const drafts = await draftsMailbox();
 			const sent = await mailboxes.roleId('sent');
 			const create = emailToCreate(draft, drafts, [DRAFT, SEEN], identity);
-			// RFC 8621 7.5.1: once submitted, out of Drafts, into Sent, no longer a draft. Without a
-			// Sent folder the message stays in Drafts rather than in no mailbox at all.
-			const onSent: Patch = sent
-				? {
-						[patchPath('mailboxIds', drafts)]: null,
-						[patchPath('mailboxIds', sent)]: true,
-						[patchPath('keywords', DRAFT)]: null,
-					}
-				: { [patchPath('keywords', DRAFT)]: null };
+			const onSent = sentPatch(drafts, sent);
 			const destroy = draft.id === undefined ? [] : await stillDrafts([draft.id]);
 			const marks = markPatches(draft);
 			const cleanUp = destroy.length > 0 || Object.keys(marks).length > 0;
@@ -256,7 +289,8 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 				unsure.delete(key);
 				if (asked?.went) {
 					// It went out the first time: that send is finished, never made again.
-					await quietly(() => tidy(destroy, { ...marks, [asked.copy]: onSent }));
+					await quietly(() => fileSent(asked.copy, onSent));
+					await quietly(() => tidy(destroy, marks));
 					nudge();
 					return { id: asked.copy };
 				}
@@ -332,11 +366,13 @@ export function createDraftMethods(options: DraftOptions): DraftMethods {
 			}
 			const { clean } = first.calls;
 			const later = { destroy: [] as string[], update: {} as Record<string, Patch> };
-			if (cleanUp && (!clean || first.result.error(clean))) {
+			// Made again in full when any of it was refused: what was done already is done again (the
+			// message destroyed is gone, which counts as done).
+			if (cleanUp && (!clean || !cleaned(first.result, clean))) {
 				later.destroy.push(...destroy);
 				Object.assign(later.update, marks);
 			}
-			if (!filed(result, submission, id)) later.update[id] = onSent;
+			if (!filed(result, submission, id)) await quietly(() => fileSent(id, onSent));
 			await quietly(() => tidy(later.destroy, later.update));
 			nudge();
 			return { id };
