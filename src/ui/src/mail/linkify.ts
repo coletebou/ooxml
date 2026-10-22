@@ -9,7 +9,10 @@ export interface TextSegment {
 
 /** Where a found link points: an address becomes `mailto:`, a bare `www.` host `https://`. */
 function linkHref(value: string): string {
-	if (value.includes('@') && !/^https?:|^www\./i.test(value)) return `mailto:${value}`;
+	// RFC 6068 2: what an address holds that a mailto: link may not (# ? % & = /) is encoded, so the
+	// link writes to the address shown and adds no field of its own.
+	if (value.includes('@') && !/^https?:|^www\./i.test(value))
+		return `mailto:${encodeURIComponent(value).replace(/%40/g, '@')}`;
 	if (/^www\./i.test(value)) return `https://${value}`;
 	return value;
 }

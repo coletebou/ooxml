@@ -1,4 +1,5 @@
 import { linkify } from './linkify';
+import { mailtoDraft } from './mailto';
 
 describe('linkify', () => {
 	it('splits plain text into text and links, never markup', () => {
@@ -34,6 +35,20 @@ describe('linkify', () => {
 		]);
 		// Where the start of an address cannot be told, nothing is linked rather than a part of it.
 		expect(links('d’arcy@example.com')).toEqual([]);
+	});
+
+	it('encodes what a mailto: link may not hold, so the link writes to the address shown', () => {
+		// RFC 6068 2: # ? % & = / and the like are percent-encoded in a mailto: address.
+		for (const address of [
+			'x#y@example.com',
+			'a?b@example.com',
+			'a%2Bb@example.com',
+			'q=r&s@example.com',
+		]) {
+			const [link] = linkify(address);
+			expect(link?.href).toBe(`mailto:${encodeURIComponent(address).replace(/%40/g, '@')}`);
+			expect(mailtoDraft(link!.href!)?.to.map((a) => a.email)).toEqual([address]);
+		}
 	});
 
 	it('stays fast on long words', () => {
