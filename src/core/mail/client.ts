@@ -16,7 +16,7 @@ import { SEEN } from './model';
 export function createMailClient(options: MailClientOptions): MailClient {
 	const core = new ClientCore(options);
 	const list = createListLoader(core);
-	const { load: loadPeople, ...people } = createPeople(core);
+	const { load: loadPeople, ...people } = createPeople(core, () => list.connect());
 	const { markSeen, ...mutations } = createMutations(core, list);
 	const order = (): string[] => core.state.conversations.map((c) => c.id);
 

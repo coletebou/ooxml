@@ -9,6 +9,7 @@ import { errorCode, type ClientCore } from './client-core';
 import type { MailClient, MailClientOptions } from './client-types';
 import { sortContacts } from './contacts';
 import type { RecordStore } from './record-store';
+import { MailTransportError } from './transport';
 import { parseVCards, serializeVCards } from './vcard';
 
 type PeopleActions = Pick<
@@ -56,15 +57,43 @@ async function saveAll<T extends { id: string }>(
 	if (refused !== undefined) throw refused;
 }
 
-export function createPeople(core: ClientCore): PeopleLoader {
+export function createPeople(core: ClientCore, connect: () => Promise<void>): PeopleLoader {
 	type Stores = Pick<MailClientOptions, 'contacts' | 'calendar'>;
+	/** Each store, or undefined where there is none. */
+	type Open = { [K in keyof Stores]-?: Stores[K] | undefined };
 	let opened: Stores | null = null;
 	/** The host's own stores, else, once a connection worked, those opened for its account. */
-	const stores = (): { contacts: Stores['contacts']; calendar: Stores['calendar'] } => {
+	const stores = (): Open => {
 		const { contacts, calendar, openStores } = core.options;
 		if (!opened && core.session && openStores && !(contacts && calendar))
 			opened = openStores(core.session);
 		return { contacts: contacts ?? opened?.contacts, calendar: calendar ?? opened?.calendar };
+	};
+	/**
+	 * The store a change goes to. Its account's, before the account is known, once the connection
+	 * under way (or a new attempt) has made it known; failing that, the change fails with what
+	 * stopped the connection, so it is never dropped without a word. Undefined for a client given
+	 * no such store.
+	 */
+	/** `storeFor`, a failure reported as the action's error: undefined then, or without a store. */
+	const storeOrFail = async <K extends keyof Open>(kind: K): Promise<Open[K]> => {
+		try {
+			return await storeFor(kind);
+		} catch (error) {
+			core.fail(kind, error);
+			return undefined;
+		}
+	};
+	const storeFor = async <K extends keyof Open>(kind: K): Promise<Open[K]> => {
+		const store = stores()[kind];
+		if (store || !core.options.openStores || core.session) return store;
+		await connect();
+		const opened = stores()[kind];
+		if (opened) return opened;
+		throw new MailTransportError(
+			core.state.error ?? 'network',
+			'The address book and the calendar open once the account has connected.',
+		);
 	};
 
 	const guard = async (action: Book, run: () => Promise<void>): Promise<void> => {
@@ -99,10 +128,12 @@ export function createPeople(core: ClientCore): PeopleLoader {
 			await Promise.all([loadContacts(), loadEvents()]);
 		},
 		saveContact: (contact) =>
-			change('contacts', () => stores().contacts?.save({ ...contact, updatedAt: core.now() })),
-		deleteContact: (id) => change('contacts', () => stores().contacts?.remove(id)),
+			change('contacts', async () =>
+				(await storeFor('contacts'))?.save({ ...contact, updatedAt: core.now() }),
+			),
+		deleteContact: (id) => change('contacts', async () => (await storeFor('contacts'))?.remove(id)),
 		async importVCards(text) {
-			const { contacts } = stores();
+			const contacts = await storeOrFail('contacts');
 			if (!contacts) return 0;
 			const { contacts: read, skipped } = parseVCards(text);
 			let count = 0;
@@ -117,10 +148,10 @@ export function createPeople(core: ClientCore): PeopleLoader {
 				core.state.contacts.filter((contact) => !wanted || wanted.has(contact.id)),
 			);
 		},
-		saveEvent: (event) => change('calendar', () => stores().calendar?.save(event)),
-		deleteEvent: (id) => change('calendar', () => stores().calendar?.remove(id)),
+		saveEvent: (event) => change('calendar', async () => (await storeFor('calendar'))?.save(event)),
+		deleteEvent: (id) => change('calendar', async () => (await storeFor('calendar'))?.remove(id)),
 		async importIcs(text, zone) {
-			const { calendar } = stores();
+			const calendar = await storeOrFail('calendar');
 			if (!calendar) return 0;
 			let count = 0;
 			let unsupported: string[] = [];

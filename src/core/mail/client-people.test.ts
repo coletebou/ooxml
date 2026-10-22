@@ -260,6 +260,48 @@ describe('stores opened for the account', () => {
 		client.destroy();
 	});
 
+	it('keeps a change made before the account is known, or says why it could not', async () => {
+		const base = createMemoryTransport();
+		let open: () => void = () => {};
+		let down = false;
+		const transport = {
+			...base,
+			connect: async () => {
+				if (down) throw new MailTransportError('network', 'Offline.');
+				await new Promise<void>((done) => (open = done));
+				return base.connect();
+			},
+		};
+		const contacts = createMemoryContactStore();
+		const client = createMailClient({ transport, openStores: () => ({ contacts }) });
+		const notices: MailNotice[] = [];
+		client.onNotice((notice) => notices.push(notice));
+		// Saved while the client still connects: it waits for the account, then is kept.
+		const saving = client.saveContact({ ...emptyContact('kim', 0), name: 'Kim' });
+		open();
+		await saving;
+		expect((await contacts.list()).map((c) => c.name)).toEqual(['Kim']);
+		expect(client.getState().contacts.map((c) => c.name)).toEqual(['Kim']);
+		client.destroy();
+		// The server cannot be reached: the change is not lost without a word.
+		down = true;
+		const offline = createMailClient({ transport, openStores: () => ({ contacts }) });
+		const told: MailNotice[] = [];
+		offline.onNotice((notice) => told.push(notice));
+		await until(offline, (s) => s.status === 'error');
+		await offline.saveEvent(STAND_UP);
+		expect(
+			await offline.importVCards('BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Lee\r\nEND:VCARD\r\n'),
+		).toBe(0);
+		// Each says what stopped it; the connection's own failure shows in the client's status.
+		expect(told).toEqual([
+			{ kind: 'error', action: 'calendar', code: 'network' },
+			{ kind: 'error', action: 'contacts', code: 'network' },
+		]);
+		expect(notices).toEqual([]);
+		offline.destroy();
+	});
+
 	it("uses the host's own stores first, and opens none before a connection works", async () => {
 		const own = createMemoryContactStore({ seed: [kim] });
 		const base = createMemoryTransport();
