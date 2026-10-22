@@ -45,6 +45,16 @@ const PAPER = `:host{${Object.entries(OFFICE_TOKENS)
 	.map(([name, value]) => `${name}:${value}`)
 	.join(';')}}`;
 
+/**
+ * Frames in a fixed order: stacking (Bring to front, a collaborator's, undo) changes only their
+ * z-index, so a frame is never moved in the DOM, which would end its text editor (focus,
+ * selection, a composition in progress).
+ */
+const byId = (containers: readonly Container[]): [Container, number][] =>
+	containers
+		.map((c, rank): [Container, number] => [c, rank])
+		.sort(([a], [b]) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
 export class NotebookPage extends NotebookElement {
 	static override styles = [unsafeCSS(PAPER), ...controlStyles(css)];
 	static override properties = {
@@ -535,9 +545,9 @@ export class NotebookPage extends NotebookElement {
 					>
 						<div class="frames">
 							${repeat(
-								state.containers,
-								(c) => c.id,
-								(c, i) => this.#frame(c, i, state.peers),
+								byId(state.containers),
+								([c]) => c.id,
+								([c, rank]) => this.#frame(c, rank, state.peers),
 							)}
 						</div>
 						<notebook-ink

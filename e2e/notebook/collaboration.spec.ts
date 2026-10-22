@@ -88,5 +88,6 @@ test("a click on the page leaves a collaborator's new empty text box alone", asy
 	await expect(ada.locator('notebook-page .frame.text')).toHaveCount(2);
 	await expect(bob.locator('notebook-page .frame.text')).toHaveCount(2);
 	await bob.keyboard.type('Still here');
-	await expect(bob.locator('notebook-text').first()).toContainText('Still here');
+	// Frames keep a fixed order in the page (by id, not by stacking): find Bob's by its text.
+	await expect(bob.locator('notebook-text').filter({ hasText: 'Still here' })).toHaveCount(1);
 });

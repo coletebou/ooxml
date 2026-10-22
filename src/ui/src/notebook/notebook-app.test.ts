@@ -353,6 +353,27 @@ describe('<notebook-app>', () => {
 		await until(() => done()[0] === true);
 	});
 
+	it('keeps a text box editing when it is brought to the front', async () => {
+		app = await mount();
+		const page = app.page()!;
+		const below = app.client!.addText({ x: 40, y: 40 }, [
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'below' }] },
+		]);
+		app.client!.addText({ x: 60, y: 60 }, [
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'above' }] },
+		]);
+		const editorOf = (id: string) =>
+			page.shadowRoot!.querySelector<NotebookText>(`.frame[data-id="${id}"] notebook-text`)?.view;
+		await until(() => editorOf(below));
+		const view = editorOf(below)!;
+		app.client!.bringToFront(below);
+		await until(() => app.state!.containers.at(-1)?.id === below);
+		await page.updateComplete;
+		// The same editor, still on the page: it was not moved in the DOM and torn down.
+		expect(editorOf(below)).toBe(view);
+		expect(view.isDestroyed).toBe(false);
+	});
+
 	it('undoes with the keyboard while a to-do checkbox has the focus', async () => {
 		app = await mount();
 		const undo = vi.spyOn(app.client!, 'undo');
