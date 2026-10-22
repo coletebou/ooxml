@@ -159,6 +159,51 @@ describe('useNotebook', () => {
 		root.unmount();
 	});
 
+	it('opens the next client only once the one it replaces has saved', async () => {
+		const data = new Map<string, Uint8Array>();
+		let release = (): void => undefined;
+		let held: Promise<void> | null = null;
+		const storage = {
+			load: async (key: string) => data.get(key) ?? null,
+			save: async (key: string, bytes: Uint8Array) => {
+				if (held) await held;
+				data.set(key, bytes);
+			},
+			remove: async (key: string) => void data.delete(key),
+		};
+		const seen: { client: NotebookClient | null; state: NotebookState | null } = {
+			client: null,
+			state: null,
+		};
+		function Probe(props: { options: CreateNotebookOptions }) {
+			const notebook = useNotebook(props.options);
+			seen.client = notebook.client;
+			seen.state = notebook.state;
+			return createElement('output', null, notebook.state?.ready ? 'ready' : 'opening');
+		}
+		const base = { storageName: unique('react-handover'), storage, saveDelayMs: 60_000 };
+		const { container, root } = mount();
+		root.render(createElement(Probe, { options: { ...base, user: { id: 'u-ada', name: 'Ada' } } }));
+		await vi.waitFor(() => expect(container.textContent).toBe('ready'), { timeout: 10_000 });
+		const old = seen.client!;
+		await old.flush();
+		old.createPage({ title: 'Made just before the switch' });
+		// The old client's last save waits until released.
+		held = new Promise<void>((resolve) => (release = resolve));
+		let closed = false;
+		const destroy = old.destroy;
+		old.destroy = () => destroy().then(() => void (closed = true));
+		root.render(createElement(Probe, { options: { ...base, user: { id: 'u-bob', name: 'Bob' } } }));
+		await new Promise((r) => setTimeout(r, 100));
+		expect(seen.client).toBeNull();
+		held = null;
+		release();
+		await vi.waitFor(() => expect(seen.state?.ready).toBe(true), { timeout: 10_000 });
+		expect(closed).toBe(true);
+		expect(seen.state?.pages.map((p) => p.title)).toContain('Made just before the switch');
+		root.unmount();
+	});
+
 	it('makes a new client for another storage and renames new items on a language change', async () => {
 		const memory = () => {
 			const data = new Map<string, Uint8Array>();

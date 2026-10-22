@@ -101,14 +101,24 @@ export function useNotebookClient(options: CreateNotebookOptions | null): Notebo
 		: '';
 	const latest = useRef(options);
 	latest.current = options;
+	// The client being closed: its replacement opens once it has saved, so it opens with its edits.
+	const closing = useRef<Promise<void>>(Promise.resolve());
 	useEffect(() => {
 		const opts = latest.current;
 		if (!opts) return;
-		const created = createNotebook(opts);
-		setMade({ key, client: created });
+		let created: NotebookClient | null = null;
+		let cancelled = false;
+		const start = async (): Promise<void> => {
+			await closing.current;
+			if (cancelled) return;
+			created = createNotebook(opts);
+			setMade({ key, client: created });
+		};
+		void start();
 		return () => {
-			void created.destroy();
+			cancelled = true;
 			setMade(null);
+			if (created) closing.current = created.destroy().catch(() => undefined);
 		};
 	}, [key]);
 	// During the render that changes the options the old client is still in state; it belongs to
