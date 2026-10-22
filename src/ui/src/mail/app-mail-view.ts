@@ -3,11 +3,11 @@
 import { html, nothing } from 'lit';
 import type { Identity, MailAttachment, MailClient, MailState } from 'ooxml-core/mail';
 import { runCommand } from './app-commands';
-import { readFiles } from './attachments';
 import { icon } from './icons';
 import { folderLabel } from './labels';
 import type { MailApp } from './mail-app';
 import { downloadBytes } from './object-urls';
+import { readFiles } from './picked-files';
 import type { InlineUrls } from './reading-pane';
 
 /**
@@ -146,8 +146,11 @@ function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
 			hidden
 			@change=${async (e: Event) => {
 				const input = e.currentTarget as HTMLInputElement;
-				await mail.importEml(await readFiles(input.files));
+				const { read, unreadable } = await readFiles([...(input.files ?? [])]);
 				input.value = '';
+				if (unreadable.length)
+					app.notify({ kind: 'warning', action: 'readFiles', names: unreadable });
+				if (read.length) await mail.importEml(read);
 			}}
 		/>
 	</div>`;

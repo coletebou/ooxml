@@ -139,7 +139,13 @@ export type MailNotice =
 	 * files are still uploading into its draft (`compose`, `editDraft`, `closeCompose` and `send`
 	 * resolve false).
 	 */
-	| { kind: 'warning'; action: 'upload'; uploading: number };
+	| { kind: 'warning'; action: 'upload'; uploading: number }
+	/**
+	 * Files a person picked or dropped that the browser could not read (deleted, moved or changed
+	 * since), by name: they were left out, the others attached or imported. The app's own; the
+	 * client never gives it.
+	 */
+	| { kind: 'warning'; action: 'readFiles'; names: readonly string[] };
 
 export type MailAction =
 	| 'connect'

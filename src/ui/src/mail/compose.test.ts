@@ -63,6 +63,13 @@ function slowFile() {
 	return { file, finish: () => finish() };
 }
 
+/** A file picked, then deleted or moved before it was read: the browser refuses its bytes. */
+const goneFile = (name: string) => {
+	const refuse = () =>
+		Promise.reject(new DOMException('The requested file could not be read.', 'NotReadableError'));
+	return { name, type: 'application/octet-stream', arrayBuffer: refuse, text: refuse };
+};
+
 /** Drop `files` on the compose window. */
 function dropFiles(el: MailCompose, ...files: unknown[]): void {
 	const drop = new Event('drop', { bubbles: true, cancelable: true, composed: true });
@@ -243,6 +250,36 @@ describe('<mail-compose>', () => {
 		await settle(el);
 		expect(send.disabled).toBe(false);
 		expect(el.readingFiles).toBe(false);
+	});
+
+	it('attaches the files it can read, names those it cannot and lets them be picked again', async () => {
+		const el = await mount(composeState());
+		const seen = record(el, 'mail-draft-attach', 'mail-files-unreadable');
+		const good = { name: 'a.txt', type: 'text/plain', arrayBuffer: async () => new ArrayBuffer(1) };
+		const input = el.shadowRoot!.querySelector<HTMLInputElement>('input.file')!;
+		let cleared = false;
+		Object.defineProperty(input, 'files', { configurable: true, value: [good, goneFile('b.pdf')] });
+		Object.defineProperty(input, 'value', {
+			configurable: true,
+			get: () => (cleared ? '' : 'C:\\fakepath\\b.pdf'),
+			set: (value: string) => {
+				cleared ||= value === '';
+			},
+		});
+		input.dispatchEvent(new Event('change'));
+		await vi.waitFor(() => expect(el.readingFiles).toBe(false));
+		expect(seen.map(([type, detail]) => [type, detail])).toEqual([
+			[
+				'mail-draft-attach',
+				{ files: [{ name: 'a.txt', type: 'text/plain', bytes: new Uint8Array(1) }], session: 1 },
+			],
+			['mail-files-unreadable', { names: ['b.pdf'] }],
+		]);
+		// Picking the same file again must fire a change.
+		expect(cleared).toBe(true);
+		dropFiles(el, goneFile('c.pdf'));
+		await vi.waitFor(() => expect(seen).toHaveLength(3));
+		expect(seen[2]).toEqual(['mail-files-unreadable', { names: ['c.pdf'] }]);
 	});
 
 	it('never hands the files read for one draft to the next one', async () => {

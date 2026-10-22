@@ -343,6 +343,24 @@ describe('<mail-calendar>', () => {
 		expect(tab(field(el, 'title')).defaultPrevented).toBe(false);
 	});
 
+	it('imports the .ics files it can read and names those it cannot', async () => {
+		const el = await mount([review]);
+		const imported = record(el, 'mail-import-ics');
+		const unreadable = record(el, 'mail-files-unreadable');
+		const input = el.shadowRoot!.querySelector<HTMLInputElement>('input.file')!;
+		const refuse = () =>
+			Promise.reject(new DOMException('The requested file could not be read.', 'NotReadableError'));
+		const files = [
+			{ name: 'gone.ics', type: 'text/calendar', text: refuse, arrayBuffer: refuse },
+			new File(['BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n'], 'a.ics', { type: 'text/calendar' }),
+		];
+		Object.defineProperty(input, 'files', { configurable: true, value: files });
+		input.dispatchEvent(new Event('change'));
+		await vi.waitFor(() => expect(unreadable).toHaveLength(1));
+		expect(imported).toEqual([{ text: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n' }]);
+		expect(unreadable).toEqual([{ names: ['gone.ics'] }]);
+	});
+
 	it('imports .ics files and exports the whole calendar', async () => {
 		const el = await mount([review]);
 		const imported = record(el, 'mail-import-ics');

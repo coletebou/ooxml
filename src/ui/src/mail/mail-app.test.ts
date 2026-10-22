@@ -720,6 +720,23 @@ describe('<mail-app>', () => {
 		expect(toasts.map((toast) => toast.textContent)).toEqual([said]);
 	});
 
+	it('names a dropped file the browser could not read in a notice', async () => {
+		const app = await mount();
+		const told: unknown[] = [];
+		app.addEventListener('mail-notice', (e) => told.push((e as CustomEvent).detail));
+		await app.client!.compose('new');
+		const refuse = () =>
+			Promise.reject(new DOMException('The requested file could not be read.', 'NotReadableError'));
+		const gone = { name: 'gone.pdf', type: 'application/pdf', arrayBuffer: refuse };
+		await dropOn(app, gone);
+		await until(() => app.toasts.length === 1);
+		await app.updateComplete;
+		const toasts = [...app.shadowRoot!.querySelectorAll('.toast > span')];
+		expect(toasts.map((toast) => toast.textContent)).toEqual(['gone.pdf could not be read.']);
+		expect(told).toEqual([{ kind: 'warning', action: 'readFiles', names: ['gone.pdf'] }]);
+		expect(state(app).compose?.draft.attachments).toEqual([]);
+	});
+
 	it('puts the files it is still reading in the draft before another draft takes its place', async () => {
 		const { transport, saved } = testTransport();
 		const app = await mount({ kind: 'transport', transport });

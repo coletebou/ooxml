@@ -4,8 +4,8 @@
 // an event; the client saves the draft after a quiet moment, and Ctrl/Cmd+Enter sends. An address
 // still being typed is part of the draft before the window closes or sends (`commitRecipients()`).
 // Picked files are read for the draft they were added to (`compose-files.ts`): Send stays off while
-// they are read, Close (and the app's own hand-overs, `filesRead()`) waits for them, and Discard
-// drops them. Each edit and each hand-over names its session: an edit can come once its draft has
+// they are read, Close (and the app's own hand-overs, `filesRead()`) waits for them, Discard drops
+// them, and one the browser cannot read is named (`mail-files-unreadable` `{ names }`). Each edit and each hand-over names its session: an edit can come once its draft has
 // gone (an address field commits what it holds a moment after it is left), and is dropped then.
 // The pictures the draft's HTML shows by `cid:` show from the bytes `download` reads, and the HTML
 // handed back always refers to them by `cid:` (`compose-pictures.ts`).
@@ -79,6 +79,7 @@ export class MailCompose extends MailElement {
 	private readonly files = new FileReads(
 		() => this.compose?.session,
 		(files, session) => this.emit('mail-draft-attach', { files, session }),
+		(names) => this.emit('mail-files-unreadable', { names }),
 		(running) => (this.reading = running),
 	);
 	private readonly pictures = new DraftPictures(

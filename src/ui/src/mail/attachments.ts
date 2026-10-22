@@ -1,8 +1,7 @@
 // The attachment strip of a message: each file with its kind, size, and Preview (Word, Excel,
-// PowerPoint and Visio files through the suite's own viewers, images, text) and Download. Files a
-// person picks or drops are read here for the client too.
+// PowerPoint and Visio files through the suite's own viewers, images, text) and Download.
 import { html, nothing } from 'lit';
-import type { FileInput, MailAttachment, MailMessage } from 'ooxml-core/mail';
+import type { MailAttachment, MailMessage } from 'ooxml-core/mail';
 import { fileSize } from './format';
 import type { MailI18n } from './i18n/translator';
 import { icon } from './icons';
@@ -34,17 +33,6 @@ export function previewKind(attachment: Pick<MailAttachment, 'name' | 'type'>): 
 	if (IMAGE_TYPES.has(attachment.type)) return 'image';
 	if (attachment.type === 'text/plain' || attachment.type === 'text/csv') return 'text';
 	return null;
-}
-
-/** Picked or dropped files as the client takes them: name, type and bytes. */
-export function readFiles(list: FileList | null | undefined): Promise<FileInput[]> {
-	return Promise.all(
-		[...(list ?? [])].map(async (file) => ({
-			name: file.name,
-			type: file.type,
-			bytes: new Uint8Array(await file.arrayBuffer()),
-		})),
-	);
 }
 
 /** The token colour of a file chip. */

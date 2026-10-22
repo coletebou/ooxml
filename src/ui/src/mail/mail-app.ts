@@ -99,6 +99,13 @@ export class MailApp extends MailElement {
 	/** Keeps the focus in the app when an update takes away what had it. */
 	private readonly focusKeeper = new FocusKeeper(this);
 	private readonly onKey = (event: KeyboardEvent): void => this.keydown(event);
+	/** Files picked or dropped in a pane or the compose window that the browser could not read. */
+	private readonly onUnreadable = (event: Event): void =>
+		this.notify({
+			kind: 'warning',
+			action: 'readFiles',
+			names: (event as CustomEvent<{ names: string[] }>).detail.names,
+		});
 
 	constructor() {
 		super();
@@ -132,6 +139,7 @@ export class MailApp extends MailElement {
 		defineMailContacts();
 		super.connectedCallback();
 		this.addEventListener('keydown', this.onKey);
+		this.addEventListener('mail-files-unreadable', this.onUnreadable);
 		// The client starts with the next update (`willUpdate`), once the host has set what it sets
 		// along with connecting the element: a framework that defines or adds it, then sets `config`,
 		// gets that connection and never the demo mailbox first. Back in a page it left, it starts
@@ -141,6 +149,7 @@ export class MailApp extends MailElement {
 
 	override disconnectedCallback(): void {
 		this.removeEventListener('keydown', this.onKey);
+		this.removeEventListener('mail-files-unreadable', this.onUnreadable);
 		// A move takes the element out and puts it back in one go: the client goes only if the
 		// element is still out of the page once that is done, so a move keeps what it shows (the open
 		// conversation, the compose window) instead of connecting again.

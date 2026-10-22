@@ -36,6 +36,10 @@ export function noticeText(notice: MailNotice, i18n: MailI18n): string {
 	if (notice.kind === 'error') return errorText(notice.code, i18n);
 	if (notice.kind === 'warning') {
 		if (notice.action === 'upload') return i18n.tn('notice.stillUploading', notice.uploading);
+		if (notice.action === 'readFiles')
+			return i18n.tn('notice.unreadable', notice.names.length, {
+				names: new Intl.ListFormat(i18n.intl, { type: 'conjunction' }).format(notice.names),
+			});
 		return notice.action === 'contactsImported'
 			? i18n.tn('notice.contactsSkipped', notice.skipped)
 			: i18n.tn('notice.eventsUnsupported', notice.unsupported.length);

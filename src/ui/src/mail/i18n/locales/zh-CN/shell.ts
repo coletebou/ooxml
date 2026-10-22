@@ -45,6 +45,8 @@ export const zhCNShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsImported.other': '已导入 {count} 个日程。',
 	'notice.contactsSkipped.one': '文件中有 {count} 张名片无法读取。',
 	'notice.contactsSkipped.other': '文件中有 {count} 张名片无法读取。',
+	'notice.unreadable.one': '无法读取 {names}。',
+	'notice.unreadable.other': '无法读取 {count} 个文件：{names}。',
 	'notice.eventsUnsupported.one': '日历文件中有 {count} 处内容无法按原样导入。',
 	'notice.eventsUnsupported.other': '日历文件中有 {count} 处内容无法按原样导入。',
 	'notice.undone': '已撤销。',

@@ -77,7 +77,9 @@ toast in the reader's language:
   is a send the server did not confirm, which may have gone out, and `storage` a change to the
   contacts or the calendar that the browser could not store, kept only until the page is closed.
 - `warning`: contact cards an import could not read, what a calendar import could not represent,
-  or files still uploading, which keep the compose window open and its message unsent.
+  files still uploading, which keep the compose window open and its message unsent, or files
+  picked or dropped that the browser could not read (`readFiles`, by name: deleted or moved since
+  they were picked), which are left out while the others are attached or imported.
 
 ## Keyboard
 

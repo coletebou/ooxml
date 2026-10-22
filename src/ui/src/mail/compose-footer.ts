@@ -48,8 +48,12 @@ export function composeFooter(
 			hidden
 			@change=${async (e: Event) => {
 				const input = e.currentTarget as HTMLInputElement;
-				await handlers.attach(input.files);
-				input.value = '';
+				// Emptied however the read ends, so the same file picked again is a change again.
+				try {
+					await handlers.attach(input.files);
+				} finally {
+					input.value = '';
+				}
 			}}
 		/>
 		<span class=${`status${compose.status === 'error' ? ' error' : ''}`} role="status"

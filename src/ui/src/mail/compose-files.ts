@@ -1,10 +1,11 @@
 // The files of <mail-compose>: those a person picks or drops, read for the draft they were added
 // to, and the list of those already in it. A read that ends once its window closed, gave way to
 // another draft or was discarded hands its files to nobody, and the window's own hand-overs wait
-// for the reads still running (`settled`). New code.
+// for the reads still running (`settled`). A file the browser cannot read is left out and named,
+// the others still attached. New code.
 import { html, nothing } from 'lit';
 import type { DraftAttachment, FileInput } from 'ooxml-core/mail';
-import { readFiles } from './attachments';
+import { readFiles } from './picked-files';
 import { fileSize } from './format';
 import type { MailI18n } from './i18n/translator';
 import { icon } from './icons';
@@ -16,22 +17,25 @@ export class FileReads {
 
 	/**
 	 * `session` is the compose session the window shows now; `deliver` gets the files of a read once
-	 * they are in, with the session they were read for; `changed` hears how many reads are running.
+	 * they are in, with the session they were read for; `unreadable` gets the names of the files of
+	 * that read the browser refused; `changed` hears how many reads are running.
 	 */
 	constructor(
 		private readonly session: () => number | undefined,
 		private readonly deliver: (files: FileInput[], session: number) => void,
+		private readonly unreadable: (names: string[]) => void,
 		private readonly changed: (running: number) => void,
 	) {}
 
-	/** Read `list` for the draft the window shows now. */
+	/** Read `list` for the draft the window shows now. Never rejects. */
 	read(list: FileList | null | undefined): Promise<void> {
 		const session = this.session();
 		if (!list?.length || session === undefined) return Promise.resolve();
 		const read = readFiles(list)
-			.then((files) => {
-				if (files.length && this.session() === session && this.discarded !== session)
-					this.deliver(files, session);
+			.then(({ read: files, unreadable }) => {
+				if (this.session() !== session || this.discarded === session) return;
+				if (files.length) this.deliver(files, session);
+				if (unreadable.length) this.unreadable(unreadable);
 			})
 			.finally(() => {
 				this.running.delete(read);

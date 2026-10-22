@@ -1,6 +1,19 @@
 import { errorText, noticeText } from './app-text';
 import { MAIL_LOCALES, mailI18n } from './i18n/translator';
 
+describe('the words of a warning', () => {
+	it('names the files the browser could not read, in every locale', () => {
+		const one = { kind: 'warning', action: 'readFiles', names: ['a.pdf'] } as const;
+		const two = { kind: 'warning', action: 'readFiles', names: ['a.pdf', 'b.ics'] } as const;
+		expect(noticeText(one, mailI18n('en'))).toBe('a.pdf could not be read.');
+		expect(noticeText(two, mailI18n('en'))).toBe('2 files could not be read: a.pdf and b.ics.');
+		for (const locale of MAIL_LOCALES) {
+			expect(noticeText(one, mailI18n(locale)), locale).toContain('a.pdf');
+			expect(noticeText(two, mailI18n(locale)), locale).toMatch(/2.*a\.pdf.*b\.ics/su);
+		}
+	});
+});
+
 describe('the words of an error notice', () => {
 	it('says that a change the browser could not store lasts until the page is closed', () => {
 		const notice = { kind: 'error', action: 'contacts', code: 'storage' } as const;

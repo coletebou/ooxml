@@ -187,6 +187,27 @@ describe('<mail-contacts>', () => {
 		expect(picker.multiple).toBe(true);
 	});
 
+	it('imports the vCard files it can read and names those it cannot', async () => {
+		const el = await mount([contact('ada', 'Ada')]);
+		const picker = el.shadowRoot!.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const refuse = () =>
+			Promise.reject(new DOMException('The requested file could not be read.', 'NotReadableError'));
+		const files = [
+			new File(['BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bea\r\nEND:VCARD\r\n'], 'bea.vcf'),
+			{ name: 'gone.vcf', type: 'text/vcard', text: refuse, arrayBuffer: refuse },
+		];
+		Object.defineProperty(picker, 'files', { value: files, configurable: true });
+		const seen: [string, unknown][] = [];
+		for (const type of ['mail-import-vcf', 'mail-files-unreadable'])
+			el.addEventListener(type, (e) => seen.push([type, (e as CustomEvent).detail]));
+		picker.dispatchEvent(new Event('change'));
+		await vi.waitFor(() => expect(seen).toHaveLength(2));
+		expect(seen).toEqual([
+			['mail-import-vcf', { text: 'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bea\r\nEND:VCARD\r\n' }],
+			['mail-files-unreadable', { names: ['gone.vcf'] }],
+		]);
+	});
+
 	it('moves through the list and selects with the keyboard', async () => {
 		const el = await mount([contact('ada', 'Ada'), contact('bob', 'Bob'), contact('cy', 'Cy')]);
 		const list = el.shadowRoot!.querySelector<HTMLElement>('[role="listbox"]')!;

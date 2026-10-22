@@ -16,6 +16,7 @@ import { defineOnce, MailElement, mailStyles } from './base';
 import { contactForm, readContactForm } from './contact-form';
 import { hueOf, initials } from './format';
 import { icon } from './icons';
+import { readEach } from './picked-files';
 import css from './contacts-pane.css?raw';
 
 const newId = (): string =>
@@ -115,14 +116,16 @@ export class MailContacts extends MailElement {
 	/**
 	 * Import the vCard files picked as one stream of cards (RFC 6350 3.3), so they make one import
 	 * and one notice. A line break goes between two files: a card that ends a file without one
-	 * would otherwise run into the next file's first line.
+	 * would otherwise run into the next file's first line. A file the browser cannot read is named
+	 * (`mail-files-unreadable`), the others still imported.
 	 */
 	private async importFiles(input: HTMLInputElement): Promise<void> {
 		const files = [...(input.files ?? [])];
 		input.value = '';
 		if (!files.length) return;
-		const texts = await Promise.all(files.map((file) => file.text()));
-		this.emit('mail-import-vcf', { text: texts.join('\r\n') });
+		const { read: texts, unreadable } = await readEach(files, (file) => file.text());
+		if (texts.length) this.emit('mail-import-vcf', { text: texts.join('\r\n') });
+		if (unreadable.length) this.emit('mail-files-unreadable', { names: unreadable });
 	}
 
 	private save(event: Event): void {

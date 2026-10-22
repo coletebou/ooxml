@@ -29,6 +29,7 @@ import { eventDialog, ISSUE_FIELD, readDraft, type EventDialogHandlers } from '.
 import { mailI18n, type MailKey } from './i18n/translator';
 import { icon } from './icons';
 import { FocusReturn } from './modal';
+import { readEach } from './picked-files';
 import css from './calendar-pane.css?raw';
 import dialogCss from './event-dialog.css?raw';
 
@@ -114,7 +115,8 @@ export class MailCalendarGrid extends CalendarGridView<CalendarEvent> {
 /**
  * The calendar of the mail app. Properties: `events`, `zone` (IANA, this device's by default),
  * `now` (0 reads the clock; for tests) and `locale` (inherited). Emits `mail-save-event`
- * `{ event }`, `mail-delete-event` `{ id }`, `mail-import-ics` `{ text }` (one per file) and
+ * `{ event }`, `mail-delete-event` `{ id }`, `mail-import-ics` `{ text }` (one per file),
+ * `mail-files-unreadable` `{ names }` (the files picked the browser could not read) and
  * `mail-export-ics` `{ ids? }` (every event when `ids` is omitted).
  */
 export class MailCalendar extends MailElement {
@@ -199,7 +201,9 @@ export class MailCalendar extends MailElement {
 	private async importFiles(input: HTMLInputElement): Promise<void> {
 		const files = [...(input.files ?? [])];
 		input.value = '';
-		for (const file of files) this.emit('mail-import-ics', { text: await file.text() });
+		const { read: texts, unreadable } = await readEach(files, (file) => file.text());
+		for (const text of texts) this.emit('mail-import-ics', { text });
+		if (unreadable.length) this.emit('mail-files-unreadable', { names: unreadable });
 	}
 
 	private readonly handlers: EventDialogHandlers = {

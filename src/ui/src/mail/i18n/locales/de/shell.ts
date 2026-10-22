@@ -45,6 +45,8 @@ export const deShell: Record<keyof typeof enShell, string> = {
 	'notice.eventsImported.other': '{count} Termine importiert.',
 	'notice.contactsSkipped.one': '{count} Karte in der Datei konnte nicht gelesen werden.',
 	'notice.contactsSkipped.other': '{count} Karten in der Datei konnten nicht gelesen werden.',
+	'notice.unreadable.one': '{names} konnte nicht gelesen werden.',
+	'notice.unreadable.other': '{count} Dateien konnten nicht gelesen werden: {names}.',
 	'notice.eventsUnsupported.one':
 		'{count} Teil der Kalenderdatei konnte nicht wie geschrieben importiert werden.',
 	'notice.eventsUnsupported.other':
