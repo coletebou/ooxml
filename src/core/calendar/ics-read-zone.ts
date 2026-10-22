@@ -1,17 +1,12 @@
-// The time zones of an imported iCalendar file. A TZID that names an IANA zone is resolved with
-// `Intl`, also behind a path prefix such as `/mozilla.org/20050126_1/Europe/Berlin`. Any other name
-// (a display name such as `W. Europe Standard Time`) is read from the file's own VTIMEZONE: its
-// STANDARD and DAYLIGHT observances (a first onset, the offsets before and after, a yearly RRULE by
-// month and weekday ordinal or by weekday and month days, either with one BYSETPOS, RDATEs) give
-// the offset at any instant.
-// Times are converted with those rules; a repeat keeps its time in the IANA zone whose clock
-// changes match them in the event's year (a city named in the TZID first, then a short list of
-// common zones, then every zone the platform knows). Without a match a repeat keeps UTC time.
+// The time zones of an imported iCalendar file, read from its own VTIMEZONEs: their STANDARD and
+// DAYLIGHT observances (a first onset, the offsets before and after, a yearly RRULE by month and
+// weekday ordinal or by weekday and month days, either with one BYSETPOS, RDATEs) give the offset
+// at any instant. Which IANA zone a TZID names, or matches, is in `ics-zone-names.ts`.
 // DOM-free. New code.
 import { type ContentLine, type Component, unescapeText } from './ics-lines';
 import { type Wall, readDateValue, readUtcOffset, wallAsUtc } from './ics-read-time';
 import { daysInMonth, nthWeekdayOfMonth } from './recurrence-calendar';
-import { MINUTE_MS, isValidZone, offsetMinutes } from './time-zone';
+import { MINUTE_MS } from './time-zone';
 
 const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 /** The days of a month's first week, and of the whole of the longest month. */
@@ -45,7 +40,8 @@ export interface FileZone {
 	observances: Observance[];
 }
 
-interface Change {
+/** A change of the clocks: the instant, and the offsets before and after, in minutes. */
+export interface ZoneChange {
 	at: number;
 	from: number;
 	to: number;
@@ -163,8 +159,8 @@ const RULE_CYCLE_YEARS = 28;
  * Every change from the zone's onsets and its rules in the years around `year`, in order, with the
  * last change of a rule that stopped before them: which offset came last decides the offset after.
  */
-function changesAround(zone: FileZone, year: number): Change[] {
-	const out: Change[] = [];
+export function fileZoneChanges(zone: FileZone, year: number): ZoneChange[] {
+	const out: ZoneChange[] = [];
 	for (const o of zone.observances) {
 		const at = (w: Wall): number => wallAsUtc(w) - o.from * MINUTE_MS;
 		const start = at(o.onset);
@@ -202,7 +198,7 @@ function changesAround(zone: FileZone, year: number): Change[] {
 
 /** Minutes the file's zone is ahead of UTC at an instant. */
 export function fileZoneOffset(zone: FileZone, instant: number): number {
-	const changes = changesAround(zone, new Date(instant).getUTCFullYear());
+	const changes = fileZoneChanges(zone, new Date(instant).getUTCFullYear());
 	let offset = changes[0]?.from ?? 0;
 	for (const c of changes) if (c.at <= instant) offset = c.to;
 	return offset;
@@ -218,103 +214,4 @@ export function fileZoneToUtc(zone: FileZone, wall: Wall): number {
 	const again = naive - fileZoneOffset(zone, guess) * MINUTE_MS;
 	const exact = [guess, again].filter((t) => t + fileZoneOffset(zone, t) * MINUTE_MS === naive);
 	return exact.length ? Math.min(...exact) : Math.max(guess, again);
-}
-
-/** Common zones, tried before the rest, so a match gets a familiar name. */
-const COMMON = [
-	'UTC',
-	'America/New_York',
-	'America/Chicago',
-	'America/Denver',
-	'America/Phoenix',
-	'America/Los_Angeles',
-	'America/Anchorage',
-	'Pacific/Honolulu',
-	'America/Halifax',
-	'America/St_Johns',
-	'America/Mexico_City',
-	'America/Bogota',
-	'America/Sao_Paulo',
-	'America/Argentina/Buenos_Aires',
-	'Europe/London',
-	'Europe/Lisbon',
-	'Europe/Berlin',
-	'Europe/Paris',
-	'Europe/Athens',
-	'Europe/Helsinki',
-	'Europe/Istanbul',
-	'Europe/Moscow',
-	'Africa/Lagos',
-	'Africa/Cairo',
-	'Africa/Johannesburg',
-	'Africa/Nairobi',
-	'Asia/Dubai',
-	'Asia/Karachi',
-	'Asia/Kolkata',
-	'Asia/Dhaka',
-	'Asia/Bangkok',
-	'Asia/Shanghai',
-	'Asia/Singapore',
-	'Asia/Tokyo',
-	'Asia/Seoul',
-	'Australia/Perth',
-	'Australia/Adelaide',
-	'Australia/Brisbane',
-	'Australia/Sydney',
-	'Pacific/Auckland',
-];
-
-const words = (text: string): string => ` ${text.toLowerCase().replace(/[^a-z0-9]+/gu, ' ')} `;
-
-/** The IANA zone whose offsets and clock changes in `year` are the file zone's, or null. */
-export function matchZone(zone: FileZone, year: number): string | null {
-	const probes = [Date.UTC(year, 0, 15, 12), Date.UTC(year, 6, 15, 12)];
-	const expected = probes.map((t) => fileZoneOffset(zone, t));
-	const changes = changesAround(zone, year).filter(
-		(c) => c.at >= Date.UTC(year, 0, 1) && c.at < Date.UTC(year + 1, 0, 1) && c.from !== c.to,
-	);
-	const fits = (candidate: string): boolean =>
-		probes.every((t, i) => offsetMinutes(t, candidate) === expected[i]) &&
-		changes.every(
-			(c) =>
-				offsetMinutes(c.at - MINUTE_MS, candidate) === c.from &&
-				offsetMinutes(c.at, candidate) === c.to,
-		);
-	const known =
-		typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
-	const named = words(zone.tzid);
-	const cities = known
-		.map((z) => ({ z, at: named.indexOf(words(z.split('/').pop() ?? '')) }))
-		.filter((c) => c.at >= 0)
-		.sort((a, b) => a.at - b.at)
-		.map((c) => c.z);
-	for (const candidate of new Set([...cities, ...COMMON, ...known]))
-		if (isValidZone(candidate) && fits(candidate)) return candidate;
-	return null;
-}
-
-/** The zone's own spelling when only the letter case differs (`america/new_york`). */
-function spelled(zone: string): string {
-	try {
-		const resolved = new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions()
-			.timeZone;
-		return resolved.toLowerCase() === zone.toLowerCase() ? resolved : zone;
-	} catch {
-		return zone;
-	}
-}
-
-/** The IANA zone a TZID names, also behind a path prefix (`/mozilla.org/.../Europe/Berlin`). */
-export function ianaZone(tzid: string): string | null {
-	const name = tzid.trim();
-	// Widened: `isValidZone` is a type guard, which would narrow a `string` to `never` below.
-	const whole: unknown = name;
-	if (isValidZone(whole)) return spelled(whole);
-	if (!name.includes('/')) return null;
-	const segments = name.split('/').filter(Boolean);
-	for (const n of [3, 2, 1]) {
-		const tail = segments.slice(-n).join('/');
-		if (segments.length >= n && isValidZone(tail)) return spelled(tail);
-	}
-	return null;
 }

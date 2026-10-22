@@ -4,10 +4,10 @@
 // (`ics-read-changes.ts`), and of a UID, or a UID and RECURRENCE-ID, that appears twice the higher
 // SEQUENCE wins. A changed occurrence whose series is not in the file joins the series the calendar
 // holds (`stored`), else it is an event of its own, never one that replaces the series. An event
-// takes the id of a stored one only when it is that event again (the same UID). Time zones come
-// from `ics-read-zone.ts`. The importer never throws: what cannot be read is skipped, and what the
-// events cannot hold (a property, a repeat rule, another component, an unknown zone) is listed once
-// in `unsupported`, never dropped silently. DOM-free. New code.
+// takes the id of a stored one only when it is that event again (the same UID). Zones: from
+// `ics-read-zone.ts` and `ics-zone-names.ts`. The importer never throws: what cannot be read is
+// skipped, and what the events cannot hold (a property, a repeat rule, another component, an
+// unknown zone) is listed once in `unsupported`, never dropped silently. DOM-free. New code.
 import { type Component, readComponents, unescapeText } from './ics-lines';
 import { exceptionsOf } from './ics-read-changes';
 import {
@@ -18,7 +18,8 @@ import {
 	readEvent,
 } from './ics-read-event';
 import { type Wall, wallAsUtc } from './ics-read-time';
-import { type FileZone, fileZoneToUtc, ianaZone, matchZone, readFileZone } from './ics-read-zone';
+import { type FileZone, fileZoneToUtc, readFileZone } from './ics-read-zone';
+import { ianaZone, matchZone } from './ics-zone-names';
 import { icsUtc } from './ics-write';
 import type { CalendarEvent, EventException } from './model';
 import { isValidZone, zonedToUtc } from './time-zone';
