@@ -156,7 +156,13 @@ function ruleDay(rule: YearlyRule, year: number): number | null {
 	return days.at(rule.setPos > 0 ? rule.setPos - 1 : rule.setPos) ?? null;
 }
 
-/** Every change from the zone's onsets and its rules in the years around `year`, in order. */
+/** The years a rule's weekdays and leap days take to repeat: a rule with no day in them has none. */
+const RULE_CYCLE_YEARS = 28;
+
+/**
+ * Every change from the zone's onsets and its rules in the years around `year`, in order, with the
+ * last change of a rule that stopped before them: which offset came last decides the offset after.
+ */
 function changesAround(zone: FileZone, year: number): Change[] {
 	const out: Change[] = [];
 	for (const o of zone.observances) {
@@ -166,14 +172,29 @@ function changesAround(zone: FileZone, year: number): Change[] {
 		for (const d of o.dates) out.push({ at: at(d), from: o.from, to: o.to });
 		const rule = o.rule;
 		if (!rule) continue;
-		for (const y of [year - 1, year, year + 1]) {
+		/** The change of the rule in year `y`, if it has one. */
+		const changeIn = (y: number): number | null => {
 			if (y < o.onset.year || (rule.count !== undefined && y - o.onset.year >= rule.count))
-				continue;
+				return null;
 			const day = ruleDay(rule, y);
-			if (day === null) continue;
+			if (day === null) return null;
 			const t = at({ ...o.onset, year: y, month: rule.month, day });
-			if (t > start && (rule.until === undefined || t <= rule.until))
-				out.push({ at: t, from: o.from, to: o.to });
+			return t > start && (rule.until === undefined || t <= rule.until) ? t : null;
+		};
+		for (const y of [year - 1, year, year + 1]) {
+			const t = changeIn(y);
+			if (t !== null) out.push({ at: t, from: o.from, to: o.to });
+		}
+		const last = Math.min(
+			rule.until === undefined ? Infinity : new Date(rule.until).getUTCFullYear(),
+			rule.count === undefined ? Infinity : o.onset.year + rule.count - 1,
+		);
+		if (last >= year - 1) continue;
+		for (let y = last; y > o.onset.year && y > last - RULE_CYCLE_YEARS; y--) {
+			const t = changeIn(y);
+			if (t === null) continue;
+			out.push({ at: t, from: o.from, to: o.to });
+			break;
 		}
 	}
 	return out.sort((a, b) => a.at - b.at);

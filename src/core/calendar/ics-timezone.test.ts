@@ -161,4 +161,45 @@ describe('VTIMEZONE', () => {
 		// One counted back further than any month has weekdays is not read, never guessed.
 		expect(fileZoneOffset(zone('-5SU')!, Date.UTC(2026, 9, 25, 12))).toBe(480);
 	});
+
+	it('keeps the offset of the last change after the rules stop, not of the latest onset', () => {
+		// Ten hours ahead, eleven from the first Sunday of October to the first Sunday of April, both
+		// rules ending: the last change is a STANDARD one, though DAYLIGHT starts later in 2000.
+		const zone = (standardEnd: string, daylightEnd: string) =>
+			readFileZone(
+				readComponents(
+					[
+						'BEGIN:VTIMEZONE',
+						'TZID:Zone Ten',
+						'BEGIN:STANDARD',
+						'DTSTART:20000402T030000',
+						'TZOFFSETFROM:+1100',
+						'TZOFFSETTO:+1000',
+						`RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=1SU${standardEnd}`,
+						'END:STANDARD',
+						'BEGIN:DAYLIGHT',
+						'DTSTART:20001001T020000',
+						'TZOFFSETFROM:+1000',
+						'TZOFFSETTO:+1100',
+						`RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=1SU${daylightEnd}`,
+						'END:DAYLIGHT',
+						'END:VTIMEZONE',
+					].join('\r\n'),
+				).components[0]!,
+			)!;
+		// The last changes: 5 April 2020 (03:00 there is 16:00 UTC the day before) and 6 October 2019.
+		const until = zone(';UNTIL=20200404T160000Z', ';UNTIL=20191005T160000Z');
+		expect(fileZoneOffset(until, Date.UTC(2010, 0, 15, 12))).toBe(660);
+		expect(fileZoneOffset(until, Date.UTC(2019, 11, 15, 12))).toBe(660);
+		expect(fileZoneOffset(until, Date.UTC(2022, 0, 15, 12))).toBe(600);
+		expect(fileZoneOffset(until, Date.UTC(2026, 0, 15, 12))).toBe(600);
+		// Counted instead: twenty changes back each April (2000 to 2019), nineteen on (2000 to 2018).
+		const count = zone(';COUNT=20', ';COUNT=19');
+		expect(fileZoneOffset(count, Date.UTC(2019, 0, 15, 12))).toBe(660);
+		expect(fileZoneOffset(count, Date.UTC(2026, 0, 15, 12))).toBe(600);
+		// A rule still running when the other stops keeps changing the clocks.
+		const open = zone(';UNTIL=20200404T160000Z', '');
+		expect(fileZoneOffset(open, Date.UTC(2026, 0, 15, 12))).toBe(660);
+		expect(fileZoneOffset(open, Date.UTC(2026, 6, 15, 12))).toBe(660);
+	});
 });
