@@ -793,6 +793,32 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('writes to the Bcc of the identity a draft is now written as, never the one before', async () => {
+		const mine = { name: '', email: 'archive@example.com' };
+		const theirs = { name: '', email: 'team-archive@example.com' };
+		const own = { ...identityOf('own', me.name, me.email), bcc: [mine] };
+		const team = { ...identityOf('team', 'Team', 'team@example.com'), bcc: [theirs] };
+		const { client, inMailbox } = plain({ identities: [own, team] });
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Plan', bcc: [mine, ada] });
+		// Written from the team address now: its archive takes the place of the person's own, and
+		// the Bcc typed stays.
+		client.updateDraft({ identityId: 'team', from: { name: 'Team', email: 'team@example.com' } });
+		expect(client.getState().compose?.draft.bcc).toEqual([ada, theirs]);
+		// Back again, without a second copy of either.
+		client.updateDraft({ identityId: 'own', from: me });
+		client.updateDraft({ identityId: 'team', from: { name: 'Team', email: 'team@example.com' } });
+		expect(client.getState().compose?.draft.bcc).toEqual([ada, theirs]);
+		expect(await client.send()).toBe(true);
+		const [sent] = await inMailbox('sent');
+		expect(sent!.bcc.map((address) => address.email)).toEqual([
+			'ada@example.com',
+			'team-archive@example.com',
+		]);
+		client.destroy();
+	});
+
 	it('keeps a new draft with only Bcc addresses typed, never one with only its own', async () => {
 		const archive = { name: '', email: 'archive@example.com' };
 		const own = { ...identityOf('own', me.name, me.email), bcc: [archive] };

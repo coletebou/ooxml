@@ -271,6 +271,19 @@ export function patchDraft(
 	return next;
 }
 
+/**
+ * The Bcc of a draft written as `to` now, not `from`: the addresses `from` adds by itself (RFC 8621
+ * 6, an identity's `bcc`) go, and those of `to` come, once; the ones typed stay.
+ */
+export function bccFor(
+	bcc: readonly MailAddress[],
+	from: Identity | undefined,
+	to: Identity | undefined,
+): MailAddress[] {
+	const typed = unique(bcc, from?.bcc ?? []);
+	return [...typed, ...unique(to?.bcc ?? [], typed)];
+}
+
 /** Markup that shows something without any text: a picture or other media. */
 const MEDIA = /<(?:img|picture|svg|video|audio|canvas|object|embed)\b/i;
 

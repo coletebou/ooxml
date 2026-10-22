@@ -6,6 +6,7 @@ import { createAutosave, patchCompose } from './client-autosave';
 import { errorCode, type ClientCore } from './client-core';
 import type { ComposeState, MailClient } from './client-types';
 import {
+	bccFor,
 	composeDraft,
 	draftFromMessage,
 	draftRecipients,
@@ -42,6 +43,8 @@ export function createCompose(core: ClientCore): ComposeActions {
 	const compose = (): ComposeState | null => core.state.compose;
 	const setCompose = (next: Partial<ComposeState>): void => patchCompose(core, next);
 	const identities = (): readonly Identity[] => core.state.identities;
+	const identityById = (id: string | undefined): Identity | undefined =>
+		id === undefined ? undefined : identities().find((identity) => identity.id === id);
 	/** `message` as the list knows it now: a body read before keeps its old keywords and folders. */
 	const listed = (message: MailMessage): EmailSummary => core.emails.get(message.id) ?? message;
 	/** True when `message` is filed in the folder of `role`: in Sent, the person sent it. */
@@ -216,7 +219,14 @@ export function createCompose(core: ClientCore): ComposeActions {
 			const current = compose();
 			if (!current) return;
 			if ('html' in patch) htmlFrom = current.session;
-			edit(patchDraft(current.draft, patch, htmlFrom === current.session));
+			// Written as another identity, the draft goes to that one's own Bcc, not the last one's.
+			const was = current.draft.identityId;
+			const now = patch.identityId;
+			const changes =
+				now !== undefined && now !== was && !('bcc' in patch)
+					? { ...patch, bcc: bccFor(current.draft.bcc, identityById(was), identityById(now)) }
+					: patch;
+			edit(patchDraft(current.draft, changes, htmlFrom === current.session));
 		},
 		async attach(files) {
 			const owner = compose()?.session;
