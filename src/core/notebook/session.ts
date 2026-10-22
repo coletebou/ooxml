@@ -108,9 +108,10 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 		const ours = Y.encodeStateAsUpdate(doc);
 		saving = saving
 			// Merged with what is stored: another client on the same storage (a tab cut off from the
-			// sync server) may have saved edits this one does not have.
+			// sync server) may have saved edits this one does not have. A stored copy that cannot be
+			// read fails the save rather than being written over.
 			.then(async () => {
-				const stored = await storage.load(key).catch(() => null);
+				const stored = await storage.load(key);
 				await storage.save(key, stored?.length ? Y.mergeUpdates([stored, ours]) : ours);
 			})
 			.then(

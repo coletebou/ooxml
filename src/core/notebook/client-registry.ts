@@ -56,9 +56,14 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 		// notebooks it lists); the changes stay unsaved and flush() says so.
 		if (!storage || !dirty || readFailed) return saving;
 		dirty = false;
-		const bytes = Y.encodeStateAsUpdate(doc);
+		const ours = Y.encodeStateAsUpdate(doc);
 		saving = saving
-			.then(() => storage.save(REGISTRY_KEY, bytes))
+			// Merged with what is stored, as a notebook is: another client on the same storage that
+			// cannot reach this one may have listed notebooks this list does not have.
+			.then(async () => {
+				const stored = await storage.load(REGISTRY_KEY);
+				await storage.save(REGISTRY_KEY, stored?.length ? Y.mergeUpdates([stored, ours]) : ours);
+			})
 			.then(
 				() => {
 					failed = null;

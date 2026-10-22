@@ -556,6 +556,57 @@ describe('notebook client tenth review round', () => {
 	});
 });
 
+describe('notebook client eleventh review round', () => {
+	it('keeps notebooks listed by another client on the same storage that it cannot reach', async () => {
+		const shared = createMemoryStorage();
+		const a = start(shared, createChannelHub());
+		await a.whenReady();
+		await settle();
+		await a.flush();
+		const b = start(shared, createChannelHub());
+		await b.whenReady();
+		await settle();
+		await a.createNotebook({ name: 'From A' });
+		await a.flush();
+		await b.createNotebook({ name: 'From B' });
+		await b.flush();
+		await a.destroy();
+		await b.destroy();
+		const c = start(shared, createChannelHub());
+		await c.whenReady();
+		await settle();
+		const names = c.getState().notebooks.map((n) => n.name);
+		expect(names).toContain('From A');
+		expect(names).toContain('From B');
+	});
+
+	it('fails a save whose stored copy cannot be read instead of writing over it', async () => {
+		const inner = createMemoryStorage();
+		const control = { failLoad: false };
+		const storage: NotebookStorage = {
+			...inner,
+			load: async (key) => {
+				if (control.failLoad && key.startsWith('notebook:')) throw new Error('read failed');
+				return inner.load(key);
+			},
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		const key = `notebook:${client.getState().notebookId}`;
+		await client.flush();
+		const stored = await inner.load(key);
+		control.failLoad = true;
+		client.renamePage(client.getState().pageId, 'Not yet saved');
+		await expect(client.flush()).rejects.toThrow('read failed');
+		expect(await inner.load(key)).toEqual(stored);
+		// The change stays unsaved, so the next flush once the copy reads again saves it.
+		control.failLoad = false;
+		await client.flush();
+		expect(await inner.load(key)).not.toEqual(stored);
+	});
+});
+
 describe('notebook client with damaged input', () => {
 	it('imports an archive whose text is malformed, keeping what is valid', async () => {
 		const client = start(createMemoryStorage(), createChannelHub());
