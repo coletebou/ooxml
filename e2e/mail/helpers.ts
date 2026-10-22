@@ -1,6 +1,41 @@
 // Shared steps of the OpenMail browser tests. They run against the React demo on the in-memory demo
 // mailbox, so no server is needed. Playwright's CSS and text locators pierce the open shadow roots.
-import { expect, type Page } from '@playwright/test';
+import { expect, type FileChooser, type Page } from '@playwright/test';
+
+/**
+ * The file choosers `page` opens, in turn, from one listener kept for the page's whole life. Each
+ * `page.waitForEvent('filechooser')` turns Playwright's interception of the choosers on, and off
+ * once it has one; a chooser that opens while it is still being turned on is never reported (about
+ * one in ten in Chrome 156, measured against one listener kept: none of 240), so a test that
+ * waited for each in turn failed now and then without any fault of the app. Call it before the
+ * first chooser opens; `next` rejects when none opens within `timeout`.
+ */
+export function fileChoosers(page: Page): { next(timeout?: number): Promise<FileChooser> } {
+	const opened: FileChooser[] = [];
+	const waiting: ((chooser: FileChooser) => void)[] = [];
+	page.on('filechooser', (chooser) => {
+		const take = waiting.shift();
+		if (take) take(chooser);
+		else opened.push(chooser);
+	});
+	return {
+		next(timeout = 10_000) {
+			const ready = opened.shift();
+			if (ready) return Promise.resolve(ready);
+			return new Promise((resolve, reject) => {
+				const take = (chooser: FileChooser): void => {
+					clearTimeout(timer);
+					resolve(chooser);
+				};
+				const timer = setTimeout(() => {
+					waiting.splice(waiting.indexOf(take), 1);
+					reject(new Error(`No file chooser opened within ${timeout} ms.`));
+				}, timeout);
+				waiting.push(take);
+			});
+		},
+	};
+}
 
 export async function openDemo(page: Page, query = ''): Promise<void> {
 	await page.goto(`/${query}`);

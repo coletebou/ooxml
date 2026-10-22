@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openConversation, openDemo, row, selectFolder } from './helpers';
+import { fileChoosers, openConversation, openDemo, row, selectFolder } from './helpers';
 
 test('write a new message with a suggested recipient and send it', async ({ page }) => {
 	await openDemo(page);
@@ -91,6 +91,7 @@ test('a forward shows the picture its message shows and sends it as the same par
 });
 
 test('attach files and import from the keyboard', async ({ page }) => {
+	const choosers = fileChoosers(page);
 	await openDemo(page);
 	await page.getByRole('button', { name: 'New message' }).click();
 	const compose = page.locator('mail-compose');
@@ -98,7 +99,7 @@ test('attach files and import from the keyboard', async ({ page }) => {
 	await compose.getByRole('button', { name: 'Send' }).focus();
 	await page.keyboard.press('Tab');
 	await expect(compose.getByRole('button', { name: 'Attach files' })).toBeFocused();
-	const picked = page.waitForEvent('filechooser');
+	const picked = choosers.next();
 	await page.keyboard.press('Enter');
 	await (
 		await picked
@@ -108,14 +109,14 @@ test('attach files and import from the keyboard', async ({ page }) => {
 		buffer: Buffer.from('Notes'),
 	});
 	await expect(compose.locator('.files')).toContainText('notes.txt');
-	const again = page.waitForEvent('filechooser');
+	const again = choosers.next();
 	await page.keyboard.press(' ');
 	expect((await again).isMultiple()).toBe(true);
 	await compose.getByRole('button', { name: 'Discard' }).click();
 	// The same for .eml files in the list toolbar and vCard files in Contacts.
 	const importer = async (name: string) => {
 		await page.getByRole('button', { name, exact: true }).focus();
-		const chooser = page.waitForEvent('filechooser');
+		const chooser = choosers.next();
 		await page.keyboard.press('Enter');
 		await chooser;
 	};
