@@ -242,6 +242,9 @@ export async function importNotebookArchive(
 		}));
 	// Every page in a section, every item on a page, of the archive: anything else would import
 	// and then never show (and leave the next export unsaid), so the archive is refused.
+	// A stroke without a single whole point could not be written: refused, not dropped unsaid.
+	if (strokes.some((x) => x.points.length < 3))
+		throw new NotebookArchiveError('This archive has a stroke without points');
 	const sectionIds = new Set(sections.filter((x) => x.kind === 'section').map((x) => x.id));
 	const pageIds = new Set(pages.map((p) => p.id));
 	if (

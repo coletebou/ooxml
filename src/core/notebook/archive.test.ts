@@ -281,6 +281,10 @@ describe('notebook archive', () => {
 		await expect(
 			archive({ sections, pages, ink: [{ id: 'i1', pageId: 'p2', points: [1, 2, 0.5] }] }),
 		).rejects.toThrow(NotebookArchiveError);
+		// A stroke without one whole point would be skipped when written.
+		await expect(
+			archive({ sections, pages, ink: [{ id: 'i1', pageId: 'p1', points: [1, 'x'] }] }),
+		).rejects.toThrow('without points');
 		expect(
 			(await archive({ sections, pages, containers: [{ ...text, pageId: 'p1' }] })).pages,
 		).toHaveLength(1);
