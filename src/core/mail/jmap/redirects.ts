@@ -159,7 +159,17 @@ export async function followRedirects(
 			);
 		if (++hops > MAX_REDIRECTS)
 			throw new JmapError('server', `${what} was redirected too many times.`, { level: 'http' });
-		hop = nextHop(hop, response.status, to, what);
+		const next = nextHop(hop, response.status, to, what);
+		// Turned into a GET, a request that changes the server reached it, which may have acted on it
+		// (a 303 after a POST points at its result): what the new address answers, a 404 say, is no
+		// answer to it. Neither refused nor known to be done, as with a redirect fetch hides.
+		if (next.method === 'GET' && hop.method !== 'GET' && hop.method !== 'HEAD' && !hop.repeatable)
+			throw new JmapError(
+				'network',
+				`${what} was redirected after the server got it, and is not sent again.`,
+				{ level: 'http' },
+			);
+		hop = next;
 	}
 	const response = await send(hop, 'follow');
 	return { response, landed: landedAt(response, hop) };

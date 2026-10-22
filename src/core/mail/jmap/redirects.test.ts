@@ -98,10 +98,12 @@ describe('redirects of API calls, uploads, downloads and push', () => {
 			() => json({ ok: true }),
 		);
 		const http = createJmapHttp({ auth: AUTH, fetch: server.fetch });
+		// An upload may be sent twice (a second blob nothing refers to), as the real one says.
 		const init = {
 			method: 'POST' as const,
 			headers: { 'Content-Type': 'image/png', Accept: 'application/json' },
 			body: new Uint8Array([1]),
+			repeatable: true,
 		};
 		expect(await http.exchange(UPLOAD, init, 'The upload', (r) => r.json())).toEqual({ ok: true });
 		const hop = server.requests.at(-1)!;
@@ -109,6 +111,11 @@ describe('redirects of API calls, uploads, downloads and push', () => {
 		expect(hop.headers['content-type']).toBeUndefined();
 		expect(hop.headers.accept).toBe('application/json');
 		expect(hop.headers.authorization).toBe(`Bearer ${TOKEN}`);
+		// One that may not be sent twice reached the server: what the 303 points at is no answer.
+		const once = { ...init, repeatable: false };
+		expect(await failure(http.exchange(UPLOAD, once, 'The upload', (r) => r.json()))).toMatchObject(
+			{ code: 'network' },
+		);
 	});
 
 	it('gives up after five redirects in a row', async () => {
@@ -163,6 +170,29 @@ describe('a redirect a browser hides, found out once the request reached the ser
 		text: 'I have the most brilliant plan.',
 		attachments: [],
 	};
+
+	it('takes no error after a redirect it follows as a GET for a request not sent', async () => {
+		// The server acts on the send, then points elsewhere (303), and that address answers 404:
+		// the 404 is the redirect target's, not an answer to the send.
+		const context = setup();
+		const store = installMailStore(context.server);
+		context.server.route(
+			(request) => request.url === API && (request.body?.includes('EmailSubmission/set') ?? false),
+			async (request) => {
+				await context.server.process(request).text();
+				return new Response(null, { status: 303, headers: { Location: `${ORIGIN}/api/gone` } });
+			},
+		);
+		context.server.route(
+			(request) => request.url === `${ORIGIN}/api/gone`,
+			() => new Response('Not here', { status: 404 }),
+		);
+		const outcome = await context.transport.send(message).catch((error: unknown) => error);
+		expect(outcome).toMatchObject({ code: 'uncertain' });
+		expect(store.submissions).toHaveLength(1);
+		await context.transport.send(message).catch(() => undefined);
+		expect(store.submissions).toHaveLength(1);
+	});
 
 	it('sends a request that changes the server once, failing as not known to be done', async () => {
 		const { server, transport, store, modes } = browser();
