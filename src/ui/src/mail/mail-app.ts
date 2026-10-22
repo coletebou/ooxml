@@ -3,12 +3,13 @@
 // person does to client actions. It runs on the demo mailbox (in memory) unless given a JMAP
 // server or a transport of its own.
 import { html, nothing, unsafeCSS, type PropertyValues } from 'lit';
-import type {
-	MailAttachment,
-	MailClient,
-	MailMessage,
-	MailNotice,
-	MailState,
+import {
+	MailTransportError,
+	type MailAttachment,
+	type MailClient,
+	type MailMessage,
+	type MailNotice,
+	type MailState,
 } from 'ooxml-core/mail';
 import { THEME_CSS, installOfficeUiTheme } from '../theme';
 import { committingClient, release } from './app-client';
@@ -51,6 +52,8 @@ interface Toast {
 	text: string;
 	tone: 'done' | 'error' | 'warning';
 	undo?: () => Promise<void>;
+	/** Its Undo is running: the notice stays, its button off, until it is done. */
+	undoing?: boolean;
 }
 
 // The theme's tokens scoped to the element, so it themes itself without a page stylesheet and
@@ -251,6 +254,22 @@ export class MailApp extends MailElement {
 		this.toasts = this.toasts.filter((toast) => toast.id !== id);
 	}
 
+	/** Run a notice's Undo once; one that fails (a host's own may) is told as an error. */
+	private async undo(clicked: Toast): Promise<void> {
+		// As the notice is now: two clicks before the button is drawn off still run it once.
+		const toast = this.toasts.find((t) => t.id === clicked.id);
+		if (!toast?.undo || toast.undoing) return;
+		this.toasts = this.toasts.map((t) => (t.id === toast.id ? { ...t, undoing: true } : t));
+		try {
+			await toast.undo();
+		} catch (error) {
+			const code = error instanceof MailTransportError ? error.code : 'server';
+			this.notify({ kind: 'error', action: 'move', code });
+		} finally {
+			this.dismissToast(toast.id);
+		}
+	}
+
 	private keydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
 		const path = event.composedPath();
@@ -381,10 +400,8 @@ export class MailApp extends MailElement {
 							toast.undo
 								? html`<button
 										type="button"
-										@click=${() => {
-											void toast.undo!();
-											this.dismissToast(toast.id);
-										}}
+										?disabled=${!!toast.undoing}
+										@click=${() => void this.undo(toast)}
 										>${this.t('notice.undo')}</button
 									>`
 								: nothing

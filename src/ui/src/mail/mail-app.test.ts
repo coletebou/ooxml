@@ -9,6 +9,7 @@ import {
 	type MailState,
 	type MailTransport,
 } from 'ooxml-core/mail';
+import { errorText } from './app-text';
 import type { MailHtmlFrame } from './html-frame';
 import { defineMailApp, MailApp } from './mail-app';
 import type { MailConnection } from './store';
@@ -718,6 +719,39 @@ describe('<mail-app>', () => {
 		expect(inner(compose, '.status')!.textContent).toBe(said);
 		const toasts = [...app.shadowRoot!.querySelectorAll('.toast > span')];
 		expect(toasts.map((toast) => toast.textContent)).toEqual([said]);
+	});
+
+	it('runs an Undo once, keeps its notice until it is done, and says so when it fails', async () => {
+		const app = await mount();
+		let finish: () => void = () => {};
+		const undo = vi.fn(() => new Promise<void>((done) => (finish = done)));
+		app.notify({ kind: 'done', action: 'archived', count: 1, undo });
+		await app.updateComplete;
+		const button = () =>
+			[...app.shadowRoot!.querySelectorAll<HTMLButtonElement>('.toast button')].find(
+				(b) => b.textContent === 'Undo',
+			);
+		// Two clicks before the button is drawn again, and one after.
+		const first = button()!;
+		first.click();
+		first.click();
+		await app.updateComplete;
+		expect(button()!.disabled).toBe(true);
+		button()!.click();
+		expect(undo).toHaveBeenCalledOnce();
+		finish();
+		await until(() => app.toasts.length === 0);
+		// An Undo that fails is told, not dropped with its notice.
+		app.notify({
+			kind: 'done',
+			action: 'archived',
+			count: 1,
+			undo: () => Promise.reject(new MailTransportError('network', 'Offline.')),
+		});
+		await app.updateComplete;
+		button()!.click();
+		await until(() => app.toasts.length === 1 && app.toasts[0]!.tone === 'error');
+		expect(app.toasts[0]!.text).toBe(errorText('network', app.i18nFor()));
 	});
 
 	it('names a dropped file the browser could not read in a notice', async () => {
