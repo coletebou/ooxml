@@ -7,6 +7,7 @@ import { addFile, addImage, addStroke, addText } from './canvas';
 import { NOTEBOOK_ORIGIN, NOTEBOOK_SEED_ORIGIN, notebookTypes } from './schema';
 import { overLimit, readSnapshot, writeSnapshot } from './snapshot';
 import { MAX_INK_POINTS } from './ink';
+import { MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
 import { type NotebookEditContext, addPage, addSection, deletePage, writeMeta } from './structure';
 
 const context = (origin: unknown = NOTEBOOK_ORIGIN, client = 'a'): NotebookEditContext => ({
@@ -209,6 +210,30 @@ describe('notebook archive', () => {
 					.map((c) => c.container.x);
 			expect(order(read.containers)).toEqual(order(snapshot.containers));
 		}
+	});
+
+	it('refuses an archive whose text a text box could not hold whole, instead of cutting it', async () => {
+		const archive = async (content: unknown[]) => {
+			const zip = new JSZip();
+			zip.file(
+				'notebook.json',
+				JSON.stringify({
+					format: 'ooxml-notebook',
+					version: 1,
+					containers: [{ id: 'c1', pageId: 'p1', kind: 'text', x: 0, y: 0, content }],
+				}),
+			);
+			return importNotebookArchive(await zip.generateAsync({ type: 'uint8array' }));
+		};
+		const para = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] });
+		await expect(archive([para('x'.repeat(MAX_TEXT_LENGTH + 1))])).rejects.toThrow(
+			NotebookArchiveError,
+		);
+		const many = Array.from({ length: MAX_TEXT_NODES + 1 }, () => ({ type: 'paragraph' }));
+		await expect(archive(many)).rejects.toThrow(NotebookArchiveError);
+		// At the limits, and with shapes the editor never writes (left out), it imports.
+		const snapshot = await archive([para('x'.repeat(MAX_TEXT_LENGTH)), { type: 'script' }]);
+		expect(snapshot.containers).toHaveLength(1);
 	});
 
 	it('reads stroke points as whole triples, so one bad value never shifts the rest', async () => {

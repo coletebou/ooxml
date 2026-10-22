@@ -139,15 +139,30 @@ const isNode = (value: unknown): value is RichNode => isTyped<RichNode>(value);
 const childrenOf = (node: RichNode): RichNode[] =>
 	Array.isArray(node.content) ? node.content.filter(isNode) : [];
 
+/** What a text box may still take; `cut` notes that something valid did not fit. */
+interface Budget {
+	chars: number;
+	nodes: number;
+	cut?: boolean;
+}
+
 /** A text run or a leaf rebuilt from its valid parts only (text a string, marks objects). */
-function inlineNode(node: RichNode, budget: { chars: number; nodes: number }): RichNode | null {
+function inlineNode(node: RichNode, budget: Budget): RichNode | null {
 	if (LEAVES.has(node.type)) return { type: node.type };
 	if (typeof node.text !== 'string' || !node.text) return null;
 	const text = node.text.slice(0, Math.max(0, budget.chars));
+	if (text.length < node.text.length) budget.cut = true;
 	budget.chars -= text.length;
 	if (!text) return null;
 	const marks = Array.isArray(node.marks) ? node.marks.filter((m) => isTyped<RichMark>(m)) : [];
 	return marks.length ? { type: 'text', text, marks } : { type: 'text', text };
+}
+
+/** One node more from the budget, noting when there is none left. */
+function spend(budget: Budget): boolean {
+	if (--budget.nodes >= 0) return true;
+	budget.cut = true;
+	return false;
 }
 
 /**
@@ -157,7 +172,7 @@ function inlineNode(node: RichNode, budget: { chars: number; nodes: number }): R
 function normaliseBlocks(
 	input: readonly RichNode[],
 	depth = 0,
-	budget = { chars: MAX_TEXT, nodes: MAX_NODES },
+	budget: Budget = { chars: MAX_TEXT, nodes: MAX_NODES },
 ): RichNode[] {
 	if (depth > MAX_DEPTH) return [];
 	const nodes = unwrapUnknown(input);
@@ -169,7 +184,10 @@ function normaliseBlocks(
 	};
 	for (const node of nodes) {
 		// Each node costs one: millions of line breaks or empty paragraphs cost no text, but memory.
-		if (--budget.nodes < 0) break;
+		if (--budget.nodes < 0) {
+			budget.cut = true;
+			break;
+		}
 		if (node.type === 'text' || LEAVES.has(node.type)) {
 			const leaf = inlineNode(node, budget);
 			if (leaf) inline.push(leaf);
@@ -178,7 +196,7 @@ function normaliseBlocks(
 		flush();
 		if (node.type === 'bullet_list' || node.type === 'ordered_list') {
 			const items = childrenOf(node)
-				.filter((c) => c.type === 'list_item' && --budget.nodes >= 0)
+				.filter((c) => c.type === 'list_item' && spend(budget))
 				.map((c) => ({ ...c, content: normaliseBlocks(childrenOf(c), depth + 1, budget) }))
 				.map((c) => (c.content.length ? c : { ...c, content: [emptyParagraph()] }));
 			if (items.length) out.push({ ...node, content: items });
@@ -187,7 +205,7 @@ function normaliseBlocks(
 		else if (node.type === 'paragraph' || node.type === 'heading') {
 			const content = childrenOf(node)
 				.filter((c) => c.type === 'text' || LEAVES.has(c.type))
-				.filter(() => --budget.nodes >= 0)
+				.filter(() => spend(budget))
 				.map((c) => inlineNode(c, budget))
 				.filter(isNode);
 			out.push(
@@ -243,6 +261,16 @@ function toYNodes(nodes: readonly RichNode[]): (Y.XmlElement | Y.XmlText)[] {
 	}
 	flush();
 	return out;
+}
+
+/**
+ * Whether `blocks` fit in a text box whole: `writeRichText` keeps everything valid in them, cutting
+ * no text and no nodes at the limits (an archive import refuses what would be cut).
+ */
+export function richTextFits(blocks: readonly RichNode[]): boolean {
+	const budget: Budget = { chars: MAX_TEXT, nodes: MAX_NODES };
+	normaliseBlocks(blocks, 0, budget);
+	return !budget.cut;
 }
 
 /** Replace the fragment's content with `blocks` (validated and normalised first). */

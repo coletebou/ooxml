@@ -24,7 +24,7 @@ import {
 } from './model';
 import { detectOfficeKind } from '../opc/office-kind';
 import { paletteColor } from './palette';
-import type { RichNode } from './rich-text';
+import { type RichNode, richTextFits } from './rich-text';
 import type { NotebookSnapshot, SnapshotContainer } from './snapshot';
 
 export const NOTEBOOK_ARCHIVE_FORMAT = 'ooxml-notebook';
@@ -182,10 +182,13 @@ export async function importNotebookArchive(
 			z: num(c.z),
 		};
 		if (c.kind === 'text') {
-			containers.push({
-				container: { ...base, kind: 'text' },
-				content: Array.isArray(c.content) ? (c.content as RichNode[]) : [],
-			});
+			const content = Array.isArray(c.content) ? (c.content as RichNode[]) : [];
+			// More text than a text box holds would be cut when it is written: refused, not cut unsaid.
+			if (!richTextFits(content))
+				throw new NotebookArchiveError(
+					'This archive has a text box with more text than a notebook takes',
+				);
+			containers.push({ container: { ...base, kind: 'text' }, content });
 			continue;
 		}
 		if (c.kind !== 'image' && c.kind !== 'file') continue;
