@@ -221,10 +221,11 @@ export function addStroke(ctx: NotebookEditContext, pageId: string, input: Strok
 	});
 	let first = '';
 	transact(ctx, () => {
-		// A stroke longer than one stored stroke holds becomes several, so none of it is lost.
-		for (let at = 0; at < all.length; at += MAX_INK_POINTS * 3) {
-			const points = encodeInkPoints(all.slice(at, at + MAX_INK_POINTS * 3));
-			if (points.length < 3) continue;
+		// A stroke longer than one stored stroke holds becomes several, so none of it is lost: each
+		// one after the first starts on the previous one's last point, so the line has no gap.
+		const size = MAX_INK_POINTS * 3;
+		for (let at = 0; ; at += size - 3) {
+			const points = encodeInkPoints(all.slice(at, at + size));
 			const id = ctx.newId('ink');
 			first ||= id;
 			ctx.types.ink.set(id, {
@@ -235,6 +236,7 @@ export function addStroke(ctx: NotebookEditContext, pageId: string, input: Strok
 				pts: points,
 				seq: ++seq,
 			});
+			if (at + size >= all.length) break;
 		}
 	});
 	return first;

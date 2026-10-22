@@ -233,4 +233,26 @@ describe('ink storage', () => {
 		expect(strokes.at(-1)!.id).toBe(later);
 		expect(strokes[2]!.points[3]).toBe(MAX_COORDINATE);
 	});
+
+	it('stores a split stroke as one connected line, with no stray single point', () => {
+		const types = notebookTypes(new Y.Doc());
+		let n = 0;
+		const edit: NotebookEditContext = {
+			types,
+			newId: () => `ink-${n++}`,
+			now: () => 0,
+			origin: NOTEBOOK_ORIGIN,
+		};
+		const points: number[] = [];
+		for (let i = 0; i < MAX_INK_POINTS + 1; i++) points.push(i % 2 ? i : -i, i, 0.5);
+		addStroke(edit, 'p1', { tool: 'pen', color: '#000000', width: 2, points });
+		const [head, tail] = readStrokes(types, 'p1');
+		expect(head!.points).toHaveLength(MAX_INK_POINTS * 3);
+		// The second part starts where the first ends and carries the one point left over.
+		expect(tail!.points.slice(0, 3)).toEqual(head!.points.slice(-3));
+		expect(tail!.points.slice(3)).toEqual(points.slice(-3));
+		// Exactly full: one stroke, not a second one holding only the shared point.
+		addStroke(edit, 'p2', { tool: 'pen', color: '#000000', width: 2, points: points.slice(0, -3) });
+		expect(readStrokes(types, 'p2')).toHaveLength(1);
+	});
 });
