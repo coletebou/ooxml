@@ -58,7 +58,8 @@ const todoPlugin = (label: (done: boolean) => string): Plugin =>
 					const box = (event.target as HTMLElement | null)?.closest?.(
 						'.todo-box',
 					) as HTMLElement | null;
-					if (!box) return false;
+					// Only the main button ticks it; a right click opens the menu and leaves it as it is.
+					if (!box || event.button !== 0) return false;
 					event.preventDefault();
 					const pos = Number(box.dataset.pos);
 					setTodoAt(pos, box.dataset.todo === 'done' ? 'open' : 'done')(view.state, view.dispatch);

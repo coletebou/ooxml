@@ -334,6 +334,25 @@ describe('<notebook-app>', () => {
 		expect(app.page()!.shadowRoot!.activeElement).not.toBe(title);
 	});
 
+	it('ticks a to-do with the main button only, not with the right click that opens the menu', async () => {
+		app = await mount();
+		const page = app.page()!;
+		app.client!.addText({ x: 40, y: 40 }, [
+			{ type: 'paragraph', attrs: { todo: 'open' }, content: [{ type: 'text', text: 'call' }] },
+		]);
+		const text = () => page.shadowRoot!.querySelector<NotebookText>('notebook-text');
+		await until(() => text()?.view?.dom.querySelector('.todo-box'));
+		const box = () => text()!.view!.dom.querySelector<HTMLElement>('.todo-box')!;
+		const press = (button: number) =>
+			box().dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true, cancelable: true }));
+		const done = () => app.client!.getState().todos.map((t) => t.done);
+		press(2);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(done()).toEqual([false]);
+		press(0);
+		await until(() => done()[0] === true);
+	});
+
 	it('shows the navigation pane to rename the notebook when it was hidden', async () => {
 		app = await mount();
 		app.navOpen = false;
