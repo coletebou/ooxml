@@ -165,9 +165,15 @@ export function cleanCss(css: string): string {
 	);
 }
 
-function instance(): ReturnType<typeof DOMPurify> {
+/**
+ * The purifier with this module's hooks, or null where DOMPurify cannot work (no DOM: a server, a
+ * worker). Nothing is kept then, so a page that gains a DOM later still gets one.
+ */
+function instance(): ReturnType<typeof DOMPurify> | null {
 	if (purifier) return purifier;
-	purifier = DOMPurify(globalThis as unknown as Window & typeof globalThis);
+	const made = DOMPurify(globalThis as unknown as Window & typeof globalThis);
+	if (!made.isSupported) return null;
+	purifier = made;
 	purifier.addHook('uponSanitizeAttribute', (_node, data) => {
 		if (data.attrName === 'style') data.attrValue = cleanCss(data.attrValue);
 	});
@@ -203,6 +209,7 @@ type Taken = Record<'html' | 'body', Set<string>>;
  * to it.
  */
 function cleanAttributes<Name extends string>(
+	purify: ReturnType<typeof DOMPurify>,
 	element: Element,
 	names: readonly Name[],
 	taken: Set<string>,
@@ -215,7 +222,7 @@ function cleanAttributes<Name extends string>(
 		stand.setAttribute(name, value);
 	}
 	if (!stand.hasAttributes()) return {};
-	const clean = instance().sanitize(stand, {
+	const clean = purify.sanitize(stand, {
 		...PURIFY,
 		ADD_ATTR: [...PURIFY.ADD_ATTR, ...BODY_ONLY],
 		RETURN_DOM: true,
@@ -240,7 +247,7 @@ export function sanitizeEmailHtml(html: string, options: SanitizeOptions): Sanit
 /** `sanitizeEmailHtml` without the attributes named in `taken` (`cleanAttributes`). */
 function cleanText(html: string, options: SanitizeOptions, taken: Taken): SanitizedHtml {
 	const purify = instance();
-	if (typeof purify.sanitize !== 'function' || typeof DOMParser === 'undefined')
+	if (!purify || typeof DOMParser === 'undefined')
 		return { sheets: [], body: '', htmlAttributes: {}, bodyAttributes: {}, blocked: 0, cids: [] };
 	pass = { options, blocked: 0, cids: new Set() };
 	try {
@@ -248,8 +255,13 @@ function cleanText(html: string, options: SanitizeOptions, taken: Taken): Saniti
 		const sheets = [...parsed.querySelectorAll('style')].map((style) =>
 			cleanCss(style.textContent ?? ''),
 		);
-		const htmlAttributes = cleanAttributes(parsed.documentElement, HTML_ATTRIBUTES, taken.html);
-		const bodyAttributes = cleanAttributes(parsed.body, BODY_ATTRIBUTES, taken.body);
+		const htmlAttributes = cleanAttributes(
+			purify,
+			parsed.documentElement,
+			HTML_ATTRIBUTES,
+			taken.html,
+		);
+		const bodyAttributes = cleanAttributes(purify, parsed.body, BODY_ATTRIBUTES, taken.body);
 		const body = purify.sanitize(parsed.body.innerHTML, PURIFY);
 		const { blocked, cids } = pass;
 		return { sheets, body, htmlAttributes, bodyAttributes, blocked, cids: [...cids] };
