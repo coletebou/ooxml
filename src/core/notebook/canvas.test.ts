@@ -202,6 +202,31 @@ describe('reading order', () => {
 	});
 });
 
+describe('picture types', () => {
+	it('reads a picture of a type a page would run (a peer writing text/html) as a PNG', () => {
+		const types = notebookTypes(new Y.Doc());
+		const edit: NotebookEditContext = {
+			types,
+			newId: (kind) => `${kind}-1`,
+			now: () => 0,
+			origin: NOTEBOOK_ORIGIN,
+		};
+		const id = addImage(edit, 'p1', {
+			x: 0,
+			y: 0,
+			width: 10,
+			height: 10,
+			name: 'a.png',
+			mime: 'image/png',
+			bytes: new Uint8Array([1]),
+		});
+		(types.containers.get(id) as Y.Map<unknown>).set('mime', 'text/html');
+		expect(readContainers(types, 'p1')[0]).toMatchObject({ kind: 'image', mime: 'image/png' });
+		(types.containers.get(id) as Y.Map<unknown>).set('mime', 'image/svg+xml');
+		expect(readContainers(types, 'p1')[0]).toMatchObject({ mime: 'image/svg+xml' });
+	});
+});
+
 describe('ink storage', () => {
 	it('splits a long stroke, clamps far points and keeps the drawing order across sessions', () => {
 		const doc = new Y.Doc();

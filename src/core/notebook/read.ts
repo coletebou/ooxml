@@ -21,6 +21,7 @@ import {
 	sanitizeHexColor,
 	sanitizeLevel,
 	sanitizeLine,
+	isImageMime,
 	sanitizeMime,
 	sanitizeName,
 	sanitizeTimestamp,
@@ -162,7 +163,9 @@ function readContainer(id: string, map: Y.Map<unknown>): Container | undefined {
 			kind,
 			height,
 			name: sanitizeFileName(map.get('name'), 'picture'),
-			mime: sanitizeMime(map.get('mime'), 'image/png'),
+			// A picture's type is one a page shows as a picture: a peer's `text/html` would make it a
+			// page the browser runs once opened on its own.
+			mime: imageMime(map.get('mime')),
 			alt: sanitizeLine(map.get('alt'), 500),
 		};
 	}
@@ -231,3 +234,8 @@ export function readStrokes(types: NotebookTypes, pageId?: string): InkStroke[] 
 // Stroke ids end in a per-client counter (`createIdGenerator`); within one client that is the
 // drawing order, across clients ties fall back to the id.
 const strokeSeq = (id: string): number => Number(/-(\d+)$/u.exec(id)?.[1] ?? 0);
+
+function imageMime(value: unknown): string {
+	const mime = sanitizeMime(value, 'image/png');
+	return isImageMime(mime) ? mime : 'image/png';
+}

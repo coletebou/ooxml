@@ -24,6 +24,7 @@ import { formatCreated } from './i18n/translator';
 import { defineNotebookInk, type StrokeDetail } from './ink-layer';
 import { composing } from './keys';
 import { belowContent, placeFiles } from './page-files';
+import { rasterize } from './raster';
 import { type NotebookText, defineNotebookText } from './text-container';
 import css from './page-canvas.css?raw';
 
@@ -68,7 +69,7 @@ export class NotebookPage extends NotebookElement {
 	declare selectedId: string;
 	declare drag: Drag | null;
 	#bindings = new Map<string, TextBinding>();
-	#assets = new Map<string, { bytes: Uint8Array; url?: string }>();
+	#assets = new Map<string, { bytes: Uint8Array; url?: string; drawnAt?: string }>();
 	#title: string | null = null;
 	/** Where the person last clicked on this page: pasted items go there, else below the content. */
 	#lastPoint: { x: number; y: number } | null = null;
@@ -181,11 +182,41 @@ export class NotebookPage extends NotebookElement {
 			const bytes = this.client?.containerBytes(c.id);
 			if (!bytes) return null;
 			asset = { bytes };
-			if (c.kind === 'image')
+			if (c.kind === 'image' && c.mime !== 'image/svg+xml')
 				asset.url = URL.createObjectURL(new Blob([bytes.slice()], { type: c.mime }));
 			this.#assets.set(c.id, asset);
 		}
+		// An SVG is shown as a PNG drawn from it, at its frame's size: a peer's SVG under a blob URL
+		// of this origin would run its script once opened on its own (Open image in new tab).
+		if (c.kind === 'image' && c.mime === 'image/svg+xml') {
+			const size = `${c.width}x${c.height}`;
+			if (asset.drawnAt !== size) {
+				asset.drawnAt = size;
+				void this.#drawSvg(c.id, asset, c.width, c.height);
+			}
+		}
 		return asset;
+	}
+
+	async #drawSvg(
+		id: string,
+		asset: { bytes: Uint8Array; url?: string; drawnAt?: string },
+		width: number,
+		height: number,
+	): Promise<void> {
+		const drawn = asset.drawnAt;
+		const png = await rasterize({
+			kind: 'image',
+			bytes: asset.bytes,
+			mime: 'image/svg+xml',
+			width,
+			height,
+		});
+		// Gone, or drawn again at another size meanwhile.
+		if (!png || this.#assets.get(id) !== asset || asset.drawnAt !== drawn) return;
+		if (asset.url) URL.revokeObjectURL(asset.url);
+		asset.url = URL.createObjectURL(new Blob([png.bytes.slice()], { type: 'image/png' }));
+		this.requestUpdate();
 	}
 
 	/** A point on the canvas in page pixels. */

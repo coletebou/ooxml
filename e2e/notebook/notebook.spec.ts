@@ -253,3 +253,24 @@ test('exports a picture in its own shape after its frame was resized to another'
 	// Square in Word too, as the page draws it (contained in the wide frame).
 	expect(Number(extent![1])).toBe(Number(extent![2]));
 });
+
+test('shows an SVG picture from a PNG drawn from it, never from the SVG itself', async ({
+	page,
+}) => {
+	await open(page);
+	await ribbonTab(page, 'Insert');
+	const pictures = page.waitForEvent('filechooser');
+	await command(page, 'picture');
+	// A script in the SVG would run in this page's origin if its own URL were opened in a tab.
+	const svg =
+		'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/><script>window.ran = true</script></svg>';
+	await (
+		await pictures
+	).setFiles({ name: 'shape.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
+	const img = page.locator('notebook-page .frame.image img');
+	await expect(img).toHaveAttribute('src', /^blob:/u);
+	const type = await img.evaluate(
+		async (el) => (await (await fetch((el as HTMLImageElement).src)).blob()).type,
+	);
+	expect(type).toBe('image/png');
+});
