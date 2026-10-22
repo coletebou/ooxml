@@ -41,8 +41,15 @@ export function parseSyncConfig(raw: unknown): { config: NotebookSyncConfig; pro
 	return { config: { mode: 'server', syncUrl: url, ...(token ? { token } : {}) }, problems };
 }
 
-/** The sync room of a notebook. Collaborators share it, so it never depends on a local profile. */
-export const notebookRoomId = (notebookId: string): string => `nb-${notebookId}`.slice(0, 128);
+/**
+ * The sync room of a notebook. Collaborators share it, so it never depends on a local profile. An
+ * id too long for a room name is named by a digest of all of it (under a prefix no id gives), so
+ * two ids never share a room.
+ */
+export function notebookRoomId(notebookId: string): string {
+	const room = `nb-${notebookId}`;
+	return room.length <= 128 ? room : `nbh-${scopeDigest(notebookId).slice(3)}`;
+}
 
 /** The registry's room: tabs of one profile only, never a server. */
 export const registryRoomId = (scope = ''): string =>

@@ -4,7 +4,7 @@ import { loadDocx } from '../docx/parse';
 import { createNotebookClient } from './client';
 import type { NotebookClient, NotebookClientOptions } from './client-types';
 import { type NotebookStorage, REGISTRY_KEY, createMemoryStorage } from './storage';
-import { sanitizeScope } from './sync';
+import { notebookRoomId, sanitizeScope } from './sync';
 import { createChannelHub, settle } from './test-support/channel';
 
 const clients: NotebookClient[] = [];
@@ -685,6 +685,15 @@ describe('notebook client twelfth review round', () => {
 		expect(client.getState().sectionId).toBe(s2);
 		client.deleteSection(s2);
 		expect((await state()).sectionId).toBe(s3);
+	});
+
+	it('gives every notebook id its own room, also the longest ones', () => {
+		const base = 'n'.repeat(125);
+		const ids = [`${base}abc`, `${base}abd`, 'nshort'];
+		const rooms = ids.map(notebookRoomId);
+		expect(new Set(rooms).size).toBe(ids.length);
+		for (const room of rooms) expect(room.length <= 128 && /^[\w-]+$/u.test(room)).toBe(true);
+		expect(notebookRoomId('nshort')).toBe('nb-nshort');
 	});
 
 	it('gives every scope its own room, also scopes that are not plain ids', () => {
