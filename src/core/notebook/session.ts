@@ -216,8 +216,13 @@ export function undoKeeper(): {
 	filter: (item: Y.Item) => boolean;
 	attach: (manager: Y.UndoManager) => void;
 } {
-	let step: { insertions: Parameters<typeof Y.isDeleted>[0] } | null = null;
+	type Step = { insertions: Parameters<typeof Y.isDeleted>[0] };
+	// The history entry being undone or redone. Yjs pops each entry before it processes it and may
+	// skip one that changes nothing, then take the next; the one in hand is therefore the entry at
+	// the stack's current length in a copy of the stack taken before the call.
+	let current: (() => Step | null) | null = null;
 	const filter = (item: Y.Item): boolean => {
+		const step = current?.() ?? null;
 		const parent = item.parent;
 		const created = parent instanceof Y.Map ? parent._item : null;
 		if (
@@ -243,11 +248,12 @@ export function undoKeeper(): {
 		] as const) {
 			const run = manager[name].bind(manager);
 			manager[name] = () => {
-				step = stack().at(-1) ?? null;
+				const items = [...stack()];
+				current = () => items[stack().length] ?? null;
 				try {
 					return run();
 				} finally {
-					step = null;
+					current = null;
 				}
 			};
 		}

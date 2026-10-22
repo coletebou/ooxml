@@ -119,4 +119,39 @@ describe('notebook undo', () => {
 		expect(pages.has('p9')).toBe(true);
 		expect(page.get('title')).toBe('Mine');
 	});
+
+	it('keeps the fields of a box a collaborator wrote in when undo skips an entry to reach it', () => {
+		const keeper = undoKeeper();
+		const doc = new Y.Doc();
+		const boxes = doc.getMap('containers');
+		const undo = new Y.UndoManager(boxes, {
+			trackedOrigins: new Set(['local']),
+			deleteFilter: keeper.filter,
+		});
+		keeper.attach(undo);
+		const make = (id: string): Y.XmlFragment => {
+			const box = new Y.Map();
+			const content = new Y.XmlFragment();
+			doc.transact(() => {
+				boxes.set(id, box);
+				box.set('page', 'p1');
+				box.set('x', 10);
+				box.set('content', content);
+			}, 'local');
+			undo.stopCapturing();
+			return content;
+		};
+		const a = make('A');
+		make('B');
+		// A collaborator writes in A and deletes B: undoing B changes nothing, so undo reaches A.
+		doc.transact(() => {
+			const p = new Y.XmlElement('paragraph');
+			a.insert(0, [p]);
+			p.insert(0, [new Y.XmlText('theirs')]);
+			boxes.delete('B');
+		}, 'remote');
+		undo.undo();
+		const box = boxes.get('A') as Y.Map<unknown>;
+		expect([box.get('page'), box.get('x')]).toEqual(['p1', 10]);
+	});
 });
