@@ -93,13 +93,14 @@ describe('a notebook kept as a log', () => {
 				await run?.();
 			},
 		};
-		const seed = tracked();
-		const first = notebookCopy(storage, 'n1');
-		await first.load(seed.doc, STORED);
-		seed.doc.getText('t').insert(0, 'base');
-		await first.save(seed.doc, seed.take());
-		seed.doc.getText('t').insert(4, '!');
-		await first.save(seed.doc, seed.take());
+		// Two bases, as two clients that compacted at once leave: this open folds them.
+		const docA = new Y.Doc();
+		docA.getText('t').insert(0, 'base');
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+		docB.getText('t').insert(4, '!');
+		await inner.save(`${notebookKey('n1')}:b:one`, Y.encodeStateAsUpdate(docA));
+		await inner.save(`${notebookKey('n1')}:b:two`, Y.encodeStateAsUpdate(docB));
 		const late = new Y.Doc();
 		late.getMap('m').set('late', true);
 		during = () => inner.save(`${notebookKey('n1')}:u:late`, Y.encodeStateAsUpdate(late));
@@ -109,6 +110,36 @@ describe('a notebook kept as a log', () => {
 		expect(inner.keys()).toContain(`${notebookKey('n1')}:u:late`);
 		const all = await reopen(storage);
 		expect([all.getText('t').toString(), all.getMap('m').get('late')]).toEqual(['base!', true]);
+	});
+
+	it('opens after a small edit without rewriting the whole notebook', async () => {
+		const inner = createMemoryStorage();
+		const bases: number[] = [];
+		const storage: NotebookStorage = {
+			...inner,
+			save: async (key, bytes) => {
+				if (key.includes(':b:')) bases.push(bytes.length);
+				return inner.save(key, bytes);
+			},
+		};
+		const copy = notebookCopy(storage, 'n1');
+		const { doc, take } = tracked();
+		await copy.load(doc, STORED);
+		doc.getMap('assets').set('file', new Uint8Array(1_000_000));
+		await copy.save(doc, take());
+		// One base holds the file now.
+		await notebookCopy(storage, 'n1').load(new Y.Doc(), STORED);
+		expect(bases).toHaveLength(1);
+		// A session types a little; the next open reads base and entry, and writes no base.
+		const again = tracked();
+		const second = notebookCopy(storage, 'n1');
+		await second.load(again.doc, STORED);
+		again.doc.getText('t').insert(0, 'a few words');
+		await second.save(again.doc, again.take());
+		const third = new Y.Doc();
+		await notebookCopy(storage, 'n1').load(third, STORED);
+		expect(bases).toHaveLength(1);
+		expect(third.getText('t').toString()).toBe('a few words');
 	});
 
 	it('reads the one copy an older version kept and folds it into the log', async () => {

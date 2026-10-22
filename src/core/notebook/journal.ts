@@ -53,17 +53,17 @@ export function notebookCopy(storage: NotebookStorage, id: string): NotebookCopy
 	const due = (): boolean =>
 		entries >= COMPACT_ENTRIES * backoff ||
 		entryBytes >= Math.max(baseBytes, COMPACT_MIN_BYTES) * backoff;
-	const tryCompact = async (doc: Y.Doc): Promise<void> => {
+	const tryCompact = async (doc: Y.Doc, base?: Uint8Array): Promise<void> => {
 		try {
-			await compact(doc);
+			await compact(doc, base);
 			backoff = 1;
 		} catch {
 			// The pieces stay as they are; a later save tries again.
 			backoff = Math.min(backoff * 2, 64);
 		}
 	};
-	const compact = async (doc: Y.Doc): Promise<void> => {
-		const base = Y.encodeStateAsUpdate(doc);
+	const compact = async (doc: Y.Doc, encoded?: Uint8Array): Promise<void> => {
+		const base = encoded ?? Y.encodeStateAsUpdate(doc);
 		const fresh = `${prefix}b:${token()}`;
 		await storage.save(fresh, base);
 		const folded = [...known];
@@ -86,18 +86,29 @@ export function notebookCopy(storage: NotebookStorage, id: string): NotebookCopy
 				known.add(key);
 				baseBytes += single.length;
 			}
+			let bases = 0;
 			for (const [k, bytes] of stored) {
 				if (!k.startsWith(prefix)) continue;
 				Y.applyUpdate(doc, bytes, origin);
 				known.add(k);
-				if (k.startsWith(`${prefix}b:`)) baseBytes += bytes.length;
-				else {
+				if (k.startsWith(`${prefix}b:`)) {
+					bases++;
+					baseBytes += bytes.length;
+				} else {
 					entries++;
 					entryBytes += bytes.length;
 				}
 			}
-			// Several pieces (other clients' saves) or an older version's copy become one base now.
-			if (known.size > 1 || known.has(key)) await tryCompact(doc);
+			// An older version's copy, or several bases (clients that compacted at once), become one
+			// base now. A few entries wait for the usual threshold, so opening does not rewrite the
+			// whole notebook (pictures and files included) after every session's edits, unless what
+			// is stored has shrunk: a deleted file leaves storage when the live document, encoded
+			// (cheap, unlike the write), takes less than half of what is stored.
+			if (known.has(key) || bases > 1 || due()) await tryCompact(doc);
+			else if (entries) {
+				const live = Y.encodeStateAsUpdate(doc);
+				if (live.length * 2 < baseBytes + entryBytes) await tryCompact(doc, live);
+			}
 		},
 		async save(doc, changes) {
 			const k = `${prefix}u:${token()}`;
