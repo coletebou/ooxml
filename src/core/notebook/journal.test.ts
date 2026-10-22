@@ -136,6 +136,32 @@ describe('a notebook kept as a log', () => {
 		expect((await reopen(storage)).getText('t').length).toBe(600);
 	});
 
+	it('waits longer after a compaction fails, instead of rewriting the notebook every save', async () => {
+		const inner = createMemoryStorage();
+		const bases: number[] = [];
+		// Bases do not fit any more; small entries still do.
+		const storage: NotebookStorage = {
+			...inner,
+			save: async (key, bytes) => {
+				if (key.includes(':b:')) {
+					bases.push(bytes.length);
+					throw new Error('quota exceeded');
+				}
+				return inner.save(key, bytes);
+			},
+		};
+		const copy = notebookCopy(storage, 'n1');
+		const { doc, take } = tracked();
+		await copy.load(doc, STORED);
+		for (let i = 0; i < 2000; i++) {
+			doc.getText('t').insert(i, 'x');
+			await copy.save(doc, take());
+		}
+		// Due at 500 entries, then at 1000 and 2000 more: three tries, not 1500.
+		expect(bases.length).toBeLessThanOrEqual(3);
+		expect((await reopen(inner)).getText('t').length).toBe(2000);
+	});
+
 	it('keeps one merged copy on a storage that cannot read key ranges', async () => {
 		const inner = createMemoryStorage();
 		const storage: NotebookStorage = { load: inner.load, save: inner.save, remove: inner.remove };

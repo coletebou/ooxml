@@ -47,6 +47,21 @@ export function notebookCopy(storage: NotebookStorage, id: string): NotebookCopy
 	let baseBytes = 0;
 	let entryBytes = 0;
 	let entries = 0;
+	// After a compaction fails (a base too large for what the storage still takes, while small
+	// entries fit), the next one waits for twice the log, so saves do not rewrite the notebook each time.
+	let backoff = 1;
+	const due = (): boolean =>
+		entries >= COMPACT_ENTRIES * backoff ||
+		entryBytes >= Math.max(baseBytes, COMPACT_MIN_BYTES) * backoff;
+	const tryCompact = async (doc: Y.Doc): Promise<void> => {
+		try {
+			await compact(doc);
+			backoff = 1;
+		} catch {
+			// The pieces stay as they are; a later save tries again.
+			backoff = Math.min(backoff * 2, 64);
+		}
+	};
 	const compact = async (doc: Y.Doc): Promise<void> => {
 		const base = Y.encodeStateAsUpdate(doc);
 		const fresh = `${prefix}b:${token()}`;
@@ -81,9 +96,8 @@ export function notebookCopy(storage: NotebookStorage, id: string): NotebookCopy
 					entryBytes += bytes.length;
 				}
 			}
-			// Several pieces (other clients' saves) or an older version's copy become one base now;
-			// when that fails they stay as they are and the next compaction folds them.
-			if (known.size > 1 || known.has(key)) await compact(doc).catch(() => undefined);
+			// Several pieces (other clients' saves) or an older version's copy become one base now.
+			if (known.size > 1 || known.has(key)) await tryCompact(doc);
 		},
 		async save(doc, changes) {
 			const k = `${prefix}u:${token()}`;
@@ -91,9 +105,8 @@ export function notebookCopy(storage: NotebookStorage, id: string): NotebookCopy
 			known.add(k);
 			entries++;
 			entryBytes += changes.length;
-			// The changes are stored; a compaction that fails is tried again by a later save.
-			if (entries >= COMPACT_ENTRIES || entryBytes >= Math.max(baseBytes, COMPACT_MIN_BYTES))
-				await compact(doc).catch(() => undefined);
+			// The changes are stored whether or not the compaction goes through.
+			if (due()) await tryCompact(doc);
 		},
 	};
 }
