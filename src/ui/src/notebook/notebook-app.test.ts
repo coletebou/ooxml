@@ -427,6 +427,48 @@ describe('<notebook-app> on a touch screen', () => {
 	});
 });
 
+describe('<notebook-app> page sizing', () => {
+	let app: NotebookApp;
+	afterEach(() => {
+		app?.remove();
+		vi.unstubAllGlobals();
+	});
+
+	it('stops watching the text boxes of a page it moved away from', async () => {
+		const watched = new Set<Element>();
+		vi.stubGlobal(
+			'ResizeObserver',
+			class {
+				observe(el: Element): void {
+					watched.add(el);
+				}
+				unobserve(el: Element): void {
+					watched.delete(el);
+				}
+				disconnect(): void {
+					watched.clear();
+				}
+			},
+		);
+		app = await mount();
+		const page = app.page()!;
+		app.client!.addText({ x: 40, y: 40 }, [
+			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'first' }] },
+		]);
+		await until(() => page.shadowRoot!.querySelector('.frame.text'));
+		await page.updateComplete;
+		const frames = () => [...watched].filter((el) => el.matches('.frame.text')).length;
+		expect(frames()).toBe(1);
+		const before = app.state!.pageId;
+		runCommand(app, 'new-page');
+		await until(
+			() => app.state!.pageId !== before && !page.shadowRoot!.querySelector('.frame.text'),
+		);
+		await page.updateComplete;
+		expect(frames()).toBe(0);
+	});
+});
+
 describe('<notebook-app> restarts', () => {
 	let app: NotebookApp;
 	afterEach(() => app?.remove());

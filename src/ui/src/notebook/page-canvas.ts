@@ -121,14 +121,28 @@ export class NotebookPage extends NotebookElement {
 	#resized =
 		typeof ResizeObserver === 'function' ? new ResizeObserver(() => this.requestUpdate()) : null;
 
+	/** The text frames observed now; one that left the page (another page shown) is let go. */
+	#observed = new Set<Element>();
+
 	protected override updated(): void {
-		for (const frame of this.renderRoot.querySelectorAll('.frame.text'))
-			this.#resized?.observe(frame);
+		if (!this.#resized) return;
+		const frames = new Set(this.renderRoot.querySelectorAll('.frame.text'));
+		for (const frame of this.#observed)
+			if (!frames.has(frame)) {
+				this.#resized.unobserve(frame);
+				this.#observed.delete(frame);
+			}
+		for (const frame of frames)
+			if (!this.#observed.has(frame)) {
+				this.#resized.observe(frame);
+				this.#observed.add(frame);
+			}
 	}
 
 	override disconnectedCallback(): void {
 		super.disconnectedCallback();
 		this.#resized?.disconnect();
+		this.#observed.clear();
 		for (const asset of this.#assets.values()) if (asset.url) URL.revokeObjectURL(asset.url);
 		this.#assets.clear();
 		this.#bindings.clear();
