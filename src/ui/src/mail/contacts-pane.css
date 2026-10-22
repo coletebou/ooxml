@@ -1,8 +1,10 @@
-/* <mail-contacts>: the contact list beside the selected contact or its edit form. */
+/* <mail-contacts>: the contact list beside the selected contact or its edit form. Its layout
+   follows its own width (the container query below), in the app or on its own. */
 :host {
 	display: block;
 	min-height: 0;
 	height: 100%;
+	container-type: inline-size;
 }
 .pane {
 	display: grid;
