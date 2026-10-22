@@ -237,6 +237,20 @@ describe('composeDraft', () => {
 		for (const html of ['<p><br></p>', '<div>&nbsp; </div>', ' <br> ', '<p></p><p>&#160;</p>'])
 			expect(isEmptyDraft({ ...draft, html })).toBe(true);
 	});
+	it('counts the Bcc addresses typed, not those an identity adds of its own', () => {
+		const archive = { name: '', email: 'archive@example.com' };
+		const ada = { name: 'Ada', email: 'ada@example.com' };
+		const own: Identity = { ...identity, bcc: [archive] };
+		const draft = composeDraft('new', null, { identity: own, me: [me], format });
+		expect(draft.bcc).toEqual([archive]);
+		expect(isEmptyDraft(draft, own.bcc)).toBe(true);
+		expect(
+			isEmptyDraft({ ...draft, bcc: [{ name: 'Archive', email: 'ARCHIVE@example.com' }] }, own.bcc),
+		).toBe(true);
+		expect(isEmptyDraft({ ...draft, bcc: [archive, ada] }, own.bcc)).toBe(false);
+		expect(isEmptyDraft({ ...draft, bcc: [ada] })).toBe(false);
+		expect(isEmptyDraft({ ...draft, bcc: [] })).toBe(true);
+	});
 });
 
 describe('patchDraft', () => {

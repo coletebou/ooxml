@@ -52,7 +52,11 @@ export function createAutosave(core: ClientCore, sending: () => boolean): Autosa
 	const compose = (): ComposeState | null => core.state.compose;
 	const unsaved = (): boolean => {
 		const current = compose();
-		return !!current && saved !== edits && (!!current.draft.id || !isEmptyDraft(current.draft));
+		if (!current || saved === edits) return false;
+		// The Bcc addresses an identity adds by itself are no edit: any identity's, as the window may
+		// have changed its From since.
+		const ownBcc = core.state.identities.flatMap((identity) => identity.bcc);
+		return !!current.draft.id || !isEmptyDraft(current.draft, ownBcc);
 	};
 
 	/** Saves the open draft once if it has unsaved edits; resolves to the error, if it failed. */

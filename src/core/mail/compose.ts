@@ -266,13 +266,15 @@ const hasContent = (html: string | undefined): boolean =>
 	!!html && (MEDIA.test(dropScriptsAndStyles(html)) || !!bodyText({ html }).trim());
 
 /**
- * True when a draft has nothing worth keeping: no To or Cc recipients, subject, text, formatted
- * text or files. Bcc is not counted, since a new draft starts with the identity's own Bcc addresses.
+ * True when a draft has nothing worth keeping: no recipients, subject, text, formatted text or
+ * files. A Bcc address counts unless it is one of `ownBcc`, those an identity adds by itself to
+ * every new draft.
  */
-export function isEmptyDraft(draft: Draft): boolean {
+export function isEmptyDraft(draft: Draft, ownBcc: readonly MailAddress[] = []): boolean {
 	return (
 		!draft.to.length &&
 		!draft.cc.length &&
+		draft.bcc.every((address) => ownBcc.some((own) => sameAddress(own, address))) &&
 		!draft.subject.trim() &&
 		!draft.text.trim() &&
 		!draft.attachments.length &&

@@ -671,6 +671,29 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('keeps a new draft with only Bcc addresses typed, never one with only its own', async () => {
+		const archive = { name: '', email: 'archive@example.com' };
+		const own = { ...identityOf('own', me.name, me.email), bcc: [archive] };
+		const team = identityOf('team', 'Team', 'team@example.com');
+		const { client, inMailbox } = plain({ identities: [own, team] });
+		await until(client, (s) => s.status === 'ready');
+		// Opened with the identity's own Bcc, and written from another one: nothing typed, nothing kept.
+		await client.compose('new');
+		expect(client.getState().compose?.draft.bcc).toEqual([archive]);
+		client.updateDraft({ identityId: 'team' });
+		expect(await client.closeCompose()).toBe(true);
+		expect(await inMailbox('drafts')).toEqual([]);
+		// A Bcc address typed is kept, by the quiet save and on closing.
+		await client.compose('new');
+		client.updateDraft({ bcc: [archive, ada] });
+		expect(await client.closeCompose()).toBe(true);
+		const kept = await inMailbox('drafts');
+		expect(kept.map((draft) => draft.bcc.map((address) => address.email))).toEqual([
+			['archive@example.com', 'ada@example.com'],
+		]);
+		client.destroy();
+	});
+
 	it('saves a saved draft emptied of everything, so reopening it shows it empty', async () => {
 		const { client, drafts, memory } = setup();
 		await until(client, (s) => s.status === 'ready');
