@@ -193,7 +193,7 @@ export const fr: Record<keyof typeof en, string> = {
 	'status.local': 'Enregistré sur cet appareil',
 	'status.unsaved': 'Modifications non enregistrées sur cet appareil',
 	'status.memory':
-		'Non enregistré sur cet appareil : les blocs-notes durent jusqu’à la fermeture de cet onglet',
+		'Non enregistré sur cet appareil : les blocs-notes sont perdus si cette page est rechargée ou fermée',
 	'status.connected': 'Connecté',
 	'status.connecting': 'Connexion en cours',
 	'status.disconnected': 'Hors connexion',

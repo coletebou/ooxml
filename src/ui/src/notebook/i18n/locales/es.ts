@@ -193,7 +193,7 @@ export const es: Record<keyof typeof en, string> = {
 	'status.local': 'Guardado en este dispositivo',
 	'status.unsaved': 'Cambios no guardados en este dispositivo',
 	'status.memory':
-		'No se guarda en este dispositivo: los blocs de notas duran hasta que se cierre esta pestaña',
+		'No se guarda en este dispositivo: los blocs de notas se pierden al recargar o cerrar esta página',
 	'status.connected': 'Conectado',
 	'status.connecting': 'Conectando',
 	'status.disconnected': 'Sin conexión',

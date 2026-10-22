@@ -195,7 +195,7 @@ export const de: Record<keyof typeof en, string> = {
 	'status.local': 'Auf diesem Gerät gespeichert',
 	'status.unsaved': 'Änderungen nicht auf diesem Gerät gespeichert',
 	'status.memory':
-		'Nicht auf diesem Gerät gespeichert: Notizbücher bleiben nur, bis dieser Tab geschlossen wird',
+		'Nicht auf diesem Gerät gespeichert: Notizbücher gehen verloren, wenn diese Seite neu geladen oder geschlossen wird',
 	'status.connected': 'Verbunden',
 	'status.connecting': 'Verbindung wird hergestellt',
 	'status.disconnected': 'Offline',

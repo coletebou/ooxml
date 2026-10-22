@@ -191,7 +191,7 @@ export const zhCN: Record<keyof typeof en, string> = {
 
 	'status.local': '已保存在此设备上',
 	'status.unsaved': '更改未保存在此设备上',
-	'status.memory': '未保存在此设备上：笔记本只保留到此标签页关闭',
+	'status.memory': '未保存在此设备上：重新加载或关闭此页面后笔记本将丢失',
 	'status.connected': '已连接',
 	'status.connecting': '正在连接',
 	'status.disconnected': '脱机',

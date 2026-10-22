@@ -461,7 +461,7 @@ describe('<notebook-app>', () => {
 		);
 		// This DOM has no IndexedDB, so the notebooks only last for the session, and the status says so.
 		expect(app.shadowRoot!.querySelector('.status .sync')?.textContent).toBe(
-			'Nicht auf diesem Gerät gespeichert: Notizbücher bleiben nur, bis dieser Tab geschlossen wird',
+			'Nicht auf diesem Gerät gespeichert: Notizbücher gehen verloren, wenn diese Seite neu geladen oder geschlossen wird',
 		);
 	});
 });

@@ -188,7 +188,8 @@ export const en = {
 	'notice.sync-error': 'The connection to collaborators had a problem.',
 
 	'status.local': 'Saved on this device',
-	'status.memory': 'Not saved on this device: notebooks last until this tab closes',
+	'status.memory':
+		'Not saved on this device: notebooks are lost when this page is reloaded or closed',
 	'status.unsaved': 'Changes not saved on this device',
 	'status.connected': 'Connected',
 	'status.connecting': 'Connecting',
