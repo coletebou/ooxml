@@ -74,6 +74,26 @@ describe('mailtoDraft', () => {
 		expect(draft?.subject).toBe('Plan');
 	});
 
+	it('reads each field as the address list it decodes to, its commas escaped or not', () => {
+		// RFC 6068 5: what a link holds is decoded before the message is made, so a to, cc or bcc
+		// value is a header field's: its commas part addresses outside quotes. A link made with
+		// encodeURIComponent escapes every comma.
+		const draft = mailtoDraft(
+			`mailto:${encodeURIComponent('ada@example.com,eve@example.com')}` +
+				`?cc=${encodeURIComponent('Bob Carter <bob@example.com>, "x,y"@example.com')}` +
+				`&bcc=${encodeURIComponent('dan@example.com;')}`,
+		);
+		expect(draft?.to).toEqual([
+			{ name: '', email: 'ada@example.com' },
+			{ name: '', email: 'eve@example.com' },
+		]);
+		expect(draft?.cc).toEqual([
+			{ name: 'Bob Carter', email: 'bob@example.com' },
+			{ name: '', email: '"x,y"@example.com' },
+		]);
+		expect(draft?.bcc).toEqual([{ name: '', email: 'dan@example.com' }]);
+	});
+
 	it('takes every address from its fields when the link names none of its own', () => {
 		expect(mailtoDraft('mailto:?to=ada@example.com&cc=bob@example.com')).toMatchObject({
 			to: [{ name: '', email: 'ada@example.com' }],

@@ -1,7 +1,7 @@
 // A `mailto:` link (RFC 6068) as the new message it starts: its addresses (the link's own, then
 // those of its `to`, `cc` and `bcc` fields), subject and body. The link comes from a message a
 // sender wrote, so it is read as text and never trusted to be well formed. New code.
-import type { MailAddress } from 'ooxml-core/mail';
+import { parseAddressList, type MailAddress } from 'ooxml-core/mail';
 
 /** What a `mailto:` link puts in a new message. */
 export interface MailtoDraft {
@@ -39,13 +39,26 @@ function fields(query: string): [name: string, value: string][] {
 	return out;
 }
 
-/** Addresses as a link writes them: split at a comma as written, then decoded (one inside is %2C). */
-const addresses = (written: string): MailAddress[] =>
-	written
-		.split(',')
-		.map((part) => decoded(part).trim())
-		.filter(Boolean)
-		.map((email) => ({ name: '', email }));
+/**
+ * The addresses of a link's own part or of its `to`, `cc` or `bcc` field. Decoded first, as RFC
+ * 6068 5 asks, the value is read as an address list: a comma parts addresses, written or escaped (a
+ * link made with `encodeURIComponent` escapes every one), except inside a quoted local part or
+ * name. A value with a broken escape (`%zz`) is split at its commas as written instead, each
+ * address decoded on its own or kept as written.
+ */
+function addresses(written: string): MailAddress[] {
+	let text: string;
+	try {
+		text = decodeURIComponent(written);
+	} catch {
+		return written
+			.split(',')
+			.map((part) => decoded(part).trim())
+			.filter(Boolean)
+			.map((email) => ({ name: '', email }));
+	}
+	return parseAddressList(text).filter((address) => address.email);
+}
 
 /** The message a `mailto:` link starts, or null for anything else. */
 export function mailtoDraft(href: string): MailtoDraft | null {
