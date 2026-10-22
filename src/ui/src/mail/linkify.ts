@@ -14,14 +14,22 @@ function linkHref(value: string): string {
 	return value;
 }
 
+const URL_PATTERN = String.raw`\b(?:https?:\/\/|www\.)[^\s<>"]{0,2048}[^\s<>".,;:!?)\]]`;
+/**
+ * An address, its local part whole (RFC 5322 atext: `o'connor`, `a=b`). It never starts inside a
+ * word, nor right after another local-part character or a word and an apostrophe (`d’arcy`):
+ * where its start cannot be told, nothing is linked rather than its end, an address of someone
+ * else.
+ */
+const ADDRESS_PATTERN = String.raw`(?<![\p{L}\p{N}_.!#$%&*+\/=?^${'`'}{|}~-]|[\p{L}\p{N}_]['’])[\w+-][\w.!#$%&'*+\/=?^${'`'}{|}~-]{0,63}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}\b`;
+/** Bounded quantifiers (RFC 5321 length limits for addresses) keep this linear on hostile text. */
+const LINKS = new RegExp(`${URL_PATTERN}|${ADDRESS_PATTERN}`, 'giu');
+
 /** Plain text split into text and links (`https://...`, `www....`, addresses), never markup. */
 export function linkify(text: string): TextSegment[] {
 	const out: TextSegment[] = [];
-	// Bounded quantifiers (RFC 5321 length limits for addresses) keep this linear on hostile text.
-	const pattern =
-		/\b(?:https?:\/\/|www\.)[^\s<>"]{0,2048}[^\s<>".,;:!?)\]]|\b[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}\b/gi;
 	let at = 0;
-	for (const match of text.matchAll(pattern)) {
+	for (const match of text.matchAll(LINKS)) {
 		const start = match.index ?? 0;
 		if (start > at) out.push({ text: text.slice(at, start) });
 		const value = match[0];
