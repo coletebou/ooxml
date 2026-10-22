@@ -3,6 +3,7 @@ import { loadDocx } from 'ooxml-core/docx';
 import { getIcon } from '../icons';
 import { TextSelection } from 'prosemirror-state';
 import { applyLink, openLinkDialog, runCommand } from './app-actions';
+import { notebookMenuAt } from './app-nav';
 import { type NotebookApp, type NotebookExportDetail, defineNotebookApp } from './notebook-app';
 import type { NotebookText } from './text-container';
 
@@ -525,5 +526,39 @@ describe('<notebook-app> restarts', () => {
 		await app.updateComplete;
 		done();
 		await until(() => !!app.state?.page);
+	});
+
+	it('closes the menus and dialogs of a profile it switches away from at once', async () => {
+		app = await mount();
+		holdFlush(app, false);
+		notebookMenuAt(app, 10, 10);
+		app.link = { href: 'https://kept.example/', text: 'private words', linked: true };
+		await app.updateComplete;
+		expect(app.menu).not.toBeNull();
+		app.storageName = `${app.getAttribute('storage-name')}-other`;
+		await app.updateComplete;
+		expect([app.state, app.menu, app.link]).toEqual([null, null, null]);
+	});
+
+	it('does not show a profile it switched away from when that one finishes loading', async () => {
+		defineNotebookApp();
+		app = document.createElement('notebook-app') as NotebookApp;
+		const name = `nb-test-${Math.random().toString(36).slice(2)}`;
+		app.setAttribute('storage-name', name);
+		app.userName = 'Ada';
+		const ready: string[] = [];
+		app.addEventListener('notebook-ready', () => ready.push(app.storageName));
+		document.body.append(app);
+		await app.updateComplete;
+		const done = holdFlush(app, false);
+		app.storageName = `${name}-other`;
+		await app.updateComplete;
+		// The first client finishes loading while its last save is still pending.
+		await new Promise((r) => setTimeout(r, 700));
+		expect(app.state).toBeNull();
+		expect(ready).toEqual([]);
+		done();
+		await until(() => !!app.state?.page);
+		expect(ready).toEqual([`${name}-other`]);
 	});
 });

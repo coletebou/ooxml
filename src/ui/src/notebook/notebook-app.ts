@@ -281,11 +281,9 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		// even when the last save failed (the save-failed notice said so).
 		const profile = this.storageName !== this.#storageName;
 		if (profile) {
-			// Off the screen at once: its notebooks are not shown while its last save completes.
-			for (const off of this.#off.splice(0)) off();
-			this.state = null;
-			this.editor = null;
-			this.formats = null;
+			// Off the screen at once (menus, dialogs and notices too): its notebooks are not shown
+			// while its last save completes.
+			this.#hide();
 			// No longer shown, so a switch straight back to this profile starts a client to show it.
 			this.#clientKey = '';
 		}
@@ -341,20 +339,26 @@ export class NotebookApp extends NotebookElement implements AppHost {
 			client.on('notice', ({ code }) => this.notify(this.t(`notice.${code}`))),
 		);
 		void client.whenReady().then(() => {
-			if (this.#client !== client) return;
+			// Not if it was taken off the screen meanwhile (a switch to another profile).
+			if (this.#client !== client || this.#clientKey !== key) return;
 			this.#onState(client);
 			this.fire('notebook-ready', { user: { id: client.getState().user.id, name } });
 		});
 	}
 
 	#stop(): void {
-		for (const off of this.#off.splice(0)) off();
+		this.#hide();
 		const client = this.#client;
 		this.#client = null;
 		this.#clientKey = '';
+		void client?.destroy();
+	}
+
+	/** Nothing of the current client (another profile's notebooks) stays on screen or in reach. */
+	#hide(): void {
+		for (const off of this.#off.splice(0)) off();
 		this.editor = null;
 		this.#editorId = '';
-		// Nothing of the previous client (another profile's notebooks) stays on screen or in reach.
 		this.state = null;
 		this.formats = null;
 		this.link = null;
@@ -362,7 +366,6 @@ export class NotebookApp extends NotebookElement implements AppHost {
 		clearTimeout(this.#noticeTimer);
 		this.notice = null;
 		this.#lastNav = '';
-		void client?.destroy();
 	}
 
 	#onState(client: NotebookClient): void {
