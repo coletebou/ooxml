@@ -293,6 +293,38 @@ describe('page export to .docx', () => {
 		expect(start('one')).toEqual([0, null]);
 	});
 
+	it('restarts each separate numbered list nested in one item', async () => {
+		const para = (t: string): RichNode => ({
+			type: 'paragraph',
+			attrs: { todo: null },
+			content: [text(t)],
+		});
+		const list = (...items: RichNode[][]): RichNode => ({
+			type: 'ordered_list',
+			attrs: { order: 1 },
+			content: items.map((content) => ({ type: 'list_item', content })),
+		});
+		const { bytes } = await exportPageToDocx({
+			title: 'Sublists',
+			items: [
+				{
+					kind: 'text',
+					x: 0,
+					y: 0,
+					blocks: [list([para('item'), list([para('a1')]), para('between'), list([para('b1')])])],
+				},
+			],
+		});
+		const loaded = await loadDocx(bytes);
+		const numbering = (t: string) =>
+			paragraphs(loaded.model).find((p) => textOf(p) === t)!.numbering!;
+		// The first sublist continues the item's list one level deeper; the second, after a plain
+		// paragraph, is a list of its own, so it starts at 1 again.
+		expect(numbering('a1')).toEqual({ numId: numbering('item').numId, level: 1 });
+		expect(numbering('b1').level).toBe(1);
+		expect(numbering('b1').numId).not.toBe(numbering('a1').numId);
+	});
+
 	it('reports a text box that holds more than the limit', async () => {
 		const { report } = await exportPageToDocx({
 			title: 'Long',

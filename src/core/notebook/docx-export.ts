@@ -148,6 +148,9 @@ class Writer {
 		// In a list item only the first paragraph carries the number; the ones after it continue the
 		// item, indented to its text, as they read on the page.
 		let numbered = false;
+		// Only the item's first nested list continues its parent's numbering: Word restarts a level
+		// only after an item of the level above, so a second one after a plain paragraph would count on.
+		let continued = false;
 		for (const node of blocks) {
 			if (node.type === 'paragraph' || node.type === 'heading') {
 				const todo = node.attrs?.todo;
@@ -173,7 +176,8 @@ class Writer {
 				// A nested list of the same kind continues its parent one level deeper; anything else,
 				// or a list with a start of its own, is a Word list of its own, so numbering restarts as
 				// it does on the page.
-				let numId = list?.kind === kind && start === 1 ? list.numId : undefined;
+				let numId = list?.kind === kind && start === 1 && !continued ? list.numId : undefined;
+				if (numId !== undefined) continued = true;
 				if (numId === undefined) {
 					const created = ensureListDefinition(this.model.numberingCatalog, kind);
 					numId = created.numId;
