@@ -229,11 +229,20 @@ export async function discoverJmapSession(
 	return loadJmapSession(http, sessionResourceUrl(options.url), options.signal);
 }
 
-/** The account to use: `preferred`, else the primary mail account, else any account with mail. */
+/**
+ * The account to use: `preferred` (which must offer mail), else the primary mail account, else any
+ * account with mail.
+ */
 export function mailAccountId(session: JmapSession, preferred?: string): string {
 	if (preferred !== undefined) {
-		if (Object.hasOwn(session.accounts, preferred)) return preferred;
-		throw new MailTransportError('notFound', 'The JMAP server has no such account.');
+		if (!Object.hasOwn(session.accounts, preferred))
+			throw new MailTransportError('notFound', 'The JMAP server has no such account.');
+		if (!accountHas(session, preferred, MAIL))
+			throw new MailTransportError(
+				'unsupported',
+				'That account on the JMAP server offers no mail.',
+			);
+		return preferred;
 	}
 	const primary = session.primaryAccounts[MAIL];
 	if (primary !== undefined && Object.hasOwn(session.accounts, primary)) return primary;

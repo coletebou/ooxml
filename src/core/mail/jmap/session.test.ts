@@ -475,6 +475,27 @@ describe('mailAccountId', () => {
 		);
 	});
 
+	it('refuses a requested account that offers no mail', () => {
+		const raw = rfcSession();
+		const contactsOnly = {
+			...raw,
+			accounts: {
+				...(raw.accounts as Record<string, unknown>),
+				X1: {
+					name: 'Address book',
+					isPersonal: true,
+					isReadOnly: false,
+					accountCapabilities: { 'urn:ietf:params:jmap:contacts': {} },
+				},
+			},
+		};
+		const parsed = parseJmapSession(contactsOnly, 'https://jmap.example.com/.well-known/jmap');
+		expect(() => mailAccountId(parsed, 'X1')).toThrow(
+			expect.objectContaining({ code: 'unsupported' }),
+		);
+		expect(mailAccountId(parsed, 'A97813')).toBe('A97813');
+	});
+
 	it('falls back to any account with mail when there is no primary one', () => {
 		const other = parseJmapSession(
 			{ ...rfcSession(), primaryAccounts: {} },
