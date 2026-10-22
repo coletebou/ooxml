@@ -107,24 +107,26 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 	const save = (): Promise<void> => {
 		clearTimeout(timer);
 		timer = undefined;
-		if (!copy || !pending.length) return saving;
-		const changes = pending.length === 1 ? pending[0]! : Y.mergeUpdates(pending);
-		pending = [];
-		saving = saving
-			.then(() => copy.save(doc, changes))
-			.then(
-				() => {
-					failed = null;
-					if (storage) rescued(storage).delete(key);
-					options.onSaved?.();
-				},
-				(error: unknown) => {
-					// Still unsaved: the next change, flush or close tries again.
-					pending.unshift(changes);
-					failed = error;
-					options.onError(error, 'save');
-				},
-			);
+		if (!copy) return saving;
+		// The changes are taken when this save runs, after the ones before it: a save that failed
+		// put its changes back, so they go with this one, and a success means nothing is left.
+		saving = saving.then(async () => {
+			if (!pending.length) return;
+			const changes = pending.length === 1 ? pending[0]! : Y.mergeUpdates(pending);
+			pending = [];
+			try {
+				await copy.save(doc, changes);
+			} catch (error) {
+				// Still unsaved: the next change, flush or close tries again.
+				pending.unshift(changes);
+				failed = error;
+				options.onError(error, 'save');
+				return;
+			}
+			failed = null;
+			if (storage) rescued(storage).delete(key);
+			options.onSaved?.();
+		});
 		return saving;
 	};
 	const onUpdate = (update: Uint8Array, origin: unknown): void => {
@@ -186,7 +188,8 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 			closed = true;
 			await save();
 			// The device refused the last save: the tab keeps a copy for the next open of it.
-			if (failed && storage) rescued(storage).set(key, Y.encodeStateAsUpdate(doc));
+			if ((failed || pending.length) && storage)
+				rescued(storage).set(key, Y.encodeStateAsUpdate(doc));
 			offStatus();
 			offPeers();
 			offError();

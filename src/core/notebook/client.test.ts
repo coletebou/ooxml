@@ -709,6 +709,47 @@ describe('notebook client twelfth review round', () => {
 });
 
 describe('notebook client saves', () => {
+	it('keeps a failed save for the one queued behind it, so closing loses nothing', async () => {
+		const inner = createMemoryStorage();
+		let hold: { release: () => void; done: Promise<void> } | null = null;
+		const storage: NotebookStorage = {
+			...inner,
+			save: async (key, bytes) => {
+				// The held save waits, then fails (a full disk); every later one goes through.
+				const held = key.includes(':u:') ? hold : null;
+				if (held) {
+					hold = null;
+					await held.done;
+					throw new Error('quota exceeded');
+				}
+				return inner.save(key, bytes);
+			},
+		};
+		const client = start(storage, createChannelHub());
+		await client.whenReady();
+		await settle();
+		const id = client.getState().notebookId;
+		await client.flush();
+		let release = (): void => undefined;
+		hold = { release: () => release(), done: new Promise<void>((r) => (release = r)) };
+		client.renamePage(client.getState().pageId, 'First');
+		const first = client.flush().catch(() => undefined);
+		await settle();
+		client.createPage({ title: 'Second' });
+		const closing = client.destroy();
+		release();
+		await Promise.all([first, closing]);
+		const again = start(inner, createChannelHub());
+		await again.whenReady();
+		await until(() => again.getState().notebookId === id && !again.getState().loading);
+		expect(
+			again
+				.getState()
+				.pages.map((p) => p.title)
+				.sort(),
+		).toEqual(['First', 'Second']);
+	});
+
 	it('writes only what changed, not the pictures already stored', async () => {
 		const inner = createMemoryStorage();
 		const written: number[] = [];
