@@ -1,6 +1,6 @@
 import { MailTransportError } from '../transport';
 import { createJmapClient } from './client';
-import { sessionResourceUrl } from './http';
+import { sessionResourceUrl } from './urls';
 import { accountHas, discoverJmapSession, mailAccountId, parseJmapSession } from './session';
 import {
 	createFakeServer,

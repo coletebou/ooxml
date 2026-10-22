@@ -7,13 +7,12 @@ import {
 	createJmapHttp,
 	discard,
 	isSafeUrl,
-	resolveTemplate,
-	sessionResourceUrl,
 	type JmapAuth,
 	type JmapHttp,
 	type JmapHttpInit,
 } from './http';
 import { CORE, MAIL, isRecord } from './types';
+import { resolveTemplate, sessionResourceUrl } from './urls';
 
 /** The request limits of `urn:ietf:params:jmap:core`; the RFC's suggested minimums when absent. */
 export interface JmapLimits {

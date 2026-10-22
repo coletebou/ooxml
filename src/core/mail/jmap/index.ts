@@ -10,15 +10,13 @@ export type { PushMode } from './watch';
 export {
 	authorization,
 	createJmapHttp,
-	expandTemplate,
 	isSafeUrl,
-	resolveTemplate,
-	sessionResourceUrl,
 	type JmapAuth,
 	type JmapHttp,
 	type JmapHttpInit,
 	type JmapHttpOptions,
 } from './http';
+export { expandTemplate, resolveTemplate, sessionResourceUrl } from './urls';
 export {
 	accountHas,
 	discoverJmapSession,

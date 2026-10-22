@@ -3,7 +3,8 @@
 // are handed on; a stream that ends is reopened with capped exponential backoff, one that falls
 // silent (no ping for twice the interval) is dropped and reopened, and after repeated failures the
 // caller is told to poll until a stream works again. New code.
-import { discard, expandTemplate, type JmapHttp } from './http';
+import { discard, type JmapHttp } from './http';
+import { expandTemplate } from './urls';
 import { createSseParser, type SseEvent } from './sse';
 import { isRecord } from './types';
 

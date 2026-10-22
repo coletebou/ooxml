@@ -5,13 +5,13 @@
 import {
 	createJmapGate,
 	createJmapHttp,
-	sessionResourceUrl,
 	type JmapAuth,
 	type JmapGate,
 	type JmapHttp,
 } from './http';
 import { JmapRequestBuilder, JmapResult, parseJmapResponse, type JmapCall } from './request';
 import { loadJmapSession, mailAccountId, type JmapLimits, type JmapSession } from './session';
+import { sessionResourceUrl } from './urls';
 import { CORE, MAIL, SUBMISSION, type JmapRequest, type JmapResponse } from './types';
 
 export interface JmapClientOptions {

@@ -5,7 +5,7 @@ import { SEEN } from '../model';
 import { MailTransportError, type UploadedBlob } from '../transport';
 import type { JmapClient } from './client';
 import { networkError } from './errors';
-import { expandTemplate } from './http';
+import { expandTemplate } from './urls';
 import { patchPath } from './request';
 import { isRecord } from './types';
 
