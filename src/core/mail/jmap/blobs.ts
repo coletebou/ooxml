@@ -50,7 +50,27 @@ export function createBlobMethods(client: JmapClient, nudge: () => void): BlobMe
 		};
 	};
 
-	return {
+	/**
+	 * Whether the message `existingId` holds these bytes, the upload `blobId`: the same blob id (a
+	 * server naming bytes by their content), else the same size and, read, the same bytes.
+	 */
+	const holds = async (existingId: string, bytes: Uint8Array, blobId: string): Promise<boolean> => {
+		const { result, calls } = await client.request((builder, accountId) =>
+			builder.call('Email/get', { accountId, ids: [existingId], properties: ['blobId', 'size'] }),
+		);
+		const list: unknown = result.get(calls).list;
+		const email: unknown = Array.isArray(list) ? list[0] : undefined;
+		if (!isRecord(email) || typeof email.blobId !== 'string') return false;
+		if (email.blobId === blobId) return true;
+		if (email.size !== bytes.byteLength) return false;
+		const held = await methods.download(email.blobId, {
+			type: 'message/rfc822',
+			name: 'message.eml',
+		});
+		return held.byteLength === bytes.byteLength && held.every((byte, i) => byte === bytes[i]);
+	};
+
+	const methods: BlobMethods = {
 		upload,
 
 		async download(blobId, options) {
@@ -88,8 +108,14 @@ export function createBlobMethods(client: JmapClient, nudge: () => void): BlobMe
 				duplicate.type === 'alreadyExists' &&
 				typeof duplicate.existingId === 'string'
 			) {
-				// The account has this message already (RFC 8621 4.8): file that one in the mailbox.
+				// The account has this message already (RFC 8621 4.8): file that one in the mailbox. A
+				// server may call one a duplicate by its Message-ID alone: only the same bytes are filed.
 				const existing = duplicate.existingId;
+				if (!(await holds(existing, bytes, blobId)))
+					throw new MailTransportError(
+						'invalid',
+						'The account holds another message with the Message-ID of this one.',
+					);
 				const { result: filed, calls: set } = await client.request((builder, accountId) =>
 					builder.call('Email/set', {
 						accountId,
@@ -105,4 +131,5 @@ export function createBlobMethods(client: JmapClient, nudge: () => void): BlobMe
 			return { id };
 		},
 	};
+	return methods;
 }

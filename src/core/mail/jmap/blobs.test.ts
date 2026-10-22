@@ -103,10 +103,27 @@ describe('importMessage', () => {
 		]);
 	});
 
+	it('files no other message the server takes for the one imported', async () => {
+		// RFC 8621 4.8: a server may call a message a duplicate by its Message-ID alone.
+		const { server, transport } = setup();
+		server.on('Email/import', () => ({
+			notCreated: { eml: { type: 'alreadyExists', existingId: 'Mexisting' } },
+		}));
+		server.on('Email/get', () => ({ list: [{ id: 'Mexisting', blobId: 'Gother', size: 999 }] }));
+		expect(await failure(transport.importMessage(bytes, 'MBwork'))).toMatchObject({
+			code: 'invalid',
+		});
+		expect(server.argsOf('Email/set')).toEqual([]);
+	});
+
 	it('files a message the account already has instead of failing', async () => {
 		const { server, transport } = setup();
 		server.on('Email/import', () => ({
 			notCreated: { eml: { type: 'alreadyExists', existingId: 'Mexisting' } },
+		}));
+		// The same message: the server names its bytes as the upload's (by their content).
+		server.on('Email/get', () => ({
+			list: [{ id: 'Mexisting', blobId: 'G1', size: bytes.length }],
 		}));
 		server.on('Email/set', () => ({ updated: { Mexisting: null } }));
 		expect(await transport.importMessage(bytes, 'MBwork')).toEqual({ id: 'Mexisting' });
