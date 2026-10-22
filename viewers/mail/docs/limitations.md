@@ -44,7 +44,10 @@ OpenMail is an early implementation. This page lists what it does not do, so not
   server, and is the same message only if it reads back exactly as it was. After a send that got
   no answer at all, the copy is looked for by the message's Message-ID: a server that cannot
   search messages by header field cannot say whether it went out, and it is sent again, so look in
-  Sent first.
+  Sent first. The other way round, a copy that is no longer a draft, with no record of a
+  submission, counts as sent: should another app have canceled that submission and the server then
+  dropped its record, the message is reported sent though it never went (the server holds nothing
+  that tells the two apart).
 - **Unsaved drafts when the app goes away**: if the app is removed, or connects to another mailbox,
   while a draft cannot be saved (offline, over quota), it keeps trying in the background (after 5,
   15 and 40 seconds, then once a minute) until the draft is saved; closing the page before then
