@@ -1,6 +1,6 @@
-// Answering and forwarding over JMAP, from the client down to the requests it makes: the From of a
-// wildcard identity, the whole of a message the reading pane shows cut short, and the inline
-// picture a forward carries with its Content-ID.
+// Answering, forwarding and sending over JMAP, from the client down to the requests it makes: the
+// From of a wildcard identity, the whole of a message the reading pane shows cut short, the inline
+// picture a forward carries with its Content-ID, and a send the server did not confirm.
 import { createMailClient } from '../client';
 import { until } from './test-support/fake-server';
 import { installMailStore } from './test-support/mail-store';
@@ -94,5 +94,41 @@ describe('answering and forwarding over JMAP', () => {
 			},
 		]);
 		client.destroy();
+	});
+});
+
+describe('sending over JMAP', () => {
+	it('saves a new message whose send went unconfirmed, and sent again asks about it', async () => {
+		for (const failed of ['before', 'after'] as const) {
+			const due = new Map<number, () => void>();
+			let next = 0;
+			const { server, transport } = setup();
+			const store = installMailStore(server);
+			const client = createMailClient({
+				transport,
+				setTimeout: (callback) => (due.set(++next, callback), next),
+				clearTimeout: (handle) => void due.delete(handle as number),
+			});
+			await until(() => client.getState().status === 'ready');
+			await client.compose('new');
+			// Sent within the quiet moment after the last edit, before any save.
+			client.updateDraft({ to: [{ name: 'Ada', email: 'ada@example.org' }], subject: 'Hello' });
+			store.failSubmission = failed;
+			expect(await client.send()).toBe(false);
+			store.failSubmission = null;
+			const submitted = store.submissions.length;
+			// Saved after a quiet moment, so a reload keeps it, and still said to be unconfirmed.
+			for (const callback of due.values()) callback();
+			due.clear();
+			await until(() => client.getState().compose?.draft.id !== undefined);
+			expect(client.getState().compose, failed).toMatchObject({
+				status: 'error',
+				error: 'uncertain',
+			});
+			// Sent again unchanged, the server is asked first: the message goes out once in all.
+			expect(await client.send(), failed).toBe(true);
+			expect(store.submissions, failed).toHaveLength(failed === 'after' ? submitted : 1);
+			client.destroy();
+		}
 	});
 });

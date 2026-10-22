@@ -92,13 +92,12 @@ export function createCompose(core: ClientCore): ComposeActions {
 	/**
 	 * Sends the draft of `open`, the window shown: it closes once the message is sent, and shows the
 	 * error if that fails. What the server does not hold yet is then saved again, the edits whose
-	 * save Send called off included, unless the message may have gone out (`uncertain`) and nothing
-	 * was edited meanwhile: the copy the send made holds those edits, and saved, the draft would be
-	 * a new message, which a second Send could not ask about. Nothing replaces the window until then
-	 * (`close` waits), so it is still this one; that is checked all the same before it is changed.
+	 * save Send called off included, even when the message may have gone out (`uncertain`): the
+	 * transport asks about that send when the draft saved unchanged is sent (`MailTransport.send`),
+	 * and unsaved, a reload would lose it. Nothing replaces the window until then (`close` waits),
+	 * so it is still this one; that is checked all the same before it is changed.
 	 */
 	const deliver = async (open: ComposeState): Promise<boolean> => {
-		const revision = autosave.revision();
 		autosave.cancel();
 		setCompose({ status: 'sending', error: null });
 		const own = (): boolean => compose()?.session === open.session;
@@ -108,8 +107,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 			const code = errorCode(error);
 			if (own()) {
 				setCompose({ status: 'error', error: code });
-				const edited = autosave.revision() !== revision;
-				if (autosave.unsaved() && (edited || code !== 'uncertain')) autosave.schedule();
+				if (autosave.unsaved()) autosave.schedule();
 			}
 			core.fail('send', error);
 			return false;

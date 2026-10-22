@@ -34,8 +34,6 @@ export interface Autosave {
 	cancel(): void;
 	/** Counts an edit of the open draft. */
 	edited(): void;
-	/** How many edits the open draft has had, to tell whether more came since. */
-	revision(): number;
 	/** A window opened on `draft`: saved already when the server holds it (it has an id). */
 	opened(draft: Draft): void;
 }
@@ -65,7 +63,10 @@ export function createAutosave(core: ClientCore, sending: () => boolean): Autosa
 		// Nothing is saved over a message on its way: what was edited meanwhile saves if it fails.
 		if (!current || !unsaved() || sending()) return null;
 		const revision = edits;
-		patchCompose(core, { status: 'saving' });
+		// A message that may have gone out is still said to be one until it is edited (`edit`, which
+		// makes it another message) or sent again: saving it changes neither.
+		const unsure = current.status === 'error' && current.error === 'uncertain';
+		if (!unsure) patchCompose(core, { status: 'saving' });
 		try {
 			const { id } = await core.transport.saveDraft(current.draft);
 			// A transport that kept the id saved over the copy read before: reopening must not show it.
@@ -74,13 +75,14 @@ export function createAutosave(core: ClientCore, sending: () => boolean): Autosa
 			if (!latest || latest.session !== current.session) return null;
 			saved = revision;
 			// Edits made meanwhile stay, unsaved; the draft adopts the saved id.
+			const still = unsure && saved === edits;
 			core.patch({
 				compose: {
 					...latest,
 					draft: { ...latest.draft, id },
-					status: saved === edits ? 'saved' : 'editing',
+					status: still ? 'error' : saved === edits ? 'saved' : 'editing',
 					savedAt: core.now(),
-					error: null,
+					error: still ? 'uncertain' : null,
 				},
 			});
 			return null;
@@ -130,7 +132,6 @@ export function createAutosave(core: ClientCore, sending: () => boolean): Autosa
 		edited() {
 			edits++;
 		},
-		revision: () => edits,
 		opened(draft) {
 			edits = 0;
 			saved = draft.id ? 0 : -1;

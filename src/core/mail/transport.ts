@@ -118,7 +118,8 @@ export interface MailTransport {
 	/**
 	 * Sends `draft`, files it in Sent and removes the saved draft; returns the sent message's id.
 	 * Fails with `uncertain`, not as not sent, when the server did not say whether it went out; the
-	 * same draft sent again first asks whether that send went out.
+	 * same draft sent again first asks whether that send went out, saved unchanged (`saveDraft`)
+	 * meanwhile or not: the client saves it, so a reload does not lose it.
 	 */
 	send(draft: Draft): Promise<{ id: string }>;
 	upload(bytes: Uint8Array, type: string): Promise<UploadedBlob>;

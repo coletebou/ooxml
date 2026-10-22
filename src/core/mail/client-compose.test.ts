@@ -620,7 +620,7 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
-	it('saves nothing over a message that may have gone out, so sent again it is asked about', async () => {
+	it('saves a message that may have gone out, still saying so until it is edited', async () => {
 		const timers = manualTimers();
 		const { client, control, drafts } = setup(timers);
 		await until(client, (s) => s.status === 'ready');
@@ -628,16 +628,21 @@ describe('the compose window', () => {
 		client.updateDraft({ to: [ada], subject: 'Perhaps', text: 'Sent or not' });
 		control.sendFailure = new MailTransportError('uncertain', 'Not confirmed.');
 		expect(await client.send()).toBe(false);
-		// Saved, the draft would be a new message, which a second Send could not ask about.
+		// Saved unchanged, so a reload keeps it: sent again, the transport asks about the first send
+		// (see the JMAP compose flow). The window still says the message may have gone out.
 		timers.fire();
-		await new Promise((resolve) => setTimeout(resolve, 5));
+		await until(client, (s) => s.compose?.draft.id !== undefined);
 		expect(client.getState().compose).toMatchObject({
 			status: 'error',
 			error: 'uncertain',
 			draft: { text: 'Sent or not' },
 		});
-		expect(client.getState().compose?.draft.id).toBeUndefined();
-		expect(await drafts()).toEqual([]);
+		expect((await drafts()).map((draft) => draft.text)).toEqual(['Sent or not']);
+		// Edited, it is another message, saved as any other.
+		client.updateDraft({ text: 'Sent or not, again' });
+		timers.fire();
+		await until(client, (s) => s.compose?.status === 'saved');
+		expect(client.getState().compose?.error).toBeNull();
 		client.destroy();
 	});
 
