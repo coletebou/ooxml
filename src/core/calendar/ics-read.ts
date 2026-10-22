@@ -48,6 +48,12 @@ export interface ParseIcsOptions {
 	 * with it: an update to one occurrence then changes that occurrence of the series.
 	 */
 	stored?: (id: string) => CalendarEvent | undefined;
+	/**
+	 * The calendar's event whose `uid` is this, if any: the event a file brings again, wherever it
+	 * stands. Without it, one that once took `<id>-2` (as `<id>` was taken then) is found only while
+	 * every id before its own is still in use.
+	 */
+	storedByUid?: (uid: string) => CalendarEvent | undefined;
 }
 
 export interface IcsImport {
@@ -176,6 +182,8 @@ function assemble(
 	 * event but the one it brings again.
 	 */
 	const slot = (base: string, key?: string, plain?: string): [string, CalendarEvent?] => {
+		const known = key === undefined ? undefined : options.storedByUid?.(key);
+		if (known && !used.has(known.id)) return [known.id, known];
 		const anonymous = key === undefined && plain === undefined;
 		for (let n = anonymous ? (resume.get(base) ?? 1) : 1; ; n++) {
 			const id = n === 1 ? base : `${base}-${n}`;

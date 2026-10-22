@@ -160,11 +160,15 @@ export function createPeople(core: ClientCore, connect: () => Promise<void>): Pe
 				// An event without a UID gets an id no stored event has, so it never replaces one, and an
 				// update to one occurrence of a stored series changes that occurrence of it.
 				const stored = new Map((await calendar.list()).map((event) => [event.id, event]));
+				const byUid = new Map(
+					[...stored.values()].flatMap((event) => (event.uid ? [[event.uid, event] as const] : [])),
+				);
 				const read = parseIcs(text, {
 					uidDomain: UID_DOMAIN,
 					...(zone ? { zone } : {}),
 					taken: (id) => stored.has(id),
 					stored: (id) => stored.get(id),
+					storedByUid: (uid) => byUid.get(uid),
 				});
 				unsupported = read.unsupported;
 				await saveAll(calendar, read.events, () => count++);

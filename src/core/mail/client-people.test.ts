@@ -57,6 +57,11 @@ describe('the calendar actions', () => {
 		await client.importIcs(file('Review', 'UID:review@example.com'));
 		await client.importIcs(file('Review, moved', 'UID:review@example.com'));
 		expect(titles()).toEqual(['First', 'Second', 'Review, moved']);
+		// One that took `event-2`, as `event` was in use, is still itself once `event` is deleted.
+		await client.importIcs(file('Other', 'UID:event'));
+		await client.deleteEvent('event');
+		await client.importIcs(file('Other, moved', 'UID:event'));
+		expect(titles()).toEqual(['Second', 'Review, moved', 'Other, moved']);
 		client.destroy();
 	});
 

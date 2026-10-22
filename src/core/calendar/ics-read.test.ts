@@ -1111,6 +1111,7 @@ describe('the ids of imported events in a calendar', () => {
 				uidDomain: 'example.com',
 				taken: (id) => events.has(id),
 				stored: (id) => events.get(id),
+				storedByUid: (uid) => [...events.values()].find((event) => event.uid === uid),
 			});
 			for (const event of read.events) events.set(event.id, event);
 			return read.events.map((event) => [event.id, event.uid, event.title]);
@@ -1129,6 +1130,20 @@ describe('the ids of imported events in a calendar', () => {
 			['event-2', 'event', 'Unrelated, moved'],
 		]);
 		expect(held.events.get('event')?.title).toBe('First');
+	});
+
+	it('brings an event back to its own id after the event at the id it would take is gone', () => {
+		const held = holding();
+		held.add(vevent(at, 'SUMMARY:First'));
+		expect(held.add(vevent('UID:event', at, 'SUMMARY:Unrelated'))).toEqual([
+			['event-2', 'event', 'Unrelated'],
+		]);
+		// `event` is free again: the same UID is still the event at `event-2`, updated, not a copy.
+		held.events.delete('event');
+		expect(held.add(vevent('UID:event', at, 'SUMMARY:Unrelated, moved'))).toEqual([
+			['event-2', 'event', 'Unrelated, moved'],
+		]);
+		expect([...held.events.keys()]).toEqual(['event-2']);
 	});
 
 	it('tells an event this app wrote from another with the same id', () => {
