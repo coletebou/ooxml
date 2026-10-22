@@ -22,9 +22,10 @@ const URL_PATTERN = String.raw`\b(?:https?:\/\/|www\.)[^\s<>"]{0,2048}[^\s<>".,;
  * An address, its local part whole (RFC 5322 atext: `o'connor`, `a=b`). It never starts inside a
  * word, nor right after another local-part character or a word and an apostrophe (`d’arcy`):
  * where its start cannot be told, nothing is linked rather than its end, an address of someone
- * else.
+ * else. Nor does it end inside a word, which `\b` alone (ASCII) would let it do before `ö`
+ * (`user@shop.coöperatie.nl`), or after a hyphen: the domain is whole, or nothing is linked.
  */
-const ADDRESS_PATTERN = String.raw`(?<![\p{L}\p{N}_.!#$%&*+\/=?^${'`'}{|}~-]|[\p{L}\p{N}_]['’])[\w+-][\w.!#$%&'*+\/=?^${'`'}{|}~-]{0,63}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}\b`;
+const ADDRESS_PATTERN = String.raw`(?<![\p{L}\p{N}_.!#$%&*+\/=?^${'`'}{|}~-]|[\p{L}\p{N}_]['’])[\w+-][\w.!#$%&'*+\/=?^${'`'}{|}~-]{0,63}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}(?<!-)(?![\p{L}\p{N}\p{M}_-])`;
 /** Bounded quantifiers (RFC 5321 length limits for addresses) keep this linear on hostile text. */
 const LINKS = new RegExp(`${URL_PATTERN}|${ADDRESS_PATTERN}`, 'giu');
 

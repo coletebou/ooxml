@@ -37,6 +37,24 @@ describe('linkify', () => {
 		expect(links('d’arcy@example.com')).toEqual([]);
 	});
 
+	it('links a whole domain, never only its start', () => {
+		const links = (text: string) =>
+			linkify(text)
+				.filter((s) => s.href)
+				.map((s) => s.text);
+		// A domain goes on past the letters this link reads (RFC 6531): `user@shop.co` would be another.
+		expect(links('mail user@shop.coöperatie.nl now')).toEqual([]);
+		expect(links('写信给ada@example.com联系')).toEqual([]);
+		expect(links('mail user@example.com-ish')).toEqual(['user@example.com-ish']);
+		expect(links('mail user@example.co- now')).toEqual([]);
+		// Punctuation after it is not part of it.
+		expect(links('ada@example.com。 Or ada@example.com, ada@example.com.')).toEqual([
+			'ada@example.com',
+			'ada@example.com',
+			'ada@example.com',
+		]);
+	});
+
 	it('encodes what a mailto: link may not hold, so the link writes to the address shown', () => {
 		// RFC 6068 2: # ? % & = / and the like are percent-encoded in a mailto: address.
 		for (const address of [
