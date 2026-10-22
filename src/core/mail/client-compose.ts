@@ -154,7 +154,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 			if (!autosave.unsaved()) break;
 			const error = await autosave.save();
 			if (error) {
-				core.notice({ kind: 'error', action: 'save', code: error });
+				// Over a send that may be done, the autosave told the failure itself (the window keeps
+				// saying the send may be done).
+				if (compose()?.error !== 'uncertain')
+					core.notice({ kind: 'error', action: 'save', code: error });
 				return false;
 			}
 		}

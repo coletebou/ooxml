@@ -88,8 +88,11 @@ export function createAutosave(core: ClientCore, sending: () => boolean): Autosa
 			return null;
 		} catch (error) {
 			const code = errorCode(error);
-			if (compose()?.session === current.session)
-				patchCompose(core, { status: 'error', error: code });
+			if (compose()?.session !== current.session) return code;
+			// Unchanged since a send that may be done, the window still says so: the failed save is
+			// told apart, so it does not take the place of that.
+			if (unsure && edits === revision) core.notice({ kind: 'error', action: 'save', code });
+			else patchCompose(core, { status: 'error', error: code });
 			return code;
 		}
 	};

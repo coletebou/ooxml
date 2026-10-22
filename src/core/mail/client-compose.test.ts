@@ -646,6 +646,32 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('still says a message may have gone out when its draft cannot be saved either', async () => {
+		const timers = manualTimers();
+		const { client, control, notices, drafts } = setup(timers);
+		await until(client, (s) => s.status === 'ready');
+		await client.compose('new');
+		client.updateDraft({ to: [ada], subject: 'Perhaps', text: 'Sent or not' });
+		control.sendFailure = new MailTransportError('uncertain', 'Not confirmed.');
+		expect(await client.send()).toBe(false);
+		// Still offline: the save fails too, and says so, without hiding that the send may be done.
+		control.failure = new MailTransportError('network', 'Offline.');
+		timers.fire();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(notices).toContainEqual({ kind: 'error', action: 'save', code: 'network' });
+		expect(client.getState().compose).toMatchObject({ status: 'error', error: 'uncertain' });
+		// Closed while still offline, it stays open, told once.
+		notices.length = 0;
+		expect(await client.closeCompose()).toBe(false);
+		expect(notices).toEqual([{ kind: 'error', action: 'save', code: 'network' }]);
+		expect(client.getState().compose).toMatchObject({ status: 'error', error: 'uncertain' });
+		// Back online, closing the window saves it, as any other.
+		control.failure = null;
+		expect(await client.closeCompose()).toBe(true);
+		expect((await drafts()).map((draft) => draft.text)).toEqual(['Sent or not']);
+		client.destroy();
+	});
+
 	it('sends an answer whose text alone a host changed as that text, without the quote it made', async () => {
 		const { client, inMailbox } = plain({
 			messages: [
