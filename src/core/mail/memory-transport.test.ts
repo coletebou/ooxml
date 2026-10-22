@@ -266,6 +266,31 @@ describe('createMemoryTransport', () => {
 		expect(new TextDecoder().decode(bytes)).toBe('notes');
 	});
 
+	it("writes the identity's Reply-To on a draft saved and on the Sent copy, as JMAP does", async () => {
+		const desk = { name: 'Desk', email: 'desk@example.com' };
+		const transport = createMemoryTransport({
+			identities: [
+				{ id: 'own', ...me, replyTo: [], bcc: [], textSignature: '', htmlSignature: '' },
+				{ id: 'desk', ...me, replyTo: [desk], bcc: [], textSignature: '', htmlSignature: '' },
+			],
+		});
+		const draft = {
+			identityId: 'desk',
+			to: [ada],
+			cc: [],
+			bcc: [],
+			subject: 'Plans',
+			text: 'Soon',
+			attachments: [],
+		};
+		const { id } = await transport.saveDraft(draft);
+		expect((await transport.message(id)).replyTo).toEqual([desk]);
+		const { id: sent } = await transport.send({ ...draft, id });
+		expect((await transport.message(sent)).replyTo).toEqual([desk]);
+		const { id: plain } = await transport.saveDraft({ ...draft, identityId: 'own' });
+		expect((await transport.message(plain)).replyTo).toEqual([]);
+	});
+
 	it('writes the Bcc of the Sent copy into its file, never into a copy delivered', async () => {
 		const transport = createMemoryTransport();
 		const draft = {

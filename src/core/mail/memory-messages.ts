@@ -185,6 +185,8 @@ export function messageFromDraft(
 		sent: boolean;
 		now: number;
 		from: MailAddress | undefined;
+		/** The identity's Reply-To, as a JMAP save or send writes it. */
+		replyTo?: readonly MailAddress[];
 		blobs: BlobStore;
 	},
 ): MailMessage {
@@ -214,7 +216,7 @@ export function messageFromDraft(
 		to: [...draft.to],
 		cc: [...draft.cc],
 		bcc: [...draft.bcc],
-		replyTo: [],
+		replyTo: [...(options.replyTo ?? [])],
 		subject: draft.subject,
 		preview: preview({ ...draft, text }),
 		hasAttachment: hasFile(attachments, draft.html),

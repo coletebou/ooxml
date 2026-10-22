@@ -5,18 +5,27 @@
 import { draftRecipients } from './compose';
 import { messageFromDraft } from './memory-messages';
 import type { MemoryState } from './memory-state';
-import { ANSWERED, FORWARDED, isWildcardAddress, type Draft, type MailAddress } from './model';
+import {
+	ANSWERED,
+	FORWARDED,
+	isWildcardAddress,
+	type Draft,
+	type Identity,
+	type MailAddress,
+} from './model';
 import { MailTransportError, type MailTransport } from './transport';
 
 export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDraft' | 'send'> {
 	const { messages } = state;
+	/** The identity a draft is written as: its own, else the first. */
+	const identityOf = (draft: Draft): Identity =>
+		state.identities.find((i) => i.id === draft.identityId) ?? state.identities[0]!;
 	/**
-	 * The address a draft is sent from: its own, else its identity's, else the first identity's. A
-	 * `*@domain` wildcard is never one, as a server would never send from it.
+	 * The address a draft is sent from: its own, else its identity's. A `*@domain` wildcard is never
+	 * one, as a server would never send from it.
 	 */
 	const senderOf = (draft: Draft): MailAddress | undefined => {
-		const identity =
-			state.identities.find((i) => i.id === draft.identityId) ?? state.identities[0]!;
+		const identity = identityOf(draft);
 		const own = { name: identity.name, email: identity.email };
 		return [draft.from, own].find((address) => address && !isWildcardAddress(address.email));
 	};
@@ -46,6 +55,7 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 					sent: false,
 					now: state.now(),
 					from,
+					replyTo: identityOf(draft).replyTo,
 					blobs: state.blobs,
 				}),
 			);
@@ -71,6 +81,7 @@ export function createOutgoing(state: MemoryState): Pick<MailTransport, 'saveDra
 				sent: true,
 				now: state.now(),
 				from,
+				replyTo: identityOf(draft).replyTo,
 				blobs: state.blobs,
 			});
 			messages.set(id, sent);
