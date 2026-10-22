@@ -72,6 +72,8 @@ export class NotebookPage extends NotebookElement {
 	#title: string | null = null;
 	/** Where the person last clicked on this page: pasted items go there, else below the content. */
 	#lastPoint: { x: number; y: number } | null = null;
+	/** A touch or pen contact on the empty canvas that has not turned into a scroll (yet). */
+	#tapPending = false;
 	#page = '';
 
 	constructor() {
@@ -184,10 +186,27 @@ export class NotebookPage extends NotebookElement {
 	}
 
 	#surfaceDown(event: PointerEvent): void {
+		this.#tapPending = false;
 		if (event.button !== 0 || this.tool !== 'type' || event.target !== event.currentTarget) return;
+		// A touch or pen contact may be the start of a scroll: the box is placed on the tap's click,
+		// which the browser does not send for a contact that scrolled (that one is cancelled).
+		if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+			this.#tapPending = true;
+			return;
+		}
+		event.preventDefault();
+		this.#placeText(event);
+	}
+
+	#surfaceClick(event: MouseEvent): void {
+		if (!this.#tapPending) return;
+		this.#tapPending = false;
+		if (this.tool === 'type' && event.target === event.currentTarget) this.#placeText(event);
+	}
+
+	#placeText(event: MouseEvent): void {
 		const client = this.client;
 		if (!client || !this.state?.page) return;
-		event.preventDefault();
 		const at = this.#at(event);
 		this.#lastPoint = at;
 		// Empty text boxes are swept away, except one a collaborator is in (about to type).
@@ -462,6 +481,8 @@ export class NotebookPage extends NotebookElement {
 						aria-label=${this.t('page.canvas')}
 						style=${`height:${size.height}px`}
 						@pointerdown=${(e: PointerEvent) => this.#surfaceDown(e)}
+						@pointercancel=${() => (this.#tapPending = false)}
+						@click=${(e: MouseEvent) => this.#surfaceClick(e)}
 						@dragover=${(e: DragEvent) => {
 							if ([...(e.dataTransfer?.types ?? [])].includes('Files')) e.preventDefault();
 						}}

@@ -401,3 +401,28 @@ describe('<notebook-app>', () => {
 		);
 	});
 });
+
+describe('<notebook-app> on a touch screen', () => {
+	let app: NotebookApp;
+	afterEach(() => app?.remove());
+
+	it('places a text box on a tap, not on a touch that scrolls the page', async () => {
+		app = await mount();
+		const page = app.page()!;
+		await page.updateComplete;
+		const surface = page.shadowRoot!.querySelector<HTMLElement>('.surface')!;
+		const at = { bubbles: true, composed: true, button: 0, clientX: 120, clientY: 160 };
+		surface.dispatchEvent(new PointerEvent('pointerdown', { ...at, pointerType: 'touch' }));
+		await new Promise((r) => setTimeout(r, 20));
+		expect(app.state!.containers).toHaveLength(0);
+		// The browser took the contact for a scroll: no box, also not on a later click.
+		surface.dispatchEvent(new PointerEvent('pointercancel', { ...at, pointerType: 'touch' }));
+		surface.dispatchEvent(new MouseEvent('click', at));
+		await new Promise((r) => setTimeout(r, 20));
+		expect(app.state!.containers).toHaveLength(0);
+		// A tap: the box comes with its click.
+		surface.dispatchEvent(new PointerEvent('pointerdown', { ...at, pointerType: 'touch' }));
+		surface.dispatchEvent(new MouseEvent('click', at));
+		await until(() => app.state!.containers.length === 1);
+	});
+});
