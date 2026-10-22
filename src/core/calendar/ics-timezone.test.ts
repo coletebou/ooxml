@@ -202,4 +202,31 @@ describe('VTIMEZONE', () => {
 		expect(fileZoneOffset(open, Date.UTC(2026, 0, 15, 12))).toBe(660);
 		expect(fileZoneOffset(open, Date.UTC(2026, 6, 15, 12))).toBe(660);
 	});
+
+	it('ends on the last change of a rule that stopped after a single later onset', () => {
+		// Daylight time abolished: its last onset given alone (November 2018), the rule that ends it
+		// running from 2009 to February 2019. A 09:00 appointment of 2026 is three hours behind UTC.
+		const zone = readFileZone(
+			readComponents(
+				[
+					'BEGIN:VTIMEZONE',
+					'TZID:Zone Three',
+					'BEGIN:STANDARD',
+					'DTSTART:20090215T000000',
+					'TZOFFSETFROM:-0200',
+					'TZOFFSETTO:-0300',
+					'RRULE:FREQ=YEARLY;BYMONTH=2;BYDAY=3SU;UNTIL=20190217T020000Z',
+					'END:STANDARD',
+					'BEGIN:DAYLIGHT',
+					'DTSTART:20181104T000000',
+					'TZOFFSETFROM:-0300',
+					'TZOFFSETTO:-0200',
+					'END:DAYLIGHT',
+					'END:VTIMEZONE',
+				].join('\r\n'),
+			).components[0]!,
+		)!;
+		expect(fileZoneOffset(zone, Date.UTC(2018, 11, 15, 12))).toBe(-120);
+		expect(fileZoneOffset(zone, Date.UTC(2026, 0, 15, 12))).toBe(-180);
+	});
 });
