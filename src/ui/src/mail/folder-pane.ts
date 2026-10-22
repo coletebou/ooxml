@@ -12,6 +12,16 @@ import css from './folder-pane.css?raw';
 /** The `DataTransfer` type a message row carries: JSON conversation ids. */
 export const MAIL_DRAG_TYPE = 'application/x-ooxml-mail-ids';
 
+/**
+ * Escape in a folder's name field cancels the rename or the new folder, and only that: marked
+ * handled, so the app's own Escape (closing the open conversation, the folder drawer) does not run.
+ */
+function cancelOn(event: KeyboardEvent, cancel: () => void): void {
+	if (!isCancelKey(event)) return;
+	event.preventDefault();
+	cancel();
+}
+
 export class MailFolderPane extends MailElement {
 	static override styles = mailStyles(css);
 	static override properties = {
@@ -80,7 +90,7 @@ export class MailFolderPane extends MailElement {
 						name="name"
 						.value=${mailbox.name}
 						aria-label=${this.t('folder.renameLabel')}
-						@keydown=${(e: KeyboardEvent) => isCancelKey(e) && (this.editing = '')}
+						@keydown=${(e: KeyboardEvent) => cancelOn(e, () => (this.editing = ''))}
 					/>
 				</form>
 			</li>`;
@@ -145,7 +155,7 @@ export class MailFolderPane extends MailElement {
 								name="name"
 								placeholder=${this.t('folder.newPlaceholder')}
 								aria-label=${this.t('folder.newLabel')}
-								@keydown=${(e: KeyboardEvent) => isCancelKey(e) && (this.creating = false)}
+								@keydown=${(e: KeyboardEvent) => cancelOn(e, () => (this.creating = false))}
 								@blur=${(e: FocusEvent) => !(e.target as HTMLInputElement).value && (this.creating = false)}
 							/>
 						</form>`

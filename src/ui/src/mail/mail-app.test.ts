@@ -721,6 +721,24 @@ describe('<mail-app>', () => {
 		expect(toasts.map((toast) => toast.textContent)).toEqual([said]);
 	});
 
+	it('leaves the open conversation alone when Escape cancels a new folder', async () => {
+		const app = await mount();
+		await app.client!.open(state(app).conversations[0]!.id);
+		await app.updateComplete;
+		const pane = inner<Updating>(app, 'mail-folder-pane')!;
+		inner<HTMLButtonElement>(pane, 'button.new')!.click();
+		await pane.updateComplete;
+		const name = inner<HTMLInputElement>(pane, 'form.edit input')!;
+		name.focus();
+		const escape = key('Escape');
+		name.dispatchEvent(escape);
+		await pane.updateComplete;
+		// The Escape cancelled the folder, and nothing else.
+		expect(inner(pane, 'form.edit input')).toBeNull();
+		expect(escape.defaultPrevented).toBe(true);
+		expect(state(app).open).not.toBeNull();
+	});
+
 	it('runs an Undo once, keeps its notice until it is done, and says so when it fails', async () => {
 		const app = await mount();
 		let finish: () => void = () => {};
