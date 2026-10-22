@@ -9,7 +9,13 @@ import type { BroadcastChannelConstructor } from '../collab/broadcast-transport'
 import { type CollabSession, createCollabSession } from '../collab/session';
 import { transportProvider } from '../collab/transport-provider';
 import { type RegistryEntry, readRegistry, unregisterNotebook } from './registry';
-import { type NotebookStorage, REGISTRY_KEY, notebookKey, tabCopies } from './storage';
+import {
+	type NotebookStorage,
+	REGISTRY_KEY,
+	mergeIntoStorage,
+	notebookKey,
+	tabCopies,
+} from './storage';
 import { registryRoomId } from './sync';
 
 const REGISTRY_STORAGE_ORIGIN = Symbol('ooxml-core:notebook:registry-storage');
@@ -60,10 +66,7 @@ export function createRegistryStore(options: RegistryStoreOptions): RegistryStor
 		saving = saving
 			// Merged with what is stored, as a notebook is: another client on the same storage that
 			// cannot reach this one may have listed notebooks this list does not have.
-			.then(async () => {
-				const stored = await storage.load(REGISTRY_KEY);
-				await storage.save(REGISTRY_KEY, stored?.length ? Y.mergeUpdates([stored, ours]) : ours);
-			})
+			.then(() => mergeIntoStorage(storage, REGISTRY_KEY, ours))
 			.then(
 				() => {
 					failed = null;

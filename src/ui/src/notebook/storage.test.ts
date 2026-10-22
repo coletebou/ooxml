@@ -86,4 +86,25 @@ describe('notebook IndexedDB storage', () => {
 		// What this tab saves afterwards fails, rather than recreating the deleted database.
 		await expect(storage.save('registry', new Uint8Array([2]))).rejects.toThrow();
 	});
+
+	it('updates a key in one step, so two tabs saving at once keep both changes', async () => {
+		const factory = new IDBFactory();
+		const tabA = createIndexedDbStorage('test-notebooks-update', factory);
+		const tabB = createIndexedDbStorage('test-notebooks-update', factory);
+		await tabA.save('registry', new Uint8Array([0]));
+		const append = (byte: number) => (stored: Uint8Array | null) =>
+			new Uint8Array([...(stored ?? []), byte]);
+		await Promise.all([tabA.update('registry', append(1)), tabB.update('registry', append(2))]);
+		const stored = [...((await tabA.load('registry')) ?? [])];
+		expect(stored.sort()).toEqual([0, 1, 2]);
+		// A change that throws fails the update and leaves what is stored.
+		await expect(
+			tabB.update('registry', () => {
+				throw new Error('cannot merge');
+			}),
+		).rejects.toThrow('cannot merge');
+		expect((await tabA.load('registry'))?.length).toBe(3);
+		tabA.close();
+		tabB.close();
+	});
 });

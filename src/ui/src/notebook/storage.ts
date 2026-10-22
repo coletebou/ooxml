@@ -11,6 +11,7 @@ const STORE = 'documents';
 export interface IndexedDbStorage extends NotebookStorage {
 	/** False when IndexedDB was unavailable and documents live in memory only. */
 	readonly persistent: () => boolean;
+	update: NonNullable<NotebookStorage['update']>;
 	close: () => void;
 }
 
@@ -20,7 +21,7 @@ const wrap = <T>(request: IDBRequest<T>): Promise<T> =>
 		request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
 	});
 
-const memories = new Map<string, NotebookStorage>();
+const memories = new Map<string, ReturnType<typeof createMemoryStorage>>();
 
 export function createIndexedDbStorage(
 	name: string = DEFAULT_NOTEBOOK_DATABASE,
@@ -58,6 +59,18 @@ export function createIndexedDbStorage(
 			if (!opened) persistent = false;
 			return opened;
 		}));
+	/** A write transaction that counts only once it is done (quota or disk can fail it at commit). */
+	const commit = (tx: IDBTransaction): Promise<void> =>
+		new Promise<void>((resolve, reject) => {
+			tx.oncomplete = () => resolve();
+			tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
+		});
+	const bytesOf = (value: unknown): Uint8Array | null =>
+		value instanceof Uint8Array
+			? value
+			: value instanceof ArrayBuffer
+				? new Uint8Array(value)
+				: null;
 	const run = async <T>(
 		mode: IDBTransactionMode,
 		fn: (store: IDBObjectStore) => IDBRequest<T>,
@@ -67,25 +80,40 @@ export function createIndexedDbStorage(
 		const tx = opened.transaction(STORE, mode);
 		const result = wrap(fn(tx.objectStore(STORE)));
 		if (mode === 'readonly') return result;
-		// A write can still fail at commit (quota, disk): it only counts once the transaction is done.
-		const committed = new Promise<void>((resolve, reject) => {
-			tx.oncomplete = () => resolve();
-			tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
-		});
-		const [value] = await Promise.all([result, committed]);
+		const [value] = await Promise.all([result, commit(tx)]);
 		return value;
 	};
 	return {
 		async load(key) {
 			if (!persistent) return memory.load(key);
-			const value = await run('readonly', (store) => store.get(key));
-			if (value instanceof Uint8Array) return value;
-			if (value instanceof ArrayBuffer) return new Uint8Array(value);
-			return persistent ? null : memory.load(key);
+			const value = bytesOf(await run('readonly', (store) => store.get(key)));
+			return value ?? (persistent ? null : memory.load(key));
 		},
 		async save(key, bytes) {
 			if (!persistent || !(await open())) return memory.save(key, bytes);
 			await run('readwrite', (store) => store.put(bytes, key));
+		},
+		async update(key, change) {
+			const opened = persistent ? await open() : null;
+			if (!opened) return memory.update(key, change);
+			// Read and write in one transaction, so another tab's save cannot come between them; the
+			// write is queued from the read's own event, while the transaction is still active.
+			const tx = opened.transaction(STORE, 'readwrite');
+			const store = tx.objectStore(STORE);
+			const done = commit(tx);
+			const read = store.get(key);
+			let failed: unknown = null;
+			read.onsuccess = () => {
+				try {
+					store.put(change(bytesOf(read.result)), key);
+				} catch (error) {
+					failed = error;
+					tx.abort();
+				}
+			};
+			await done.catch((error: unknown) => {
+				throw failed ?? error;
+			});
 		},
 		async remove(key) {
 			await memory.remove(key);

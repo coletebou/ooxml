@@ -6,7 +6,12 @@
 import * as Y from 'yjs';
 import { type CollabSession, createCollabSession } from '../collab/session';
 import { transportProvider } from '../collab/transport-provider';
-import { type NotebookStorage, notebookKey, tabCopies as rescued } from './storage';
+import {
+	type NotebookStorage,
+	mergeIntoStorage,
+	notebookKey,
+	tabCopies as rescued,
+} from './storage';
 import {
 	NOTEBOOK_ORIGIN,
 	NOTEBOOK_SEED_ORIGIN,
@@ -107,13 +112,9 @@ export async function openNotebook(options: OpenNotebookOptions): Promise<OpenNo
 		dirty = false;
 		const ours = Y.encodeStateAsUpdate(doc);
 		saving = saving
-			// Merged with what is stored: another client on the same storage (a tab cut off from the
-			// sync server) may have saved edits this one does not have. A stored copy that cannot be
-			// read fails the save rather than being written over.
-			.then(async () => {
-				const stored = await storage.load(key);
-				await storage.save(key, stored?.length ? Y.mergeUpdates([stored, ours]) : ours);
-			})
+			// Merged with what is stored, which another client (a tab cut off from the sync server)
+			// may have changed.
+			.then(() => mergeIntoStorage(storage, key, ours))
 			.then(
 				() => {
 					failed = null;

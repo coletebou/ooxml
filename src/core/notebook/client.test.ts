@@ -580,30 +580,81 @@ describe('notebook client eleventh review round', () => {
 		expect(names).toContain('From B');
 	});
 
-	it('fails a save whose stored copy cannot be read instead of writing over it', async () => {
-		const inner = createMemoryStorage();
-		const control = { failLoad: false };
-		const storage: NotebookStorage = {
-			...inner,
-			load: async (key) => {
-				if (control.failLoad && key.startsWith('notebook:')) throw new Error('read failed');
-				return inner.load(key);
-			},
-		};
-		const client = start(storage, createChannelHub());
-		await client.whenReady();
+	it.each([
+		['reads and then writes', false],
+		['updates in one step', true],
+	])(
+		'fails a save whose stored copy cannot be read instead of writing over it (%s)',
+		async (_, atomic) => {
+			const inner = createMemoryStorage();
+			const control = { failLoad: false };
+			const unreadable = (key: string) => control.failLoad && key.startsWith('notebook:');
+			const storage: NotebookStorage = {
+				save: inner.save,
+				remove: inner.remove,
+				load: async (key) => {
+					if (unreadable(key)) throw new Error('read failed');
+					return inner.load(key);
+				},
+				...(atomic
+					? {
+							update: async (key, change) => {
+								if (unreadable(key)) throw new Error('read failed');
+								return inner.update(key, change);
+							},
+						}
+					: {}),
+			};
+			const client = start(storage, createChannelHub());
+			await client.whenReady();
+			await settle();
+			const key = `notebook:${client.getState().notebookId}`;
+			await client.flush();
+			const stored = await inner.load(key);
+			control.failLoad = true;
+			client.renamePage(client.getState().pageId, 'Not yet saved');
+			await expect(client.flush()).rejects.toThrow('read failed');
+			expect(await inner.load(key)).toEqual(stored);
+			// The change stays unsaved, so the next flush once the copy reads again saves it.
+			control.failLoad = false;
+			await client.flush();
+			expect(await inner.load(key)).not.toEqual(stored);
+		},
+	);
+});
+
+describe('notebook client twelfth review round', () => {
+	it('keeps both clients edits and notebooks when they save to one storage at the same time', async () => {
+		const shared = createMemoryStorage();
+		const a = start(shared, createChannelHub());
+		await a.whenReady();
 		await settle();
-		const key = `notebook:${client.getState().notebookId}`;
-		await client.flush();
-		const stored = await inner.load(key);
-		control.failLoad = true;
-		client.renamePage(client.getState().pageId, 'Not yet saved');
-		await expect(client.flush()).rejects.toThrow('read failed');
-		expect(await inner.load(key)).toEqual(stored);
-		// The change stays unsaved, so the next flush once the copy reads again saves it.
-		control.failLoad = false;
-		await client.flush();
-		expect(await inner.load(key)).not.toEqual(stored);
+		const id = a.getState().notebookId;
+		await a.flush();
+		const b = start(shared, createChannelHub());
+		await b.whenReady();
+		await until(() => b.getState().notebookId === id && !b.getState().loading);
+		a.renamePage(a.getState().pageId, 'From A');
+		b.createPage({ title: 'From B' });
+		await Promise.all([a.flush(), b.flush()]);
+		const madeA = await a.createNotebook({ name: 'Listed by A' });
+		const madeB = await b.createNotebook({ name: 'Listed by B' });
+		await Promise.all([a.flush(), b.flush()]);
+		await Promise.all([a.destroy(), b.destroy()]);
+		const c = start(shared, createChannelHub());
+		await c.whenReady();
+		await settle();
+		expect(c.getState().notebooks.map((n) => n.id)).toEqual(
+			expect.arrayContaining([id, madeA, madeB]),
+		);
+		await c.openNotebook(id);
+		await until(() => c.getState().notebookId === id && !c.getState().loading);
+		expect(
+			c
+				.getState()
+				.pages.map((p) => p.title)
+				.sort(),
+		).toEqual(['From A', 'From B']);
 	});
 });
 
