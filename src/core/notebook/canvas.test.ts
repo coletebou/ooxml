@@ -155,6 +155,10 @@ describe('ink geometry', () => {
 		const stroke = { points: line, width: 4, tool: 'pen' as const };
 		expect(inkHits(stroke, 50, 3, 2)).toBe(true);
 		expect(inkHits(stroke, 50, 6, 2)).toBe(false);
+		// A swipe across the line between two reported points still touches it.
+		expect(inkHits(stroke, 50, 40, 2, { x: 50, y: -40 })).toBe(true);
+		expect(inkHits(stroke, 120, 40, 2, { x: 120, y: -40 })).toBe(false);
+		expect(inkHits(stroke, 104, 20, 2, { x: 104, y: -20 })).toBe(true);
 		expect(strokesBounds([stroke, { points: [0, 50, 0.5], width: 2, tool: 'pen' }])).toEqual({
 			x: -2,
 			y: -2,

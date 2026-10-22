@@ -38,6 +38,8 @@ export class NotebookInk extends NotebookElement {
 	declare live: number[] | null;
 	declare erased: ReadonlySet<string>;
 	#pointer = -1;
+	/** Where the eraser was last, so the way from there is erased too. */
+	#eraserAt: { x: number; y: number } | null = null;
 
 	constructor() {
 		super();
@@ -61,12 +63,18 @@ export class NotebookInk extends NotebookElement {
 		return [(event.clientX - rect.left) / scale, (event.clientY - rect.top) / scale, pressure];
 	}
 
+	/** Erase along the eraser's way through each position the event reports (fast swipes coalesce). */
 	#erase(event: PointerEvent): void {
-		const [x, y] = this.#point(event);
-		const hit = this.strokes.filter(
-			(s) => !this.erased.has(s.id) && inkHits(s, x, y, ERASER_RADIUS),
-		);
-		if (hit.length) this.erased = new Set([...this.erased, ...hit.map((s) => s.id)]);
+		const events = event.type === 'pointermove' ? (event.getCoalescedEvents?.() ?? []) : [];
+		const erased = new Set(this.erased);
+		for (const e of events.length ? events : [event]) {
+			const [x, y] = this.#point(e);
+			const from = this.#eraserAt ?? { x, y };
+			for (const s of this.strokes)
+				if (!erased.has(s.id) && inkHits(s, x, y, ERASER_RADIUS, from)) erased.add(s.id);
+			this.#eraserAt = { x, y };
+		}
+		if (erased.size !== this.erased.size) this.erased = erased;
 	}
 
 	#down(event: PointerEvent): void {
@@ -74,6 +82,7 @@ export class NotebookInk extends NotebookElement {
 		event.preventDefault();
 		this.#pointer = event.pointerId;
 		(event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+		this.#eraserAt = null;
 		if (this.tool === 'eraser') this.#erase(event);
 		else this.live = [...this.#point(event)];
 	}

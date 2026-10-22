@@ -174,19 +174,52 @@ function segmentDistance(
 	return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
 }
 
-/** True when an eraser of `radius` at (x, y) touches the stroke. */
+/** The distance between segments PQ and AB (0 when they cross). */
+function segmentsDistance(
+	px: number,
+	py: number,
+	qx: number,
+	qy: number,
+	ax: number,
+	ay: number,
+	bx: number,
+	by: number,
+): number {
+	const side = (ox: number, oy: number, ux: number, uy: number, vx: number, vy: number): number =>
+		Math.sign((ux - ox) * (vy - oy) - (uy - oy) * (vx - ox));
+	const crosses =
+		side(ax, ay, bx, by, px, py) * side(ax, ay, bx, by, qx, qy) < 0 &&
+		side(px, py, qx, qy, ax, ay) * side(px, py, qx, qy, bx, by) < 0;
+	if (crosses) return 0;
+	return Math.min(
+		segmentDistance(px, py, ax, ay, bx, by),
+		segmentDistance(qx, qy, ax, ay, bx, by),
+		segmentDistance(ax, ay, px, py, qx, qy),
+		segmentDistance(bx, by, px, py, qx, qy),
+	);
+}
+
+/**
+ * True when an eraser of `radius` at (x, y) touches the stroke; with `from`, when it touches it
+ * anywhere on its way from there (a fast swipe reports points far apart).
+ */
 export function inkHits(
 	stroke: { points: readonly number[]; width: number; tool: 'pen' | 'highlighter' },
 	x: number,
 	y: number,
 	radius: number,
+	from?: { x: number; y: number },
 ): boolean {
 	const { points } = stroke;
 	const n = Math.floor(points.length / 3);
+	const fx = from?.x ?? x;
+	const fy = from?.y ?? y;
 	for (let i = 0; i < n; i++) {
 		const j = Math.min(n - 1, i + 1);
 		const reach = radius + inkWidthAt(stroke.width, points[i * 3 + 2] ?? 0.5, stroke.tool) / 2;
-		const d = segmentDistance(
+		const d = segmentsDistance(
+			fx,
+			fy,
 			x,
 			y,
 			points[i * 3] ?? 0,
