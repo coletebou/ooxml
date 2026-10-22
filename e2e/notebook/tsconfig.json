@@ -1,0 +1,8 @@
+{
+	"extends": "../../viewers/notebook/tsconfig.json",
+	"compilerOptions": {
+		// The specs import test and expect from @playwright/test; no Vitest globals here.
+		"types": ["node"]
+	},
+	"include": ["./**/*.ts"]
+}

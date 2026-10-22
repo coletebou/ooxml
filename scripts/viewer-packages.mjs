@@ -123,6 +123,14 @@ export const VIEWER_PACKAGES = {
 			server: { dir: 'server', npm: 'openteams-server', global: false },
 		},
 	}),
+	// The notebook has a React binding only so far; the other frameworks join it here.
+	...viewer('notebook', {
+		bundled: ['packages/web-component'],
+		globals: ['scripts/build-packages.mjs', 'tsconfig.release.json'],
+		packages: {
+			react: { dir: 'packages/react', npm: 'opennotes-react-viewer', bundled: true },
+		},
+	}),
 };
 
 /** Directory (under the repository root) of the viewer a table entry belongs to, or null. */

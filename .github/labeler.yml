@@ -79,6 +79,12 @@
           - 'viewers/teams/**'
           - 'demos/teams/**'
           - 'e2e/teams/**'
+'viewer: notebook':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'viewers/notebook/**'
+          - 'demos/notebook/**'
+          - 'e2e/notebook/**'
 
 # Cross-cutting
 site:

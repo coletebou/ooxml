@@ -1,24 +1,10 @@
 // Per-browser conveniences in localStorage: who I am and the server settings. Every access is
 // guarded: storage can be blocked or full, and the app must work without it.
-import { type StorageLike, type TeamsServerConfig, parseServerConfig } from 'ooxml-core/teams';
+import { type TeamsServerConfig, parseServerConfig } from 'ooxml-core/teams';
 
-/** localStorage that never throws (private windows, blocked cookies, quota). */
-export const safeStorage: StorageLike = {
-	getItem(key) {
-		try {
-			return globalThis.localStorage?.getItem(key) ?? null;
-		} catch {
-			return null;
-		}
-	},
-	setItem(key, value) {
-		try {
-			globalThis.localStorage?.setItem(key, value);
-		} catch {
-			// Blocked or over quota: the convenience is lost, the app keeps working.
-		}
-	},
-};
+import { safeStorage } from '../../safe-storage';
+
+export { safeStorage };
 
 export interface Identity {
 	id: string;

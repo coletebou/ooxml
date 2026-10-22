@@ -40,6 +40,9 @@ export const documentDatabase = () =>
 	state.active === 'default' ? 'ooxml-suite-documents' : `ooxml-suite-documents-${state.active}`;
 export const teamsWorkspace = () =>
 	state.active === 'default' ? 'office-suite' : `suite-${state.active}`;
+/** The IndexedDB database of this profile's notebooks: each local profile keeps its own. */
+export const notebookDatabase = () =>
+	state.active === 'default' ? 'ooxml-suite-notebooks' : `ooxml-suite-notebooks-${state.active}`;
 export const initials = (name) =>
 	name
 		.trim()

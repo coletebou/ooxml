@@ -28,6 +28,8 @@ export default defineConfig({
 		'docx/ui/index': 'docx/ui/index.ts',
 		'collab/index': 'collab/index.ts',
 		'teams/index': 'teams/index.ts',
+		'notebook/index': 'notebook/index.ts',
+		'notebook/editor/index': 'notebook/editor/index.ts',
 		'visio/index': 'visio/index.ts',
 		'visio/ui/index': 'visio/ui/index.ts',
 		'visio/collab/index': 'visio/collab/index.ts',

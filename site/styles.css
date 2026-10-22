@@ -868,7 +868,9 @@ p:where(:not(.pptxv *, [class*='pptxv-'], [class*='pptxv-'] *)) {
 	height: 100%;
 }
 .teams-host,
-.teams-host > teams-app {
+.teams-host > teams-app,
+.notebook-host,
+.notebook-host > notebook-app {
 	display: block;
 	height: 100%;
 	width: 100%;

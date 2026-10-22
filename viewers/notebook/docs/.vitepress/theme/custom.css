@@ -1,0 +1,95 @@
+/**
+ * Site-wide look and feel for the VitePress default theme. The neutrals, type and code cards
+ * follow docs/pages-design.md at the repository root; the only saturated colour is the
+ * notebook's accent.
+ */
+
+:root {
+	--vp-c-brand-1: #7a4cc2;
+	--vp-c-brand-2: #6c3fb3;
+	--vp-c-brand-3: #5f37a0;
+	--vp-c-brand-soft: rgba(122, 76, 194, 0.14);
+
+	--vp-button-brand-bg: #7a4cc2;
+	--vp-button-brand-hover-bg: #6c3fb3;
+	--vp-button-brand-active-bg: #5f37a0;
+
+	--vp-font-family-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+	--vp-c-bg: #f7f8fa;
+	--vp-c-bg-alt: #ffffff;
+	--vp-c-bg-soft: #ffffff;
+	--vp-c-divider: #e3e6eb;
+	--vp-c-gutter: #e3e6eb;
+
+	--vp-code-block-bg: #181a1e;
+	--vp-code-block-color: #e6e4df;
+	--vp-code-lang-color: rgba(240, 239, 236, 0.66);
+	--vp-code-tab-bg: #181a1e;
+	--vp-code-tab-text-color: rgba(240, 239, 236, 0.66);
+	--vp-code-tab-hover-text-color: #f0efec;
+	--vp-code-tab-active-text-color: #ffffff;
+	--vp-code-tab-active-bar-color: #b393ea;
+	--vp-code-tab-divider: rgba(240, 239, 236, 0.14);
+	--vp-code-copy-code-bg: rgba(240, 239, 236, 0.1);
+	--vp-code-copy-code-hover-bg: rgba(240, 239, 236, 0.2);
+	--vp-code-copy-code-border-color: rgba(240, 239, 236, 0.18);
+	--vp-code-copy-code-active-text: #f0efec;
+
+	--nb-display: 'Bricolage Grotesque', var(--vp-font-family-base);
+}
+
+.dark {
+	--vp-c-brand-1: #b393ea;
+	--vp-c-brand-2: #a07ddf;
+	--vp-c-brand-3: #7a4cc2;
+	--vp-c-brand-soft: rgba(179, 147, 234, 0.16);
+
+	--vp-button-brand-bg: #7a4cc2;
+	--vp-button-brand-hover-bg: #8a5fd0;
+	--vp-button-brand-active-bg: #6c3fb3;
+
+	--vp-c-bg: #181a1e;
+	--vp-c-bg-alt: #202228;
+	--vp-c-bg-soft: #202228;
+	--vp-c-divider: #34383f;
+	--vp-c-gutter: #34383f;
+
+	--vp-code-block-bg: #121418;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPHero .name,
+.VPHero .text {
+	font-family: var(--nb-display);
+	letter-spacing: -0.02em;
+}
+
+.vp-doc h2 {
+	border-top: none;
+	margin-top: 3rem;
+	padding-top: 1.4rem;
+	position: relative;
+}
+
+.vp-doc h2::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 2.4rem;
+	height: 2px;
+	background: var(--vp-c-brand-1);
+}
+
+.vp-doc p,
+.vp-doc li {
+	line-height: 1.75;
+}
+
+.vp-doc div[class*='language-'] {
+	border-radius: 8px;
+	border: 1px solid var(--vp-c-divider);
+}

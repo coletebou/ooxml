@@ -1,5 +1,6 @@
 import { $, apps, badge, escape } from './ui.js';
 import { currentProfile } from './profile-state.js';
+import { productKind } from './product.js';
 import { icon } from './icons.js';
 
 const key = () => `suite-favourites-${currentProfile().id}`;
@@ -27,9 +28,7 @@ export function renderLibrary(files, filter) {
 		.filter(
 			(d) =>
 				!d.parent &&
-				(!document.body.dataset.product ||
-					document.body.dataset.product === 'teams' ||
-					d.kind === document.body.dataset.product) &&
+				(!productKind || d.kind === productKind) &&
 				(filter === 'favourites'
 					? saved.has(d.id)
 					: !filter || filter === 'files' || d.kind === filter) &&

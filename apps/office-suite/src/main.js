@@ -6,12 +6,26 @@ import { assistantEnabled, currentPolicy, loadPolicy } from './ai/policy.js';
 import { mountTabOrder } from './tabs.js';
 import { blankDocument, preloadEditor } from './editors.js';
 import { mountTeams, shareDocument, localDocumentId } from './teams.js';
-import { $, apps, badge, escape, notify, task, download, choose, tag, teamsApp } from './ui.js';
+import { mountNotebook } from './notebook.js';
+import {
+	$,
+	apps,
+	badge,
+	escape,
+	notify,
+	task,
+	download,
+	choose,
+	tag,
+	teamsApp,
+	notebookApp,
+	suiteApps,
+} from './ui.js';
 import { mountThemes } from './themes.js';
 import { mountProfile } from './profile.js';
 import { documentDatabase } from './profile-state.js';
 import { renderLibrary, toggleFavourite } from './home.js';
-import { product, mountProduct } from './product.js';
+import { product, productKind, mountProduct } from './product.js';
 import { mountFileActions } from './file-actions.js';
 import { mountDiskSearch } from './disk-search.js';
 import { mountPwa } from './pwa.js';
@@ -31,6 +45,9 @@ let files = [],
 	filter = '',
 	teams,
 	teamsTabOpen = false,
+	notebook,
+	notebookMount,
+	notebookTabOpen = false,
 	chatTabOpen = false,
 	chatPage,
 	assistant;
@@ -60,7 +77,8 @@ function renderFiles() {
 	renderLibrary(files, filter);
 	disk?.search(filter);
 	const kind = createKind();
-	$('create-new').hidden = product === 'teams';
+	// Teams and Notebook make no file of their own.
+	$('create-new').hidden = !!product && !productKind;
 	$('create-new').innerHTML =
 		`${icon('add')}<span>${kind ? `New ${blankNames[kind].toLowerCase()}` : 'Create'}</span>`;
 }
@@ -78,7 +96,7 @@ function chooseBlank() {
 let applyShell = () => {};
 function renderTabs() {
 	document.body.dataset.view = view;
-	$('tabs').hidden = !teamsTabOpen && !chatTabOpen && !sessions.sessions.size;
+	$('tabs').hidden = !teamsTabOpen && !notebookTabOpen && !chatTabOpen && !sessions.sessions.size;
 	$('tabs').innerHTML =
 		(chatTabOpen
 			? `<button role="tab" aria-selected="${view === 'chat'}" data-chat>${icon('spark')}Chat</button>`
@@ -86,6 +104,9 @@ function renderTabs() {
 		`<button role="tab" aria-selected="${view === 'home'}" data-home>Home</button>` +
 		(teamsTabOpen
 			? `<button role="tab" aria-selected="${view === 'teams'}" data-teams>Teams</button>`
+			: '') +
+		(notebookTabOpen
+			? `<button role="tab" aria-selected="${view === 'notebook'}" data-notebook>Notebook</button>`
 			: '') +
 		[...sessions.sessions.values()]
 			.map(
@@ -105,6 +126,7 @@ function renderTabs() {
 	$('home').hidden = view !== 'home';
 	$('chat').hidden = view !== 'chat';
 	$('teams-host').hidden = view !== 'teams';
+	$('notebook-host').hidden = view !== 'notebook';
 	$('editor-area').hidden = view !== 'editor';
 	$('back-teams').hidden = !origins.has(active);
 	$('back-parent').hidden = !sessions.sessions.get(active)?.doc.parent;
@@ -114,7 +136,7 @@ function renderTabs() {
 			: view === 'chat'
 				? 'Chat - OOXML Office'
 				: product
-					? `OOXML ${apps.find((a) => a.id === product)?.name ?? 'Teams'}`
+					? `OOXML ${suiteApps.find((a) => a.id === product)?.name ?? 'Office'}`
 					: 'OOXML Office';
 	for (const button of $('rail').querySelectorAll('button'))
 		button.setAttribute(
@@ -224,6 +246,32 @@ async function showTeams() {
 	renderTabs();
 	history.replaceState(null, '', '#/teams');
 }
+async function showNotebook() {
+	notebookTabOpen = true;
+	view = 'notebook';
+	renderTabs();
+	// One element however many routes ask while its chunk loads; a failed load can be retried.
+	notebookMount ??= mountNotebook($('notebook-host'), store, open).then(
+		(element) => (notebook = element),
+		(error) => {
+			notebookMount = undefined;
+			throw error;
+		},
+	);
+	await notebookMount;
+	renderTabs();
+	if (view === 'notebook') history.replaceState(null, '', '#/notebook');
+}
+/** Closes the Teams or Notebook tab. The app stays mounted, so opening it again is instant. */
+function closeAppTab(app) {
+	if (app === 'teams') teamsTabOpen = false;
+	else notebookTabOpen = false;
+	if (view === app) {
+		view = 'home';
+		history.replaceState(null, '', '#/');
+	}
+	renderTabs();
+}
 const blankNames = {
 	docx: 'Document',
 	xlsx: 'Workbook',
@@ -309,7 +357,7 @@ async function share() {
 }
 
 $('rail').innerHTML =
-	`<span class="nav-caption">Workspace</span><button class="ai-only" data-chat data-view="chat">${icon('spark')}<span>Chat</span></button><button data-home data-view="home" aria-current="true">${icon('home')}<span>Home</span></button><button data-library="files">${icon('folder')}<span>My files</span></button><button data-library="favourites">${icon('star')}<span>Favourites</span></button><span class="nav-caption">Apps</span><button data-teams data-view="teams">${badge('teams')}<span>Teams</span>${tag(teamsApp.tag)}</button>` +
+	`<span class="nav-caption">Workspace</span><button class="ai-only" data-chat data-view="chat">${icon('spark')}<span>Chat</span></button><button data-home data-view="home" aria-current="true">${icon('home')}<span>Home</span></button><button data-library="files">${icon('folder')}<span>My files</span></button><button data-library="favourites">${icon('star')}<span>Favourites</span></button><span class="nav-caption">Apps</span><button data-teams data-view="teams">${badge('teams')}<span>Teams</span>${tag(teamsApp.tag)}</button><button data-notebook data-view="notebook">${badge('notebook')}<span>Notebook</span>${tag(notebookApp.tag)}</button>` +
 	apps
 		.map(
 			(a) =>
@@ -329,7 +377,7 @@ $('create-row').innerHTML =
 				`<button data-create="${a.id}">${badge(a.id)}<span>${blankNames[a.id]}${tag(a.tag)}</span><small>${blankDescriptions[a.id]} in ${a.name}</small></button>`,
 		)
 		.join('') +
-	`<button data-teams>${badge('teams')}<span>Teams${tag(teamsApp.tag)}</span><small>Chat, calls and shared files on your server</small></button><button data-import>${icon('upload')}<span>Open a file</span><small>Bring a .docx, .xlsx, .pptx or .vsdx from this device</small></button>`;
+	`<button data-teams>${badge('teams')}<span>Teams${tag(teamsApp.tag)}</span><small>Chat, calls and shared files on your server</small></button><button data-notebook>${badge('notebook')}<span>Notebook${tag(notebookApp.tag)}</span><small>Free-form pages for notes, ink and to-dos</small></button><button data-import>${icon('upload')}<span>Open a file</span><small>Bring a .docx, .xlsx, .pptx or .vsdx from this device</small></button>`;
 // Each tile's place in the entrance stagger (styles.css).
 for (const [i, button] of [...$('create-row').children].entries())
 	button.style.setProperty('--i', i);
@@ -346,6 +394,7 @@ document.addEventListener('click', (event) => {
 	if (b.hasAttribute('data-chat')) task(() => showChat());
 	if (b.hasAttribute('data-import')) $('file-input').click();
 	if (b.hasAttribute('data-teams')) task(showTeams);
+	if (b.hasAttribute('data-notebook')) task(showNotebook);
 	if (b.dataset.app) {
 		view = 'home';
 		filter = b.dataset.app;
@@ -461,7 +510,7 @@ document.addEventListener('keydown', (event) => {
 		!event.metaKey &&
 		!event.altKey &&
 		!event.target.closest(
-			'input, textarea, [contenteditable], docx-editor, xlsx-editor, visio-viewer, teams-app, .pptxv',
+			'input, textarea, [contenteditable], docx-editor, xlsx-editor, visio-viewer, teams-app, notebook-app, .pptxv',
 		)
 	) {
 		event.preventDefault();
@@ -472,10 +521,11 @@ document.addEventListener('dragover', (event) => {
 	if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
 });
 document.addEventListener('drop', (event) => {
-	if (view !== 'teams' && event.dataTransfer?.files.length) {
-		event.preventDefault();
-		task(() => importFiles([...event.dataTransfer.files]));
-	}
+	if (view === 'teams' || !event.dataTransfer?.files.length) return;
+	event.preventDefault();
+	// A notebook page places dropped files itself; elsewhere in Notebook a drop does nothing,
+	// rather than the browser opening the file in place of the suite.
+	if (view !== 'notebook') task(() => importFiles([...event.dataTransfer.files]));
 });
 // The home rises into place once; after that, switching back to it is instant (styles.css).
 document.body.classList.add('entering');
@@ -485,11 +535,18 @@ mountProfile({
 	beforeSwitch: async () => {
 		for (const id of sessions.sessions.keys()) await sessions.save(id);
 		teams?.client?.flushStorage();
+		// The page reloads for the other profile, so notes this device cannot save yet would be
+		// lost: the switch waits until they are saved (the notebook says why they are not).
+		await notebook?.client?.flush().catch(() => {
+			throw new Error(
+				'Your latest notebook changes could not be saved on this device, so the profile was not switched. Free some storage space and try again.',
+			);
+		});
 	},
 	changed: () => renderFiles(),
 });
 $('app-launcher').innerHTML =
-	`<div class="launcher-heading"><h2>Your apps</h2><span>OOXML Office</span></div><div class="launcher-grid"><button class="ai-only" data-chat><span class="app-badge chat-badge">${icon('spark')}</span><span>Chat</span></button>${apps.map((a) => `<button data-app="${a.id}">${badge(a.id)}<span>${a.name}</span></button>`).join('')}<button data-teams>${badge('teams')}<span>Teams</span></button></div>`;
+	`<div class="launcher-heading"><h2>Your apps</h2><span>OOXML Office</span></div><div class="launcher-grid"><button class="ai-only" data-chat><span class="app-badge chat-badge">${icon('spark')}</span><span>Chat</span></button>${apps.map((a) => `<button data-app="${a.id}">${badge(a.id)}<span>${a.name}</span></button>`).join('')}<button data-teams>${badge('teams')}<span>Teams</span></button><button data-notebook>${badge('notebook')}<span>Notebook</span></button></div>`;
 $('app-launcher').addEventListener('click', (event) => {
 	if (event.target.closest('button')) $('app-launcher').hidePopover();
 });
@@ -514,6 +571,8 @@ window.addEventListener('hashchange', () =>
 			await showAttachment(localAttachmentId(location.href));
 		else if (location.hash === '#/teams' || (product === 'teams' && !location.hash))
 			await showTeams();
+		else if (location.hash === '#/notebook' || (product === 'notebook' && !location.hash))
+			await showNotebook();
 		else if (joinRoute()) await showChat(undefined, joinRoute());
 		else if (assistantEnabled() && (chatRoute() || (!product && !location.hash)))
 			await showChat(chatRoute()?.[1]);
@@ -547,6 +606,8 @@ task(async () => {
 	else if (localAttachmentId(location.href)) await showAttachment(localAttachmentId(location.href));
 	else if (location.hash === '#/teams' || (product === 'teams' && !location.hash))
 		await showTeams();
+	else if (location.hash === '#/notebook' || (product === 'notebook' && !location.hash))
+		await showNotebook();
 	else if (joinRoute()) await showChat(undefined, joinRoute());
 	// With the assistant on, the suite opens on chat; a product's own app opens on its files.
 	else if (assistantEnabled() && (chatRoute() || (!product && !location.hash)))
@@ -565,6 +626,7 @@ applyShell = mountShell(() => ({
 	view,
 	documents: sessions.sessions.size,
 	teamsOpen: teamsTabOpen,
+	notebookOpen: notebookTabOpen,
 }));
 mountPwa({ idle: () => sessions.sessions.size === 0 && view === 'home' });
 mountStart();
@@ -575,14 +637,8 @@ const fileActions = mountFileActions({
 	store,
 	sessions,
 	refresh,
-	closeTeams: () => {
-		teamsTabOpen = false;
-		if (view === 'teams') {
-			view = 'home';
-			history.replaceState(null, '', '#/');
-		}
-		renderTabs();
-	},
+	closeTeams: () => closeAppTab('teams'),
+	closeNotebook: () => closeAppTab('notebook'),
 	active: () => active,
 	activate: open,
 	home: () => {

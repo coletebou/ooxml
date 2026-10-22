@@ -165,6 +165,11 @@
 		"description": "OpenTeams viewer, demos and tests"
 	},
 	{
+		"name": "viewer: notebook",
+		"color": "e1d5f5",
+		"description": "OpenNotes viewer, demos and tests"
+	},
+	{
 		"name": "stale",
 		"color": "ededed",
 		"description": "No activity for a while; closes soon unless updated"

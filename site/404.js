@@ -5,7 +5,7 @@
  * Any other missing address shows the page.
  */
 const root = new URL('./', document.currentScript?.src ?? import.meta.url).pathname;
-const match = new RegExp(`^${root}(docx|xlsx|pptx|visio|teams)/(fr|es|de|zh)/(.*)$`).exec(
+const match = new RegExp(`^${root}(docx|xlsx|pptx|visio|teams|notebook)/(fr|es|de|zh)/(.*)$`).exec(
 	location.pathname,
 );
 if (match) {

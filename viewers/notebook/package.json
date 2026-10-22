@@ -1,0 +1,47 @@
+{
+	"name": "notebook-viewer-workspace",
+	"version": "0.0.0",
+	"private": true,
+	"description": "OpenNotes: an open-source, local-first notebook app (notebooks, sections, pages and a free-form canvas with ink) built on ooxml-core",
+	"license": "Apache-2.0",
+	"type": "module",
+	"scripts": {
+		"dev": "bun run --cwd ../../demos/notebook/react dev",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run --passWithNoTests",
+		"test:scripts": "node --test 'scripts/*.test.mjs'",
+		"build:packages": "node scripts/build-packages.mjs",
+		"check:published": "node scripts/check-published-refs.mjs",
+		"pack:smoke": "node scripts/pack-smoke.mjs",
+		"pack:smoke:local": "NOTEBOOK_SMOKE_LOCAL_OOXML=1 node scripts/pack-smoke.mjs",
+		"test:browser": "playwright test",
+		"docs:dev": "bun run --cwd docs docs:dev",
+		"docs:build": "bun run --cwd docs docs:build",
+		"build:pages": "node scripts/build-pages.mjs",
+		"fmt": "oxfmt",
+		"fmt:check": "oxfmt --check",
+		"lint": "oxlint",
+		"lint:fix": "oxlint --fix"
+	},
+	"dependencies": {
+		"lib0": "^0.2.119",
+		"lit": "^3.3.3",
+		"ooxml-core": "*",
+		"ooxml-ui": "*",
+		"y-protocols": "^1.0.7",
+		"yjs": "^13.6.33"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.64.1",
+		"@types/node": "^26.6.5",
+		"@typescript/typescript6": "^6.0.2",
+		"jsdom": "^30.1.3",
+		"oxfmt": "^0.73.0",
+		"oxlint": "^1.88.0",
+		"rollup": "^4.64.7",
+		"rollup-plugin-dts": "^6.5.1",
+		"typescript": "^7.0.2",
+		"vite": "^8.3.4",
+		"vitest": "^5.0.5"
+	}
+}

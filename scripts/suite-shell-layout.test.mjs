@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { shellLayout } from '../apps/office-suite/src/shell-layout.js';
 
-const base = { width: 1366, height: 768, view: 'editor', documents: 1, teamsOpen: false };
+const base = {
+	width: 1366,
+	height: 768,
+	view: 'editor',
+	documents: 1,
+	teamsOpen: false,
+	notebookOpen: false,
+};
 
 test('desktop keeps every bar', () => {
 	assert.deepEqual(shellLayout(base), {
@@ -21,9 +28,10 @@ test('a phone portrait editor folds the actions and hides a lone tab', () => {
 	assert.equal(layout.collapsed, false);
 });
 
-test('two documents or Teams keep the tab strip', () => {
+test('two documents, Teams or Notebook keep the tab strip', () => {
 	assert.equal(shellLayout({ ...base, width: 375, documents: 2 }).hideTabs, false);
 	assert.equal(shellLayout({ ...base, width: 375, teamsOpen: true }).hideTabs, false);
+	assert.equal(shellLayout({ ...base, width: 375, notebookOpen: true }).hideTabs, false);
 });
 
 test('the home view never hides tabs or collapses', () => {

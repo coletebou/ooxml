@@ -33,6 +33,7 @@ export default defineConfig({
 		presence: 'src/presence.ts',
 		smartart: 'src/smartart.ts',
 		teams: 'src/teams/index.ts',
+		notebook: 'src/notebook/index.ts',
 		suite: 'src/suite/index.ts',
 		xlsx: 'src/xlsx/index.ts',
 		docx: 'src/docx/index.ts',

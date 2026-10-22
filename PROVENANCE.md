@@ -1,5 +1,17 @@
 # Provenance
 
+## Notebook area
+
+`src/core/notebook/` (`ooxml-core/notebook` and `ooxml-core/notebook/editor`) is new code. `rich-text.ts` reads and writes the XML encoding that y-prosemirror (MIT) uses for a ProseMirror document in a `Y.XmlFragment` (elements named after node types, text runs carrying one attribute per mark). Only the format is shared, no y-prosemirror code was copied; `rich-text.test.ts` checks the two against each other with y-prosemirror's own converters. The editor schema reuses the Word mark specs of `src/core/docx/ui/schema-marks.ts` unchanged, adding a plain-`a[href]` paste rule to the link mark.
+
+## Shared fractional reorder
+
+Source: ChristopherVR/ooxml at `a9bb07957`, `reorder` in `src/core/xlsx/collab/sheets.ts`. It moved unchanged (apart from its name and comment) to `src/core/collab/ordering.ts` as `reorderFractional`, with its tests from `xlsx/collab/parts.test.ts` now in `collab/helpers.test.ts`. `sheets.ts` re-exports it as `reorder`, so the xlsx binding is unchanged; the notebook orders sections, pages and notebooks with it.
+
+## Office file kind detection
+
+Source: ChristopherVR/ooxml at `a9bb07957`, `OfficeKind` and `detectOfficeKind` in `src/core/teams/model.ts`. They moved unchanged to `src/core/opc/office-kind.ts` (exported from `ooxml-core/opc`), with their test from `teams/teams.test.ts`. `teams/model.ts` re-exports both, so `ooxml-core/teams` is unchanged; the notebook uses them to show embedded files in the matching viewer.
+
 ## Shared move, resize and touch interaction
 
 Source: ChristopherVR/ooxml, commit `3874d8d63`, `src/ui/src/pptx/render/element-interaction.ts` and its tests. Move/resize transforms, local-axis projection, handle metadata and box centres move to `src/core/geometry/element-transform.ts`, with their behavior tests. The PowerPoint path remains a compatibility export; the 12-unit default remains unchanged and Excel passes its existing 8-unit minimum explicitly. Core no longer imports a PowerPoint constant for these calculations.

@@ -72,12 +72,13 @@ test('a docs-only change runs nothing', () => {
 	assert.deepEqual(result.viewers, []);
 });
 
-test('a docx change tests the changed files, typechecks and checks only the docx viewer', () => {
+test('a docx change tests the changed files, typechecks and checks the viewers that read it', () => {
 	const result = plan(['src/core/docx/block-parser.ts'], { testFiles: 20 });
 	assert.equal(result.test.mode, 'changed');
 	assert.deepEqual(result.test.shards, [1]);
 	assert.equal(result.typecheck.strict, true);
-	assert.deepEqual(viewers(result), ['docx']);
+	// The notebook's editor marks and Word export use the docx area.
+	assert.deepEqual(viewers(result), ['docx', 'notebook']);
 	assert.deepEqual(result.consumers, []);
 });
 
@@ -339,9 +340,12 @@ test('a viewer test file, its MCP server and its docs run only what they can bre
 });
 
 test('a product editor in ooxml-ui checks its own viewer; shared ui checks every viewer', () => {
-	const editor = plan(['src/ui/src/docx/model-adapter.ts'], { testFiles: 1 });
-	assert.deepEqual(viewers(editor), ['docx']);
+	const editor = plan(['src/ui/src/visio/binding.ts'], { testFiles: 1 });
+	// The notebook shows Visio drawings in its pages with this editor.
+	assert.deepEqual(viewers(editor).sort(), ['notebook', 'visio']);
 	assert.equal(editor.pptx.run, false);
+	const own = plan(['src/ui/src/notebook/notebook-app.ts'], { testFiles: 1 });
+	assert.deepEqual(viewers(own), ['notebook']);
 	const ribbon = plan(['src/ui/src/ribbon/ribbon.ts'], { testFiles: 1 });
 	assert.deepEqual(viewers(ribbon), MATRIX_VIEWERS);
 	assert.equal(ribbon.pptx.run, true);
@@ -360,6 +364,56 @@ test('teams builds its packages before its typecheck and browser tests', () => {
 	const verify = verifyOf('teams', 'demos/teams/react/main.tsx');
 	assert.equal(verify[0], 'bun run build:packages');
 	assert.ok(verify.indexOf('bun run typecheck') > 0);
+});
+
+test('notebook typechecks and runs its browser tests from source, without a package build', () => {
+	assert.deepEqual(verifyOf('notebook', 'demos/notebook/react/src/App.tsx'), [
+		'bun run typecheck',
+		'bun x playwright install --with-deps chromium',
+		'bun run test:browser',
+	]);
+});
+
+test('the notebook area, its ooxml-ui app and its specs reach only the notebook viewer', () => {
+	assert.deepEqual(viewers(plan(['src/core/notebook/client.ts'], { testFiles: 1 })), ['notebook']);
+	const app = plan(['src/ui/src/notebook/notebook-app.ts'], { testFiles: 1 });
+	assert.deepEqual(viewers(app), ['notebook']);
+	assert.equal(app.pptx.run, false);
+	assert.deepEqual(viewers(plan(['viewers/notebook/packages/react/src/index.ts'])), ['notebook']);
+	assert.deepEqual(viewers(plan(['e2e/notebook/notebook.spec.ts'])), ['notebook']);
+	assert.ok(
+		verifyOf('notebook', 'e2e/notebook/notebook.spec.ts').includes(
+			'bun run test:browser -- notebook.spec.ts',
+		),
+	);
+	assert.deepEqual(plan(['viewers/notebook/README.md', 'viewers/notebook/LICENSE']).viewers, []);
+});
+
+test('a notebook packaging script runs its script tests and the package smoke on workspace copies', () => {
+	assert.deepEqual(verifyOf('notebook', 'viewers/notebook/scripts/pack-smoke.mjs'), [
+		'bun run test:scripts',
+		'bun run build:packages',
+		'bun run check:published',
+		'bun run pack:smoke:local',
+	]);
+});
+
+test('the editors the notebook embeds check the notebook viewer too', () => {
+	for (const [file, owner] of [
+		['src/ui/src/docx/model-adapter.ts', 'docx'],
+		['src/ui/src/xlsx/building-blocks.ts', 'xlsx'],
+		['src/ui/src/visio/binding.ts', 'visio'],
+		['src/ui/src/teams/app/presentation-preview.ts', 'teams'],
+	]) {
+		const result = plan([file], { testFiles: 1 });
+		assert.deepEqual(viewers(result).sort(), [owner, 'notebook'].sort(), file);
+		const notebook = result.viewers.find((viewer) => viewer.name === 'notebook').verify;
+		assert.ok(notebook.includes('bun run typecheck') && notebook.includes('test:browser'), file);
+	}
+	// Another product's own editor does not.
+	assert.deepEqual(viewers(plan(['src/ui/src/notebook/page-canvas.ts'], { testFiles: 1 })), [
+		'notebook',
+	]);
 });
 
 test('PowerPoint product UI reaches its own bindings without unrelated viewers', () => {

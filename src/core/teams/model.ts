@@ -1,6 +1,7 @@
 // Shared types and small validators for the `teams` area: channels, messages, attachments and the
 // Office-file kinds a channel can link to. Pure data, no DOM, no Yjs. New code.
 import { stripHtmlTags } from '../collab/validation';
+import { detectOfficeKind, type OfficeKind } from '../opc/office-kind';
 import type { Mention } from './mentions';
 
 export type ChannelKind = 'channel' | 'direct';
@@ -15,8 +16,8 @@ export interface Channel {
 	archived: boolean;
 }
 
-/** The Office products a channel can link a file from. */
-export type OfficeKind = 'docx' | 'xlsx' | 'pptx' | 'vsdx' | 'other';
+/** The Office products a channel can link a file from (shared with every product in `opc`). */
+export { detectOfficeKind, type OfficeKind } from '../opc/office-kind';
 
 export interface Attachment {
 	name: string;
@@ -56,36 +57,6 @@ export const MAX_CHANNEL_NAME_CHARS = 80;
 export const MAX_CHANNEL_TOPIC_CHARS = 1024;
 export const MAX_ATTACHMENTS = 20;
 const MAX_EMOJI_CHARS = 16;
-
-const OFFICE_EXTENSIONS: Record<string, OfficeKind> = {
-	docx: 'docx',
-	docm: 'docx',
-	dotx: 'docx',
-	xlsx: 'xlsx',
-	xlsm: 'xlsx',
-	xltx: 'xlsx',
-	pptx: 'pptx',
-	pptm: 'pptx',
-	potx: 'pptx',
-	ppsx: 'pptx',
-	vsdx: 'vsdx',
-	vsdm: 'vsdx',
-	vssx: 'vsdx',
-	vstx: 'vsdx',
-};
-
-/** Which Office viewer opens a file, from its name (the extension wins over the MIME type). */
-export function detectOfficeKind(name: string, mime?: string): OfficeKind {
-	const ext = name.split('.').pop()?.toLowerCase() ?? '';
-	const byExt = OFFICE_EXTENSIONS[ext];
-	if (byExt) return byExt;
-	const m = mime?.toLowerCase() ?? '';
-	if (m.includes('wordprocessingml')) return 'docx';
-	if (m.includes('spreadsheetml')) return 'xlsx';
-	if (m.includes('presentationml')) return 'pptx';
-	if (m.includes('visio')) return 'vsdx';
-	return 'other';
-}
 
 /** Message text: tags stripped, control characters removed, trimmed and length-capped. */
 export function sanitizeMessageText(text: unknown): string {

@@ -12,6 +12,12 @@
 	.create-row {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
+	#create-row > [data-import]:nth-child(n) {
+		grid-column: auto;
+	}
+	#create-row > [data-import]:nth-child(odd) {
+		grid-column: 1 / -1;
+	}
 	.page-heading h1 {
 		font-size: 32px;
 	}

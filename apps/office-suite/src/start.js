@@ -9,7 +9,7 @@
  * beneath. workspace-chrome.css draws the rings and the entrance; on narrow screens the same
  * buttons stack as a list.
  */
-import { $, apps, badge, escape, tag, teamsApp } from './ui.js';
+import { $, apps, badge, escape, tag, teamsApp, notebookApp } from './ui.js';
 import { icon } from './icons.js';
 import { product, productPaths, suiteBase } from './product.js';
 import { currentTheme, setThemeMode } from './themes.js';
@@ -20,12 +20,14 @@ const sites = {
 	pptx: 'pptx',
 	vsdx: 'visio',
 	teams: 'teams',
+	notebook: 'notebook',
 	docs: 'docs',
 };
 /** The products around the ring, clockwise from the top. */
 const products = [
 	...apps.map((a) => ({ id: a.id, name: a.name, tag: a.tag, detail: `.${a.id}` })),
 	{ id: 'teams', name: 'Teams', tag: teamsApp.tag, detail: 'chat and calls' },
+	{ id: 'notebook', name: 'Notebook', tag: notebookApp.tag, detail: 'notes, ink and to-dos' },
 ];
 const badges = {
 	office: '<span class="app-badge" style="--app:#0f6cbd">O</span>',
@@ -70,7 +72,7 @@ export function showChooser({ required = false, onSuite } = {}) {
 		`<div class="start-heading"><h1 id="start-title">Where would you like to start?</h1><p>${preview ? 'Preview every app in one workspace, or open one app separately.' : 'Every app in one workspace, or one product on its own site with its guides and demos.'}</p></div>
 		<div class="start-stage">
 			<svg class="rings rings--start" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="47" /><circle cx="50" cy="50" r="33" /><circle cx="50" cy="50" r="19" /></svg>
-			<button class="start-card start-center" data-start="office">${badges.office}<span><strong>OOXML Office</strong><small>Word, Excel, PowerPoint, Visio and Teams in one workspace</small></span></button>
+			<button class="start-card start-center" data-start="office">${badges.office}<span><strong>OOXML Office</strong><small>Word, Excel, PowerPoint, Visio, Teams and Notebook in one workspace</small></span></button>
 			${products
 				.map(
 					(c, i) =>
