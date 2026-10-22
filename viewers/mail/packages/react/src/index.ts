@@ -91,7 +91,9 @@ interface Leaving {
  *   const state = useMailState(client);
  */
 export function useMailClient(options: MailOptions | null): MailClient | null {
-	const [client, setClient] = useState<MailClient | null>(null);
+	// The client with the options it was made for: from the render that asks for other options,
+	// it is not given out again, even before the effect has let it go.
+	const [held, setHeld] = useState<{ client: MailClient; for: MailOptions } | null>(null);
 	const latest = useRef(options);
 	latest.current = options;
 	// The options the client was made for, kept while they make the same client: the connection
@@ -113,7 +115,7 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 		const created =
 			kept?.client ??
 			createMail({ ...opts, quoteFormat: followQuoteFormat(() => latest.current?.quoteFormat) });
-		setClient(created);
+		setHeld({ client: created, for: opts });
 		return () => {
 			// The open draft is saved (retried until it is) before the client goes.
 			const release = setTimeout(() => {
@@ -121,10 +123,10 @@ export function useMailClient(options: MailOptions | null): MailClient | null {
 				void releaseMailClient(created);
 			});
 			leaving.current = { client: created, options: opts, keep: () => clearTimeout(release) };
-			setClient(null);
+			setHeld(null);
 		};
 	}, [wanted]);
-	return client;
+	return held && wanted && sameMailOptions(held.for, wanted) ? held.client : null;
 }
 
 const NO_UNSUBSCRIBE = (): void => {};

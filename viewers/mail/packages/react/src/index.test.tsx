@@ -10,7 +10,7 @@ import {
 	type MailTransport,
 } from 'ooxml-core/mail';
 import { MailApp, type MailClient, type MailConnection, type MailOptions } from 'mail-viewer';
-import { Mail, useMail } from './index';
+import { Mail, useMail, useMailClient } from './index';
 
 beforeAll(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true));
 afterAll(() => vi.unstubAllGlobals());
@@ -176,6 +176,31 @@ describe('useMail', () => {
 			await act(() => new Promise((done) => setTimeout(done, 5)));
 		expect(destroy).toHaveBeenCalledOnce();
 		destroy.mockRestore();
+	});
+
+	it('never returns the last client once the options asked for another or for none', async () => {
+		const seen: (MailClient | null)[] = [];
+		function Probe({ options }: { options: MailOptions | null }): ReactElement {
+			seen.push(useMailClient(options));
+			return createElement('output');
+		}
+		const { root: view } = root();
+		const render = (options: MailOptions | null): Promise<void> =>
+			act(async () => view.render(createElement(Probe, { options })));
+		const config: MailConnection = { kind: 'demo', seed: { now: NOW } };
+		await render({ config });
+		const first = seen.at(-1)!;
+		expect(first).not.toBeNull();
+		// Another address book: from the render that asks for it on, the first client is gone.
+		let from = seen.length;
+		await render({ config, contacts: createMemoryContactStore() });
+		expect(seen.slice(from)).not.toContain(first);
+		const second = seen.at(-1)!;
+		expect(second).not.toBeNull();
+		from = seen.length;
+		await render(null);
+		expect(seen.slice(from)).toEqual(seen.slice(from).map(() => null));
+		await act(async () => view.unmount());
 	});
 
 	it('makes a new client for a store given later, and keeps it for new quote wording', async () => {
