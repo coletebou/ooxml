@@ -706,6 +706,35 @@ describe('the compose window', () => {
 		client.destroy();
 	});
 
+	it('reopens a draft as the identity it was written as, of several with its address', async () => {
+		const own = identityOf('own', 'Sam', 'sam@example.com');
+		const help = { name: '', email: 'help@example.com' };
+		const desk = { name: '', email: 'desk@example.com' };
+		const support = { ...identityOf('support', 'Support', 'sam@example.com'), replyTo: [help] };
+		const front = { ...identityOf('front', 'Support', 'sam@example.com'), replyTo: [desk] };
+		const { client, inMailbox } = plain({ identities: [own, support, front] });
+		await until(client, (s) => s.status === 'ready');
+		// Written as each, as the window's From picker sets it: the identity and its own name.
+		for (const identity of [support, front, own]) {
+			await client.compose('new');
+			client.updateDraft({
+				identityId: identity.id,
+				from: { name: identity.name, email: identity.email },
+				subject: identity.id,
+			});
+			expect(await client.closeCompose()).toBe(true);
+		}
+		const saved = await inMailbox('drafts');
+		expect(saved.find((draft) => draft.subject === 'front')?.replyTo).toEqual([desk]);
+		for (const identity of [support, front, own]) {
+			const draft = saved.find((message) => message.subject === identity.id)!;
+			expect(await client.editDraft(draft.id)).toBe(true);
+			expect(client.getState().compose?.draft.identityId).toBe(identity.id);
+			expect(await client.closeCompose()).toBe(true);
+		}
+		client.destroy();
+	});
+
 	it('keeps a new draft with only Bcc addresses typed, never one with only its own', async () => {
 		const archive = { name: '', email: 'archive@example.com' };
 		const own = { ...identityOf('own', me.name, me.email), bcc: [archive] };

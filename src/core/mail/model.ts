@@ -229,3 +229,26 @@ export function identityFor(
 	}
 	return undefined;
 }
+
+const sameAddresses = (a: readonly MailAddress[], b: readonly MailAddress[]): boolean =>
+	a.length === b.length && a.every((address) => b.some((other) => sameAddress(address, other)));
+
+/**
+ * The identity a saved message was written as. A message keeps no identity, and identities may
+ * share an address (RFC 8621 6), so of those with its From address, the one with its From name
+ * and its Reply-To, as a save writes them; else `identityFor` its From.
+ */
+export function writtenAs(
+	identities: readonly Identity[],
+	message: Pick<MailMessage, 'from' | 'replyTo'>,
+): Identity | undefined {
+	const from = message.from.slice(0, 1);
+	const score = (identity: Identity): number =>
+		(identity.name === from[0]?.name ? 2 : 0) +
+		(sameAddresses(identity.replyTo, message.replyTo) ? 1 : 0);
+	let best: Identity | undefined;
+	for (const identity of identities)
+		if (from[0] && sameAddress(identity.email, from[0]) && (!best || score(identity) > score(best)))
+			best = identity;
+	return best ?? identityFor(identities, from);
+}

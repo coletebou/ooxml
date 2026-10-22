@@ -12,7 +12,7 @@ import {
 	ENGLISH_QUOTE_FORMAT,
 	patchDraft,
 } from './compose';
-import { DRAFT, identityFor } from './model';
+import { DRAFT, identityFor, writtenAs } from './model';
 import type { Draft, EmailSummary, Identity, MailboxRole, MailMessage } from './model';
 import { MailTransportError } from './transport';
 
@@ -189,7 +189,7 @@ export function createCompose(core: ClientCore): ComposeActions {
 				const inDrafts = filedIn(message, 'drafts') && !!core.mailboxByRole('sent');
 				if (!listed(message).keywords[DRAFT] && !inDrafts)
 					throw new MailTransportError('invalid', 'Only a draft opens to edit.');
-				const identity = identityFor(identities(), message.from.slice(0, 1));
+				const identity = writtenAs(identities(), message);
 				if (!(await close())) return false;
 				start(draftFromMessage(message, identity, core.options.draftHtml), 'new');
 				return true;
