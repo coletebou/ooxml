@@ -4,7 +4,7 @@
 // month view, the first day of the week and `eventsByDay` are new.
 import { type DateRange, overlapsRange } from './occurrences';
 import { daysInMonth } from './recurrence-calendar';
-import { addDays, dayKey, startOfDay, zonedParts, zonedToUtc } from './time-zone';
+import { addDays, dayKey, zonedParts, zonedToUtc } from './time-zone';
 
 export type CalendarMode = 'workweek' | 'week' | 'day' | 'month';
 
@@ -25,17 +25,23 @@ export interface MonthDay extends CalendarDay {
 	inMonth: boolean;
 }
 
-const describe = (start: number, zone: string): CalendarDay => {
+/**
+ * The day `offset` days from a wall date, from its own midnight to the next: a day that starts
+ * late (a clock change at midnight) does not shift the days after it.
+ */
+function dayFrom(date: { year: number; month: number; day: number }, offset: number, zone: string) {
+	const midnight = (n: number): number => zonedToUtc({ ...date, day: date.day + n }, zone);
+	const start = midnight(offset);
 	const p = zonedParts(start, zone);
 	return {
 		start,
-		end: addDays(start, 1, zone),
+		end: midnight(offset + 1),
 		weekday: p.weekday,
 		day: p.day,
 		month: p.month,
 		year: p.year,
-	};
-};
+	} satisfies CalendarDay;
+}
 
 /** A week day number (0 = Sunday) from any integer. */
 const weekdayOf = (n: number): number => ((Math.trunc(n) % 7) + 7) % 7;
@@ -51,16 +57,16 @@ export function viewDays(
 	zone: string,
 	weekStartsOn = 1,
 ): CalendarDay[] {
-	const today = startOfDay(anchor, zone);
-	if (mode === 'day') return [describe(today, zone)];
 	if (mode === 'month') return monthGrid(anchor, zone, weekStartsOn).flat();
+	const { year, month, day, weekday } = zonedParts(anchor, zone);
+	const date = { year, month, day };
+	if (mode === 'day') return [dayFrom(date, 0, zone)];
 	const first = weekdayOf(weekStartsOn);
-	const sinceFirst = (zonedParts(anchor, zone).weekday - first + 7) % 7;
+	const sinceFirst = (weekday - first + 7) % 7;
 	// The work week starts on the Monday of the week, whichever day the week starts on.
 	const toMonday = mode === 'workweek' ? (8 - first) % 7 : 0;
-	const firstDay = addDays(today, toMonday - sinceFirst, zone);
 	const count = mode === 'workweek' ? 5 : 7;
-	return Array.from({ length: count }, (_, i) => describe(addDays(firstDay, i, zone), zone));
+	return Array.from({ length: count }, (_, i) => dayFrom(date, toMonday - sinceFirst + i, zone));
 }
 
 /**
@@ -94,23 +100,10 @@ export function monthGrid(anchor: number, zone: string, weekStartsOn = 1): Month
 	const { year, month } = zonedParts(anchor, zone);
 	const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
 	const lead = (first - weekdayOf(weekStartsOn) + 7) % 7;
-	// Each day from its own wall date, so a day that starts late (a clock change at midnight) does
-	// not shift the days after it.
-	const midnight = (day: number): number => zonedToUtc({ year, month, day }, zone);
 	return Array.from({ length: 6 }, (_, week) =>
 		Array.from({ length: 7 }, (_, i): MonthDay => {
-			const day = 1 - lead + week * 7 + i;
-			const start = midnight(day);
-			const p = zonedParts(start, zone);
-			return {
-				start,
-				end: midnight(day + 1),
-				weekday: p.weekday,
-				day: p.day,
-				month: p.month,
-				year: p.year,
-				inMonth: p.month === month && p.year === year,
-			};
+			const day = dayFrom({ year, month, day: 1 }, week * 7 + i - lead, zone);
+			return { ...day, inMonth: day.month === month && day.year === year };
 		}),
 	);
 }

@@ -101,6 +101,26 @@ describe('month view', () => {
 		expect(days.filter((d) => d !== gap).every((d) => minuteOfDay(d.start, zone) === 0)).toBe(true);
 	});
 
+	it('starts each day of a week or day view at its own midnight too', () => {
+		const zone = 'America/Santiago';
+		const gapDay = at(2026, 9, 6, 15, zone);
+		for (const weekStartsOn of [0, 1]) {
+			const week = viewDays(gapDay, 'week', zone, weekStartsOn);
+			const gap = week.find((d) => d.day === 6)!;
+			expect(minuteOfDay(gap.start, zone)).toBe(60);
+			expect(week.filter((d) => d !== gap).every((d) => minuteOfDay(d.start, zone) === 0)).toBe(
+				true,
+			);
+			// Each day ends where the next starts: none overlaps, none leaves a gap.
+			week.slice(1).forEach((d, i) => expect(d.start).toBe(week[i]!.end));
+		}
+		const [day] = viewDays(gapDay, 'day', zone);
+		expect([minuteOfDay(day!.start, zone), day!.end]).toEqual([60, at(2026, 9, 7, 0, zone)]);
+		expect(viewDays(gapDay, 'workweek', zone).map((d) => minuteOfDay(d.start, zone))).toEqual([
+			0, 0, 0, 0, 0,
+		]);
+	});
+
 	it('is what the month mode of viewDays shows', () => {
 		const anchor = at(2026, 10, 20, 15);
 		expect(viewDays(anchor, 'month', NY)).toEqual(monthGrid(anchor, NY).flat());
