@@ -109,6 +109,36 @@ describe('moving and deleting', () => {
 		client.destroy();
 	});
 
+	it('destroys nothing in Trash that another device filed elsewhere since the list was read', async () => {
+		const transport = createMemoryTransport({
+			mailboxes: [...DEFAULT_MAILBOXES, { id: 'projects', name: 'Projects' }],
+			now: () => T0,
+			// Two in the Inbox, which the client opens on, and three in Trash.
+			messages: ['x', 'y', 'a', 'b', 'c'].map((id, minute) => ({
+				id,
+				mailboxId: minute < 2 ? 'inbox' : 'trash',
+				from: ada,
+				to: [me],
+				subject: `Subject ${id}`,
+				receivedAt: T0 + minute * 60_000,
+			})),
+		});
+		const { client, notices } = await connect(transport);
+		await client.selectMailbox('trash');
+		await until(client, (s) => s.conversations.length === 3);
+		// Before this client hears of it: `a` taken out of Trash, `b` filed in Projects as well.
+		await transport.update({ a: { mailboxIds: { trash: false, projects: true } } });
+		await transport.update({ b: { mailboxIds: { projects: true } } });
+		notices.length = 0;
+		await client.remove(['a', 'b', 'c']);
+		expect((await transport.message('a')).mailboxIds).toEqual(['projects']);
+		expect((await transport.message('b')).mailboxIds).toEqual(['projects']);
+		await expect(transport.message('c')).rejects.toMatchObject({ code: 'notFound' });
+		expect(notices).toMatchObject([{ kind: 'done', action: 'deleted', count: 2 }]);
+		expect(client.getState().conversations).toEqual([]);
+		client.destroy();
+	});
+
 	it('moves what a search of every folder finds to Trash, never destroying what is there', async () => {
 		const transport = server(DEFAULT_MAILBOXES);
 		const { client, notices } = await connect(transport);

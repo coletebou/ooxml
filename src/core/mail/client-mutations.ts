@@ -268,8 +268,24 @@ export function createMutations(core: ClientCore, list: ListLoader): Mutations {
 			core.listIds = core.listIds.filter((id) => !inTrash.includes(id));
 			core.rebuild();
 			try {
-				await core.transport.destroy(inTrash);
-				core.notice({ kind: 'done', action: 'deleted', count: inTrash.length });
+				// Read again first: a destroy takes a message from every folder, and another device may
+				// have filed one elsewhere since the list was read. That one only leaves Trash, if it is
+				// still there; what is in Trash alone goes for good.
+				const now = await core.transport.summaries(inTrash);
+				const alone = (email: EmailSummary): boolean =>
+					email.mailboxIds.length === 1 && email.mailboxIds[0] === trash.id;
+				const doomed = now.filter(alone).map((email) => email.id);
+				const filed = now.filter((email) => !alone(email) && email.mailboxIds.includes(trash.id));
+				if (filed.length)
+					await core.transport.update(
+						Object.fromEntries(
+							filed.map((email) => [email.id, { mailboxIds: { [trash.id]: false } }]),
+						),
+					);
+				if (doomed.length) await core.transport.destroy(doomed);
+				if (doomed.length < inTrash.length) await list.loadList();
+				const count = doomed.length + filed.length;
+				if (count) core.notice({ kind: 'done', action: 'deleted', count });
 			} catch (error) {
 				await list.loadList();
 				core.fail('delete', error);
