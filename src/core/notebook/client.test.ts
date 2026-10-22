@@ -658,6 +658,35 @@ describe('notebook client twelfth review round', () => {
 		).toEqual(['From A', 'From B']);
 	});
 
+	it('selects the neighbour of a page or section that is deleted, not the first one', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		const state = async () => {
+			await settle();
+			return client.getState();
+		};
+		const first = (await state()).pageId;
+		const second = client.createPage({ title: 'Second', afterId: first });
+		const third = client.createPage({ title: 'Third', afterId: second });
+		const fourth = client.createPage({ title: 'Fourth', afterId: third });
+		client.selectPage(third);
+		expect((await state()).pages.map((p) => p.id)).toEqual([first, second, third, fourth]);
+		client.deletePage(third);
+		expect((await state()).pageId).toBe(fourth);
+		// The last page's neighbour is the one before it.
+		client.deletePage(fourth);
+		expect((await state()).pageId).toBe(second);
+		const s1 = (await state()).sectionId;
+		const s2 = client.createSection({ name: 'Two' });
+		const s3 = client.createSection({ name: 'Three' });
+		client.selectSection(s2);
+		expect((await state()).sections.map((s) => s.id)).toEqual([s1, s2, s3]);
+		expect(client.getState().sectionId).toBe(s2);
+		client.deleteSection(s2);
+		expect((await state()).sectionId).toBe(s3);
+	});
+
 	it('gives every scope its own room, also scopes that are not plain ids', () => {
 		const scopes = ['alice@example.com', 'bob@example.com', 'x'.repeat(60), `${'x'.repeat(60)}y`];
 		const rooms = scopes.map(sanitizeScope);

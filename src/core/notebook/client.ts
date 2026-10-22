@@ -32,7 +32,7 @@ import { writeSnapshot } from './snapshot';
 import * as structure from './structure';
 import { sanitizeScope } from './sync';
 import { collectTodos, searchNotebook, setTodoState } from './text-index';
-import { notebookPages, pageViews, peerViews, sectionViews } from './views';
+import { neighbour, notebookPages, pageViews, peerViews, sectionViews } from './views';
 
 export function createNotebookClient(options: NotebookClientOptions): NotebookClient {
 	const now = options.now ?? Date.now;
@@ -62,6 +62,8 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 	let destroyed = false;
 	let sectionId = '';
 	let pageId = '';
+	/** The sections and the selected section's pages as last shown, for picking a neighbour. */
+	let shown: { sections: string[]; pages: string[] } = { sections: [], pages: [] };
 	let focused = '';
 	let query = '';
 	let queued = false;
@@ -134,14 +136,20 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		const { types } = open;
 		const allPages = readPages(types);
 		const sections = sectionViews(readSections(types), allPages);
+		// A section or page that went (deleted here or by a collaborator, moved away) hands the
+		// selection to its neighbour in the list as it was last shown.
+		const sectionList = sections.filter((s) => s.kind === 'section');
 		const section =
-			sections.find((s) => s.id === sectionId && s.kind === 'section') ??
-			sections.find((s) => s.kind === 'section') ??
-			null;
+			sectionList.find((s) => s.id === sectionId) ??
+			neighbour(shown.sections, sectionId, sectionList);
+		const sameSection = section?.id === sectionId;
 		sectionId = section?.id ?? '';
 		const pages = pageViews(allPages, sectionId);
-		const page = pages.find((p) => p.id === pageId) ?? pages[0] ?? null;
+		const page =
+			pages.find((p) => p.id === pageId) ??
+			(sameSection ? neighbour(shown.pages, pageId, pages) : (pages[0] ?? null));
 		pageId = page?.id ?? '';
+		shown = { sections: sectionList.map((s) => s.id), pages: pages.map((p) => p.id) };
 		const visible = notebookPages(sections, allPages);
 		return {
 			...base,

@@ -87,3 +87,27 @@ export function peerViews(peers: readonly RemotePresence<NotebookPresence>[]): P
 		containerId: p.containerId ?? '',
 	}));
 }
+
+/**
+ * What to select when `id` is gone from a list: the next item of `before` (the list as it was last
+ * shown) that is still in `now`, else the nearest one before it, else the first of `now`.
+ */
+export function neighbour<T extends { id: string }>(
+	before: readonly string[],
+	id: string,
+	now: readonly T[],
+): T | null {
+	const at = before.indexOf(id);
+	if (at >= 0) {
+		const byId = new Map(now.map((item) => [item.id, item]));
+		for (let i = at + 1; i < before.length; i++) {
+			const next = byId.get(before[i]!);
+			if (next) return next;
+		}
+		for (let i = at - 1; i >= 0; i--) {
+			const previous = byId.get(before[i]!);
+			if (previous) return previous;
+		}
+	}
+	return now[0] ?? null;
+}
