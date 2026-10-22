@@ -381,6 +381,24 @@ describe('<mail-app>', () => {
 		await until(() => !state(app).conversations.some((c) => c.id === id));
 	});
 
+	it('selects a range with Shift and a click on a checkbox', async () => {
+		const app = await mount();
+		const list = inner<Updating>(app, 'mail-message-list')!;
+		await list.updateComplete;
+		const ids = state(app)
+			.conversations.slice(0, 3)
+			.map((c) => c.id);
+		const boxes = [
+			...list.shadowRoot!.querySelectorAll<HTMLInputElement>('.row input[type="checkbox"]'),
+		];
+		boxes[0]!.click();
+		boxes[2]!.dispatchEvent(
+			new MouseEvent('click', { shiftKey: true, bubbles: true, composed: true }),
+		);
+		await until(() => state(app).selection.length === 3);
+		expect([...state(app).selection].sort()).toEqual([...ids].sort());
+	});
+
 	it('archives with e pressed on the checkbox that selected the conversation', async () => {
 		const app = await mount();
 		const list = inner<Updating>(app, 'mail-message-list')!;

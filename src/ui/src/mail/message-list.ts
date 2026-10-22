@@ -162,9 +162,11 @@ export class MailMessageList extends MailElement {
 				type="checkbox"
 				.checked=${selected}
 				aria-label=${this.t('list.select', { subject })}
-				@click=${(e: Event) => {
+				@click=${(e: MouseEvent) => {
 					e.stopPropagation();
-					this.emit('mail-toggle-select', { id: conversation.id });
+					// Shift and a click select a range here too, as on the row.
+					if (e.shiftKey) this.emit('mail-select-range', { id: conversation.id });
+					else this.emit('mail-toggle-select', { id: conversation.id });
 				}}
 			/>
 			<span class="who" title=${who}
