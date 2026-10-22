@@ -10,7 +10,7 @@ import {
 	type PageEntry,
 	type SectionEntry,
 } from './model';
-import { addFile, addImage, addStroke, addText, containerBytes } from './canvas';
+import { addFile, addImage, addStroke, addText, containerBytes, readStacking } from './canvas';
 import {
 	deletedSectionIds,
 	readContainers,
@@ -83,8 +83,10 @@ export function readSnapshot(ctx: Pick<NotebookEditContext, 'types'>): NotebookS
  * Write a snapshot into an empty notebook. Section and page ids are kept (they are local to the
  * notebook); containers and strokes get new ids. Returns how many items could not be written.
  */
-export function writeSnapshot(ctx: NotebookEditContext, snapshot: NotebookSnapshot): number {
+export function writeSnapshot(edit: NotebookEditContext, snapshot: NotebookSnapshot): number {
 	let skipped = 0;
+	// Many items in one go: the stacking and drawing order are read once, not for every item.
+	const ctx: NotebookEditContext = { ...edit, stacking: readStacking(edit.types) };
 	ctx.types.doc.transact(() => {
 		writeMeta(ctx, { name: snapshot.name, color: snapshot.color });
 		if (snapshot.created) ctx.types.meta.set('created', snapshot.created);

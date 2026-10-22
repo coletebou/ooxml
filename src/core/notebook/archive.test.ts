@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { createIdGenerator } from '../collab/identity';
 import { NotebookArchiveError, exportNotebookArchive, importNotebookArchive } from './archive';
@@ -169,6 +169,46 @@ describe('notebook archive', () => {
 		expect(read.containers[0]?.content).toEqual([
 			{ type: 'paragraph', attrs: { todo: null }, content: [{ type: 'text', text: 'x' }] },
 		]);
+	});
+
+	it('writes a large notebook without scanning it again for every item', () => {
+		const source = context();
+		const section = addSection(source, { name: 'Ink' });
+		const pages = [
+			addPage(source, { sectionId: section }),
+			addPage(source, { sectionId: section }),
+		];
+		for (let i = 0; i < 300; i++) {
+			const page = pages[i % 2]!;
+			addStroke(source, page, {
+				tool: 'pen',
+				color: '#000000',
+				width: 2,
+				points: [i, 0, 0.5, i, 9, 0.5],
+			});
+			addText(source, page, { x: i, y: i, content: [] });
+		}
+		const snapshot = readSnapshot(source);
+		const target = context(NOTEBOOK_SEED_ORIGIN, 'b');
+		const inkScans = vi.spyOn(target.types.ink, 'forEach');
+		const boxScans = vi.spyOn(target.types.containers, 'forEach');
+		expect(writeSnapshot(target, snapshot)).toBe(0);
+		expect([inkScans.mock.calls.length, boxScans.mock.calls.length]).toEqual([1, 1]);
+		inkScans.mockRestore();
+		boxScans.mockRestore();
+		// Still drawn and stacked in the same order.
+		const read = readSnapshot(target);
+		for (const page of pages) {
+			const firstX = (strokes: typeof read.strokes) =>
+				strokes.filter((s) => s.pageId === page).map((s) => s.points[0]);
+			expect(firstX(read.strokes)).toEqual(firstX(snapshot.strokes));
+			const order = (items: typeof read.containers) =>
+				items
+					.filter((c) => c.container.pageId === page)
+					.sort((a, b) => a.container.z - b.container.z)
+					.map((c) => c.container.x);
+			expect(order(read.containers)).toEqual(order(snapshot.containers));
+		}
 	});
 
 	it('reads a media entry once and keeps the total within a budget', async () => {

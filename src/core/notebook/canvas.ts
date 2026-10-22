@@ -19,13 +19,33 @@ import {
 import { MAX_INK_POINTS, encodeInkPoints, simplifyInk } from './ink';
 import { type RichNode, writeRichText } from './rich-text';
 import { NOTEBOOK_ASSETS, entityMap } from './schema';
-import type { NotebookEditContext } from './structure';
+import type { NotebookEditContext, Stacking } from './structure';
 
 const pos = (v: number): number => Math.round(clampNumber(v, -MAX_COORDINATE, MAX_COORDINATE, 0));
 const width = (v: number | undefined, fallback: number): number =>
 	Math.round(clampNumber(v, MIN_CONTAINER_WIDTH, MAX_CONTAINER_WIDTH, fallback));
 
+/** The highest `z` and `seq` of every page, in one pass (for `NotebookEditContext.stacking`). */
+export function readStacking(types: NotebookEditContext['types']): Stacking {
+	const z = new Map<string, number>();
+	const seq = new Map<string, number>();
+	types.containers.forEach((value) => {
+		if (!(value instanceof Y.Map)) return;
+		const page = value.get('page');
+		const current = value.get('z');
+		if (typeof page === 'string' && typeof current === 'number' && current > (z.get(page) ?? 0))
+			z.set(page, current);
+	});
+	types.ink.forEach((value) => {
+		const raw = value as { page?: unknown; seq?: unknown } | null;
+		if (typeof raw?.page === 'string' && typeof raw.seq === 'number')
+			seq.set(raw.page, Math.max(seq.get(raw.page) ?? 0, raw.seq));
+	});
+	return { z, seq };
+}
+
 function topZ(ctx: NotebookEditContext, pageId: string): number {
+	if (ctx.stacking) return ctx.stacking.z.get(pageId) ?? 0;
 	let z = 0;
 	ctx.types.containers.forEach((value) => {
 		if (value instanceof Y.Map && value.get('page') === pageId) {
@@ -52,7 +72,9 @@ function newContainer(
 	map.set('y', pos(at.y));
 	map.set('w', width(at.width, defaultWidth));
 	if (kind !== 'text') map.set('h', Math.round(clampNumber(at.height, 16, MAX_COORDINATE, 200)));
-	map.set('z', topZ(ctx, pageId) + 1);
+	const z = topZ(ctx, pageId) + 1;
+	map.set('z', z);
+	ctx.stacking?.z.set(pageId, z);
 	return [id, map];
 }
 
@@ -178,8 +200,10 @@ export function bringToFront(ctx: NotebookEditContext, id: string): void {
 	const page = map?.get('page');
 	if (!map || typeof page !== 'string') return;
 	const top = topZ(ctx, page);
-	if (map.get('z') !== top || countAtZ(ctx, page, top) > 1)
+	if (map.get('z') !== top || countAtZ(ctx, page, top) > 1) {
 		transact(ctx, () => map.set('z', top + 1));
+		ctx.stacking?.z.set(page, top + 1);
+	}
 }
 
 function countAtZ(ctx: NotebookEditContext, pageId: string, z: number): number {
@@ -214,11 +238,12 @@ export function addStroke(ctx: NotebookEditContext, pageId: string, input: Strok
 	if (!isEntityId(pageId) || all.length < 3) return '';
 	// The drawing order is stored: ids end in a per-client counter, which says nothing across
 	// sessions or peers. Later strokes get a higher number than any on the page.
-	let seq = 0;
-	ctx.types.ink.forEach((value) => {
-		const raw = value as { page?: unknown; seq?: unknown } | null;
-		if (raw?.page === pageId && typeof raw.seq === 'number') seq = Math.max(seq, raw.seq);
-	});
+	let seq = ctx.stacking?.seq.get(pageId) ?? 0;
+	if (!ctx.stacking)
+		ctx.types.ink.forEach((value) => {
+			const raw = value as { page?: unknown; seq?: unknown } | null;
+			if (raw?.page === pageId && typeof raw.seq === 'number') seq = Math.max(seq, raw.seq);
+		});
 	let first = '';
 	transact(ctx, () => {
 		// A stroke longer than one stored stroke holds becomes several, so none of it is lost: each
@@ -239,6 +264,7 @@ export function addStroke(ctx: NotebookEditContext, pageId: string, input: Strok
 			if (at + size >= all.length) break;
 		}
 	});
+	ctx.stacking?.seq.set(pageId, seq);
 	return first;
 }
 

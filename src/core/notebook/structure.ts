@@ -25,6 +25,18 @@ export interface NotebookEditContext {
 	readonly now: () => number;
 	/** Transaction origin: `NOTEBOOK_ORIGIN` for undoable edits, `NOTEBOOK_SEED_ORIGIN` otherwise. */
 	readonly origin: unknown;
+	/**
+	 * The highest stacking order (`z`) and drawing order (`seq`) of every page, read once by a writer
+	 * that adds many items in one go (an archive import), so each add does not scan the notebook.
+	 * Omitted, each add reads them from the document.
+	 */
+	readonly stacking?: Stacking;
+}
+
+/** Per page: the highest container `z` and stroke `seq` (see `readStacking`). */
+export interface Stacking {
+	readonly z: Map<string, number>;
+	readonly seq: Map<string, number>;
 }
 
 const transact = <T>(ctx: NotebookEditContext, fn: () => T): T => {
