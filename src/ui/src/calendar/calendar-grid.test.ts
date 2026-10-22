@@ -314,6 +314,20 @@ describe('the shared calendar view: time grid', () => {
 		expect(el.calls).toEqual([['new', 0, false]]);
 	});
 
+	it('proposes the half hour a click points at, the last one at the foot of the column', async () => {
+		const el = await mount([], 'day');
+		const column = qa(el, '.column')[0]!;
+		column.getBoundingClientRect = () => ({ top: 100, height: 960, bottom: 1060 }) as DOMRect;
+		const click = (clientY: number) =>
+			column.dispatchEvent(new MouseEvent('click', { clientY, bubbles: true, composed: true }));
+		click(580);
+		click(1060);
+		expect(el.calls).toEqual([
+			['new', at(10, 15, 12), false],
+			['new', at(10, 15, 23, 30), false],
+		]);
+	});
+
 	it('opens a phone on the day view unless a mode was chosen', async () => {
 		vi.stubGlobal('matchMedia', () => ({ matches: true }));
 		expect((await mount([])).mode).toBe('day');

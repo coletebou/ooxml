@@ -127,7 +127,9 @@ function proposeAt<E extends CalendarGridItem>(
 ): void {
 	const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
 	const fraction = box.height ? (event.clientY - box.top) / box.height : 0;
-	const minute = Math.floor((Math.max(0, fraction) * 1440) / SLOT_MINUTES) * SLOT_MINUTES;
+	// Within the day: the foot of the column is its last half hour, not the next day's midnight.
+	const slot = Math.floor((Math.min(1, Math.max(0, fraction)) * 1440) / SLOT_MINUTES);
+	const minute = Math.min(slot, 1440 / SLOT_MINUTES - 1) * SLOT_MINUTES;
 	view.propose(
 		zonedToUtc({ year: day.year, month: day.month, day: day.day, hour: 0, minute }, view.zone),
 		false,
