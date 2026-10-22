@@ -1,10 +1,10 @@
 import { createMailClient } from './client';
-import type { MailNotice } from './client-types';
+import type { MailClient, MailNotice } from './client-types';
 import { createMemoryContactStore } from './contacts';
 import { createMemoryTransport, type MemoryTransport } from './memory-transport';
 import type { SeedMessage } from './memory-messages';
 import { until } from './test-support/client';
-import { MailTransportError, type MailTransport } from './transport';
+import { MailTransportError, type MailChange, type MailTransport } from './transport';
 
 const T0 = Date.UTC(2026, 0, 5, 9, 0, 0);
 const ada = { name: 'Ada', email: 'ada@example.com' };
@@ -69,6 +69,35 @@ function setup(options: { timers?: boolean } = {}) {
 	return { transport, client, pending, notices };
 }
 
+/** A client whose transport cannot read the body of `r2` until `server.up`, its changes pushed by hand. */
+function failingBody() {
+	const memory = createMemoryTransport({ messages: seed(), now: () => T0 + 3_600_000 });
+	const server = { up: false };
+	const listeners: ((change: MailChange) => void)[] = [];
+	const pending: (() => void)[] = [];
+	const transport: MailTransport = {
+		...memory,
+		message: async (id) => {
+			if (!server.up && id === 'r2') throw new MailTransportError('server', 'Unavailable.');
+			return memory.message(id);
+		},
+		watch: (listener) => {
+			listeners.push(listener);
+			return () => undefined;
+		},
+	};
+	const client = createMailClient({
+		transport,
+		setTimeout: (callback: () => void) => pending.push(callback),
+		clearTimeout: () => undefined,
+	});
+	return { client, memory, server, listeners, pending };
+}
+
+/** The open conversation's bodies and errors, message by message. */
+const bodiesOf = (client: MailClient) =>
+	client.getState().open?.messages.map((m) => [m.message?.text ?? null, m.error]);
+
 describe('createMailClient', () => {
 	it('connects, opens the Inbox and threads its messages into conversations', async () => {
 		const { client } = setup();
@@ -122,6 +151,43 @@ describe('createMailClient', () => {
 		);
 		expect((await memory.message('r1')).keywords.$seen).toBe(true);
 		expect((await memory.message('r2')).keywords.$seen).toBeUndefined();
+		client.destroy();
+	});
+
+	it('reads a body that could not be read again on an explicit refresh', async () => {
+		const { client, server } = failingBody();
+		await until(client, (s) => s.conversations.length > 0);
+		await client.open('r1');
+		expect(bodiesOf(client)).toEqual([
+			['First', null],
+			[null, 'server'],
+		]);
+		server.up = true;
+		await client.refresh();
+		expect(bodiesOf(client)).toEqual([
+			['First', null],
+			['Second', null],
+		]);
+		client.destroy();
+	});
+
+	it('reads every body again when the server starts over, one that failed too', async () => {
+		const { client, server, listeners, pending } = failingBody();
+		await until(client, (s) => s.conversations.length > 0);
+		await client.open('r1');
+		expect(bodiesOf(client)).toEqual([
+			['First', null],
+			[null, 'server'],
+		]);
+		// Its state too old to say what changed: the server starts over, and now answers.
+		server.up = true;
+		for (const listener of listeners) listener({ type: 'reset' });
+		for (const run of pending.splice(0)) run();
+		await until(client, (s) => s.open?.messages[1]?.message?.text === 'Second');
+		expect(bodiesOf(client)).toEqual([
+			['First', null],
+			['Second', null],
+		]);
 		client.destroy();
 	});
 

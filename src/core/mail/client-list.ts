@@ -22,7 +22,8 @@ export interface ListLoader {
 	loadMailboxes(): Promise<void>;
 	/**
 	 * Run the list's folder or search again; with `refetch` (an explicit refresh), fetch the cached
-	 * summaries again too, since a change the server did not push shows only then.
+	 * summaries again too, since a change the server did not push shows only then, and the bodies of
+	 * the open conversation that could not be read.
 	 */
 	loadList(options?: { refetch?: boolean }): Promise<void>;
 	/** Raise how many messages the list holds and load them. */
@@ -116,8 +117,9 @@ export function createListLoader(core: ClientCore): ListLoader {
 			core.fail('load', error);
 			return;
 		}
-		// A message that joined the open conversation (a reply that just arrived) needs its body.
-		if (core.openId) await core.loadBodies(core.openId, false);
+		// A message that joined the open conversation (a reply that just arrived) needs its body; an
+		// explicit refresh also asks again for those that could not be read.
+		if (core.openId) await core.loadBodies(core.openId, options.refetch === true);
 	};
 
 	const loadMailboxes = async (): Promise<void> => {
@@ -149,6 +151,7 @@ export function createListLoader(core: ClientCore): ListLoader {
 		if (changes.some((change) => change.type === 'reset')) {
 			core.emails.clear();
 			core.bodies.clear();
+			core.bodyErrors.clear();
 			await Promise.all([loadMailboxes(), loadList()]);
 			return;
 		}
@@ -160,6 +163,7 @@ export function createListLoader(core: ClientCore): ListLoader {
 			for (const id of change.destroyed) {
 				core.emails.delete(id);
 				core.bodies.delete(id);
+				core.bodyErrors.delete(id);
 			}
 			for (const id of change.updated) updated.add(id);
 		}
