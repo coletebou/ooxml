@@ -30,31 +30,45 @@ function listsOf<K extends string>(parts: Record<K, string>): ContactLists<K> | 
 	return Object.keys(out).length ? out : null;
 }
 
-const KNOWN_TYPES = new Set(['home', 'work', 'cell', 'fax', 'other', 'pager', 'voice', 'text']);
-/** The first meaningful TYPE value (`work`, `home`, `cell`, ...), lower case. */
+const KNOWN_TYPES = new Set(['home', 'work', 'cell', 'fax', 'other', 'pager']);
+/** TYPE values that mark what a value is (a voice line, a preferred one), never its label. */
+const MARKERS = new Set(['voice', 'text', 'pref', 'internet']);
+/**
+ * The first meaningful TYPE value, lower case: a mobile number is `cell`, then a label the form
+ * offers (`work`, `home`, ...), then the card's own (`video`, `x-school`), which the form keeps.
+ */
 function typeOf(property: Property, fallback = ''): string {
 	const types = (property.params.TYPE ?? [])
 		.flatMap((t) => t.split(','))
-		.map((t) => t.toLowerCase());
+		.map((t) => t.trim().toLowerCase());
 	const cell = types.includes('cell') || types.includes('mobile') ? 'cell' : '';
-	const known = types.find((type) => KNOWN_TYPES.has(type) && type !== 'voice' && type !== 'text');
-	return cell || known || fallback;
+	const known = types.find((type) => KNOWN_TYPES.has(type));
+	const own = types.find((type) => /^[a-z\d-]+$/.test(type) && !MARKERS.has(type));
+	return cell || known || own || fallback;
 }
 
-/** `19850412`, `1985-04-12`, `--0412` and `--04-12` as `YYYY-MM-DD` or `--MM-DD`. */
+/**
+ * `19850412`, `1985-04-12`, `--0412` and `--04-12` as `YYYY-MM-DD` or `--MM-DD`; a date-time at
+ * midnight, as some programs write a date, is its date. Any other time is not a date.
+ */
 function normaliseDate(value: string): string | null {
-	const full = /^(\d{4})-?(\d{2})-?(\d{2})(?:T.*)?$/.exec(value);
+	const full = /^(\d{4})-?(\d{2})-?(\d{2})(?:T00:?00(?::?00)?Z?)?$/.exec(value);
 	if (full) return `${full[1]}-${full[2]}-${full[3]}`;
 	const noYear = /^--(\d{2})-?(\d{2})$/.exec(value);
 	return noYear ? `--${noYear[1]}-${noYear[2]}` : null;
 }
 
+/** A `REV` timestamp (RFC 6350 6.7.4) as epoch ms: UTC, or local time with its UTC offset. */
 function parseRev(value: string): number | undefined {
-	const match = /^(\d{4})-?(\d{2})-?(\d{2})(?:T(\d{2}):?(\d{2}):?(\d{2})?Z?)?/.exec(value);
+	const match =
+		/^(\d{4})-?(\d{2})-?(\d{2})(?:T(\d{2}):?(\d{2})(?::?(\d{2}))?(Z|([+-])(\d{2}):?(\d{2})?)?)?$/.exec(
+			value.trim(),
+		);
 	if (!match) return undefined;
-	const [, y, mo, d, h = '0', mi = '0', s = '0'] = match;
+	const [, y, mo, d, h = '0', mi = '0', s = '0', , sign, oh = '0', om = '0'] = match;
 	const at = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
-	return Number.isNaN(at) ? undefined : at;
+	const offset = sign ? (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om)) * 60_000 : 0;
+	return Number.isNaN(at) ? undefined : at - offset;
 }
 
 const encoder = new TextEncoder();
@@ -79,10 +93,11 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 	const extra: string[] = [];
 	const filled = new Set<string>();
 	/**
-	 * Whether this property fills its field: FN, ORG, TITLE, NOTE and URL may each appear any number
-	 * of times (RFC 6350 sections 6.2.1, 6.6.1, 6.6.4, 6.7.2 and 6.7.8), and the contact holds one of
-	 * each. The first that says something fills it; every later one is kept as read, after the field
-	 * on export, so it reads back the same. One that says nothing is not kept.
+	 * Whether this property fills its field: FN, N, ORG, TITLE, NOTE and URL may each appear any
+	 * number of times (RFC 6350 sections 6.2.1, 6.2.2 with ALTID, 6.6.1, 6.6.4, 6.7.2 and 6.7.8), and
+	 * the contact holds one of each. The first that says something fills it; every later one is kept
+	 * as read, after the field on export, so it reads back the same. One that says nothing is not
+	 * kept.
 	 */
 	const fills = (property: Property, says: boolean): boolean => {
 		if (filled.has(property.name)) {
@@ -100,8 +115,17 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				if (fills(property, text.trim() !== '')) contact.name = text;
 				break;
 			case 'N': {
+				const components = splitUnescaped(value, ';');
+				// A second N (another script's spelling, `ALTID`) is kept as read, as with FN.
+				if (
+					!fills(
+						property,
+						components.some((c) => unescapeText(c).trim() !== ''),
+					)
+				)
+					break;
 				const [familyName = '', givenName = '', additional = '', prefix = '', suffix = ''] =
-					splitUnescaped(value, ';');
+					components;
 				Object.assign(contact, {
 					familyName: unescapeText(familyName),
 					givenName: unescapeText(givenName),
@@ -111,7 +135,6 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				});
 				const lists = listsOf({ familyName, givenName });
 				if (lists) contact.lists = lists;
-				else delete contact.lists;
 				break;
 			}
 			case 'EMAIL':

@@ -471,6 +471,51 @@ describe('serializeVCards', () => {
 		);
 	});
 
+	it("keeps a card's own labels, its alternate names and a birth time", () => {
+		const read = [
+			'BEGIN:VCARD',
+			'VERSION:4.0',
+			'UID:kept',
+			'FN:Taro Yamada',
+			'N;ALTID=1;LANGUAGE=en:Yamada;Taro;;;',
+			'N;ALTID=1;LANGUAGE=ja:山田;太郎;;;',
+			'TEL;TYPE=video:+1 555 0100',
+			'TEL;TYPE=pref:+1 555 0101',
+			'EMAIL;TYPE=INTERNET,X-SCHOOL:taro@school.example',
+			'BDAY:19961022T140000',
+			'END:VCARD',
+		].join('\r\n');
+		const [card] = parseVCards(read).contacts;
+		expect(card).toMatchObject({ familyName: 'Yamada', givenName: 'Taro', birthday: '' });
+		expect(card!.phones.map((p) => p.type)).toEqual(['video', '']);
+		expect(card!.emails.map((e) => e.type)).toEqual(['x-school']);
+		const text = serializeVCards([card!]);
+		for (const line of [
+			'N:Yamada;Taro;;;',
+			'N;ALTID=1;LANGUAGE=ja:山田;太郎;;;',
+			'TEL;TYPE=video:+1 555 0100',
+			'EMAIL;TYPE=x-school:taro@school.example',
+			'BDAY:19961022T140000',
+		])
+			expect(text).toContain(`\r\n${line}\r\n`);
+		expect(parseVCards(text).contacts[0]).toEqual(card);
+		// A date written as a date-time at midnight is the date.
+		const midnight = read.replace('BDAY:19961022T140000', 'BDAY:1996-10-22T00:00:00Z');
+		expect(parseVCards(midnight).contacts[0]!.birthday).toBe('1996-10-22');
+	});
+
+	it('reads the zone offset of a revision time', () => {
+		const rev = (value: string) =>
+			parseVCards(`BEGIN:VCARD\r\nVERSION:4.0\r\nFN:A\r\nREV:${value}\r\nEND:VCARD\r\n`)
+				.contacts[0]!.updatedAt;
+		expect(rev('20261022T120000Z')).toBe(Date.UTC(2026, 9, 22, 12));
+		expect(rev('20261022T120000+0200')).toBe(Date.UTC(2026, 9, 22, 10));
+		expect(rev('2026-10-22T12:00:00-05:00')).toBe(Date.UTC(2026, 9, 22, 17));
+		expect(rev('20261022T120000-05')).toBe(Date.UTC(2026, 9, 22, 17));
+		expect(rev('20261022')).toBe(Date.UTC(2026, 9, 22));
+		expect(rev('20261022T120000+02:00junk')).toBe(0);
+	});
+
 	it('writes a vCard 3 or 2.1 inline photo, logo, sound or key as a vCard 4 data URI', () => {
 		const { contacts } = parseVCards(
 			[
