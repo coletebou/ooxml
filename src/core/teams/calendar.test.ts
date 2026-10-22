@@ -74,6 +74,13 @@ describe('meeting occurrences', () => {
 		});
 	});
 
+	it('leave a cancelled meeting out, with no reminder', () => {
+		// Teams hands these to the shared calendar: a cancelled meeting stays out through it.
+		const cancelled = meeting({ repeat: 'daily', cancelled: true });
+		expect(occurrencesBetween(cancelled, 0, 1e15)).toEqual([]);
+		expect(remindersDue([cancelled], cancelled.start - 60_000)).toEqual([]);
+	});
+
 	it('lay out in a Monday-based week', () => {
 		const sunday = zonedToUtc({ year: 2026, month: 3, day: 8, hour: 12 }, NY);
 		const week = viewDays(sunday, 'week', NY);
