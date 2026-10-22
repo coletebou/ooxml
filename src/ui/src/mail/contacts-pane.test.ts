@@ -57,6 +57,18 @@ describe('<mail-contacts>', () => {
 		expect(seen.map((c) => c.addresses)).toEqual([[box]]);
 	});
 
+	it('keeps a street of two lines through an edit of something else', async () => {
+		const box = place({ street: '12 Main St\nUnit 2', extended: 'Floor 3\nRear' });
+		const el = await mount([contact('ada', 'Ada', { addresses: [box] })]);
+		const seen = saved(el);
+		await click(el, 'Edit');
+		field(el, 'name').value = 'Ada L.';
+		await click(el, 'Save');
+		expect(seen.map((c) => [c.name, c.addresses[0]?.street, c.addresses[0]?.extended])).toEqual([
+			['Ada L.', '12 Main St\nUnit 2', 'Floor 3\nRear'],
+		]);
+	});
+
 	it('keeps the values a card gave an address part and a name through a save', async () => {
 		const box = place({ street: 'Line 1,Line 2', lists: { street: ['Line 1', 'Line 2'] } });
 		const lists = { familyName: ['Doe', 'Smith'] };

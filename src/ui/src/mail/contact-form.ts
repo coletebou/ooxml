@@ -34,6 +34,8 @@ const PARTS = [
 	['country', 'contacts.country'],
 ] as const satisfies readonly (readonly [keyof ContactAddress, MailKey])[];
 type Part = (typeof PARTS)[number][0];
+/** The parts of an address that may run to several lines (RFC 6350 6.3.1: street lines). */
+const MULTILINE: ReadonlySet<Part> = new Set(['street', 'extended']);
 const shownPart = (part: Part, place: Partial<ContactAddress>): boolean =>
 	(part !== 'extended' && part !== 'poBox') || !!place[part];
 
@@ -57,6 +59,11 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 	const phones = [...contact.phones, { type: '', number: '' }];
 	const field = (name: string, label: string, value: string, type = 'text') =>
 		html`<label><span>${label}</span><input name=${name} type=${type} .value=${value} /></label>`;
+	// A text input drops line breaks from its value: a street of two lines would lose its break.
+	const lines = (name: string, label: string, value: string) =>
+		html`<label
+			><span>${label}</span><textarea name=${name} rows="2" .value=${value}></textarea>
+		</label>`;
 	return html`<form class="contact-form" @submit=${handlers.save}>
 		<h2
 			>${contact.name || contact.emails.length ? t('contacts.editTitle') : t('contacts.newTitle')}</h2
@@ -82,7 +89,11 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 		</fieldset>
 		<fieldset>
 			<legend>${t('contacts.address')}</legend>
-			${PARTS.filter(([part]) => shownPart(part, place)).map(([part, label]) => field(part, t(label), place[part] ?? ''))}
+			${PARTS.filter(([part]) => shownPart(part, place)).map(([part, label]) =>
+				MULTILINE.has(part)
+					? lines(part, t(label), place[part] ?? '')
+					: field(part, t(label), place[part] ?? ''),
+			)}
 		</fieldset>
 		<fieldset>
 			<legend>${t('contacts.more')}</legend>
@@ -103,7 +114,11 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 /** The contact the form describes, on top of `base` (what the form does not show stays). */
 export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 	const data = new FormData(form);
-	const value = (name: string): string => String(data.get(name) ?? '').trim();
+	// A text area's line breaks may come as CRLF: the contact keeps them as line feeds.
+	const value = (name: string): string =>
+		String(data.get(name) ?? '')
+			.replace(/\r\n?/g, '\n')
+			.trim();
 	const rows = (prefix: string): { value: string; type: string }[] =>
 		[...data.keys()]
 			.filter((key) => new RegExp(`^${prefix}-\\d+$`).test(key))
