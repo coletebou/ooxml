@@ -72,6 +72,10 @@ export function emailToCreate(
 			? draft.attachments.map((attachment) => ({
 					blobId: attachment.blobId,
 					type: attachment.type || 'application/octet-stream',
+					// RFC 8621 4.6: a part given by its blob may say the charset of its text.
+					...(attachment.charset && attachment.type.startsWith('text/')
+						? { charset: attachment.charset }
+						: {}),
 					name: attachment.name,
 					disposition: attachment.inline ? 'inline' : 'attachment',
 					...(attachment.cid ? { cid: attachment.cid } : {}),

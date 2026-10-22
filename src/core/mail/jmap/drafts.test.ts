@@ -113,6 +113,35 @@ describe('saveDraft', () => {
 		expect(sending.store.submissions).toHaveLength(1);
 	});
 
+	it('writes the charset of a text file it attaches', async () => {
+		const { server, transport } = mail();
+		const file = {
+			blobId: 'Gt',
+			name: 'notes.txt',
+			type: 'text/plain',
+			size: 4,
+			charset: 'iso-8859-1',
+		};
+		await transport.saveDraft({
+			...draft,
+			attachments: [file, { ...file, blobId: 'Gp', type: 'application/pdf' }],
+		});
+		const created = server.argsOf('Email/set').at(-1)!.create as Record<
+			string,
+			Record<string, unknown>
+		>;
+		expect(created.draft!.attachments).toEqual([
+			{
+				blobId: 'Gt',
+				type: 'text/plain',
+				charset: 'iso-8859-1',
+				name: 'notes.txt',
+				disposition: 'attachment',
+			},
+			{ blobId: 'Gp', type: 'application/pdf', name: 'notes.txt', disposition: 'attachment' },
+		]);
+	});
+
 	it('keeps the previous draft when the new one is refused', async () => {
 		const { transport, store } = mail();
 		store.refuseCreate = 'overQuota';

@@ -1,3 +1,4 @@
+import { ENGLISH_QUOTE_FORMAT, composeDraft } from './compose';
 import { createDemoSeed } from './demo-seed';
 import { DEFAULT_MAILBOXES } from './memory-messages';
 import { createMemoryTransport } from './memory-transport';
@@ -423,5 +424,48 @@ describe('createMemoryTransport refuses what a server would', () => {
 		expect(() => createMemoryTransport({ messages: [twice, twice] })).toThrow(
 			expect.objectContaining({ code: 'invalid' }),
 		);
+	});
+});
+
+describe('createMemoryTransport keeps the charset of a text file', () => {
+	it('forwards a Latin-1 text attachment labelled as it came', async () => {
+		const transport = createMemoryTransport({});
+		const eml = [
+			'From: Ada <ada@example.com>',
+			'To: You <you@example.com>',
+			'Subject: Notes',
+			'MIME-Version: 1.0',
+			'Content-Type: multipart/mixed; boundary="b"',
+			'',
+			'--b',
+			'Content-Type: text/plain; charset=utf-8',
+			'',
+			'See the file.',
+			'--b',
+			'Content-Type: text/plain; charset=ISO-8859-1; name="notes.txt"',
+			'Content-Disposition: attachment; filename="notes.txt"',
+			'Content-Transfer-Encoding: base64',
+			'',
+			btoa('Caf\xe9'),
+			'--b--',
+			'',
+		].join('\r\n');
+		const { id } = await transport.importMessage(new TextEncoder().encode(eml), 'inbox');
+		const message = await transport.message(id);
+		expect(message.attachments[0]).toMatchObject({ type: 'text/plain', charset: 'iso-8859-1' });
+		const draft = composeDraft('forward', message, {
+			identity: null,
+			me: [],
+			format: ENGLISH_QUOTE_FORMAT,
+		});
+		expect(draft.attachments[0]).toMatchObject({ charset: 'iso-8859-1' });
+		const { id: sent } = await transport.send({ ...draft, to: [ada] });
+		const raw = new TextDecoder().decode(
+			await transport.download((await transport.message(sent)).blobId, {
+				type: 'message/rfc822',
+				name: 'sent.eml',
+			}),
+		);
+		expect(raw).toMatch(/Content-Type: text\/plain; charset=iso-8859-1; name=notes\.txt/u);
 	});
 });

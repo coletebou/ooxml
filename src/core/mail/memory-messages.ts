@@ -198,6 +198,7 @@ export function messageFromDraft(
 		size: options.blobs.get(attachment.blobId)?.bytes.length ?? attachment.size,
 		disposition: attachment.inline ? 'inline' : 'attachment',
 		cid: attachment.cid ?? null,
+		...(attachment.charset ? { charset: attachment.charset } : {}),
 	}));
 	const text = plainText(draft);
 	return {
@@ -277,7 +278,10 @@ export function messageBytes(target: MailMessage, blobs: BlobStore, account: str
 			...(target.html ? { html: target.html } : {}),
 			attachments: target.attachments.map((attachment) => ({
 				name: attachment.name,
-				type: attachment.type,
+				// The charset of a text file goes in its Content-Type, which the writer keeps.
+				type: attachment.charset
+					? `${attachment.type}; charset=${attachment.charset}`
+					: attachment.type,
 				bytes: blobs.get(attachment.blobId)?.bytes ?? new Uint8Array(),
 				...(attachment.cid ? { cid: attachment.cid } : {}),
 				inline: attachment.disposition === 'inline',

@@ -83,6 +83,8 @@ export interface MailAttachment {
 	disposition: 'attachment' | 'inline' | null;
 	/** `Content-ID` without angle brackets, for `cid:` references from the HTML body. */
 	cid: string | null;
+	/** The charset of a text file (`iso-8859-1`), lower case: its bytes are read in it. */
+	charset?: string;
 }
 
 /** A message with its bodies, for the reading pane. */
@@ -140,6 +142,8 @@ export interface DraftAttachment {
 	cid?: string;
 	/** Shown in the body rather than listed (`Content-Disposition: inline`). */
 	inline?: boolean;
+	/** The charset of a text file (`iso-8859-1`), lower case: its bytes are read in it. */
+	charset?: string;
 }
 
 /** What the compose window edits and the transport saves or sends. */

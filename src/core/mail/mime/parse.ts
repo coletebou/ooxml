@@ -127,6 +127,10 @@ function readEntity(
 	return { ...part, body: decoded, parts: [], message };
 }
 
+/** The charset a text part names, lower case, for its file to keep (`MailAttachment.charset`). */
+export const textCharset = (type: string, charset: string | undefined): { charset?: string } =>
+	type.startsWith('text/') && charset ? { charset: charset.toLowerCase() } : {};
+
 function toAttachment(part: MimePart, index: number): ParsedAttachment {
 	const made = part.message
 		? emlFileName(part.message.subject)
@@ -138,6 +142,7 @@ function toAttachment(part: MimePart, index: number): ParsedAttachment {
 		size: part.body.length,
 		disposition: part.disposition,
 		cid: part.cid,
+		...textCharset(part.type, part.params.charset),
 		bytes: part.body,
 	};
 }

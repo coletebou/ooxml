@@ -3,6 +3,7 @@
 // `null` lists empty lists, a `null` display name '', an unknown mailbox role `null`. Bodies and
 // attachment names are read as the MIME reader reads them. New code.
 import { cleanFileName } from '../mime/file-names';
+import { textCharset } from '../mime/parse';
 import { htmlPartsOf } from '../mime/message';
 import { htmlBodyPart } from '../mime/structure';
 import {
@@ -180,6 +181,7 @@ export function toAttachment(part: Record<string, unknown>): MailAttachment {
 		size: count(part.size),
 		disposition: disposition === 'inline' ? 'inline' : disposition ? 'attachment' : null,
 		cid: cid ? unbracket(cid) : null,
+		...textCharset(text(part.type).toLowerCase(), text(part.charset) || undefined),
 	};
 }
 

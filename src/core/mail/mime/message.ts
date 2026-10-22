@@ -139,6 +139,7 @@ export function toMailMessage(
 			size: attachment.size,
 			disposition: attachment.disposition,
 			cid: attachment.cid,
+			...(attachment.charset ? { charset: attachment.charset } : {}),
 		})),
 	};
 }

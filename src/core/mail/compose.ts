@@ -109,9 +109,17 @@ function sender(
  * `Content-ID` and no disposition (a picture of a `multipart/related`) counts as inline.
  */
 function draftAttachment(attachment: MailAttachment): DraftAttachment {
-	const { blobId, name, type, size, cid, disposition } = attachment;
+	const { blobId, name, type, size, cid, disposition, charset } = attachment;
 	const inline = disposition === 'inline' || (disposition === null && !!cid);
-	return { blobId, name, type, size, ...(cid ? { cid } : {}), ...(inline ? { inline } : {}) };
+	return {
+		blobId,
+		name,
+		type,
+		size,
+		...(cid ? { cid } : {}),
+		...(inline ? { inline } : {}),
+		...(charset ? { charset } : {}),
+	};
 }
 
 /**

@@ -41,6 +41,8 @@ export interface ParsedAttachment {
 	size: number;
 	disposition: 'attachment' | 'inline' | null;
 	cid: string | null;
+	/** The charset of a text file (`iso-8859-1`), lower case: its bytes are read in it. */
+	charset?: string;
 	/** The part's `body`: possibly a view of the raw message, so read it, not its `.buffer`. */
 	bytes: Uint8Array;
 }
