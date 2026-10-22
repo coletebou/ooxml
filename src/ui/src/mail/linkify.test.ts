@@ -35,6 +35,8 @@ describe('linkify', () => {
 		]);
 		// Where the start of an address cannot be told, nothing is linked rather than a part of it.
 		expect(links('d’arcy@example.com')).toEqual([]);
+		// A letter written as a base and a combining mark (u and U+0308 for ü) is part of the word.
+		expect(links('mail mu\u0308ller@example.com now')).toEqual([]);
 	});
 
 	it('links a whole domain, never only its start', () => {
