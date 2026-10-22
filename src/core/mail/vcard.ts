@@ -36,17 +36,19 @@ const KNOWN_TYPES = new Set(['home', 'work', 'cell', 'fax', 'other', 'pager']);
 /** TYPE values that mark what a value is (a voice line, a preferred one), never its label. */
 const MARKERS = new Set(['voice', 'text', 'pref', 'internet']);
 /**
- * The first meaningful TYPE value, lower case: a mobile number is `cell`, then a label the form
- * offers (`work`, `home`, ...), then the card's own (`video`, `x-school`), which the form keeps.
+ * The first meaningful TYPE value, lower case: the service of a number (a mobile number is `cell`,
+ * then `fax` and `pager`), whose place (`work`) the form cannot hold beside it, then a label the
+ * form offers (`work`, `home`, ...), then the card's own (`video`, `x-school`), which it keeps.
  */
 function typeOf(property: Property, fallback = ''): string {
 	const types = (property.params.TYPE ?? [])
 		.flatMap((t) => t.split(','))
 		.map((t) => t.trim().toLowerCase());
 	const cell = types.includes('cell') || types.includes('mobile') ? 'cell' : '';
+	const service = cell || types.find((type) => type === 'fax' || type === 'pager');
 	const known = types.find((type) => KNOWN_TYPES.has(type));
 	const own = types.find((type) => /^[a-z\d-]+$/.test(type) && !MARKERS.has(type));
-	return cell || known || own || fallback;
+	return service || known || own || fallback;
 }
 
 /**

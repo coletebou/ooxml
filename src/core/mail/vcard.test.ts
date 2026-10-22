@@ -505,6 +505,22 @@ describe('serializeVCards', () => {
 		expect(parseVCards(midnight).contacts[0]!.birthday).toBe('1996-10-22');
 	});
 
+	it('labels a work fax or pager by its service, in whichever order the types come', () => {
+		const text = [
+			'BEGIN:VCARD',
+			'VERSION:4.0',
+			'UID:office',
+			'FN:Front Desk',
+			'TEL;TYPE=WORK,FAX:+1 555 0100',
+			'TEL;TYPE=pager,work:+1 555 0101',
+			'TEL;TYPE=HOME,VOICE:+1 555 0102',
+			'END:VCARD',
+		].join('\r\n');
+		const [card] = parseVCards(text).contacts;
+		expect(card!.phones.map((p) => p.type)).toEqual(['fax', 'pager', 'home']);
+		expect(serializeVCards([card!])).toContain('\r\nTEL;TYPE=fax:+1 555 0100\r\n');
+	});
+
 	it('writes one birthday: a date typed in takes the place of the one a card gave as text', () => {
 		const card = (bday: string) =>
 			parseVCards(`BEGIN:VCARD\r\nVERSION:4.0\r\nUID:b\r\nFN:A\r\n${bday}\r\nEND:VCARD\r\n`)
