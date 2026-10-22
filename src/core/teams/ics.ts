@@ -41,7 +41,8 @@ export function meetingToIcs(meeting: Meeting, options: IcsOptions = {}): string
 	const stamp = `DTSTAMP:${icsUtc(options.now ?? Date.now())}`;
 	const status = `STATUS:${meeting.cancelled ? 'CANCELLED' : 'CONFIRMED'}`;
 	const link = options.url ? [`URL:${options.url}`] : [];
-	// A series keeps local time, which its repeats follow (`icsDateTime`).
+	// A series' start keeps local time, which its repeats follow (`icsDateTime`); an end or a moved
+	// occurrence is one instant.
 	const repeats = meeting.repeat !== 'none';
 	const changed =
 		meeting.repeat === 'none' ? [] : (meeting.exceptions ?? []).filter((e) => !e.cancelled);
@@ -60,7 +61,7 @@ export function meetingToIcs(meeting: Meeting, options: IcsOptions = {}): string
 		uid,
 		stamp,
 		icsDateTime('DTSTART', meeting.start, meeting.zone, repeats),
-		icsDateTime('DTEND', meeting.end, meeting.zone, repeats),
+		icsDateTime('DTEND', meeting.end, meeting.zone),
 		`SUMMARY:${icsEscape(meeting.title)}`,
 		details(meeting.description),
 		...icsRecurrence(meeting),
@@ -77,8 +78,8 @@ export function meetingToIcs(meeting: Meeting, options: IcsOptions = {}): string
 				uid,
 				stamp,
 				icsDateTime('RECURRENCE-ID', e.originalStart, meeting.zone, true),
-				icsDateTime('DTSTART', start, meeting.zone, true),
-				icsDateTime('DTEND', end, meeting.zone, true),
+				icsDateTime('DTSTART', start, meeting.zone),
+				icsDateTime('DTEND', end, meeting.zone),
 				`SUMMARY:${icsEscape(title)}`,
 				details(e.description ?? meeting.description),
 				...link,

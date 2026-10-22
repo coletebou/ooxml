@@ -227,10 +227,12 @@ function peopleLines(event: CalendarEvent, options: EventsToIcsOptions): string[
 function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: string): string[] {
 	const zone = isValidZone(event.zone) ? event.zone : 'UTC';
 	const at = { ...event, zone };
-	const time = (name: string, ms: number): string =>
+	// Only a series' start (and the RECURRENCE-ID its repeats are named by) keeps local time even in
+	// a repeated hour's second occurrence: an end, or a moved occurrence, is one instant (UTC then).
+	const time = (name: string, ms: number, series = false): string =>
 		event.allDay
 			? `${name};VALUE=DATE:${icsDate(ms, zone)}`
-			: icsDateTime(name, ms, zone, event.repeat !== 'none');
+			: icsDateTime(name, ms, zone, series && event.repeat !== 'none');
 	// DTEND must be later than DTSTART (RFC 5545 3.8.2.2). Without it, a timed event ends where it
 	// starts and an all-day one lasts its day (3.6.1), which is what the reader takes it for. A
 	// length in days on the clock is a DURATION, which is nominal for each occurrence (3.8.5.3).
@@ -259,7 +261,7 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 		'BEGIN:VEVENT',
 		uid,
 		stamp,
-		time('DTSTART', event.start),
+		time('DTSTART', event.start, true),
 		...(length
 			? [`DURATION:P${length.days}D${icsTime(Math.round(length.rest / 1000))}`]
 			: dtend(event.start, event.end)),
@@ -275,7 +277,7 @@ function eventLines(event: CalendarEvent, options: EventsToIcsOptions, stamp: st
 				'BEGIN:VEVENT',
 				uid,
 				stamp,
-				time('RECURRENCE-ID', e.originalStart),
+				time('RECURRENCE-ID', e.originalStart, true),
 				time('DTSTART', start),
 				...dtend(start, e.end ?? occurrenceEnd(at, start)),
 				...body(title, e.description ?? event.description),

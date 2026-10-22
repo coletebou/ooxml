@@ -98,6 +98,24 @@ describe('eventsToIcs', () => {
 		expect(eventsToIcs([{ ...single, start: first, end: first + HOUR_MS }], OPTIONS)).toContain(
 			'\r\nDTSTART;TZID=Europe/Berlin:20261025T023000\r\n',
 		);
+		// A series' end in the second 02:30 is one instant: written in UTC, the length survives.
+		const series = { ...single, start: first, end: second, repeat: 'daily' as const, count: 3 };
+		const back = parseIcs(eventsToIcs([series], OPTIONS)).events[0]!;
+		expect([back.start, back.end]).toEqual([first, second]);
+		// So is an occurrence moved into the second 02:30.
+		// Its occurrence of the next day (02:30 there, in winter time) moved into the second 02:30.
+		const next = zonedToUtc(
+			{ year: 2026, month: 10, day: 26, hour: 2, minute: 30 },
+			'Europe/Berlin',
+		);
+		const moved: CalendarEvent = {
+			...series,
+			exceptions: [{ originalStart: next, start: second, end: second + HOUR_MS, cancelled: false }],
+		};
+		const movedText = eventsToIcs([moved], OPTIONS);
+		expect(movedText).toContain('\r\nDTSTART:20261025T013000Z\r\n');
+		const read = parseIcs(movedText).events[0]!;
+		expect(read.exceptions?.[0]).toMatchObject({ start: second, end: second + HOUR_MS });
 		// A series keeps local time, which its repeats follow across the clock changes.
 		expect(eventsToIcs([{ ...single, repeat: 'daily', count: 3 }], OPTIONS)).toContain(
 			'\r\nDTSTART;TZID=Europe/Berlin:20261025T023000\r\n',
