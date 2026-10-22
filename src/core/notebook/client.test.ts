@@ -708,6 +708,34 @@ describe('notebook client twelfth review round', () => {
 	});
 });
 
+describe('notebook client changes made while a notebook is closed', () => {
+	it('applies only the colour changed while closed, keeping a collaborator rename', async () => {
+		const shared = createMemoryStorage();
+		const a = start(shared, createChannelHub());
+		await a.whenReady();
+		await settle();
+		const first = a.getState().notebookId;
+		const other = await a.createNotebook({ name: 'Original' });
+		await opened(a, other);
+		await a.openNotebook(first);
+		await opened(a, first);
+		await a.flush();
+		// A recolours the closed notebook; a collaborator (on the same device, unreached) renames it.
+		a.setNotebookColor(other, '#cc3333');
+		const b = start(shared, createChannelHub());
+		await b.whenReady();
+		await settle();
+		await b.openNotebook(other);
+		await opened(b, other);
+		b.renameNotebook(other, 'Renamed by B');
+		await b.flush();
+		await b.destroy();
+		await a.openNotebook(other);
+		await opened(a, other);
+		expect(a.getState().notebook).toMatchObject({ name: 'Renamed by B', color: '#cc3333' });
+	});
+});
+
 describe('notebook client flush', () => {
 	it('flushes without an error when a list it could not read has nothing unsaved', async () => {
 		const inner = createMemoryStorage();

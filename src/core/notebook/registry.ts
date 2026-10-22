@@ -22,8 +22,11 @@ export const REGISTRY_MAP = 'notebooks:list';
 export interface RegistryEntry extends NotebookEntry {
 	lastSection: string;
 	lastPage: string;
-	/** Renamed or recoloured while closed: the notebook's own document takes these on next open. */
-	pending: boolean;
+	/**
+	 * Renamed or recoloured while closed: the notebook's own document takes what changed, and only
+	 * that, on next open (a collaborator may have changed the other meanwhile).
+	 */
+	pending: { name: boolean; color: boolean };
 }
 
 const list = (doc: Y.Doc): Y.Map<unknown> => doc.getMap(REGISTRY_MAP);
@@ -44,7 +47,11 @@ export function readRegistry(doc: Y.Doc): RegistryEntry[] {
 				created: sanitizeTimestamp(map.get('created')),
 				lastSection: isEntityId(lastSection) ? lastSection : '',
 				lastPage: isEntityId(lastPage) ? lastPage : '',
-				pending: map.get('pending') === true,
+				// `pending` alone (an earlier version) stands for both.
+				pending: {
+					name: map.get('pendingName') === true || map.get('pending') === true,
+					color: map.get('pendingColor') === true || map.get('pending') === true,
+				},
 				...(deleted ? { deleted } : {}),
 			};
 		})
@@ -74,8 +81,10 @@ export function registerNotebook(
 export function updateRegistry(
 	doc: Y.Doc,
 	id: string,
-	patch: Partial<Pick<RegistryEntry, 'name' | 'color' | 'lastSection' | 'lastPage' | 'pending'>> & {
+	patch: Partial<Pick<RegistryEntry, 'name' | 'color' | 'lastSection' | 'lastPage'>> & {
 		deleted?: number | null;
+		/** Mark the name or colour as changed while closed; `false` clears both. */
+		pending?: 'name' | 'color' | false;
 	},
 	origin?: unknown,
 ): boolean {
@@ -88,8 +97,10 @@ export function updateRegistry(
 			map.set('lastSection', patch.lastSection);
 		if (patch.lastPage !== undefined && map.get('lastPage') !== patch.lastPage)
 			map.set('lastPage', patch.lastPage);
-		if (patch.pending === false) map.delete('pending');
-		else if (patch.pending) map.set('pending', true);
+		if (patch.pending === false)
+			for (const key of ['pending', 'pendingName', 'pendingColor']) map.delete(key);
+		else if (patch.pending === 'name') map.set('pendingName', true);
+		else if (patch.pending === 'color') map.set('pendingColor', true);
 		if (patch.deleted === null) map.delete('deleted');
 		else if (patch.deleted !== undefined) map.set('deleted', patch.deleted);
 	}, origin);

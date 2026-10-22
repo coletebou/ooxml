@@ -206,7 +206,8 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		if (
 			meta &&
 			open.types.meta.size &&
-			!entry.pending &&
+			!entry.pending.name &&
+			!entry.pending.color &&
 			(entry.name !== meta.name || entry.color !== meta.color)
 		)
 			updateRegistry(reg, open.id, { name: meta.name, color: meta.color });
@@ -301,8 +302,11 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 				},
 			});
 			if (destroyed) return void (await next.close());
-			if (entry.pending) {
-				structure.writeMeta(next.seed, { name: entry.name, color: entry.color });
+			if (entry.pending.name || entry.pending.color) {
+				structure.writeMeta(next.seed, {
+					...(entry.pending.name ? { name: entry.name } : {}),
+					...(entry.pending.color ? { color: entry.color } : {}),
+				});
 				updateRegistry(reg, id, { pending: false });
 			}
 			open = next;
@@ -407,11 +411,11 @@ export function createNotebookClient(options: NotebookClientOptions): NotebookCl
 		},
 		renameNotebook(id, name) {
 			if (open?.id === id) discrete((o) => structure.writeMeta(o.edit, { name }), undefined);
-			updateRegistry(reg, id, { name, ...(open?.id === id ? {} : { pending: true }) });
+			updateRegistry(reg, id, { name, ...(open?.id === id ? {} : { pending: 'name' as const }) });
 		},
 		setNotebookColor(id, color) {
 			if (open?.id === id) discrete((o) => structure.writeMeta(o.edit, { color }), undefined);
-			updateRegistry(reg, id, { color, ...(open?.id === id ? {} : { pending: true }) });
+			updateRegistry(reg, id, { color, ...(open?.id === id ? {} : { pending: 'color' as const }) });
 		},
 		moveNotebook: (id, beforeId) => void moveInRegistry(reg, id, beforeId),
 		async deleteNotebook(id) {
