@@ -1,4 +1,10 @@
-import { emptyContact, suggestRecipients, searchContacts, sortContacts } from './contacts';
+import {
+	emptyContact,
+	sanitizeContact,
+	suggestRecipients,
+	searchContacts,
+	sortContacts,
+} from './contacts';
 import { parseVCards, serializeVCards } from './vcard';
 
 // RFC 6350 section 8, as printed (folded lines included).
@@ -429,6 +435,40 @@ describe('serializeVCards', () => {
 			'\r\nADR;TYPE=work:;Suite 200\\, Building B;1 Long Rd;Springfield\\, East;;;\r\n',
 		);
 		expect(parseVCards(written).contacts[0]).toEqual(typed);
+	});
+
+	it('writes a name or address part a card gave several values as that list again', () => {
+		const read = [
+			'BEGIN:VCARD',
+			'VERSION:4.0',
+			'UID:lists',
+			'FN:Ann Doe',
+			'N:Doe,Smith;Ann;;;',
+			'ADR:;;12 Main St\\, Unit 2,Rear;Town;;;',
+			'ADR;TYPE=work:;;Line 1,Line 2;City,North;;;',
+			'END:VCARD',
+		].join('\r\n');
+		const [card] = parseVCards(read).contacts;
+		expect(card!.familyName).toBe('Doe,Smith');
+		expect(card!.addresses.map((a) => [a.street, a.locality])).toEqual([
+			['12 Main St, Unit 2,Rear', 'Town'],
+			['Line 1,Line 2', 'City,North'],
+		]);
+		const text = serializeVCards([card!]);
+		expect(text).toContain('\r\nN:Doe,Smith;Ann;;;\r\n');
+		expect(text).toContain('\r\nADR:;;12 Main St\\, Unit 2,Rear;Town;;;\r\n');
+		expect(text).toContain('\r\nADR;TYPE=work:;;Line 1,Line 2;City,North;;;\r\n');
+		expect(parseVCards(text).contacts[0]).toEqual(card);
+		// Kept where the contacts are stored, and dropped by an edit: an edited part is one text.
+		const stored = sanitizeContact(JSON.parse(JSON.stringify(card)))!;
+		expect(serializeVCards([stored])).toBe(text);
+		const edited = {
+			...stored,
+			addresses: [{ ...stored.addresses[0]!, street: '12 Main St, Unit 3,Rear' }],
+		};
+		expect(serializeVCards([edited])).toContain(
+			'\r\nADR:;;12 Main St\\, Unit 3\\,Rear;Town;;;\r\n',
+		);
 	});
 
 	it('writes a vCard 3 or 2.1 inline photo, logo, sound or key as a vCard 4 data URI', () => {

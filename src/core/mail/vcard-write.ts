@@ -3,7 +3,7 @@
 // and the lines `Contact.extra` keeps follow as read, an inline 3.0 or 2.1 photo, logo, sound or
 // key and a quoted-printable 2.1 value written as 4.0 has them (`vcard-legacy.ts`), so `vcard.ts`
 // reads each card back as it was. New code.
-import type { Contact } from './contacts';
+import { ADDRESS_PARTS, type Contact } from './contacts';
 import { vcard4Line } from './vcard-legacy';
 
 const encoder = new TextEncoder();
@@ -24,6 +24,12 @@ const escapeText = (value: string): string =>
  * `12 Main St, Unit 2` is the character, never the start of a second street.
  */
 const escapeList = (value: string): string => escapeBreaks(value).replace(/;/g, '\\;');
+/**
+ * A component kept as one text, escaped as text, or, while it is still the text of the values a
+ * card gave it (`ContactLists`), those values as a list again.
+ */
+const escapePart = (value: string, values: readonly string[] | undefined): string =>
+	values && values.join(',') === value ? values.map(escapeText).join(',') : escapeText(value);
 /**
  * A URI value (`URL`, RFC 6350 6.7.8), not escaped as text: other readers keep such escapes in the
  * link. A URI holds no line break (dropped) and no backslash (percent-encoded, never an escape).
@@ -86,8 +92,8 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 			`FN:${escapeText(contact.name || [contact.givenName, contact.familyName].filter(Boolean).join(' '))}`,
 		);
 		const name = [
-			escapeText(contact.familyName),
-			escapeText(contact.givenName),
+			escapePart(contact.familyName, contact.lists?.familyName),
+			escapePart(contact.givenName, contact.lists?.givenName),
 			escapeList(contact.additionalNames),
 			escapeList(contact.prefix),
 			escapeList(contact.suffix),
@@ -98,16 +104,8 @@ export function serializeVCards(contacts: readonly Contact[]): string {
 		for (const phone of contact.phones)
 			lines.push(`TEL${typeParam(phone.type)}:${escapeText(phone.number)}`);
 		for (const address of contact.addresses) {
-			const parts = [
-				address.poBox,
-				address.extended,
-				address.street,
-				address.locality,
-				address.region,
-				address.postalCode,
-				address.country,
-			];
-			lines.push(`ADR${typeParam(address.type)}:${parts.map(escapeText).join(';')}`);
+			const parts = ADDRESS_PARTS.map((part) => escapePart(address[part], address.lists?.[part]));
+			lines.push(`ADR${typeParam(address.type)}:${parts.join(';')}`);
 		}
 		if (contact.organization || contact.organizationUnits.length)
 			lines.push(

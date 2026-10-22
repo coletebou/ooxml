@@ -57,6 +57,18 @@ describe('<mail-contacts>', () => {
 		expect(seen.map((c) => c.addresses)).toEqual([[box]]);
 	});
 
+	it('keeps the values a card gave an address part and a name through a save', async () => {
+		const box = place({ street: 'Line 1,Line 2', lists: { street: ['Line 1', 'Line 2'] } });
+		const lists = { familyName: ['Doe', 'Smith'] };
+		const el = await mount([
+			contact('ada', 'Ada', { familyName: 'Doe,Smith', addresses: [box], lists }),
+		]);
+		const seen = saved(el);
+		await click(el, 'Edit');
+		await click(el, 'Save');
+		expect(seen.map((c) => [c.addresses, c.lists])).toEqual([[[box], lists]]);
+	});
+
 	it('keeps every phone and address label, including ones it has no option of its own for', async () => {
 		const phones = [
 			{ type: 'pager', number: '+1 555 0100' },

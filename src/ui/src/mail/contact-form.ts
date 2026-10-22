@@ -129,8 +129,13 @@ export function readContactForm(form: HTMLFormElement, base: Contact): Contact {
 		phones: rows('phone').map((row) => ({ type: row.type, number: row.value })),
 		organization: value('organization'),
 		title: value('title'),
+		// The values a card gave a part go along: they are written again only while the part is
+		// still their text (`ContactLists`).
 		addresses: keepPlace
-			? [{ type: first?.type ?? '', ...parts }, ...base.addresses.slice(1)]
+			? [
+					{ type: first?.type ?? '', ...parts, ...(first?.lists ? { lists: first.lists } : {}) },
+					...base.addresses.slice(1),
+				]
 			: base.addresses.slice(1),
 		birthday,
 		url: value('url'),

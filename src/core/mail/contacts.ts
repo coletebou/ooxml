@@ -26,7 +26,29 @@ export interface ContactAddress {
 	region: string;
 	postalCode: string;
 	country: string;
+	/** The parts a card gave several values, as read (see `ContactLists`). */
+	lists?: ContactLists<AddressPart>;
 }
+
+/** The parts of an address after its type, each one text. */
+export type AddressPart = Exclude<keyof ContactAddress, 'type' | 'lists'>;
+export const ADDRESS_PARTS: readonly AddressPart[] = [
+	'poBox',
+	'extended',
+	'street',
+	'locality',
+	'region',
+	'postalCode',
+	'country',
+];
+
+/**
+ * The parts of a card's `N` or `ADR` that it gave several values (`Line 1,Line 2`, RFC 6350
+ * `list-component`), each list as read. A contact keeps such a part as one text, its values joined
+ * by commas, as the form edits it; while the text is still that, the vCard export writes the list
+ * again, and once it is edited, the text as typed.
+ */
+export type ContactLists<K extends string> = Readonly<Partial<Record<K, readonly string[]>>>;
 
 export interface Contact {
 	/** The vCard `UID`. */
@@ -53,6 +75,8 @@ export interface Contact {
 	updatedAt: number;
 	/** vCard lines this model does not edit (`PHOTO`, `X-...`), kept as read so export keeps them. */
 	extra: readonly string[];
+	/** The family or given names a card gave as several values, as read (see `ContactLists`). */
+	lists?: ContactLists<'familyName' | 'givenName'>;
 }
 
 export const MAX_CONTACT_FIELD_CHARS = 2000;
@@ -188,6 +212,16 @@ export function sanitizeContact(raw: unknown): Contact | null {
 					.slice(0, 50)
 					.map(map)
 			: [];
+	const lists = <K extends string>(raw: unknown, keys: readonly K[]): ContactLists<K> | null => {
+		if (!raw || typeof raw !== 'object') return null;
+		const out: Partial<Record<K, string[]>> = {};
+		for (const key of keys) {
+			const values = (raw as Record<string, unknown>)[key];
+			if (Array.isArray(values) && values.length > 1) out[key] = values.slice(0, 20).map(clip);
+		}
+		return Object.keys(out).length ? out : null;
+	};
+	const nameLists = lists(value.lists, ['familyName', 'givenName'] as const);
 	return {
 		id,
 		name: clip(value.name),
@@ -198,16 +232,20 @@ export function sanitizeContact(raw: unknown): Contact | null {
 		suffix: clip(value.suffix),
 		emails: list(value.emails, (item) => ({ type: clip(item.type), address: clip(item.address) })),
 		phones: list(value.phones, (item) => ({ type: clip(item.type), number: clip(item.number) })),
-		addresses: list(value.addresses, (item) => ({
-			type: clip(item.type),
-			poBox: clip(item.poBox),
-			extended: clip(item.extended),
-			street: clip(item.street),
-			locality: clip(item.locality),
-			region: clip(item.region),
-			postalCode: clip(item.postalCode),
-			country: clip(item.country),
-		})),
+		addresses: list(value.addresses, (item) => {
+			const parts = lists(item.lists, ADDRESS_PARTS);
+			return {
+				type: clip(item.type),
+				poBox: clip(item.poBox),
+				extended: clip(item.extended),
+				street: clip(item.street),
+				locality: clip(item.locality),
+				region: clip(item.region),
+				postalCode: clip(item.postalCode),
+				country: clip(item.country),
+				...(parts ? { lists: parts } : {}),
+			};
+		}),
 		organization: clip(value.organization),
 		organizationUnits: Array.isArray(value.organizationUnits)
 			? value.organizationUnits.map(clip).slice(0, 20)
@@ -220,6 +258,7 @@ export function sanitizeContact(raw: unknown): Contact | null {
 		extra: Array.isArray(value.extra)
 			? value.extra.map(keptLine).filter(Boolean).slice(0, 200)
 			: [],
+		...(nameLists ? { lists: nameLists } : {}),
 	};
 }
 

@@ -5,7 +5,7 @@
 // 2.1 photo, logo, sound or key and a quoted-printable 2.1 value written as 4.0 has them,
 // `vcard-legacy.ts`). New code.
 import { sha256 } from '../digest/sha256';
-import { emptyContact, type Contact, type ContactAddress } from './contacts';
+import { emptyContact, type Contact, type ContactAddress, type ContactLists } from './contacts';
 import {
 	decodeValue,
 	parseLine,
@@ -16,6 +16,19 @@ import {
 } from './vcard-lines';
 
 export { serializeVCards } from './vcard-write';
+
+/**
+ * The components of `parts` a card gave several values (`Line 1,Line 2`), each list unescaped;
+ * their values joined by commas are the text `unescapeText` gives the component.
+ */
+function listsOf<K extends string>(parts: Record<K, string>): ContactLists<K> | null {
+	const out: Partial<Record<K, string[]>> = {};
+	for (const key of Object.keys(parts) as K[]) {
+		const values = splitUnescaped(parts[key], ',');
+		if (values.length > 1) out[key] = values.map(unescapeText);
+	}
+	return Object.keys(out).length ? out : null;
+}
 
 const KNOWN_TYPES = new Set(['home', 'work', 'cell', 'fax', 'other', 'pager', 'voice', 'text']);
 /** The first meaningful TYPE value (`work`, `home`, `cell`, ...), lower case. */
@@ -87,17 +100,18 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				if (fills(property, text.trim() !== '')) contact.name = text;
 				break;
 			case 'N': {
-				const [family = '', given = '', additional = '', prefix = '', suffix = ''] = splitUnescaped(
-					value,
-					';',
-				).map(unescapeText);
+				const [familyName = '', givenName = '', additional = '', prefix = '', suffix = ''] =
+					splitUnescaped(value, ';');
 				Object.assign(contact, {
-					familyName: family,
-					givenName: given,
-					additionalNames: additional,
-					prefix,
-					suffix,
+					familyName: unescapeText(familyName),
+					givenName: unescapeText(givenName),
+					additionalNames: unescapeText(additional),
+					prefix: unescapeText(prefix),
+					suffix: unescapeText(suffix),
 				});
+				const lists = listsOf({ familyName, givenName });
+				if (lists) contact.lists = lists;
+				else delete contact.lists;
 				break;
 			}
 			case 'EMAIL':
@@ -116,16 +130,15 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 					region = '',
 					postalCode = '',
 					country = '',
-				] = splitUnescaped(value, ';').map(unescapeText);
+				] = splitUnescaped(value, ';');
+				const parts = { poBox, extended, street, locality, region, postalCode, country };
+				const lists = listsOf(parts);
 				addresses.push({
 					type: typeOf(property),
-					poBox,
-					extended,
-					street,
-					locality,
-					region,
-					postalCode,
-					country,
+					...(Object.fromEntries(
+						Object.entries(parts).map(([part, text]) => [part, unescapeText(text)]),
+					) as typeof parts),
+					...(lists ? { lists } : {}),
 				});
 				break;
 			}

@@ -126,8 +126,10 @@ the host owns and gives to the next client (`ooxml-ui/mail`'s `createMail` does 
 does not edit verbatim (an inline 3.0 or 2.1 photo, logo, sound or key is written as the 4.0 `data:`
 URI, and a quoted-printable 2.1 value as the text it encodes, `vcard-legacy.ts`). The additional
 names, prefixes and suffixes of `N` are kept as the comma-separated lists vCard writes; every other
-`N` and `ADR` component is one text, so a comma in it (`12 Main St\, Unit 2`) is written escaped,
-as read or typed. A card without a
+`N` and `ADR` component is one text, as the form edits it, so a comma in it (`12 Main St\, Unit 2`)
+is written escaped, as read or typed. A card that gave one of those several values
+(`Line 1,Line 2`) keeps them in `lists`, and the export writes them as a list again while the
+text is still theirs. A card without a
 UID gets an id from a hash of its content, the same
 wherever it stands in a file, and two copies of it are one contact. `record-store.ts` keeps
 contacts and events in memory, optionally persisted to a `Storage`-like object and re-validated
