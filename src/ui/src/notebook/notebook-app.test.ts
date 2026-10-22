@@ -2,7 +2,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { loadDocx } from 'ooxml-core/docx';
 import { getIcon } from '../icons';
 import { TextSelection } from 'prosemirror-state';
-import { applyLink, openLinkDialog, runCommand } from './app-actions';
+import { applyLink, exportNotebook, openLinkDialog, runCommand } from './app-actions';
 import { notebookMenuAt } from './app-nav';
 import { type NotebookApp, type NotebookExportDetail, defineNotebookApp } from './notebook-app';
 import type { NotebookText } from './text-container';
@@ -600,6 +600,27 @@ describe('<notebook-app> restarts', () => {
 		expect(app.client).toBeNull();
 		done();
 		await until(() => !!app.client && app.client !== old && !!app.state?.page);
+	});
+
+	it('hands no export of the old profile to the host once another profile is on screen', async () => {
+		app = await mount();
+		let finish = (): void => undefined;
+		const pending = new Promise<void>((r) => (finish = r));
+		const client = app.client!;
+		const real = client.exportNotebook.bind(client);
+		client.exportNotebook = async () => {
+			await pending;
+			return real();
+		};
+		const exported: unknown[] = [];
+		app.addEventListener('notebook-export', (e) => exported.push(e));
+		const running = exportNotebook(app);
+		holdFlush(app, false);
+		app.storageName = `${app.getAttribute('storage-name')}-other`;
+		await app.updateComplete;
+		finish();
+		await running;
+		expect(exported).toEqual([]);
 	});
 
 	it('closes the menus and dialogs of a profile it switches away from at once', async () => {

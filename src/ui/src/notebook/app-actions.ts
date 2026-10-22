@@ -154,6 +154,8 @@ export async function exportPage(app: AppHost): Promise<void> {
 			rasterize,
 			measure: measurePicture,
 		});
+		// Another profile on screen by now: the old one's file is not handed to it.
+		if (app.client !== client) return;
 		save(app, file, 'docx');
 		const skipped = file.report.skipped.length;
 		app.notify(
@@ -171,6 +173,7 @@ export async function exportNotebook(app: AppHost): Promise<void> {
 	if (!client || !app.state?.notebook) return;
 	try {
 		const file = await client.exportNotebook();
+		if (app.client !== client) return;
 		save(app, file, 'archive');
 		app.notify(app.tr('notice.exported', { name: file.fileName }));
 	} catch {
