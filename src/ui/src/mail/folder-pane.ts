@@ -5,6 +5,7 @@ import { html, nothing, type PropertyValues } from 'lit';
 import type { MailboxView } from 'ooxml-core/mail';
 import { defineOnce, MailElement, mailStyles } from './base';
 import { icon, mailboxIcon } from './icons';
+import { isCancelKey } from './keyboard';
 import { folderLabel } from './labels';
 import css from './folder-pane.css?raw';
 
@@ -79,7 +80,7 @@ export class MailFolderPane extends MailElement {
 						name="name"
 						.value=${mailbox.name}
 						aria-label=${this.t('folder.renameLabel')}
-						@keydown=${(e: KeyboardEvent) => e.key === 'Escape' && (this.editing = '')}
+						@keydown=${(e: KeyboardEvent) => isCancelKey(e) && (this.editing = '')}
 					/>
 				</form>
 			</li>`;
@@ -144,7 +145,7 @@ export class MailFolderPane extends MailElement {
 								name="name"
 								placeholder=${this.t('folder.newPlaceholder')}
 								aria-label=${this.t('folder.newLabel')}
-								@keydown=${(e: KeyboardEvent) => e.key === 'Escape' && (this.creating = false)}
+								@keydown=${(e: KeyboardEvent) => isCancelKey(e) && (this.creating = false)}
 								@blur=${(e: FocusEvent) => !(e.target as HTMLInputElement).value && (this.creating = false)}
 							/>
 						</form>`

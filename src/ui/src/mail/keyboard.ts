@@ -31,7 +31,16 @@ export interface KeyLike {
 	metaKey?: boolean;
 	altKey?: boolean;
 	shiftKey?: boolean;
+	/** Pressed while an input method composes text: picking or cancelling a candidate. */
+	isComposing?: boolean;
 }
+
+/**
+ * An Escape that cancels what has the focus, never one an input method takes while it composes:
+ * Chrome on macOS gives the Escape that cancels a candidate list as a composing key.
+ */
+export const isCancelKey = (event: KeyLike): boolean =>
+	event.key === 'Escape' && !event.isComposing;
 
 /** Each command with the keys a person presses, in the order the help dialog lists them. */
 export const SHORTCUTS: readonly { command: MailCommand; keys: readonly string[] }[] = [
@@ -82,6 +91,8 @@ const PLAIN: Record<string, MailCommand> = {
  * Escape and Ctrl/Cmd+Enter count there.
  */
 export function commandFor(event: KeyLike, typing: boolean): MailCommand | null {
+	// A key an input method takes while it composes is its own, Escape included.
+	if (event.isComposing) return null;
 	const chord = event.ctrlKey || event.metaKey;
 	if (event.key === 'Escape') return 'close';
 	if (chord && event.key === 'Enter') return 'send';

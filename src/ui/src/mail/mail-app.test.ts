@@ -508,6 +508,21 @@ describe('<mail-app>', () => {
 		await until(() => state(app).compose === null);
 	});
 
+	it('keeps compose open for an Escape an input method composes with', async () => {
+		const app = await mount();
+		const press = (init: KeyboardEventInit) =>
+			app.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, ...init }));
+		press({ key: 'c' });
+		await until(() => state(app).compose !== null);
+		await app.updateComplete;
+		// Cancelling a candidate list: the input method's Escape, not the window's.
+		press({ key: 'Escape', isComposing: true });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(state(app).compose).not.toBeNull();
+		press({ key: 'Escape' });
+		await until(() => state(app).compose === null);
+	});
+
 	it('saves the open draft before it lets its connection go', async () => {
 		const { transport, saved, released } = testTransport();
 		const app = await mount({ kind: 'transport', transport });

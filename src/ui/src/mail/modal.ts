@@ -46,7 +46,8 @@ export function focusFirst(dialog: ParentNode | null): void {
  */
 export function trapKeys(event: KeyboardEvent, close: () => void): void {
 	event.stopPropagation();
-	if (event.defaultPrevented) return;
+	// A key an input method takes while it composes is its own (`isCancelKey`).
+	if (event.defaultPrevented || event.isComposing) return;
 	if (event.key === 'Escape') {
 		event.preventDefault();
 		close();

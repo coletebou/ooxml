@@ -1,4 +1,4 @@
-import { commandFor, controlOwnsKey, isTyping, SHORTCUTS } from './keyboard';
+import { commandFor, controlOwnsKey, isCancelKey, isTyping, SHORTCUTS } from './keyboard';
 
 describe('mail shortcuts', () => {
 	it('maps plain keys outside text fields', () => {
@@ -16,6 +16,17 @@ describe('mail shortcuts', () => {
 		expect(commandFor({ key: 'Escape' }, true)).toBe('close');
 		expect(commandFor({ key: 'Enter', metaKey: true }, true)).toBe('send');
 		expect(commandFor({ key: 'e', altKey: true }, false)).toBeNull();
+	});
+	it('leaves every key to an input method while it composes, Escape too', () => {
+		// Chrome on macOS gives the Escape that cancels a candidate list as a composing key.
+		for (const typing of [true, false]) {
+			expect(commandFor({ key: 'Escape', isComposing: true }, typing)).toBeNull();
+			expect(commandFor({ key: 'Enter', ctrlKey: true, isComposing: true }, typing)).toBeNull();
+		}
+		expect(commandFor({ key: 'c', isComposing: true }, false)).toBeNull();
+		expect(
+			[{ key: 'Escape' }, { key: 'Escape', isComposing: true }, { key: 'Enter' }].map(isCancelKey),
+		).toEqual([true, false, false]);
 	});
 	it('lists every command once for the help dialog', () => {
 		const commands = SHORTCUTS.map((s) => s.command);

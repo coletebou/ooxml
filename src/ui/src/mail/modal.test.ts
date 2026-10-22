@@ -40,6 +40,18 @@ describe('modal dialogs', () => {
 		expect(tabStops(dialog).map((el) => el.id)).toEqual(['first', 'inner', 'slotted', 'last']);
 	});
 
+	it('leave an Escape an input method composes with to it', () => {
+		const { dialog, inner } = mountDialog();
+		const closed: string[] = [];
+		dialog.addEventListener('keydown', (e) => trapKeys(e, () => closed.push('closed')));
+		inner.focus();
+		const composing = key('Escape', { isComposing: true });
+		inner.dispatchEvent(composing);
+		expect([composing.defaultPrevented, closed]).toEqual([false, []]);
+		inner.dispatchEvent(key('Escape'));
+		expect(closed).toEqual(['closed']);
+	});
+
 	it('wrap Tab round their controls and close with Escape', () => {
 		const { page, dialog, first, inner, still, last } = mountDialog();
 		const closed: string[] = [];
