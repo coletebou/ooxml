@@ -564,6 +564,22 @@ describe('serializeVCards', () => {
 		expect(decodeVCardBytes(utf16)).toBe('FN:Zoë');
 	});
 
+	it('reads a vCard 2.1 value by its own rules: a backslash is itself, but before a semicolon', () => {
+		const read = (...lines: string[]) =>
+			parseVCards(['BEGIN:VCARD', 'VERSION:2.1', 'FN:A', ...lines, 'END:VCARD', ''].join('\r\n'))
+				.contacts[0]!;
+		expect(read('NOTE;ENCODING=QUOTED-PRINTABLE:C:=5Cnotes').note).toBe('C:\\notes');
+		expect(read('NOTE:C:\\notes, a\\,b').note).toBe('C:\\notes, a\\,b');
+		expect(read('N:Doe\\;Jr;Ann;;;').familyName).toBe('Doe;Jr');
+		// 2.1 has no lists: a comma in a street is a comma.
+		const card = read('ADR;HOME:;;12 Main St, Unit 2;Town;;;');
+		expect(card.addresses[0]).toMatchObject({ street: '12 Main St, Unit 2' });
+		expect(card.addresses[0]!.lists).toBeUndefined();
+		// Written as vCard 4.0, each reads back the same.
+		const note = read('NOTE:C:\\notes');
+		expect(parseVCards(serializeVCards([note])).contacts[0]!.note).toBe('C:\\notes');
+	});
+
 	it('reads the zone offset of a revision time', () => {
 		const rev = (value: string) =>
 			parseVCards(`BEGIN:VCARD\r\nVERSION:4.0\r\nFN:A\r\nREV:${value}\r\nEND:VCARD\r\n`)

@@ -88,6 +88,11 @@ const SKIP = new Set(['BEGIN', 'END', 'VERSION', 'PRODID']);
 
 function toContact(properties: Property[], fallbackId: string): Contact {
 	const contact: { -readonly [K in keyof Contact]: Contact[K] } = emptyContact(fallbackId, 0);
+	// vCard 2.1 escapes nothing but a semicolon inside a structured value: a backslash is itself,
+	// and a comma no list separator, its line breaks quoted-printable (vCard 2.1 2.1.3).
+	const v21 = properties.some((p) => p.name === 'VERSION' && p.value.trim() === '2.1');
+	const unescape = v21 ? (value: string) => value.replace(/\\;/g, ';') : unescapeText;
+	const listsFor = <K extends string>(parts: Record<K, string>) => (v21 ? null : listsOf(parts));
 	const emails: Contact['emails'][number][] = [];
 	const phones: Contact['phones'][number][] = [];
 	const addresses: ContactAddress[] = [];
@@ -115,7 +120,7 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 	};
 	for (const property of properties) {
 		const value = decodeValue(property);
-		const text = unescapeText(value);
+		const text = unescape(value);
 		switch (property.name) {
 			case 'FN':
 				if (fills(property, text.trim() !== '')) contact.name = text;
@@ -126,20 +131,20 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				if (
 					!fills(
 						property,
-						components.some((c) => unescapeText(c).trim() !== ''),
+						components.some((c) => unescape(c).trim() !== ''),
 					)
 				)
 					break;
 				const [familyName = '', givenName = '', additional = '', prefix = '', suffix = ''] =
 					components;
 				Object.assign(contact, {
-					familyName: unescapeText(familyName),
-					givenName: unescapeText(givenName),
-					additionalNames: unescapeText(additional),
-					prefix: unescapeText(prefix),
-					suffix: unescapeText(suffix),
+					familyName: unescape(familyName),
+					givenName: unescape(givenName),
+					additionalNames: unescape(additional),
+					prefix: unescape(prefix),
+					suffix: unescape(suffix),
 				});
-				const lists = listsOf({ familyName, givenName });
+				const lists = listsFor({ familyName, givenName });
 				if (lists) contact.lists = lists;
 				keepAltId('N', property);
 				break;
@@ -162,18 +167,18 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 					country = '',
 				] = splitUnescaped(value, ';');
 				const parts = { poBox, extended, street, locality, region, postalCode, country };
-				const lists = listsOf(parts);
+				const lists = listsFor(parts);
 				addresses.push({
 					type: typeOf(property),
 					...(Object.fromEntries(
-						Object.entries(parts).map(([part, text]) => [part, unescapeText(text)]),
+						Object.entries(parts).map(([part, text]) => [part, unescape(text)]),
 					) as typeof parts),
 					...(lists ? { lists } : {}),
 				});
 				break;
 			}
 			case 'ORG': {
-				const [name = '', ...units] = splitUnescaped(value, ';').map(unescapeText);
+				const [name = '', ...units] = splitUnescaped(value, ';').map(unescape);
 				const says = [name, ...units].some((part) => part.trim() !== '');
 				if (fills(property, says)) {
 					contact.organization = name;
