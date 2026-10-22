@@ -42,7 +42,6 @@ export const Mail = forwardRef<MailApp | null, MailProps & { className?: string 
 	const latest = useRef<MailProps>(props);
 	const binding = useRef<MailBinding | null>(null);
 	latest.current = props;
-	useImperativeHandle(ref, () => el.current as MailApp, []);
 	// Three layout effects, in this order: bind the element, give it its props, define it. They run
 	// before the browser paints and before the element's first update, which starts its client, so
 	// it starts with the connection it was given and never shows the demo mailbox first, even when
@@ -64,6 +63,9 @@ export const Mail = forwardRef<MailApp | null, MailProps & { className?: string 
 	useLayoutEffect(() => {
 		defineMailApp();
 	}, []);
+	// After the element is defined (a handle is a layout effect, run in order): a ref the host gave
+	// gets the upgraded `<mail-app>`, whose API it may use at once.
+	useImperativeHandle(ref, () => el.current as MailApp, []);
 	return createElement('mail-app', {
 		ref: el,
 		class: className,

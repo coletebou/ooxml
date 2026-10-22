@@ -30,10 +30,12 @@ export const Teams = forwardRef<TeamsApp | null, TeamsProps & { className?: stri
 		const latest = useRef<TeamsProps>(props);
 		const binding = useRef<TeamsBinding | null>(null);
 		latest.current = props;
-		useImperativeHandle(ref, () => el.current as TeamsApp, []);
 		useLayoutEffect(() => {
 			defineTeamsApp();
 		}, []);
+		// After the element is defined (a handle is a layout effect, run in order): a ref the host
+		// gave gets the upgraded `<teams-app>`, whose API it may use at once.
+		useImperativeHandle(ref, () => el.current as TeamsApp, []);
 		useEffect(() => {
 			if (!el.current) return;
 			const bound = bindTeams(el.current, () => latest.current);
