@@ -64,7 +64,10 @@ export function contactForm(contact: Contact, i18n: MailI18n, handlers: ContactF
 		html`<label
 			><span>${label}</span><textarea name=${name} rows="2" .value=${value}></textarea>
 		</label>`;
-	return html`<form class="contact-form" @submit=${handlers.save}>
+	// The email and website fields are typed for the keyboard they bring up, not to be checked: a
+	// card's URL without a scheme or an address in quotes would stop Save (the form keeps them as
+	// text, as the event dialog does).
+	return html`<form class="contact-form" novalidate @submit=${handlers.save}>
 		<h2
 			>${contact.name || contact.emails.length ? t('contacts.editTitle') : t('contacts.newTitle')}</h2
 		>
