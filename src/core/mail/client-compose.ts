@@ -184,8 +184,10 @@ export function createCompose(core: ClientCore): ComposeActions {
 			try {
 				const message = await source(emailId);
 				// Saved, the window replaces the message it opened: only a draft opens so, one marked
-				// `$draft` or filed in Drafts.
-				if (!listed(message).keywords[DRAFT] && !filedIn(message, 'drafts'))
+				// `$draft`, or filed in Drafts where what is sent leaves Drafts (an account without Sent
+				// keeps its sent copies there, no longer `$draft`).
+				const inDrafts = filedIn(message, 'drafts') && !!core.mailboxByRole('sent');
+				if (!listed(message).keywords[DRAFT] && !inDrafts)
 					throw new MailTransportError('invalid', 'Only a draft opens to edit.');
 				const identity = identityFor(identities(), message.from.slice(0, 1));
 				if (!(await close())) return false;

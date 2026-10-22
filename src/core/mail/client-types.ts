@@ -244,8 +244,9 @@ export interface MailClient {
 	/**
 	 * Reopen a saved draft in the compose window; false as for `compose`. Saved, the window replaces
 	 * the message it opened, so only a draft opens: one marked `$draft` or filed in Drafts, as the
-	 * list knows it now. Any other message is refused with an `invalid` error notice, the open window
-	 * left as it is.
+	 * list knows it now (in Drafts only where the account has a Sent folder: without one, what it
+	 * sent stays in Drafts). Any other message is refused with an `invalid` error notice, the open
+	 * window left as it is.
 	 */
 	editDraft(emailId: string): Promise<boolean>;
 	/**

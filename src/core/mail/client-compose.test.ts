@@ -1,7 +1,8 @@
 import { createMailClient } from './client';
 import type { FileInput, MailNotice } from './client-types';
+import { DEFAULT_MAILBOXES } from './memory-messages';
 import { createMemoryTransport, type MemoryTransportOptions } from './memory-transport';
-import { DRAFT, type Identity, type MailMessage } from './model';
+import { DRAFT, SEEN, type Identity, type MailMessage } from './model';
 import { createGate, until } from './test-support/client';
 import { MailTransportError, type MailTransport } from './transport';
 
@@ -264,6 +265,40 @@ describe('the compose window', () => {
 		expect((await memory.message(id)).keywords).toEqual({ $seen: true });
 		expect(await client.editDraft(id)).toBe(true);
 		expect(client.getState().compose?.draft).toMatchObject({ id, subject: 'Imported' });
+		client.destroy();
+	});
+
+	it('does not open a sent copy kept in Drafts, where the account has no Sent folder', async () => {
+		const { client, notices } = plain({
+			mailboxes: DEFAULT_MAILBOXES.filter((mailbox) => mailbox.role !== 'sent'),
+			messages: [
+				// What a JMAP send leaves without a Sent folder: the copy in Drafts, no longer `$draft`.
+				{
+					id: 'went',
+					mailboxId: 'drafts',
+					from: me,
+					to: [ada],
+					subject: 'Sent',
+					text: 'Gone out',
+					receivedAt: T0,
+					keywords: [SEEN],
+				},
+				{
+					id: 'mine',
+					mailboxId: 'drafts',
+					from: me,
+					subject: 'Mine',
+					text: 'Not yet',
+					receivedAt: T0,
+					keywords: [DRAFT],
+				},
+			],
+		});
+		await until(client, (s) => s.status === 'ready');
+		expect(await client.editDraft('went')).toBe(false);
+		expect(notices).toEqual([{ kind: 'error', action: 'open', code: 'invalid' }]);
+		expect(await client.editDraft('mine')).toBe(true);
+		expect(client.getState().compose?.draft).toMatchObject({ id: 'mine', text: 'Not yet' });
 		client.destroy();
 	});
 
