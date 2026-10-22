@@ -56,6 +56,31 @@ describe('text limit', () => {
 		expect(full.apply(remote).doc.childCount).toBe(4);
 	});
 
+	it('holds back a paste that nests lists deeper than the indent command allows', () => {
+		const para = (text: string) => schema.node('paragraph', { todo: null }, [schema.text(text)]);
+		const nest = (levels: number): ReturnType<typeof para> =>
+			levels === 0
+				? para('deep')
+				: schema.node('bullet_list', null, [
+						schema.node('list_item', null, [para('item'), nest(levels - 1)]),
+					]);
+		const doc = schema.node('doc', null, [para('start')]);
+		const s = EditorState.create({ schema, doc, plugins: [textLimitPlugin(1000, 1000, 2)] });
+		const end = s.doc.content.size;
+		expect(s.apply(s.tr.insert(end, nest(2))).doc.childCount).toBe(2);
+		expect(s.apply(s.tr.insert(end, nest(3))).doc.childCount).toBe(1);
+		// A collaborator's deeper list applies, and typing in it afterwards does too.
+		const remote = s.apply(
+			s.tr.insert(end, nest(3)).setMeta(ySyncPluginKey, { isChangeOrigin: true }),
+		);
+		expect(remote.doc.childCount).toBe(2);
+		let deepText = 0;
+		remote.doc.descendants((node, pos) => {
+			if (node.isText && node.text === 'deep') deepText = pos;
+		});
+		expect(remote.apply(remote.tr.insertText('!', deepText)).doc.textContent).toContain('!deep');
+	});
+
 	it('applies changes from collaborators and undo whatever their length', () => {
 		const full = state('0123456789');
 		const remote = full.tr.insertText('more').setMeta(ySyncPluginKey, { isChangeOrigin: true });

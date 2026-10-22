@@ -7,7 +7,7 @@ import { addFile, addImage, addStroke, addText } from './canvas';
 import { NOTEBOOK_ORIGIN, NOTEBOOK_SEED_ORIGIN, notebookTypes } from './schema';
 import { overLimit, readSnapshot, writeSnapshot } from './snapshot';
 import { MAX_INK_POINTS } from './ink';
-import { MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
+import { MAX_ELEMENT_DEPTH, MAX_LIST_LEVELS, MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
 import { type NotebookEditContext, addPage, addSection, deletePage, writeMeta } from './structure';
 
 const context = (origin: unknown = NOTEBOOK_ORIGIN, client = 'a'): NotebookEditContext => ({
@@ -231,6 +231,15 @@ describe('notebook archive', () => {
 		);
 		const many = Array.from({ length: MAX_TEXT_NODES + 1 }, () => ({ type: 'paragraph' }));
 		await expect(archive(many)).rejects.toThrow(NotebookArchiveError);
+		// Lists nested deeper than the editor and its indent allow; as deep as that imports.
+		const nested = (levels: number): unknown => {
+			let node: unknown = { type: 'paragraph', content: [{ type: 'text', text: 'deep' }] };
+			for (let i = 0; i < levels; i++)
+				node = { type: 'bullet_list', content: [{ type: 'list_item', content: [node] }] };
+			return node;
+		};
+		await expect(archive([nested(MAX_LIST_LEVELS + 1)])).rejects.toThrow(NotebookArchiveError);
+		expect((await archive([nested(MAX_LIST_LEVELS)])).containers).toHaveLength(1);
 		// At the limits, and with shapes the editor never writes (left out), it imports.
 		const snapshot = await archive([para('x'.repeat(MAX_TEXT_LENGTH)), { type: 'script' }]);
 		expect(snapshot.containers).toHaveLength(1);
@@ -370,6 +379,18 @@ describe('notebook archive', () => {
 				importNotebookArchive(await zip.generateAsync({ type: 'uint8array' })),
 			).rejects.toThrow(NotebookArchiveError);
 		}
+	});
+
+	it('flags a text box nested deeper than a text box keeps, so nothing is left out unsaid', () => {
+		const doc = new Y.Doc();
+		const fragment = doc.getXmlFragment('deep');
+		let parent: Y.XmlFragment | Y.XmlElement = fragment;
+		for (let i = 0; i <= MAX_ELEMENT_DEPTH + 1; i++) {
+			const element = new Y.XmlElement(i % 2 ? 'list_item' : 'bullet_list');
+			parent.insert(0, [element]);
+			parent = element;
+		}
+		expect(overLimit(fragment)).toBe(true);
 	});
 
 	it('flags a text box with more nodes than a text box holds', () => {

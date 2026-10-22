@@ -9,7 +9,7 @@
 import * as Y from 'yjs';
 import { isWordHighlightToken } from '../docx/highlight';
 import { isOpenableHyperlinkHref } from '../opc/safe-href';
-import { MAX_ELEMENT_DEPTH, MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
+import { MAX_ELEMENT_DEPTH, MAX_LIST_LEVELS, MAX_TEXT_LENGTH, MAX_TEXT_NODES } from './model';
 
 export const RICH_BLOCK_TYPES = ['paragraph', 'heading', 'bullet_list', 'ordered_list'] as const;
 export const RICH_MARK_TYPES = ['bold', 'italic', 'underline', 'strike', 'highlight', 'link'];
@@ -121,12 +121,15 @@ function readNodes(
 const KNOWN = new Set(['text', 'paragraph', 'heading', ...CONTAINERS, ...LEAVES]);
 
 /** Nodes this schema does not know are replaced by their content (their text is kept). */
-function unwrapUnknown(nodes: readonly RichNode[], depth = 0): RichNode[] {
-	if (depth > MAX_DEPTH) return [];
+function unwrapUnknown(nodes: readonly RichNode[], depth = 0, budget?: Budget): RichNode[] {
+	if (depth > MAX_DEPTH) {
+		if (nodes.length && budget) budget.cut = true;
+		return [];
+	}
 	return nodes.flatMap((node) =>
 		node && typeof node === 'object' && KNOWN.has(node.type)
 			? [node]
-			: unwrapUnknown(Array.isArray(node?.content) ? node.content : [], depth + 1),
+			: unwrapUnknown(Array.isArray(node?.content) ? node.content : [], depth + 1, budget),
 	);
 }
 
@@ -167,15 +170,21 @@ function spend(budget: Budget): boolean {
 
 /**
  * Wrap stray inline content into paragraphs and drop empty lists, so blocks are well formed. The
- * input may come from an archive, so any shape is accepted and lists nest at most `MAX_DEPTH` deep.
+ * input may come from an archive, so any shape is accepted and lists nest at most `MAX_LIST_LEVELS`
+ * deep.
  */
 function normaliseBlocks(
 	input: readonly RichNode[],
 	depth = 0,
 	budget: Budget = { chars: MAX_TEXT, nodes: MAX_NODES },
 ): RichNode[] {
-	if (depth > MAX_DEPTH) return [];
-	const nodes = unwrapUnknown(input);
+	// Lists nested deeper than a text box keeps (what the editor and its indent allow; only a
+	// hostile document nests deeper): left out, and noted as cut.
+	if (depth > MAX_LIST_LEVELS) {
+		if (input.length) budget.cut = true;
+		return [];
+	}
+	const nodes = unwrapUnknown(input, 0, budget);
 	const out: RichNode[] = [];
 	let inline: RichNode[] = [];
 	const flush = (): void => {

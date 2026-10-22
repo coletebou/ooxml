@@ -5,6 +5,7 @@ import * as Y from 'yjs';
 import {
 	type Container,
 	type InkStroke,
+	MAX_ELEMENT_DEPTH,
 	MAX_TEXT_LENGTH,
 	MAX_TEXT_NODES,
 	type PageEntry,
@@ -146,14 +147,18 @@ export function textLength(fragment: Y.XmlFragment): number {
 	return length;
 }
 
-/** More text or more nodes than a text box holds (collaborators' edits can merge past both). */
+/**
+ * More text, more nodes or deeper nesting than a text box holds (collaborators' edits can merge
+ * past all three), so reading it would leave part of it out.
+ */
 export function overLimit(fragment: Y.XmlFragment): boolean {
 	let nodes = 0;
-	const stack: unknown[] = fragment.toArray();
+	const stack: [unknown, number][] = fragment.toArray().map((item) => [item, 0]);
 	while (stack.length) {
-		const item = stack.pop();
-		if (++nodes > MAX_TEXT_NODES) return true;
-		if (item instanceof Y.XmlElement) stack.push(...item.toArray());
+		const [item, depth] = stack.pop()!;
+		if (++nodes > MAX_TEXT_NODES || depth > MAX_ELEMENT_DEPTH) return true;
+		if (item instanceof Y.XmlElement)
+			for (const child of item.toArray()) stack.push([child, depth + 1]);
 	}
 	return textLength(fragment) > MAX_TEXT_LENGTH;
 }

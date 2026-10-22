@@ -18,7 +18,7 @@ import {
 } from 'y-prosemirror';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
-import { MAX_TEXT_LENGTH, MAX_TEXT_NODES } from '../model';
+import { MAX_LIST_LEVELS, MAX_TEXT_LENGTH, MAX_TEXT_NODES } from '../model';
 import { notebookInputRules } from './input-rules';
 import { type KeymapHandlers, notebookKeymap } from './keymap';
 import { notebookSchema } from './schema';
@@ -35,6 +35,42 @@ export interface NotebookEditorOptions extends KeymapHandlers {
 	plugins?: readonly Plugin[];
 }
 
+const LISTS = new Set(['bullet_list', 'ordered_list']);
+
+/** The deepest list nesting in `doc`. */
+function listDepth(doc: ProseMirrorNode): number {
+	let deepest = 0;
+	const walk = (node: ProseMirrorNode, lists: number): void => {
+		node.forEach((child) => {
+			const inner = lists + (LISTS.has(child.type.name) ? 1 : 0);
+			deepest = Math.max(deepest, inner);
+			if (child.childCount) walk(child, inner);
+		});
+	};
+	walk(doc, 0);
+	return deepest;
+}
+
+/** The deepest list nesting in the parts of the document `tr` changed (a paste, a drop). */
+function changedListDepth(tr: Transaction): number {
+	let deepest = 0;
+	tr.mapping.maps.forEach((map, i) => {
+		const rest = tr.mapping.slice(i + 1);
+		map.forEach((_oldFrom, _oldTo, from, to) => {
+			const start = Math.min(rest.map(from, -1), tr.doc.content.size);
+			const end = Math.min(rest.map(to, 1), tr.doc.content.size);
+			tr.doc.nodesBetween(start, end, (node, pos) => {
+				if (!LISTS.has(node.type.name)) return;
+				const $pos = tr.doc.resolve(pos);
+				let lists = 1;
+				for (let d = $pos.depth; d > 0; d--) if (LISTS.has($pos.node(d).type.name)) lists++;
+				deepest = Math.max(deepest, lists);
+			});
+		});
+	});
+	return deepest;
+}
+
 /** The nodes in `doc`: blocks, text runs and leaves. */
 function countNodes(doc: ProseMirrorNode): number {
 	let n = 0;
@@ -45,12 +81,17 @@ function countNodes(doc: ProseMirrorNode): number {
 }
 
 /**
- * Local edits stop at the text and the nodes a container holds (`MAX_TEXT_LENGTH`,
- * `MAX_TEXT_NODES`), so what is typed is what its archive and export keep (the editor's nodes are
- * never fewer than the shared text's). Changes from collaborators and undo (through the sync
- * plugin) always apply, or the editor would part from the shared text; shortening is always allowed.
+ * Local edits stop at the text, the nodes and the list nesting a container holds
+ * (`MAX_TEXT_LENGTH`, `MAX_TEXT_NODES`, `MAX_LIST_LEVELS`, which the indent command also keeps),
+ * so what is typed or pasted is what its archive and export keep (the editor's nodes are never
+ * fewer than the shared text's). Changes from collaborators and undo (through the sync plugin)
+ * always apply, or the editor would part from the shared text; shortening is always allowed.
  */
-export function textLimitPlugin(limit = MAX_TEXT_LENGTH, nodeLimit = MAX_TEXT_NODES): Plugin {
+export function textLimitPlugin(
+	limit = MAX_TEXT_LENGTH,
+	nodeLimit = MAX_TEXT_NODES,
+	listLimit = MAX_LIST_LEVELS,
+): Plugin {
 	return new Plugin({
 		filterTransaction(tr) {
 			if (!tr.docChanged || tr.getMeta(ySyncPluginKey)) return true;
@@ -65,6 +106,9 @@ export function textLimitPlugin(limit = MAX_TEXT_LENGTH, nodeLimit = MAX_TEXT_NO
 				const after = countNodes(tr.doc);
 				if (after > nodeLimit && after > countNodes(tr.before)) return false;
 			}
+			// Only an edit that nests lists deeper than any already there is held back.
+			const deepest = changedListDepth(tr);
+			if (deepest > listLimit && deepest > listDepth(tr.before)) return false;
 			return true;
 		},
 	});
