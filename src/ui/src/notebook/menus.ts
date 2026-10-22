@@ -239,7 +239,10 @@ export function notebookMenu(
 			},
 		],
 		run(action) {
-			if (action.startsWith('open:')) void c.client.openNotebook(action.slice(5));
+			// A notebook that cannot open is announced by the client (`open-failed`); the rest of a
+			// failure (the open one could not be closed) leaves things as they were.
+			if (action.startsWith('open:'))
+				void c.client.openNotebook(action.slice(5)).catch(() => undefined);
 			else if (action === 'new') actions.new();
 			else if (action === 'import') actions.import();
 			else if (action === 'export-page') actions.exportPage();
@@ -251,7 +254,8 @@ export function notebookMenu(
 				// The notice (with Undo) only when it went: it stays when its changes could not be saved.
 				void c.client
 					.deleteNotebook(current)
-					.then((done) => done && c.deleted('notebook', null, current));
+					.then((done) => done && c.deleted('notebook', null, current))
+					.catch(() => undefined);
 			}
 		},
 	};
