@@ -3,3 +3,5 @@ ooxml-core contains modern OOXML modules extracted from ChristopherVR/docx-viewe
 The pptx area also contains PowerPoint glyph-advance measurements (font-advance-widths*.generated.ts: numeric widths measured through COM automation; no font software is included). Third-party runtime dependencies are listed in THIRD-PARTY-LICENSES.
 
 The math area includes Apache-2.0 equation conversion modules extracted from ChristopherVR/pptx-viewer. Their source paths and modifications are recorded in PROVENANCE.md.
+
+The text area includes the HTML Standard's table of named character references, Copyright (c) WHATWG (Apple, Google, Mozilla, Microsoft), licensed in source code under the BSD 3-Clause License. Its notice and the licence text are in THIRD-PARTY-LICENSES.
