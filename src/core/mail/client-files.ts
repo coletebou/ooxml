@@ -21,13 +21,22 @@ export function createFileActions(core: ClientCore, list: ListLoader): FileActio
 			}
 		},
 		async exportEml(emailId) {
-			const email =
-				core.emails.get(emailId) ??
-				core.bodies.get(emailId) ??
-				(await core.transport.message(emailId));
-			const name = emlFileName(email.subject);
-			const bytes = await core.transport.download(email.blobId, { type: 'message/rfc822', name });
-			return { name, type: 'message/rfc822', bytes };
+			// A download as an attachment's is: a failure says so, then rejects.
+			try {
+				const email =
+					core.emails.get(emailId) ??
+					core.bodies.get(emailId) ??
+					(await core.transport.message(emailId));
+				const name = emlFileName(email.subject);
+				const bytes = await core.transport.download(email.blobId, {
+					type: 'message/rfc822',
+					name,
+				});
+				return { name, type: 'message/rfc822', bytes };
+			} catch (error) {
+				core.fail('download', error);
+				throw error;
+			}
 		},
 		async importEml(files: readonly FileInput[], mailboxId) {
 			const target = mailboxId ?? core.state.mailboxId ?? core.mailboxByRole('inbox')?.id;

@@ -391,6 +391,23 @@ describe('createMailClient', () => {
 		client.destroy();
 	});
 
+	it('says so when a message cannot be exported, as a download that fails does', async () => {
+		const memory = createMemoryTransport({ messages: seed(), now: () => T0 + 3_600_000 });
+		const transport: MailTransport = {
+			...memory,
+			download: async () => {
+				throw new MailTransportError('network', 'Offline.');
+			},
+		};
+		const client = createMailClient({ transport });
+		const notices: MailNotice[] = [];
+		client.onNotice((notice) => notices.push(notice));
+		await until(client, (s) => s.conversations.length > 0);
+		await expect(client.exportEml('o1')).rejects.toMatchObject({ code: 'network' });
+		expect(notices).toEqual([{ kind: 'error', action: 'download', code: 'network' }]);
+		client.destroy();
+	});
+
 	it('keeps contacts and imports vCards', async () => {
 		const { client, notices } = setup();
 		await until(client, (s) => s.status === 'ready');

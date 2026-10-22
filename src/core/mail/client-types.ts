@@ -269,7 +269,9 @@ export interface MailClient {
 	 * result is false; so does a draft whose attachments are still uploading, with a notice.
 	 */
 	closeCompose(): Promise<boolean>;
+	/** The bytes of an attachment. A failure is a `download` error notice, and the result rejects. */
 	download(attachment: MailAttachment): Promise<Uint8Array>;
+	/** A message as an `.eml` file; a failure is told as a download's is. */
 	exportEml(emailId: string): Promise<FileInput>;
 	importEml(files: readonly FileInput[], mailboxId?: string): Promise<void>;
 	saveContact(contact: Contact): Promise<void>;
