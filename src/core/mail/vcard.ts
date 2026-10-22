@@ -15,6 +15,7 @@ import {
 	type Property,
 } from './vcard-lines';
 
+import { vcard21Line } from './vcard-legacy';
 export { serializeVCards } from './vcard-write';
 export { decodeVCardBytes } from './vcard-lines';
 
@@ -93,6 +94,8 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 	const v21 = properties.some((p) => p.name === 'VERSION' && p.value.trim() === '2.1');
 	const unescape = v21 ? (value: string) => value.replace(/\\;/g, ';') : unescapeText;
 	const listsFor = <K extends string>(parts: Record<K, string>) => (v21 ? null : listsOf(parts));
+	/** A line kept as read, in vCard 4.0 terms: a 2.1 card's backslashes escaped (`vcard21Line`). */
+	const keep = (raw: string): string => (v21 ? vcard21Line(raw) : raw);
 	const emails: Contact['emails'][number][] = [];
 	const phones: Contact['phones'][number][] = [];
 	const addresses: ContactAddress[] = [];
@@ -112,7 +115,7 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 	};
 	const fills = (property: Property, says: boolean): boolean => {
 		if (filled.has(property.name)) {
-			extra.push(property.raw);
+			extra.push(keep(property.raw));
 			return false;
 		}
 		if (says) filled.add(property.name);
@@ -206,11 +209,11 @@ function toContact(properties: Property[], fallbackId: string): Contact {
 				if (date) {
 					contact.birthday = date;
 					keepAltId('BDAY', property);
-				} else extra.push(property.raw);
+				} else extra.push(keep(property.raw));
 				break;
 			}
 			default:
-				if (!SKIP.has(property.name)) extra.push(property.raw);
+				if (!SKIP.has(property.name)) extra.push(keep(property.raw));
 		}
 	}
 	return { ...contact, emails, phones, addresses, extra };

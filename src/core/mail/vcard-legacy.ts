@@ -41,6 +41,24 @@ function mediaType(property: string, type: string): string {
  * a quoted-printable one as the text it encodes, a line break in it as `\n` (RFC 6350 3.4),
  * without the encoding and the charset (4.0 is UTF-8 alone, 3.1); any other line as it is.
  */
+/**
+ * A vCard 2.1 value's text with its backslashes escaped as vCard 4.0 writes them (RFC 6350 3.4):
+ * in 2.1 a backslash is itself, but before a semicolon, where both mean a semicolon.
+ */
+const escape21 = (text: string): string => text.replace(/\\(?!;)/g, '\\\\');
+
+/**
+ * A line a vCard 2.1 card kept (`Contact.extra`) in vCard 4.0 terms, its backslashes escaped
+ * (`escape21`). A quoted-printable or inline binary one is left as read for `vcard4Line`, which
+ * writes it as 4.0 from what it encodes.
+ */
+export function vcard21Line(line: string): string {
+	const property = parseLine(line);
+	const parts = splitContentLine(line);
+	if (!property || !parts || isQuotedPrintable(property) || BINARY.has(property.name)) return line;
+	return `${[parts.name, ...parts.params].join(';')}:${escape21(parts.value)}`;
+}
+
 export function vcard4Line(line: string): string {
 	const property = parseLine(line);
 	const parts = splitContentLine(line);
@@ -62,8 +80,11 @@ export function vcard4Line(line: string): string {
 		(encoding === 'B' || encoding === 'BASE64' || types.some(base64) || (quoted && !link));
 	if (!inline) {
 		if (!quoted) return line;
-		const kept = parts.params.filter((param) => !/^\s*(?:ENCODING|CHARSET)\s*=/i.test(param));
-		const text = decodeValue(property).replace(/\r\n|\r|\n/g, '\\n');
+		// The bare 2.1 parameter (`;QUOTED-PRINTABLE`) goes with ENCODING; the text is 2.1's.
+		const kept = parts.params.filter(
+			(param) => !/^\s*(?:(?:ENCODING|CHARSET)\s*=|QUOTED-PRINTABLE\s*$)/i.test(param),
+		);
+		const text = escape21(decodeValue(property)).replace(/\r\n|\r|\n/g, '\\n');
 		return `${[parts.name, ...kept].join(';')}:${text}`;
 	}
 	const format = types.find((type) => !base64(type)) ?? '';

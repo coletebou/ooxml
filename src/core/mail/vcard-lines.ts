@@ -14,9 +14,13 @@ export interface Property {
 	raw: string;
 }
 
-/** Whether a property's value is quoted-printable (`ENCODING=QUOTED-PRINTABLE`, vCard 2.1). */
+/**
+ * Whether a property's value is quoted-printable (vCard 2.1): `ENCODING=QUOTED-PRINTABLE`, or the
+ * value alone, as 2.1 lets a parameter be written (`NOTE;QUOTED-PRINTABLE:`).
+ */
 export const isQuotedPrintable = (property: Property): boolean =>
-	property.params.ENCODING?.[0]?.toUpperCase() === 'QUOTED-PRINTABLE';
+	property.params.ENCODING?.[0]?.toUpperCase() === 'QUOTED-PRINTABLE' ||
+	(property.params.TYPE ?? []).some((type) => type.toUpperCase() === 'QUOTED-PRINTABLE');
 
 /** Versions that fold with a space after any character, an `=` included (RFC 6350 3.2). */
 const FOLD_ANYWHERE = new Set(['3.0', '4.0']);

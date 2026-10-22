@@ -580,6 +580,29 @@ describe('serializeVCards', () => {
 		expect(parseVCards(serializeVCards([note])).contacts[0]!.note).toBe('C:\\notes');
 	});
 
+	it('writes what a vCard 2.1 card kept as vCard 4.0 text, its backslashes escaped', () => {
+		const card = (...lines: string[]) =>
+			['BEGIN:VCARD', 'VERSION:2.1', 'FN:A', ...lines, 'END:VCARD', ''].join('\r\n');
+		// A bare QUOTED-PRINTABLE parameter is the encoding too, its soft break joining the lines.
+		const bare = parseVCards(card('NOTE;QUOTED-PRINTABLE:Caf=E9 au =', 'lait')).contacts[0]!;
+		expect(bare.note).toBe('Café au lait');
+		// Kept lines (a second note, an X- property) in 2.1 terms, then written as 4.0.
+		const kept = parseVCards(
+			card(
+				'NOTE:first',
+				'NOTE;ENCODING=QUOTED-PRINTABLE:C:=5Cnew',
+				'X-PATH:D:\\work\\notes',
+				'X-PARTS:a\;b',
+			),
+		).contacts[0]!;
+		const text = serializeVCards([kept]);
+		expect(text).toContain('\r\nNOTE:C:\\\\new\r\n');
+		expect(text).toContain('\r\nX-PATH:D:\\\\work\\\\notes\r\n');
+		expect(text).toContain('\r\nX-PARTS:a\;b\r\n');
+		// Read back as 4.0, each backslash is still one: written again, the card is the same.
+		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
+	});
+
 	it('reads the zone offset of a revision time', () => {
 		const rev = (value: string) =>
 			parseVCards(`BEGIN:VCARD\r\nVERSION:4.0\r\nFN:A\r\nREV:${value}\r\nEND:VCARD\r\n`)
