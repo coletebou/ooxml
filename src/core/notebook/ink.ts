@@ -26,7 +26,8 @@ export function encodeInkPoints(points: readonly number[]): number[] {
 	for (let i = 0; i < n; i++) {
 		const x = clamp(points[i * 3] ?? 0);
 		const y = clamp(points[i * 3 + 1] ?? 0);
-		const p = points[i * 3 + 2] ?? 0.5;
+		const raw = points[i * 3 + 2];
+		const p = Number.isFinite(raw) ? (raw as number) : 0.5;
 		out.push(Math.round(x * XY), Math.round(y * XY), Math.round(Math.min(1, Math.max(0, p)) * P));
 	}
 	return out;
@@ -44,7 +45,7 @@ export function decodeInkPoints(value: unknown): number[] {
 		if (typeof x !== 'number' || typeof y !== 'number' || typeof p !== 'number') return [];
 		if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > limit || Math.abs(y) > limit)
 			return [];
-		out.push(x / XY, y / XY, Math.min(1, Math.max(0, p / P)));
+		out.push(x / XY, y / XY, Number.isFinite(p) ? Math.min(1, Math.max(0, p / P)) : 0.5);
 	}
 	return out;
 }

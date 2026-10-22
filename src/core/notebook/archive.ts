@@ -90,6 +90,21 @@ export async function exportNotebookArchive(snapshot: NotebookSnapshot): Promise
 	return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 
+/**
+ * Stroke points read whole `[x, y, pressure]` triples at a time, so a value that is not a number
+ * (JSON writes NaN as null) never shifts the ones after it: a point without a position is left
+ * out, a pressure that is not a number becomes the default.
+ */
+function inkTriples(values: readonly unknown[]): number[] {
+	const out: number[] = [];
+	const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+	for (let i = 0; i + 2 < values.length; i += 3) {
+		const [x, y, p] = [values[i], values[i + 1], values[i + 2]];
+		if (finite(x) && finite(y)) out.push(x, y, finite(p) ? p : 0.5);
+	}
+	return out;
+}
+
 export class NotebookArchiveError extends Error {
 	override readonly name = 'NotebookArchiveError';
 }
@@ -214,9 +229,7 @@ export async function importNotebookArchive(
 			tool: s.tool === 'highlighter' ? 'highlighter' : 'pen',
 			color: sanitizeHexColor(s.color, '#202020'),
 			width: clampNumber(s.width, 0.5, 64, 2),
-			points: (s.points as unknown[]).filter(
-				(v): v is number => typeof v === 'number' && Number.isFinite(v),
-			),
+			points: inkTriples(s.points as unknown[]),
 		}));
 	return {
 		name: sanitizeName(meta.name, 'Notebook'),

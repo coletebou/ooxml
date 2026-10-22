@@ -153,6 +153,9 @@ describe('ink geometry', () => {
 		expect(inkOutline([5, 5, 0.5], 4)).toMatch(/^M3 5a2 2 0 1 0 4 0/u);
 		expect(inkOutline([], 4)).toBe('');
 		const stroke = { points: line, width: 4, tool: 'pen' as const };
+		// A pressure that is not a number is stored and read as the default, never as NaN.
+		expect(encodeInkPoints([1, 2, Number.NaN])).toEqual([10, 20, 50]);
+		expect(decodeInkPoints([10, 20, Number.NaN])).toEqual([1, 2, 0.5]);
 		expect(inkHits(stroke, 50, 3, 2)).toBe(true);
 		expect(inkHits(stroke, 50, 6, 2)).toBe(false);
 		// A swipe across the line between two reported points still touches it.

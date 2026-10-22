@@ -211,6 +211,23 @@ describe('notebook archive', () => {
 		}
 	});
 
+	it('reads stroke points as whole triples, so one bad value never shifts the rest', async () => {
+		const zip = new JSZip();
+		zip.file(
+			'notebook.json',
+			JSON.stringify({
+				format: 'ooxml-notebook',
+				version: 1,
+				// JSON writes a NaN pressure as null; a point without a position is left out.
+				ink: [
+					{ id: 's1', pageId: 'p1', points: [10, 20, null, 30, 40, 0.5, 'x', 1, 0.2, 50, 60, 0.7] },
+				],
+			}),
+		);
+		const snapshot = await importNotebookArchive(await zip.generateAsync({ type: 'uint8array' }));
+		expect(snapshot.strokes[0]?.points).toEqual([10, 20, 0.5, 30, 40, 0.5, 50, 60, 0.7]);
+	});
+
 	it('reads a media entry once and keeps the total within a budget', async () => {
 		const zip = new JSZip();
 		zip.file('media/a.png', new Uint8Array([1, 2, 3]));
