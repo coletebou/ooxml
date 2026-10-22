@@ -3,7 +3,8 @@
 // `ENCODING=BASE64`, quoted-printable or a bare `JPEG;BASE64` in 2.1) becomes the `data:` URI
 // (RFC 2397) that 4.0 writes instead: 4.0 has no ENCODING parameter, and those properties are URIs
 // there (RFC 6350 sections 6.2.4, 6.6.3, 6.7.5 and 6.8.1). A GEO of two decimals (RFC 2426
-// section 3.4.2) becomes the `geo:` URI of 4.0 (RFC 6350 section 6.5.2, RFC 5870). Any other
+// section 3.4.2) becomes the `geo:` URI of 4.0 (RFC 6350 section 6.5.2, RFC 5870), and a birthday
+// or anniversary in the extended date and time format the basic one 4.0 takes (4.3). Any other
 // quoted-printable value, an encoding 3.0 already dropped (RFC 2426 section 5), becomes the text it
 // encodes. Used by `vcard-write.ts`. New code.
 import { splitContentLine } from '../calendar/ics-lines';
@@ -53,6 +54,21 @@ export function vcard21Line(line: string): string {
 	return `${[parts.name, ...parts.params].join(';')}:${escape21(parts.value)}`;
 }
 
+/**
+ * A 3.0 or 2.1 date and time in the extended format ISO 8601 also has (`1987-09-27T08:30:00-06:00`,
+ * RFC 2426 3.1.5): its date, hour, minute, second and UTC offset.
+ */
+const EXTENDED_STAMP =
+	/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?(Z|[+-]\d{2}(?::?\d{2})?)?$/;
+
+/** The same date and time in the basic format, the only one 4.0 takes (RFC 6350 4.3). */
+function basicStamp(value: string): string | null {
+	const match = EXTENDED_STAMP.exec(value.trim());
+	if (!match) return null;
+	const [, year, month, day, hour, minute, second, zone] = match;
+	return `${year}${month}${day}T${hour}${minute}${second ?? ''}${(zone ?? '').replace(':', '')}`;
+}
+
 /** A 2.1 link's value type, `VALUE=URL`, as 4.0 names it: `uri` (RFC 6350 5.2). */
 const uriValue = (param: string): string =>
 	/^\s*VALUE\s*=\s*URL\s*$/i.test(param) ? 'VALUE=uri' : param;
@@ -62,7 +78,8 @@ const uriValue = (param: string): string =>
  * group and its other parameters; a GEO of two decimals as `geo:<latitude>,<longitude>`, so too;
  * a quoted-printable one as the text it encodes, a line break in it as `\n` (RFC 6350 3.4),
  * without the encoding and the charset (4.0 is UTF-8 alone, 3.1); a link's 2.1 value type, URL,
- * as `uri`; any other line as it is.
+ * as `uri`; a birthday or anniversary in the extended date and time format in the basic one;
+ * any other line as it is.
  */
 export function vcard4Line(line: string): string {
 	const property = parseLine(line);
@@ -73,6 +90,17 @@ export function vcard4Line(line: string): string {
 		// The value is a URI now, which is what 4.0 takes it as: a VALUE that says float goes.
 		const kept = parts.params.filter((param) => !/^\s*(?:ENCODING|CHARSET|VALUE)\s*=/i.test(param));
 		return `${[parts.name, ...kept].join(';')}:geo:${geo[1]},${geo[2]}`;
+	}
+	const dated =
+		(property.name === 'BDAY' || property.name === 'ANNIVERSARY') &&
+		property.params.VALUE?.[0]?.toLowerCase() !== 'text';
+	const stamp = dated ? basicStamp(decodeValue(property)) : null;
+	if (stamp) {
+		// 4.0 reads it as date-and-or-time, its default: a 3.0 VALUE=date-time goes.
+		const kept = parts.params.filter(
+			(param) => !/^\s*(?:(?:ENCODING|CHARSET|VALUE)\s*=|QUOTED-PRINTABLE\s*$)/i.test(param),
+		);
+		return `${[parts.name, ...kept].join(';')}:${stamp}`;
 	}
 	const quoted = isQuotedPrintable(property);
 	const types = property.params.TYPE ?? [];

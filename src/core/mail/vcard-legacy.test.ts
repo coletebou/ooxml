@@ -26,6 +26,35 @@ describe('vcard4Line', () => {
 		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
 	});
 
+	it('writes a 3.0 date and time, extended as ISO 8601 allows, in the basic form of 4.0', () => {
+		// RFC 2426's BDAY examples; RFC 6350 4.3 takes only the basic format, and no VALUE=date-time.
+		expect(vcard4Line('BDAY;VALUE=date-time:1953-10-15T23:10:00Z')).toBe('BDAY:19531015T231000Z');
+		expect(vcard4Line('BDAY:1987-09-27T08:30:00-06:00')).toBe('BDAY:19870927T083000-0600');
+		expect(vcard4Line('item1.ANNIVERSARY;X-A=b:2009-08-08T14:30-05')).toBe(
+			'item1.ANNIVERSARY;X-A=b:20090808T1430-05',
+		);
+		// A 4.0 value, and text, stay as they are.
+		for (const line of [
+			'BDAY:19961022T140000',
+			'BDAY;VALUE=text:circa 1800',
+			'BDAY;VALUE=text:1987-09-27T08:30',
+		])
+			expect(vcard4Line(line)).toBe(line);
+		// Read back from the 4.0 card, a 3.0 birth time is written the same again.
+		const card = [
+			'BEGIN:VCARD',
+			'VERSION:3.0',
+			'UID:b',
+			'FN:Ada',
+			'BDAY:1987-09-27T08:30:00-06:00',
+			'END:VCARD',
+			'',
+		].join('\r\n');
+		const text = serializeVCards(parseVCards(card).contacts);
+		expect(text).toContain('\r\nBDAY:19870927T083000-0600\r\n');
+		expect(serializeVCards(parseVCards(text).contacts)).toBe(text);
+	});
+
 	it('keeps every line that is neither an inline binary value nor quoted-printable as it is', () => {
 		for (const line of [
 			'PHOTO:data:image/jpeg;base64,/9j/4AAQ',
