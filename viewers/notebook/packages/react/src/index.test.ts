@@ -124,6 +124,41 @@ describe('useNotebook', () => {
 		await destroy.mock.results[0]?.value;
 	});
 
+	it('saves what is pending when the page is left, also while still mounted', async () => {
+		const saved: string[] = [];
+		const data = new Map<string, Uint8Array>();
+		const storage = {
+			load: async (key: string) => data.get(key) ?? null,
+			save: async (key: string, bytes: Uint8Array) => {
+				saved.push(key);
+				data.set(key, bytes);
+			},
+			remove: async (key: string) => void data.delete(key),
+		};
+		const options: CreateNotebookOptions = {
+			user: { id: 'u-ada', name: 'Ada' },
+			storageName: unique('react-pagehide'),
+			storage,
+			// Nothing is saved by the timer during the test.
+			saveDelayMs: 60_000,
+		};
+		let client: NotebookClient | null = null;
+		function Probe() {
+			const notebook = useNotebook(options);
+			client = notebook.client;
+			return createElement('output', null, notebook.state?.ready ? 'ready' : 'opening');
+		}
+		const { container, root } = mount();
+		root.render(createElement(Probe));
+		await vi.waitFor(() => expect(container.textContent).toBe('ready'), { timeout: 10_000 });
+		await client!.flush();
+		saved.length = 0;
+		client!.createPage({ title: 'Typed just before leaving' });
+		globalThis.dispatchEvent(new Event('pagehide'));
+		await vi.waitFor(() => expect(saved.some((key) => key.startsWith('notebook:'))).toBe(true));
+		root.unmount();
+	});
+
 	it('makes a new client for another storage and renames new items on a language change', async () => {
 		const memory = () => {
 			const data = new Map<string, Uint8Array>();

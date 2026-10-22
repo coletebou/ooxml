@@ -74,7 +74,10 @@ function storageScope(storage: NotebookStorage): string {
 	return scope;
 }
 
-/** `createNotebookClient` with this browser's IndexedDB storage, user id and localized names. */
+/**
+ * `createNotebookClient` with this browser's IndexedDB storage, user id and localized names, saving
+ * what is pending when the page is left.
+ */
 export function createNotebook(options: CreateNotebookOptions = {}): NotebookClient {
 	const {
 		storageName = DEFAULT_NOTEBOOK_DATABASE,
@@ -96,15 +99,19 @@ export function createNotebook(options: CreateNotebookOptions = {}): NotebookCli
 			...(user?.color ? { color: user.color } : {}),
 		},
 	});
-	if (!own) return client;
+	// Leaving the page (a navigation, the tab closing) need not unmount the binding first, so the
+	// client saves what is pending itself; a failure was already announced as a notice.
+	const onPageHide = (): void => void client.flush().catch(() => undefined);
+	globalThis.addEventListener?.('pagehide', onPageHide);
 	// The database this client opened is closed with it, so a restart does not leave connections
 	// behind that block another tab's upgrade or a host deleting a signed-out profile's database.
 	const destroy = client.destroy;
 	client.destroy = async () => {
+		globalThis.removeEventListener?.('pagehide', onPageHide);
 		try {
 			await destroy();
 		} finally {
-			own.close();
+			own?.close();
 		}
 	};
 	return client;

@@ -237,7 +237,6 @@ export class NotebookApp extends NotebookElement implements AppHost {
 	override connectedCallback(): void {
 		super.connectedCallback();
 		installOfficeUiTheme();
-		globalThis.addEventListener?.('pagehide', this.#flush);
 		// Moved in the DOM (removed and attached again): the client was released; start a new one,
 		// and give the ribbon its KeyTips again (firstUpdated only runs once).
 		if (!this.#client) this.requestUpdate();
@@ -247,15 +246,11 @@ export class NotebookApp extends NotebookElement implements AppHost {
 
 	override disconnectedCallback(): void {
 		super.disconnectedCallback();
-		globalThis.removeEventListener?.('pagehide', this.#flush);
 		this.#keytips?.dispose();
 		this.#keytips = null;
 		clearTimeout(this.#noticeTimer);
 		this.#stop();
 	}
-
-	// Leaving the page: save what is pending; a failure was already announced as a notice.
-	#flush = (): void => void this.#client?.flush().catch(() => undefined);
 
 	#config(): NotebookSyncConfig {
 		if (this.config) return this.config;

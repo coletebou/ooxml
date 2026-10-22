@@ -77,4 +77,21 @@ describe('notebook store helpers', () => {
 			vi.unstubAllGlobals();
 		}
 	});
+
+	it('saves on leaving the page until the client is destroyed', async () => {
+		const storage = createMemoryStorage();
+		const saves = vi.spyOn(storage, 'update');
+		const client = createNotebook({ storage, saveDelayMs: 60_000 });
+		await client.whenReady();
+		await client.flush();
+		saves.mockClear();
+		client.createPage({ title: 'Pending' });
+		globalThis.dispatchEvent(new Event('pagehide'));
+		await vi.waitFor(() => expect(saves).toHaveBeenCalled());
+		await client.destroy();
+		saves.mockClear();
+		globalThis.dispatchEvent(new Event('pagehide'));
+		await new Promise((r) => setTimeout(r, 20));
+		expect(saves).not.toHaveBeenCalled();
+	});
 });
