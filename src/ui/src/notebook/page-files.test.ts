@@ -1,5 +1,5 @@
 import { MAX_FILE_BYTES } from 'ooxml-core/notebook';
-import { belowContent, mimeOf, placeFiles } from './page-files';
+import { belowContent, mimeOf, pictureFrame, placeFiles } from './page-files';
 
 const file = (name: string, size: number, type = ''): File =>
 	({
@@ -36,5 +36,13 @@ describe('placing files on a page', () => {
 		expect(belowContent(containers)).toEqual({ x: 48, y: 344 });
 		// A text box drawn taller than its stored height pushes new items below what it shows.
 		expect(belowContent(containers, new Map([['text', 400]]))).toEqual({ x: 48, y: 524 });
+	});
+
+	it('frames a picture in its own shape, small and large', () => {
+		expect(pictureFrame({ width: 10, height: 10 })).toEqual({ width: 40, height: 40 });
+		expect(pictureFrame({ width: 960, height: 480 })).toEqual({ width: 480, height: 240 });
+		expect(pictureFrame({ width: 200, height: 100 })).toEqual({ width: 200, height: 100 });
+		// A thin strip keeps its shape at the smallest height.
+		expect(pictureFrame({ width: 400, height: 4 })).toEqual({ width: 1600, height: 16 });
 	});
 });

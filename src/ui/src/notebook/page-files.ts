@@ -1,7 +1,13 @@
 // Files dropped, pasted or inserted on a page become containers: pictures at their natural size
 // (scaled down to fit), Office files as live embeds, anything else as a card. Several files cascade
 // from the drop point so none hides another.
-import { type BinaryItemInput, MAX_FILE_BYTES, isImageMime } from 'ooxml-core/notebook';
+import {
+	type BinaryItemInput,
+	MAX_CONTAINER_WIDTH,
+	MAX_FILE_BYTES,
+	MIN_CONTAINER_WIDTH,
+	isImageMime,
+} from 'ooxml-core/notebook';
 import { detectOfficeKind } from 'ooxml-core/opc';
 
 export interface PlacedFile {
@@ -31,6 +37,24 @@ async function pictureSize(blob: Blob): Promise<{ width: number; height: number 
 }
 
 /** The mime type, guessed from the name when the platform gave none. */
+/**
+ * The frame a picture of `natural` size is placed in: at most `MAX_PICTURE_WIDTH` wide and at least
+ * the smallest frame, scaled by one factor so it keeps its shape (Word export draws it at this size).
+ */
+export function pictureFrame(natural: { width: number; height: number }): {
+	width: number;
+	height: number;
+} {
+	const w = Math.max(1, natural.width);
+	const h = Math.max(1, natural.height);
+	// Never wider than a frame can be, where the core would clamp it out of shape.
+	const scale = Math.min(
+		Math.max(Math.min(1, MAX_PICTURE_WIDTH / w), MIN_CONTAINER_WIDTH / w, 16 / h),
+		MAX_CONTAINER_WIDTH / w,
+	);
+	return { width: Math.round(w * scale), height: Math.round(h * scale) };
+}
+
 export function mimeOf(file: { name: string; type: string }): string {
 	if (file.type) return file.type;
 	const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
@@ -77,15 +101,13 @@ export async function placeFiles(
 		const x = Math.round(at.x + out.length * CASCADE);
 		const y = Math.round(at.y + out.length * CASCADE);
 		if (isImageMime(mime)) {
-			const natural = await pictureSize(file);
-			const scale = Math.min(1, MAX_PICTURE_WIDTH / natural.width);
+			const frame = pictureFrame(await pictureSize(file));
 			out.push({
 				kind: 'image',
 				input: {
 					x,
 					y,
-					width: Math.max(40, Math.round(natural.width * scale)),
-					height: Math.max(16, Math.round(natural.height * scale)),
+					...frame,
 					name: file.name || 'picture.png',
 					mime,
 					bytes,
