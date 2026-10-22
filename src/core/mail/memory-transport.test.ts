@@ -266,6 +266,28 @@ describe('createMemoryTransport', () => {
 		expect(new TextDecoder().decode(bytes)).toBe('notes');
 	});
 
+	it('writes the Bcc of the Sent copy into its file, never into a copy delivered', async () => {
+		const transport = createMemoryTransport();
+		const draft = {
+			to: [ada, me],
+			cc: [],
+			bcc: [{ name: 'Ben', email: 'ben@example.com' }],
+			subject: 'Plans',
+			text: 'Soon',
+			attachments: [],
+		};
+		await transport.send(draft);
+		const raw = async (mailboxId: string) => {
+			const { ids } = await transport.query({ mailboxId });
+			const message = await transport.message(ids[0]!);
+			const name = 'plans.eml';
+			return readEmail(await transport.download(message.blobId, { type: 'message/rfc822', name }));
+		};
+		expect((await raw('sent')).bcc).toEqual([{ name: 'Ben', email: 'ben@example.com' }]);
+		// To yourself too: the copy that arrives is what a recipient gets, without the Bcc.
+		expect((await raw('inbox')).bcc).toEqual([]);
+	});
+
 	it('keeps a copy of its own of the parts of a message imported, read as they were sent', async () => {
 		const transport = createMemoryTransport();
 		// An 8bit part is read as it was sent: its bytes are those of the message given.

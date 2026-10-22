@@ -259,7 +259,8 @@ export function messageFromRaw(
 /**
  * A stored message as raw RFC 5322 bytes (its `.eml`), written from what is kept of it; one with no
  * From is written from `account`, one with only HTML with the HTML's text as its plain part
- * (`plainText`). A draft keeps its Bcc, as a client's own copy does.
+ * (`plainText`). Its Bcc is written as kept: a draft's and the Sent copy's, a client's own copies,
+ * as a JMAP server stores them; a copy delivered keeps none.
  */
 export function messageBytes(target: MailMessage, blobs: BlobStore, account: string): Uint8Array {
 	return writeEmail(
@@ -284,6 +285,6 @@ export function messageBytes(target: MailMessage, blobs: BlobStore, account: str
 			references: target.references,
 			date: target.sentAt ?? target.receivedAt,
 		},
-		{ includeBcc: target.keywords[DRAFT] === true },
+		{ includeBcc: true },
 	);
 }
