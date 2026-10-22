@@ -175,6 +175,13 @@ describe('parseIcs: scheduling messages', () => {
 				`METHOD:${method} answers an invitation and holds no event to import`,
 			]);
 		}
+		// Occurrences added to a series would replace the series they belong to.
+		expect(parseIcs(calendar('METHOD:ADD', ...event))).toEqual({
+			events: [],
+			unsupported: [
+				'METHOD:ADD adds occurrences to an event it does not hold, so nothing is imported',
+			],
+		});
 		// Lower case is the same method (RFC 5545 values are case-insensitive).
 		expect(parseIcs(calendar('METHOD:counter', ...event)).events).toEqual([]);
 	});

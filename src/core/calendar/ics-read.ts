@@ -59,11 +59,16 @@ export interface IcsImport {
 /** Calendar properties that hold nothing an event shows. */
 const CALENDAR = new Set(['VERSION', 'PRODID', 'CALSCALE', 'METHOD']);
 /**
- * The scheduling methods (RFC 5546 3.2) whose events are no event to keep: an attendee's answer,
- * a proposed change and its refusal, a request for the latest copy. Imported, each would replace
- * the event of the same UID with what it says.
+ * The scheduling methods (RFC 5546 3.2) whose events are no event to keep, and why: an attendee's
+ * answer, a proposed change and its refusal, a request for the latest copy, and occurrences added
+ * to a series. Imported, each would replace the event of the same UID with what it says.
  */
-const ANSWERS = new Set(['REPLY', 'COUNTER', 'DECLINECOUNTER', 'REFRESH']);
+const NOT_EVENTS = new Map<string, string>([
+	...['REPLY', 'COUNTER', 'DECLINECOUNTER', 'REFRESH'].map(
+		(method) => [method, 'answers an invitation and holds no event to import'] as const,
+	),
+	['ADD', 'adds occurrences to an event it does not hold, so nothing is imported'],
+]);
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
@@ -277,8 +282,9 @@ function readCalendars(
 			.find((p) => p.name === 'METHOD')
 			?.value.trim()
 			.toUpperCase();
-		if (method && ANSWERS.has(method)) {
-			note(`METHOD:${method} answers an invitation and holds no event to import`);
+		const why = method ? NOT_EVENTS.get(method) : undefined;
+		if (why) {
+			note(`METHOD:${method} ${why}`);
 			continue;
 		}
 		for (const c of calendar.components) {
