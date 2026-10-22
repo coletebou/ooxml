@@ -49,4 +49,19 @@ describe('the mail view', () => {
 			updates.mockRestore();
 		}
 	});
+
+	it('offers no "select all" over an empty list, where a click would show a selection', async () => {
+		const app = document.createElement('mail-app') as MailApp;
+		document.body.append(app);
+		await until(() => (app.client?.getState().conversations.length ?? 0) > 0);
+		await app.client!.search('no message says zqxjv');
+		await until(() => app.client!.getState().conversations.length === 0);
+		await app.updateComplete;
+		const box = app.shadowRoot!.querySelector<HTMLInputElement>('.list-toolbar input')!;
+		box.click();
+		await app.updateComplete;
+		expect(app.client!.getState().selection).toEqual([]);
+		expect(box.disabled).toBe(true);
+		expect(box.checked).toBe(false);
+	});
 });

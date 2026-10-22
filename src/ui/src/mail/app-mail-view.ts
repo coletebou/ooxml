@@ -109,6 +109,7 @@ function listToolbar(app: MailApp, mail: MailClient, state: MailState) {
 		<input
 			type="checkbox"
 			aria-label=${i18n.t('app.selectAll')}
+			?disabled=${!state.conversations.length}
 			.checked=${all}
 			.indeterminate=${some && !all}
 			@change=${() => (all ? mail.clearSelection() : mail.selectAll())}
