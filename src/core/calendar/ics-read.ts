@@ -58,6 +58,12 @@ export interface IcsImport {
 
 /** Calendar properties that hold nothing an event shows. */
 const CALENDAR = new Set(['VERSION', 'PRODID', 'CALSCALE', 'METHOD']);
+/**
+ * The scheduling methods (RFC 5546 3.2) whose events are no event to keep: an attendee's answer,
+ * a proposed change and its refusal, a request for the latest copy. Imported, each would replace
+ * the event of the same UID with what it says.
+ */
+const ANSWERS = new Set(['REPLY', 'COUNTER', 'DECLINECOUNTER', 'REFRESH']);
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
@@ -266,7 +272,15 @@ function readCalendars(
 	});
 	const drafts: EventDraft[] = [];
 	const skipped = new Map<string, number>();
-	for (const { calendar, ctx } of read)
+	for (const { calendar, ctx } of read) {
+		const method = calendar.properties
+			.find((p) => p.name === 'METHOD')
+			?.value.trim()
+			.toUpperCase();
+		if (method && ANSWERS.has(method)) {
+			note(`METHOD:${method} answers an invitation and holds no event to import`);
+			continue;
+		}
 		for (const c of calendar.components) {
 			if (c.name === 'VTIMEZONE') continue;
 			if (c.name !== 'VEVENT') {
@@ -280,6 +294,7 @@ function readCalendars(
 				note('An event could not be read and was skipped');
 			}
 		}
+	}
 	for (const [name, n] of skipped)
 		note(`${plural(n, `${name} component`, `${name} components`)} not imported`);
 	return assemble(drafts, options, note);

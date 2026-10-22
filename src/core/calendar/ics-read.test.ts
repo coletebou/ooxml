@@ -160,6 +160,43 @@ describe('a calendar export', () => {
 	});
 });
 
+describe('parseIcs: scheduling messages', () => {
+	const event = vevent(
+		'UID:abc@example.com',
+		'DTSTART:20261022T140000Z',
+		'DTEND:20261022T150000Z',
+		'SUMMARY:Review',
+	);
+	it('reads no event from a reply, a counterproposal or a refresh, and says so', () => {
+		for (const method of ['REPLY', 'COUNTER', 'DECLINECOUNTER', 'REFRESH']) {
+			const read = parseIcs(calendar(`METHOD:${method}`, ...event));
+			expect(read.events, method).toEqual([]);
+			expect(read.unsupported, method).toEqual([
+				`METHOD:${method} answers an invitation and holds no event to import`,
+			]);
+		}
+		// Lower case is the same method (RFC 5545 values are case-insensitive).
+		expect(parseIcs(calendar('METHOD:counter', ...event)).events).toEqual([]);
+	});
+
+	it('reads the events a published calendar or an invitation holds', () => {
+		for (const method of ['PUBLISH', 'REQUEST'])
+			expect(
+				parseIcs(calendar(`METHOD:${method}`, ...event)).events.map((e) => e.title),
+				method,
+			).toEqual(['Review']);
+		// Two calendars in one file: the reply's events alone are left out.
+		const both = parseIcs(
+			calendar('METHOD:REQUEST', ...event) +
+				calendar(
+					'METHOD:REPLY',
+					...vevent('UID:other@example.com', 'DTSTART:20261023T140000Z', 'SUMMARY:Answer'),
+				),
+		);
+		expect(both.events.map((e) => e.title)).toEqual(['Review']);
+	});
+});
+
 /** An invitation the way a common mail server writes one: a display name as the TZID. */
 const INVITATION = ics(
 	'BEGIN:VCALENDAR',
