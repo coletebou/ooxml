@@ -114,6 +114,30 @@ describe('threadConversations (RFC 5256 REFERENCES)', () => {
 		expect(elapsed).toBeLessThan(2000);
 	});
 
+	it('drops the missing messages of a long chain without copying the replies below each', () => {
+		// A thousand messages whose References, of 300 ids each, go on from one another's last, and
+		// a thousand replies to the last: three hundred thousand missing messages above them all.
+		const step = 299;
+		const ref = (i: number) => `r${i}@example.test`;
+		const chain = Array.from({ length: 1000 }, (_, k) =>
+			summary(`c${k}`, {
+				references: Array.from({ length: step + 1 }, (_, i) => ref(k * step + i)),
+			}),
+		);
+		const last = ref(1000 * step);
+		const replies = Array.from({ length: 1000 }, (_, k) =>
+			summary(`reply${k}`, { references: [last], minute: 1 }),
+		);
+		const started = performance.now();
+		const [only, ...others] = threadConversations([...chain, ...replies]);
+		const elapsed = performance.now() - started;
+		expect(others).toEqual([]);
+		expect(only!.entries).toHaveLength(2000);
+		// Each missing message held a copy of every reply below it: seconds and gigabytes. Generous,
+		// so a loaded runner does not flake.
+		expect(elapsed).toBeLessThan(2000);
+	});
+
 	it('walks a long References chain once however often the header repeats its ends', () => {
 		const n = 60_000;
 		const chain = Array.from({ length: n }, (_, i) => `r${i}@example.test`);

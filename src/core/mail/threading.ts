@@ -169,19 +169,28 @@ function sortChildren(roots: readonly Container[]): void {
 	for (const container of preOrder(roots).reverse()) container.children.sort(byDate);
 }
 
-/** Step 3: drop empty placeholders, promoting their children (not to the root, unless one). */
+/**
+ * Step 3: drop empty placeholders, promoting their children (not to the root, unless one). From
+ * the top down, each placeholder is opened once and each message moved once: from the bottom up,
+ * every placeholder of a long missing chain held its own copy of all the messages below it, as
+ * many as the chain is long times the replies at its end (References come from senders).
+ */
 function prune(roots: Container[]): Container[] {
-	const order = preOrder(roots);
-	for (let i = order.length - 1; i >= 0; i--) {
-		const container = order[i]!;
+	const stack = [...roots];
+	while (stack.length) {
+		const container = stack.pop()!;
 		const next: Container[] = [];
-		for (const child of container.children) {
-			if (child.email) next.push(child);
-			else
-				for (const grandchild of child.children) {
-					grandchild.parent = container;
-					next.push(grandchild);
-				}
+		// The children in order, a placeholder's own in its place.
+		const pending = [...container.children].reverse();
+		while (pending.length) {
+			const child = pending.pop()!;
+			if (!child.email) {
+				for (let i = child.children.length - 1; i >= 0; i--) pending.push(child.children[i]!);
+				continue;
+			}
+			child.parent = container;
+			next.push(child);
+			stack.push(child);
 		}
 		container.children = next;
 	}
