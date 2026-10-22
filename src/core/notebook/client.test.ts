@@ -708,6 +708,34 @@ describe('notebook client twelfth review round', () => {
 	});
 });
 
+describe('notebook client undo of new items', () => {
+	it('undoes making a section, with the page it came with', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		const before = client.getState().sections.length;
+		const made = client.createSection({ name: 'New one' });
+		await settle();
+		expect(client.getState().sections.map((s) => s.id)).toContain(made);
+		client.undo();
+		await settle();
+		expect(client.getState().sections.map((s) => s.id)).not.toContain(made);
+		expect(client.getState().sections).toHaveLength(before);
+	});
+
+	it('undoes adding a text box that came with its text', async () => {
+		const client = start(createMemoryStorage(), createChannelHub());
+		await client.whenReady();
+		await settle();
+		client.addText({ x: 10, y: 10 }, [para('typed in one go')]);
+		await settle();
+		expect(client.getState().containers).toHaveLength(1);
+		client.undo();
+		await settle();
+		expect(client.getState().containers).toHaveLength(0);
+	});
+});
+
 describe('notebook client saves', () => {
 	it('keeps a failed save for the one queued behind it, so closing loses nothing', async () => {
 		const inner = createMemoryStorage();
