@@ -1,6 +1,6 @@
 import { createMailClient } from './client';
 import { createMemoryTransport, type MemoryTransport } from './memory-transport';
-import { until } from './test-support/client';
+import { createGate, until } from './test-support/client';
 
 const T0 = Date.UTC(2026, 0, 5, 9, 0, 0);
 const ada = { name: 'Ada', email: 'ada@example.com' };
@@ -94,5 +94,28 @@ describe('destroying a mail client', () => {
 		for (const run of timers.splice(0)) run();
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('marks nothing read that it was opening when it was destroyed, on a transport kept open', async () => {
+		for (const destroyed of [false, true]) {
+			const { transport } = hostTransport();
+			await transport.update({ m1: { keywords: { $seen: false } } });
+			const gate = createGate();
+			const read = transport.message;
+			transport.message = async (id) => {
+				await gate.pass();
+				return read(id);
+			};
+			const client = createMailClient({ transport, closeTransport: false });
+			await until(client, (s) => s.status === 'ready' && s.conversations.length === 1);
+			gate.holding = true;
+			const opening = client.open(client.getState().conversations[0]!.id);
+			if (destroyed) client.destroy();
+			gate.release();
+			await opening;
+			// Opened and shown, it is read; destroyed before it was shown, it stays unread.
+			expect(!!(await read('m1')).keywords.$seen, String(destroyed)).toBe(!destroyed);
+			if (!destroyed) client.destroy();
+		}
 	});
 });

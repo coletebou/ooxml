@@ -96,6 +96,8 @@ export function createMailClient(options: MailClientOptions): MailClient {
 			core.patch({ focusedId: id });
 			core.showOpen();
 			const loaded = await core.loadBodies(id, true);
+			// Destroyed meanwhile, it showed nothing: nothing is marked read on a transport kept open.
+			if (core.destroyed) return;
 			const conversation = core.conversationsById.get(id);
 			if (core.openId === id && conversation && (options.markReadOnOpen ?? true)) {
 				// Only what could be read: a message whose body did not load stays unread.
