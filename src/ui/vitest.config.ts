@@ -45,6 +45,16 @@ for (const file of testFiles) {
 // Component styles are `.css?raw` text; return the real CSS so tests can read it.
 const css = { include: [/\.css\?raw$/] };
 
+// The package imports its own subpaths by name, directly or through the pptx locales package;
+// resolve them to source, not to dist (the test jobs do not build dist).
+const ownSubpaths = [
+	{ find: /^ooxml-ui\/pptx\/dom$/, replacement: `${uiSource}/pptx/dom/index.ts` },
+	{
+		find: /^ooxml-ui\/chart-format-locales$/,
+		replacement: `${uiSource}/chart/format-pane-locales/index.ts`,
+	},
+];
+
 const AREAS = {
 	// happy-dom is the default DOM (about twice as fast to set up); the files that need jsdom
 	// behaviour (shadow-root focus, global confirm, and similar) say so with
@@ -53,8 +63,7 @@ const AREAS = {
 		resolve: {
 			alias: [
 				{ find: /^ooxml-core\/(.+)$/, replacement: `${coreSource}/$1/index.ts` },
-				// The package imports its own subpaths by name; resolve them to source, not to dist.
-				{ find: /^ooxml-ui\/pptx\/dom$/, replacement: `${uiSource}/pptx/dom/index.ts` },
+				...ownSubpaths,
 				// Node resolves solid-js to its server build, where effects never run; the bindings
 				// tests mount Solid components in a DOM, so they need the browser build.
 				{
@@ -76,7 +85,9 @@ const AREAS = {
 		},
 	},
 	pptx: {
-		resolve: { alias: [{ find: /^ooxml-core\/(.+)$/, replacement: `${coreSource}/$1` }] },
+		resolve: {
+			alias: [{ find: /^ooxml-core\/(.+)$/, replacement: `${coreSource}/$1` }, ...ownSubpaths],
+		},
 		test: { css, globals: true, testTimeout: 30_000, hookTimeout: 30_000 },
 	},
 } as const;
