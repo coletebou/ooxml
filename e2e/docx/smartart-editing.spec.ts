@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import JSZip from 'jszip';
 import { savedDocument } from './saved-document';
-import { dialogByHeading, fileInput, newDocument, reveal } from './helpers';
+import { dialogByHeading, fileInput, fileNameLabel, newDocument, reveal } from './helpers';
 
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 // Word's own output (Basic Block List, Alpha..Epsilon); provenance in src/core PROVENANCE.md.
@@ -114,8 +114,11 @@ for (const framework of ['vanilla', 'react', 'vue', 'angular', 'svelte', 'solid'
 		const document = await zip.file('word/document.xml')!.async('string');
 		expect(document).toContain('<dgm:relIds');
 
-		// Reload the saved file: the diagram comes back with its nodes.
+		// Reload the saved file: the diagram comes back with its nodes. The open document holds one
+		// diagram too, so wait for the file name, which changes once the reloaded document is drawn: a
+		// click before that selects the old diagram, and the reload then clears the selection.
 		await open(page, bytes, `reloaded-${framework}.docx`);
+		await expect(fileNameLabel(page)).toHaveText(`reloaded-${framework}.docx`);
 		await expect(diagrams(editor)).toHaveCount(1);
 		await diagrams(editor)
 			.first()
