@@ -14,12 +14,12 @@ import type {
 	SmartArtLayout,
 } from 'pptx-viewer-core';
 
-import type { HyperlinkEditData } from '../components/hyperlink-edit-types';
 import { DEFAULT_TABLE_ROWS, DEFAULT_TABLE_COLUMNS, DEFAULT_TEXT_FONT_SIZE } from '../constants';
 import type { CanvasSize, SupportedShapeType } from '../types';
 import { generateElementId } from '../utils/generate-id';
 import { createFileHandlers } from './insert-file-handlers';
 import { createStructuredElementHandlers } from './insert-structured-elements';
+import type { StructuredElementHandlers } from './insert-structured-elements';
 import type { CanvasImagePasteHandlers } from './useCanvasImagePaste';
 import type { EditorHistoryResult } from './useEditorHistory';
 import type { ElementOperations } from './useElementOperations';
@@ -44,7 +44,8 @@ export interface InsertElementHandlers {
 	handleInsertSmartArt: (layout: SmartArtLayout, defaultItems: string[]) => void;
 	handleInsertEquation: (omml: Record<string, unknown>) => void;
 	handleUpdateEquation: (omml: Record<string, unknown>) => void;
-	handleHyperlinkConfirm: (data: HyperlinkEditData) => void;
+	handleHyperlinkConfirm: StructuredElementHandlers['handleHyperlinkConfirm'];
+	handleHyperlinkRemove: () => void;
 	handleInsertField: (fieldType: string, value?: string) => void;
 	handleAddActionButton: (shapeType: string) => void;
 	handleAddInkElement: (ink: InkPptxElement) => void;

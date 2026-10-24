@@ -9,6 +9,7 @@ import {
  * PowerPoint viewer.  Keeps the orchestrator component focused on layout.
  */
 import type {
+	PptxElement,
 	PptxPresentationProperties,
 	PptxSlide,
 	PptxCoreProperties,
@@ -65,9 +66,7 @@ export interface ViewerDialogGroupProps {
 	digitalSignatureCount: number;
 	presentationProperties: PptxPresentationProperties;
 	customShows: Array<{ id: string; name: string; slideRIds: string[] }>;
-	selectedElements: Array<{
-		actionClick?: { url?: string; tooltip?: string; action?: string };
-	}>;
+	selectedElements: readonly PptxElement[];
 	isEncryptedDialogOpen: boolean;
 	setIsEncryptedDialogOpen: (v: boolean) => void;
 	showKeepAnnotationsDialog: boolean;
@@ -209,11 +208,16 @@ export function ViewerDialogGroup(props: ViewerDialogGroupProps) {
 
 			<HyperlinkEditDialog
 				open={dialogs.isHyperlinkDialogOpen && isDialogAvailable(customization, 'hyperlink')}
-				initialUrl={selectedElements[0]?.actionClick?.url}
-				initialTooltip={selectedElements[0]?.actionClick?.tooltip}
-				initialAction={selectedElements[0]?.actionClick?.action}
+				element={selectedElements[0]}
 				slideCount={slides.length}
-				onConfirm={insertHandlers.handleHyperlinkConfirm}
+				onConfirm={(draft) => {
+					insertHandlers.handleHyperlinkConfirm(draft, slides.length);
+					dialogs.setIsHyperlinkDialogOpen(false);
+				}}
+				onRemove={() => {
+					insertHandlers.handleHyperlinkRemove();
+					dialogs.setIsHyperlinkDialogOpen(false);
+				}}
 				onCancel={() => dialogs.setIsHyperlinkDialogOpen(false)}
 			/>
 

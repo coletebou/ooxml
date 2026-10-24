@@ -1,3 +1,11 @@
+import {
+	HYPERLINK_TARGET_TYPES,
+	hasHyperlinkEditTarget,
+	seedHyperlinkEditDraft,
+	setHyperlinkEditField,
+} from 'ooxml-ui/pptx';
+import type { HyperlinkEditDraft, HyperlinkEditFieldName } from 'ooxml-ui/pptx';
+import type { PptxElement } from 'pptx-viewer-core';
 import React, { useState, useEffect, useRef } from 'react';
 import { LuX } from 'react-icons/lu';
 
@@ -5,9 +13,6 @@ import { useModalDismissDrag } from '../hooks';
 import { useTranslation } from '../i18n/use-translation';
 import { cn } from '../utils';
 import { DialogFooter } from './DialogFooter';
-import type { HyperlinkTargetType, HyperlinkActionVerb } from './hyperlink-edit-types';
-import { ACTION_VERB_MAP } from './hyperlink-edit-types';
-import { detectTargetType, parseEmailUrl, parseSlideFromUrl } from './hyperlink-edit-utils';
 import { HyperlinkTabContent } from './HyperlinkTabContent';
 
 /**
@@ -15,91 +20,53 @@ import { HyperlinkTabContent } from './HyperlinkTabContent';
  */
 interface HyperlinkEditDialogProps {
 	open: boolean;
-	initialUrl?: string;
-	initialTooltip?: string;
-	initialAction?: string;
+	/** The element being linked: its click action fills the fields each time the dialog opens. */
+	element?: PptxElement;
 	slideCount: number;
-	onConfirm: (data: {
-		targetType: HyperlinkTargetType;
-		url: string;
-		tooltip: string;
-		emailAddress: string;
-		emailSubject: string;
-		slideNumber: number;
-		filePath: string;
-		actionVerb: HyperlinkActionVerb;
-	}) => void;
+	onConfirm: (draft: HyperlinkEditDraft) => void;
+	/** Remove link, offered while the element links anywhere. */
+	onRemove: () => void;
 	onCancel: () => void;
 }
 
 /**
  * Tabbed modal dialog for creating or editing hyperlinks.
  *
- * Supports five target types via tabs: URL, Email, Slide, File, and
- * Action (navigation verbs like next/previous slide). The initial tab
- * is auto-detected from the provided `initialUrl` / `initialAction`.
- *
- * All field state is managed locally and emitted as a single object
- * through `onConfirm` when the user applies the changes.
+ * Its targets, their fields and the patch they make are the shared model in `ooxml-ui/pptx`
+ * (`hyperlink-edit-target`): a web address, an email address, a slide of this deck, a file, or a
+ * show jump. The panel mounts only while the dialog is open, so the fields are seeded from the
+ * element's click action each time it opens, and `onConfirm` gets the edited fields.
  *
  * @param props - {@link HyperlinkEditDialogProps}
  * @returns The dialog element, or `null` when `open` is `false`.
  */
 export function HyperlinkEditDialog({
 	open,
-	initialUrl,
-	initialTooltip,
-	initialAction,
+	...panel
+}: HyperlinkEditDialogProps): React.ReactElement | null {
+	return open ? <HyperlinkEditPanel {...panel} /> : null;
+}
+
+function HyperlinkEditPanel({
+	element,
 	slideCount,
 	onConfirm,
+	onRemove,
 	onCancel,
-}: HyperlinkEditDialogProps): React.ReactElement | null {
+}: Omit<HyperlinkEditDialogProps, 'open'>): React.ReactElement {
 	const { t } = useTranslation();
 	const { panelStyle, handlers: dragHandlers } = useModalDismissDrag(onCancel);
 	const inputRef = useRef<HTMLInputElement>(null);
-
-	const detectedType = detectTargetType(initialUrl, initialAction);
-	const emailParts = parseEmailUrl(initialUrl || '');
-	const detectedSlide = parseSlideFromUrl(initialUrl, initialAction);
-	const detectedVerb = initialAction
-		? ACTION_VERB_MAP[initialAction.toLowerCase()] || 'nextSlide'
-		: 'nextSlide';
-
-	const [targetType, setTargetType] = useState<HyperlinkTargetType>(detectedType);
-	const [url, setUrl] = useState(
-		detectedType === 'email' || detectedType === 'slide' || detectedType === 'action'
-			? ''
-			: initialUrl || '',
-	);
-	const [tooltip, setTooltip] = useState(initialTooltip || '');
-	const [emailAddress, setEmailAddress] = useState(emailParts.address);
-	const [emailSubject, setEmailSubject] = useState(emailParts.subject);
-	const [slideNumber, setSlideNumber] = useState(detectedSlide);
-	const [filePath, setFilePath] = useState(detectedType === 'file' ? initialUrl || '' : '');
-	const [actionVerb, setActionVerb] = useState<HyperlinkActionVerb>(detectedVerb);
+	const [draft, setDraft] = useState(() => seedHyperlinkEditDraft(element?.actionClick));
 
 	useEffect(() => {
-		if (open) {
-			setTimeout(() => inputRef.current?.focus(), 50);
-		}
-	}, [open]);
+		const timer = setTimeout(() => inputRef.current?.focus(), 50);
+		return () => clearTimeout(timer);
+	}, []);
 
-	if (!open) {
-		return null;
-	}
-
-	const handleConfirm = () => {
-		onConfirm({
-			targetType,
-			url,
-			tooltip,
-			emailAddress,
-			emailSubject,
-			slideNumber,
-			filePath,
-			actionVerb,
-		});
-	};
+	const handleConfirm = () => onConfirm(draft);
+	const setField = (name: HyperlinkEditFieldName, value: string) =>
+		setDraft((current) => setHyperlinkEditField(current, name, value));
 
 	const tabCls = (active: boolean) =>
 		cn(
@@ -119,7 +86,11 @@ export function HyperlinkEditDialog({
 				style={{ zIndex: 1201 }}
 				className='fixed inset-0 flex items-center justify-center pointer-events-none'
 			>
+				{/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stopPropagation only, so a click inside the panel doesn't bubble to the backdrop's close handler */}
 				<div
+					role='dialog'
+					aria-modal='true'
+					aria-label={t('pptx.hyperlink.editTitle')}
 					style={panelStyle}
 					className='pointer-events-auto w-[440px] rounded-lg border border-border bg-popover shadow-2xl max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:w-full max-md:max-h-[88dvh] max-md:overflow-y-auto max-md:rounded-t-2xl max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:pb-[max(env(safe-area-inset-bottom),0px)]'
 					onClick={(e) => e.stopPropagation()}
@@ -134,6 +105,7 @@ export function HyperlinkEditDialog({
 						</h2>
 						<button
 							type='button'
+							aria-label={t('pptx.common.close')}
 							className='text-muted-foreground hover:text-foreground'
 							onClick={onCancel}
 						>
@@ -141,63 +113,26 @@ export function HyperlinkEditDialog({
 						</button>
 					</div>
 
-					{/* Tab bar */}
+					{/* Tab bar: one button per target, the active one pressed. */}
 					<div className='flex gap-1 px-4 pt-2 border-b border-border'>
-						<button
-							type='button'
-							className={tabCls(targetType === 'url')}
-							onClick={() => setTargetType('url')}
-						>
-							{t('pptx.hyperlink.tabUrl')}
-						</button>
-						<button
-							type='button'
-							className={tabCls(targetType === 'email')}
-							onClick={() => setTargetType('email')}
-						>
-							{t('pptx.hyperlink.tabEmail')}
-						</button>
-						<button
-							type='button'
-							className={tabCls(targetType === 'slide')}
-							onClick={() => setTargetType('slide')}
-						>
-							{t('pptx.hyperlink.tabSlide')}
-						</button>
-						<button
-							type='button'
-							className={tabCls(targetType === 'file')}
-							onClick={() => setTargetType('file')}
-						>
-							{t('pptx.hyperlink.tabFile')}
-						</button>
-						<button
-							type='button'
-							className={tabCls(targetType === 'action')}
-							onClick={() => setTargetType('action')}
-						>
-							{t('pptx.hyperlink.tabAction')}
-						</button>
+						{HYPERLINK_TARGET_TYPES.map(({ type, labelKey }) => (
+							<button
+								key={type}
+								type='button'
+								aria-pressed={draft.targetType === type}
+								className={tabCls(draft.targetType === type)}
+								onClick={() => setDraft((current) => ({ ...current, targetType: type }))}
+							>
+								{t(labelKey)}
+							</button>
+						))}
 					</div>
 
 					{/* Body */}
 					<HyperlinkTabContent
-						targetType={targetType}
-						url={url}
-						setUrl={setUrl}
-						tooltip={tooltip}
-						setTooltip={setTooltip}
-						emailAddress={emailAddress}
-						setEmailAddress={setEmailAddress}
-						emailSubject={emailSubject}
-						setEmailSubject={setEmailSubject}
-						slideNumber={slideNumber}
-						setSlideNumber={setSlideNumber}
+						draft={draft}
+						setField={setField}
 						slideCount={slideCount}
-						filePath={filePath}
-						setFilePath={setFilePath}
-						actionVerb={actionVerb}
-						setActionVerb={setActionVerb}
 						inputRef={inputRef}
 						inputCls={inputCls}
 						onEnterConfirm={handleConfirm}
@@ -207,10 +142,22 @@ export function HyperlinkEditDialog({
 					<div className='flex justify-end gap-2 px-4 py-3 border-t border-border'>
 						<DialogFooter
 							actions={[
+								...(hasHyperlinkEditTarget(element)
+									? [
+											{
+												id: 'remove',
+												label: t('pptx.hyperlinkDialog.removeLink'),
+												variant: 'danger' as const,
+												align: 'start' as const,
+											},
+										]
+									: []),
 								{ id: 'cancel', label: t('pptx.common.cancel') },
 								{ id: 'apply', label: t('pptx.common.apply'), variant: 'primary' },
 							]}
-							onAction={(id) => (id === 'apply' ? handleConfirm() : onCancel())}
+							onAction={(id) =>
+								id === 'apply' ? handleConfirm() : id === 'remove' ? onRemove() : onCancel()
+							}
 						/>
 					</div>
 				</div>

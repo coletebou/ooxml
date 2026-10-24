@@ -325,4 +325,73 @@ describe('handleHyperlinkConfirm', () => {
 		expect(deps.ops.updateElementById).not.toHaveBeenCalled();
 		expect(deps.history.markDirty).not.toHaveBeenCalled();
 	});
+
+	const linked = (actionClick: PptxElement['actionClick']): PptxElement =>
+		({ id: 'el1', type: 'shape', x: 0, y: 0, width: 100, height: 50, actionClick }) as PptxElement;
+	const fields = {
+		targetType: 'url' as const,
+		url: '',
+		tooltip: '',
+		emailAddress: '',
+		emailSubject: '',
+		slideNumber: 1,
+		filePath: '',
+		actionVerb: 'nextSlide' as const,
+	};
+	const applied = (deps: StructuredElementDeps) =>
+		(deps.ops.updateElementById as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[1]);
+
+	it("links to a slide by its place in the deck and keeps the action's own settings", () => {
+		const deps = makeDeps({
+			selectedElements: [
+				linked({
+					url: 'https://example.com',
+					highlightClick: true,
+					soundRId: 'rId9',
+					soundPath: '../media/c.wav',
+				}),
+			],
+		});
+		createStructuredElementHandlers(deps).handleHyperlinkConfirm({
+			...fields,
+			targetType: 'slide',
+			slideNumber: 2,
+		});
+		// No `slide2.xml` address: part names follow the deck order only until a slide is moved.
+		expect(applied(deps)).toStrictEqual([
+			{
+				actionClick: {
+					action: 'ppaction://hlinksldjump',
+					targetSlideIndex: 1,
+					highlightClick: true,
+					soundRId: 'rId9',
+					soundPath: '../media/c.wav',
+				},
+			},
+		]);
+	});
+
+	it('keeps a link the dialog left as it was, and a slide jump inside the deck', () => {
+		const deps = makeDeps({
+			selectedElements: [linked({ rId: 'rId4', url: 'https://example.com', tooltip: 'Old' })],
+		});
+		const handlers = createStructuredElementHandlers(deps);
+		handlers.handleHyperlinkConfirm({ ...fields, url: 'https://example.com', tooltip: 'New' });
+		handlers.handleHyperlinkConfirm({ ...fields, url: 'https://example.com', tooltip: 'Old' });
+		handlers.handleHyperlinkConfirm({ ...fields, targetType: 'slide', slideNumber: 9 }, 3);
+		expect(applied(deps)).toStrictEqual([
+			{ actionClick: { rId: 'rId4', url: 'https://example.com', tooltip: 'New' } },
+			{ actionClick: { action: 'ppaction://hlinksldjump', targetSlideIndex: 2 } },
+		]);
+		expect(deps.history.markDirty).toHaveBeenCalledTimes(2);
+	});
+
+	it('removes the link, a slide jump made in the editor included', () => {
+		const deps = makeDeps({
+			selectedElements: [linked({ action: 'ppaction://hlinksldjump', targetSlideIndex: 1 })],
+		});
+		createStructuredElementHandlers(deps).handleHyperlinkRemove();
+		expect(applied(deps)).toStrictEqual([{ actionClick: undefined }]);
+		expect(deps.history.markDirty).toHaveBeenCalledOnce();
+	});
 });

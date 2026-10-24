@@ -274,6 +274,7 @@ describe('insertElementHandlers type', () => {
 			handleInsertSmartArt: vi.fn<() => void>(),
 			handleInsertEquation: vi.fn<() => void>(),
 			handleHyperlinkConfirm: vi.fn<() => void>(),
+			handleHyperlinkRemove: vi.fn<() => void>(),
 			handleInsertField: vi.fn<() => void>(),
 			handleAddActionButton: vi.fn<() => void>(),
 			handleAddInkElement: vi.fn<() => void>(),
@@ -281,7 +282,7 @@ describe('insertElementHandlers type', () => {
 			handleImageFileChange: vi.fn<() => void>(),
 			handleMediaFileChange: vi.fn<() => void>(),
 		};
-		expect(Object.keys(handlers)).toHaveLength(12);
+		expect(Object.keys(handlers)).toHaveLength(13);
 	});
 });
 
