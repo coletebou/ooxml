@@ -1266,6 +1266,7 @@ const noopClose = (): void => undefined;
 				<pptx-hyperlink-dialog
 					[open]="docProperties.showHyperlink()"
 					[element]="selectedElement()"
+					[slideCount]="slideCount()"
 					(save)="docProperties.onHyperlinkSave($event)"
 					(close)="docProperties.showHyperlink.set(false)"
 				/>
