@@ -1330,6 +1330,7 @@ export * from './image-duotone-canvas';
 // Hyperlink-edit dialog patch-builders: turn a URL+tooltip draft into an
 // `{ actionClick }` element merge patch, reusing `hyperlink-security` guards.
 export * from './hyperlink-dialog';
+export * from './hyperlink-edit-target';
 // Find & replace across slide text segments (immutable transforms).
 export * from './find-replace';
 // Accessibility issue aggregation over a slide array (mirrors core's
