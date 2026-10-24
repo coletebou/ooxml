@@ -102,6 +102,64 @@ describe('hyperlinkDialog', () => {
 		expect(editor.slides[0]?.elements[0]?.actionClick?.url).toBeUndefined();
 	});
 
+	it('keeps the existing link when a blocked address is typed', () => {
+		const editor = makeEditor();
+		editor.applyElementPatch('el1', { actionClick: { url: 'https://example.com' } });
+		// `target` is mounted only after seeding the existing link above.
+		// eslint-disable-next-line one-var
+		const target = mountDialog(editor, vi.fn());
+
+		fillAndSave(target, `${'javascript'}:alert(1)`);
+
+		expect(editor.slides[0]?.elements[0]?.actionClick).toStrictEqual({
+			url: 'https://example.com',
+		});
+	});
+
+	it('links to a slide through the Slide tab, by its place in the deck', () => {
+		const editor = makeEditor();
+		editor.setSlides([
+			...editor.slides,
+			{ id: 's2', rId: 'rId2', slideNumber: 2, elements: [] },
+			{ id: 's3', rId: 'rId3', slideNumber: 3, elements: [] },
+		]);
+		editor.select('el1');
+		// `target` is mounted only after the deck has its three slides.
+		// eslint-disable-next-line one-var
+		const target = mountDialog(editor, vi.fn()),
+			slideTab = Array.from(
+				target.querySelectorAll<HTMLButtonElement>('button[aria-pressed]'),
+			).find((b) => b.textContent?.trim() === 'Slide');
+		slideTab?.click();
+		flushSync();
+		const slide = target.querySelector<HTMLInputElement>('input[aria-label="Slide number"]');
+		if (!slide) {
+			throw new Error('slide number field not found');
+		}
+		slide.value = '3';
+		slide.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		allButtons(target.querySelector('footer')!).at(-1)?.click();
+		flushSync();
+
+		expect(editor.slides[0]?.elements[0]?.actionClick).toStrictEqual({
+			action: 'ppaction://hlinksldjump',
+			targetSlideIndex: 2,
+		});
+	});
+
+	it('offers Remove link for a slide jump made in the editor', () => {
+		const editor = makeEditor();
+		editor.applyElementPatch('el1', {
+			actionClick: { action: 'ppaction://hlinksldjump', targetSlideIndex: 0 },
+		});
+		// `target` is mounted only after seeding the jump above.
+		// eslint-disable-next-line one-var
+		const target = mountDialog(editor, vi.fn());
+
+		expect(footerAction(target, 'remove')).toBeTruthy();
+	});
+
 	it('shows a Remove Link button only when the element already has a link, and clears it on click', () => {
 		const editor = makeEditor();
 		editor.applyElementPatch('el1', { actionClick: { url: 'https://example.com' } });
