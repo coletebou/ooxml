@@ -5,6 +5,7 @@ import {
 	buildClearHyperlinkPatch,
 	buildHyperlinkEditPatch,
 	hasHyperlinkEditTarget,
+	hyperlinkEditFieldText,
 	hyperlinkEditFields,
 	seedHyperlinkEditDraft,
 	setHyperlinkEditField,
@@ -132,7 +133,7 @@ const inputCls =
 					v-else
 					:type="field.control"
 					:aria-label="t(field.labelKey)"
-					:value="String(draft[field.name])"
+					:value="hyperlinkEditFieldText(draft, field.name)"
 					:min="field.control === 'number' ? 1 : undefined"
 					:max="field.control === 'number' ? props.slideCount : undefined"
 					:placeholder="field.placeholder"

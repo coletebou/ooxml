@@ -6,6 +6,7 @@
 		buildClearHyperlinkPatch,
 		buildHyperlinkEditPatch,
 		hasHyperlinkEditTarget,
+		hyperlinkEditFieldText,
 		hyperlinkEditFields,
 		seedHyperlinkEditDraft,
 		setHyperlinkEditField,
@@ -74,7 +75,7 @@
 						{#each HYPERLINK_ACTION_VERBS as opt (opt.verb)}<option value={opt.verb}>{t(opt.labelKey)}</option>{/each}
 					</pptx-ui-select>
 				{:else}
-					<input type={field.control} aria-label={t(field.labelKey)} placeholder={field.placeholder} min={field.control === 'number' ? 1 : undefined} max={field.control === 'number' ? editor.slides.length : undefined} value={String(draft[field.name])} oninput={(event) => setField(field.name, event.currentTarget.value)} onkeydown={onEnter} />
+					<input type={field.control} aria-label={t(field.labelKey)} placeholder={field.placeholder} min={field.control === 'number' ? 1 : undefined} max={field.control === 'number' ? editor.slides.length : undefined} value={hyperlinkEditFieldText(draft, field.name)} oninput={(event) => setField(field.name, event.currentTarget.value)} onkeydown={onEnter} />
 				{/if}
 				{#if field.name === 'slideNumber'}<small>{t('pptx.hyperlink.slideRange', { max: editor.slides.length })}</small>{/if}
 			</label>

@@ -30,6 +30,7 @@ import {
 	buildClearHyperlinkPatch,
 	buildHyperlinkEditPatch,
 	hasHyperlinkEditTarget,
+	hyperlinkEditFieldText,
 	hyperlinkEditFields,
 	seedHyperlinkEditDraft,
 	setHyperlinkEditField,
@@ -245,7 +246,7 @@ export class HyperlinkDialogComponent {
 	}
 
 	fieldValue(name: HyperlinkEditFieldName): string {
-		return String(this.draft()[name]);
+		return hyperlinkEditFieldText(this.draft(), name);
 	}
 
 	selectTarget(targetType: HyperlinkTargetType): void {

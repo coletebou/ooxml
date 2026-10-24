@@ -96,6 +96,19 @@ describe('hyperlinkEditDialog', () => {
 		expect(on.onRemove).toHaveBeenCalledOnce();
 	});
 
+	it('keeps an emptied slide number empty while it is retyped', () => {
+		const on = render(true, element({ action: 'ppaction://hlinksldjump', targetSlideIndex: 2 }));
+		type(field('pptx.hyperlink.slideLabel')!, '');
+		expect(field('pptx.hyperlink.slideLabel')?.value).toBe('');
+		type(field('pptx.hyperlink.slideLabel')!, '2');
+		act(() => {
+			field('pptx.hyperlink.slideLabel')!.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+			);
+		});
+		expect(on.onConfirm).toHaveBeenCalledWith(expect.objectContaining({ slideNumber: 2 }));
+	});
+
 	it('hands the edited fields to onConfirm', () => {
 		const on = render(true, element());
 		act(() =>

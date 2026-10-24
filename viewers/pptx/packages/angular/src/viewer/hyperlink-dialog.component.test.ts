@@ -101,6 +101,12 @@ describe('hyperlinkDialogComponent', () => {
 		expect(dialog.saved).toStrictEqual([{ actionClick: { action: JUMP, targetSlideIndex: 3 } }]);
 	});
 
+	it('keeps an emptied slide number empty while it is retyped', () => {
+		const dialog = mount(element({ action: JUMP, targetSlideIndex: 2 }));
+		dialog.type('Slide number', '');
+		expect(dialog.field('Slide number')?.value).toBe('');
+	});
+
 	it('applies nothing for a blocked address or unchanged fields', () => {
 		const dialog = mount(element({ rId: 'rId2', url: 'https://existing.test' }));
 		dialog.fixture.componentInstance.apply();

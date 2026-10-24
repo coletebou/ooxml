@@ -1,4 +1,4 @@
-import { HYPERLINK_ACTION_VERBS, hyperlinkEditFields } from 'ooxml-ui/pptx';
+import { HYPERLINK_ACTION_VERBS, hyperlinkEditFieldText, hyperlinkEditFields } from 'ooxml-ui/pptx';
 import type { HyperlinkEditDraft, HyperlinkEditFieldName } from 'ooxml-ui/pptx';
 import React from 'react';
 
@@ -73,7 +73,7 @@ export function HyperlinkTabContent({
 								placeholder={field.placeholder}
 								min={field.control === 'number' ? 1 : undefined}
 								max={field.control === 'number' ? slideCount : undefined}
-								value={String(draft[field.name])}
+								value={hyperlinkEditFieldText(draft, field.name)}
 								onChange={(e) => setField(field.name, e.target.value)}
 								onKeyDown={handleEnterKey}
 							/>

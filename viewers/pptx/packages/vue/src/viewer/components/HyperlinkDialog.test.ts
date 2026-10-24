@@ -201,6 +201,23 @@ describe('hyperlinkDialog', () => {
 		expect(patch).toStrictEqual({ actionClick: { ...loaded, tooltip: 'Go there' } });
 	});
 
+	it('keeps an emptied slide number empty while it is retyped', async () => {
+		const wrapper = mount(HyperlinkDialog, {
+			props: {
+				open: true,
+				element: element({ action: 'ppaction://hlinksldjump', targetSlideIndex: 2 }),
+			},
+			attachTo: document.body,
+		});
+		const slide = document.body.querySelector<HTMLInputElement>(
+			'input[aria-label="Slide number"]',
+		)!;
+		slide.value = '';
+		slide.dispatchEvent(new Event('input'));
+		await wrapper.vm.$nextTick();
+		expect(slide.value).toBe('');
+	});
+
 	it('prefills a slide-jump action on the Slide target', () => {
 		mount(HyperlinkDialog, {
 			props: {

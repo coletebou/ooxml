@@ -148,6 +148,22 @@ describe('hyperlinkDialog', () => {
 		});
 	});
 
+	it('keeps an emptied slide number empty while it is retyped', () => {
+		const editor = makeEditor();
+		editor.applyElementPatch('el1', {
+			actionClick: { action: 'ppaction://hlinksldjump', targetSlideIndex: 2 },
+		});
+		// `target` is mounted only after seeding the jump above.
+		// eslint-disable-next-line one-var
+		const target = mountDialog(editor, vi.fn()),
+			slide = target.querySelector<HTMLInputElement>('input[aria-label="Slide number"]')!;
+		slide.value = '';
+		slide.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		expect(slide.value).toBe('');
+	});
+
 	it('offers Remove link for a slide jump made in the editor', () => {
 		const editor = makeEditor();
 		editor.applyElementPatch('el1', {

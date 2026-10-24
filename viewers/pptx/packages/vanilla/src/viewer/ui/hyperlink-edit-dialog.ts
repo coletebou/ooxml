@@ -4,6 +4,7 @@ import {
 	buildClearHyperlinkPatch,
 	buildHyperlinkEditPatch,
 	hasHyperlinkEditTarget,
+	hyperlinkEditFieldText,
 	hyperlinkEditFields,
 	seedHyperlinkEditDraft,
 	setHyperlinkEditField,
@@ -89,7 +90,7 @@ export function openHyperlinkEditDialog(
 		}
 		const input = createEl(doc, 'input');
 		input.type = field.control;
-		input.value = String(draft[field.name]);
+		input.value = hyperlinkEditFieldText(draft, field.name);
 		input.setAttribute('aria-label', label);
 		if (field.placeholder) {
 			input.placeholder = field.placeholder;

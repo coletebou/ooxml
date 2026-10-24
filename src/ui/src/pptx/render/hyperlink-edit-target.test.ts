@@ -6,6 +6,7 @@ import {
 	buildHyperlinkEditPatch,
 	detectHyperlinkTargetType,
 	hasHyperlinkEditTarget,
+	hyperlinkEditFieldText,
 	hyperlinkEditFields,
 	parseEmailUrl,
 	seedHyperlinkEditDraft,
@@ -225,7 +226,24 @@ describe('setHyperlinkEditField', () => {
 			draft({ url: 'https://a.b' }),
 		);
 		expect(setHyperlinkEditField(draft({}), 'slideNumber', '3').slideNumber).toBe(3);
-		expect(setHyperlinkEditField(draft({ slideNumber: 3 }), 'slideNumber', '').slideNumber).toBe(1);
+		// An emptied slide number stays empty while it is retyped, and a patch then links to slide 1.
+		const emptied = setHyperlinkEditField(draft({ slideNumber: 3 }), 'slideNumber', '');
+		expect(hyperlinkEditFieldText(emptied, 'slideNumber')).toBe('');
+		expect(hyperlinkEditFieldText(draft({ slideNumber: 3 }), 'slideNumber')).toBe('3');
+		expect(
+			buildHyperlinkEditPatch(element(), { ...emptied, targetType: 'slide' })?.actionClick
+				?.targetSlideIndex,
+		).toBe(0);
+		// Slide 1 retyped as 0 or emptied is still the jump the element has: it stays as loaded.
+		const jump = element({ action: JUMP, rId: 'rId3', url: 'slide1.xml', targetSlideIndex: 0 });
+		for (const typed of ['0', '']) {
+			const edited = setHyperlinkEditField(
+				seedHyperlinkEditDraft(jump.actionClick),
+				'slideNumber',
+				typed,
+			);
+			expect(buildHyperlinkEditPatch(jump, edited, 4)).toBeUndefined();
+		}
 		expect(setHyperlinkEditField(draft({}), 'actionVerb', 'endShow').actionVerb).toBe('endShow');
 		expect(setHyperlinkEditField(draft({}), 'actionVerb', 'bogus').actionVerb).toBe('nextSlide');
 	});

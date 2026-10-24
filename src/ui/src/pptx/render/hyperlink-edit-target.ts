@@ -109,7 +109,10 @@ export function hyperlinkEditFields(type: HyperlinkTargetType): readonly Hyperli
 	return [...TARGET_FIELDS[type], TOOLTIP_FIELD];
 }
 
-/** The dialog's fields. `slideNumber` is 1-based, as the field shows it. */
+/**
+ * The dialog's fields. `slideNumber` is 1-based, as the field shows it, and `NaN` while the field
+ * is empty (a patch then links to slide 1).
+ */
 export interface HyperlinkEditDraft {
 	targetType: HyperlinkTargetType;
 	url: string;
@@ -124,8 +127,9 @@ export interface HyperlinkEditDraft {
 const VERBS = new Set<string>(HYPERLINK_ACTION_VERBS.map(({ verb }) => verb));
 
 /**
- * The draft with one field set from its control's text: a slide number that is not one reads as
- * slide 1, and a show jump that is not one of {@link HYPERLINK_ACTION_VERBS} leaves the field.
+ * The draft with one field set from its control's text. An emptied slide number stays empty
+ * (`NaN`), so the field does not snap to 1 while it is retyped; a show jump that is not one of
+ * {@link HYPERLINK_ACTION_VERBS} leaves the field.
  */
 export function setHyperlinkEditField(
 	draft: HyperlinkEditDraft,
@@ -133,13 +137,26 @@ export function setHyperlinkEditField(
 	value: string,
 ): HyperlinkEditDraft {
 	if (name === 'slideNumber') {
-		const slideNumber = Number.parseInt(value, 10);
-		return { ...draft, slideNumber: slideNumber > 0 ? slideNumber : 1 };
+		return { ...draft, slideNumber: Number.parseInt(value, 10) };
 	}
 	if (name === 'actionVerb') {
 		return VERBS.has(value) ? { ...draft, actionVerb: value as HyperlinkActionVerb } : draft;
 	}
 	return { ...draft, [name]: value };
+}
+
+/** The text a field's control shows: an empty slide number shows empty. */
+export function hyperlinkEditFieldText(
+	draft: HyperlinkEditDraft,
+	name: HyperlinkEditFieldName,
+): string {
+	const value = draft[name];
+	return typeof value === 'number' && !Number.isFinite(value) ? '' : String(value);
+}
+
+/** The slide a draft links to, 1-based: slide 1 while the field is empty or below 1. */
+function draftSlide(draft: HyperlinkEditDraft): number {
+	return Number.isFinite(draft.slideNumber) ? Math.max(1, Math.trunc(draft.slideNumber)) : 1;
 }
 
 /** Whether the element links anywhere (Remove link shows), a slide jump made in the editor included. */
@@ -213,7 +230,7 @@ function targetKey(draft: HyperlinkEditDraft): string {
 		case 'email':
 			return `email:${draft.emailAddress.trim()}?${draft.emailSubject.trim()}`;
 		case 'slide':
-			return `slide:${draft.slideNumber}`;
+			return `slide:${draftSlide(draft)}`;
 		case 'action':
 			return `action:${draft.actionVerb}`;
 		case 'file':
@@ -244,7 +261,7 @@ function targetAction(
 		}
 		case 'slide': {
 			const last = slideCount && slideCount > 0 ? slideCount - 1 : Number.POSITIVE_INFINITY;
-			const slideIndex = Math.min(last, Math.max(0, Math.trunc(draft.slideNumber) - 1));
+			const slideIndex = Math.min(last, Math.max(0, draftSlide(draft) - 1));
 			return elementActionToPptxAction({ trigger: 'click', type: 'slide', slideIndex }) ?? null;
 		}
 		case 'action':
