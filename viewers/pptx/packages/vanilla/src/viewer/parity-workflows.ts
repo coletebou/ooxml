@@ -297,6 +297,7 @@ export function createParityWorkflows(host: ParityWorkflowHost): ParityWorkflows
 					element,
 					(patch) => host.editor.applyElementPatch(element.id, patch),
 					host.regions,
+					current.slides.length,
 				);
 			}
 		},

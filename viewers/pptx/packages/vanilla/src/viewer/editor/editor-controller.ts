@@ -246,6 +246,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 			element,
 			(patch) => applyElementPatch(element.id, patch),
 			deps.getDialogRegions?.(),
+			state.slides.length,
 		);
 	};
 

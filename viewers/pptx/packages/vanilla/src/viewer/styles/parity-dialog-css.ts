@@ -17,9 +17,11 @@ export const PARITY_DIALOG_CSS = `
 .pptxv-parity-body { display: flex; flex-direction: column; gap: 12px; overflow: auto; padding: 16px; font-size: 12px; }
 .pptxv-parity-body fieldset { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 10px 12px; border: 1px solid var(--pptx-border); border-radius: 6px; }
 .pptxv-parity-body legend { padding: 0 4px; color: var(--pptx-muted-foreground); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-.pptxv-parity-body input[type='text'], .pptxv-parity-body input[type='number'] { min-width: 0; padding: 7px 8px; border: 1px solid var(--pptx-border); border-radius: 4px; background: var(--pptx-muted); color: inherit; }
+.pptxv-parity-body input[type='text'], .pptxv-parity-body input[type='number'], .pptxv-parity-body input[type='url'], .pptxv-parity-body input[type='email'] { min-width: 0; padding: 7px 8px; border: 1px solid var(--pptx-border); border-radius: 4px; background: var(--pptx-muted); color: inherit; }
 .pptxv-parity-check, .pptxv-parity-range { display: flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
 .pptxv-parity-select { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 10px; }
+.pptxv-parity-select small { grid-column: 2; color: var(--pptx-muted-foreground); font-size: 10px; }
+.pptxv-parity-body-fields { display: flex; flex-direction: column; gap: 12px; }
 .pptxv-parity-select select { padding: 7px 8px; border: 1px solid var(--pptx-border); border-radius: 4px; background: var(--pptx-muted); color: inherit; }
 .pptxv-parity-range input[type='number'] { width: 58px; }
 .pptxv-parity-footer { justify-content: flex-end; gap: 8px; border-top: 1px solid var(--pptx-border); }
