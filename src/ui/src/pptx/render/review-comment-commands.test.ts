@@ -157,4 +157,16 @@ describe('comment rows', () => {
 		document.getElementById('x')?.click();
 		expect(seen).toStrictEqual(['a']);
 	});
+
+	it('styles the active row inside a shadow root, where a document rule cannot reach', () => {
+		const host = document.createElement('div');
+		document.body.append(host);
+		const root = host.attachShadow({ mode: 'open' });
+		root.innerHTML = '<div data-comment-id="a"></div>';
+		expect(revealComment(root, 'a')).toBe(true);
+		expect(root.querySelector('[data-comment-active]')).not.toBeNull();
+		expect(root.querySelectorAll('#pptx-comment-active-style')).toHaveLength(1);
+		revealComment(root, 'a');
+		expect(root.querySelectorAll('#pptx-comment-active-style')).toHaveLength(1);
+	});
 });

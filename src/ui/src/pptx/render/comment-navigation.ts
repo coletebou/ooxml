@@ -128,15 +128,22 @@ export const COMMENT_ACTIVE_ATTR = 'data-comment-active';
 
 const ACTIVE_STYLE_ID = 'pptx-comment-active-style';
 
-/** One shared rule so every binding's row shows the current comment the same way. */
-function ensureActiveStyle(doc: Document | null): void {
-	if (!doc || doc.getElementById(ACTIVE_STYLE_ID) || !doc.head) {
+/**
+ * One shared rule so every binding's row shows the current comment the same way, added where the
+ * row's styles apply: the document's head, or the shadow root of a pane that draws its rows there.
+ */
+function ensureActiveStyle(row: Element): void {
+	const root = row.getRootNode();
+	const doc = row.ownerDocument;
+	// A shadow root is a document fragment (node type 11); no window global is needed to tell.
+	const scope: ParentNode | null = root.nodeType === 11 ? (root as ShadowRoot) : (doc.head ?? null);
+	if (!scope || scope.querySelector(`#${ACTIVE_STYLE_ID}`)) {
 		return;
 	}
 	const style = doc.createElement('style');
 	style.id = ACTIVE_STYLE_ID;
 	style.textContent = `[${COMMENT_ACTIVE_ATTR}]{outline:2px solid #2563eb;outline-offset:1px;}`;
-	doc.head.append(style);
+	scope.append(style);
 }
 
 function escapeAttr(value: string): string {
@@ -155,7 +162,7 @@ export function revealComment(root: ParentNode, id: string): boolean {
 	if (!row) {
 		return false;
 	}
-	ensureActiveStyle(row.ownerDocument);
+	ensureActiveStyle(row);
 	row.setAttribute(COMMENT_ACTIVE_ATTR, 'true');
 	if (!row.hasAttribute('tabindex')) {
 		row.setAttribute('tabindex', '-1');
