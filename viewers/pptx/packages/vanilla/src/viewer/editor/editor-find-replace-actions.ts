@@ -94,6 +94,11 @@ export function createFindReplaceActions(deps: FindReplaceActionsDeps): FindRepl
 			get: () => session,
 			set: (next) => {
 				session = next;
+				// The editing canvas marks the matches; publish them only when they move.
+				const state = store.get();
+				if (state.findMatches !== next.matches || state.findCurrent !== next.current) {
+					store.set({ findMatches: next.matches, findCurrent: next.current });
+				}
 			},
 		},
 		{

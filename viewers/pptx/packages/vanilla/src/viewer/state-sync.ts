@@ -97,6 +97,9 @@ export function createStateSync(deps: StateSyncDeps): StoreListener<ViewerState>
 			state.headerFooter !== previous.headerFooter ||
 			state.customProperties !== previous.customProperties ||
 			state.tableStyleMap !== previous.tableStyleMap ||
+			// The editing canvas marks the find matches inside the text.
+			state.findMatches !== previous.findMatches ||
+			state.findCurrent !== previous.findCurrent ||
 			// A chart arms its on-canvas mark hit-testing only while selected (B3),
 			// so a chart entering/leaving the selection re-renders the stage to
 			// re-arm it. Only a chart: rebuilding on every selection change would

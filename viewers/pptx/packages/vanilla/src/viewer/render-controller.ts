@@ -8,6 +8,7 @@ import type {
 import {
 	computeGridSpacingPx,
 	DEFAULT_MASTER_PAGE_SIZE,
+	findHighlightsByElement,
 	masterViewCrudActions,
 	masterViewPseudoSlide,
 	visibleTemplateElements,
@@ -206,6 +207,10 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 		const renderSlide = template.length
 			? { ...slide, elements: [...template, ...slide.elements] }
 			: slide;
+		// Find matches are marked on the editing canvas alone: not in the show,
+		// a thumbnail, or a master page painted in the canvas's place.
+		const marksFind =
+			interactive && !presenting && slide.id === state.slides[state.currentSlide]?.id;
 		return renderSlideStage({
 			document: doc,
 			slide: renderSlide,
@@ -216,6 +221,16 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 			formatScheme: state.formatScheme,
 			tableStyleMap: state.tableStyleMap,
 			fieldContext: buildRenderFieldContext(state, slide),
+			...(marksFind && state.findMatches.length > 0
+				? {
+						findHighlights: findHighlightsByElement(
+							slide,
+							state.currentSlide,
+							state.findMatches,
+							state.findCurrent,
+						),
+					}
+				: {}),
 			registry,
 			t: deps.getTranslator(),
 			scale,
