@@ -39,6 +39,10 @@ h2 {
 	align-items: flex-start;
 	gap: var(--office-space-1);
 }
+.field {
+	position: relative;
+	align-self: stretch;
+}
 textarea {
 	box-sizing: border-box;
 	width: 100%;
@@ -150,6 +154,36 @@ time {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 }
+.mention {
+	color: var(--office-accent);
+	font-weight: var(--office-font-weight-bold);
+}
+.mentions {
+	position: absolute;
+	z-index: var(--office-z-popover);
+	top: calc(100% + var(--office-space-px));
+	inset-inline: 0;
+	padding: var(--office-space-1) 0;
+	border: var(--office-border-width) solid var(--office-border);
+	border-radius: var(--office-radius-sm);
+	background: var(--office-popover);
+	color: var(--office-popover-foreground);
+	box-shadow: var(--office-shadow);
+}
+.mentions button {
+	display: block;
+	width: 100%;
+	min-height: 0;
+	padding: var(--office-space-1) var(--office-space-2);
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	text-align: start;
+}
+.mentions button:hover,
+.mentions button[aria-selected='true'] {
+	background: var(--office-selected);
+}
 .actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -171,5 +205,9 @@ button:focus-visible {
 	}
 	.avatar {
 		border: var(--office-border-width) solid CanvasText;
+	}
+	.mentions button[aria-selected='true'] {
+		background: Highlight;
+		color: HighlightText;
 	}
 }

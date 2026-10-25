@@ -173,14 +173,57 @@ export function trimMentionText(
 }
 
 /**
+ * The text with CRLF and CR line breaks written as LF, as a textarea holds it, and the spans moved
+ * to match, so a box seeded from a file's text follows the edits made to what the box shows.
+ */
+export function normalizeLineBreaks(
+	text: string,
+	mentions: readonly OfficeCommentMention[] | undefined,
+): { text: string; mentions: OfficeCommentMention[] } {
+	const body = String(text ?? '');
+	if (!body.includes('\r')) return { text: body, mentions: usable(body, mentions) };
+	// at[i]: where offset i of the text lands in the normalized text.
+	const at: number[] = [];
+	let out = '';
+	for (let index = 0; index < body.length; index += 1) {
+		at[index] = out.length;
+		if (body[index] === '\r' && body[index + 1] === '\n') continue;
+		out += body[index] === '\r' ? '\n' : body[index];
+	}
+	at[body.length] = out.length;
+	return {
+		text: out,
+		mentions: usable(body, mentions)
+			.map((m) => ({ ...m, start: at[m.start]!, length: at[m.start + m.length]! - at[m.start]! }))
+			.filter((m) => m.length > 0),
+	};
+}
+
+/** Whether two span lists mark the same text for the same people (order and names aside). */
+export function sameMentions(
+	a: readonly OfficeCommentMention[] | undefined,
+	b: readonly OfficeCommentMention[] | undefined,
+): boolean {
+	const key = (list: readonly OfficeCommentMention[] | undefined) =>
+		(list ?? [])
+			.map((m) => `${m.start}:${m.length}:${m.id ?? ''}`)
+			.sort()
+			.join('|');
+	return key(a) === key(b);
+}
+
+/**
  * The spans after the text changed from `before` to `after` by one edit (typing, deleting or a
  * paste): spans before the changed part stay, spans after it move by the length change, and a span
- * the edit touches is dropped. The same array when the text did not change.
+ * the edit touches is dropped. The same array when the text did not change. `caret`, where the caret
+ * is in `after`, places an edit the texts alone leave ambiguous ("@" typed before "@Bob" reads as
+ * typed after its "@"): the smallest edit that ends at the caret wins.
  */
 export function followTextEdit(
 	before: string,
 	after: string,
 	mentions: readonly OfficeCommentMention[],
+	caret?: number,
 ): readonly OfficeCommentMention[] {
 	if (before === after) return mentions;
 	let prefix = 0;
@@ -193,6 +236,14 @@ export function followTextEdit(
 		before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
 	)
 		suffix += 1;
+	// The caret may place the same smallest edit elsewhere: the text after it is unchanged, and the
+	// unchanged text around the edit is as long as above. Then the edit ends at the caret.
+	const tail = caret === undefined ? -1 : after.length - caret;
+	if (tail >= 0 && tail <= before.length && before.endsWith(after.slice(after.length - tail))) {
+		let head = 0;
+		while (head < caret! && head < before.length - tail && before[head] === after[head]) head += 1;
+		if (head + tail === prefix + suffix) [prefix, suffix] = [head, tail];
+	}
 	const changedEnd = before.length - suffix;
 	const delta = after.length - before.length;
 	return mentions.flatMap((m) => {

@@ -1708,7 +1708,7 @@
 					"name": "OfficeUiCommentsPane",
 					"tagName": "office-ui-comments-pane",
 					"customElement": true,
-					"description": "`<office-ui-comments-pane>`: Office's comments pane, one UX for Word, Excel and PowerPoint. Threads show each comment's avatar initials, author, time and text, with Reply, Resolve/Reopen, Edit (own comments, by `currentAuthor`) and Delete, under a new-comment box. The pane never changes its threads: every action is an event and the product sets `threads` again. Arrow keys, Home and End move between threads; Enter or Space (or a click) selects one (`thread-select`) so the product can go to its anchor. Escape is left to the host. Properties: `threads`, `activeThreadId`, `readOnly` (controls shown but disabled), `listOnly` (no composer, replies or actions: a navigation list), `closable`, `addDisabled`, `currentAuthor`, `labels` (partial, English defaults), `classNames` (product hook classes), `locale` (time formatting). Events (bubbling, composed): `comment-add` `{ text }`, `comment-reply` `{ threadId, text }`, `comment-edit` `{ threadId, commentId, text }`, `comment-delete` `{ threadId, commentId }`, `thread-resolve`, `thread-reopen` and `thread-select` `{ threadId }`, `comments-close`.",
+					"description": "`<office-ui-comments-pane>`: Office's comments pane, one UX for Word, Excel and PowerPoint. Threads show each comment's avatar initials, author, time and text, with Reply, Resolve/Reopen, Edit (own comments, by `currentAuthor`) and Delete, under a new-comment box. The pane never changes its threads: every action is an event and the product sets `threads` again. Arrow keys, Home and End move between threads; Enter or Space (or a click) selects one (`thread-select`) so the product can go to its anchor. Escape is left to the host. Properties: `threads`, `activeThreadId`, `readOnly` (controls shown but disabled), `listOnly` (no composer, replies or actions: a navigation list), `closable`, `addDisabled`, `currentAuthor`, `labels` (partial, English defaults), `classNames` (product hook classes), `locale` (time formatting), `mentionCandidates` (people an `@` in any box offers, in a list under it: arrows move, Enter, Tab or a click picks, Escape closes; none offers nothing). A comment's `mentions` are drawn as spans. Events (bubbling, composed): `comment-add` `{ text, mentions? }`, `comment-reply` `{ threadId, text, mentions? }`, `comment-edit` `{ threadId, commentId, text, mentions? }` (`mentions`, the posted text's spans, only when people are offered or the edited comment had mentions), `comment-delete` `{ threadId, commentId }`, `thread-resolve`, `thread-reopen` and `thread-select` `{ threadId }`, `comments-close`.",
 					"attributes": [
 						{
 							"name": "active-thread-id"
@@ -1786,6 +1786,10 @@
 							"type": {
 								"text": "string"
 							}
+						},
+						{
+							"kind": "field",
+							"name": "mentionCandidates"
 						},
 						{
 							"kind": "field",

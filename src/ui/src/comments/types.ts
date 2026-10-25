@@ -2,6 +2,8 @@
 // comment records (Word `w:comment`, Excel notes and threaded comments, PowerPoint `p:cm`)
 // onto it in a small adapter beside their pane; nothing here knows a file format.
 
+import type { OfficeCommentMention } from './mentions';
+
 /** One comment of a thread: the opening comment or a reply. */
 export interface OfficeComment {
 	id: string;
@@ -12,8 +14,10 @@ export interface OfficeComment {
 	color?: string;
 	/** When it was written: an ISO 8601 date-time is formatted, any other text is shown as is. */
 	created?: string;
-	/** Plain text; `@mentions` stay text. */
+	/** Plain text; `@mentions` stay text unless `mentions` marks them. */
 	text: string;
+	/** The `@`-mentions in `text`, drawn as spans (offsets into `text`, the `@` included). */
+	mentions?: OfficeCommentMention[];
 	edited?: boolean;
 }
 
@@ -53,6 +57,8 @@ export interface OfficeCommentsLabels {
 	edited: string;
 	/** Shown when there are no threads. */
 	empty: string;
+	/** Accessible name of the `@`-mention suggestion list. */
+	mentions: string;
 }
 
 export const DEFAULT_COMMENTS_LABELS: OfficeCommentsLabels = {
@@ -71,25 +77,34 @@ export const DEFAULT_COMMENTS_LABELS: OfficeCommentsLabels = {
 	delete: 'Delete',
 	edited: 'Edited',
 	empty: 'No comments',
+	mentions: 'People',
 };
 
 /** Product hook classes added to the pane's parts, so a product keeps its own selectors. */
 export interface OfficeCommentsClassNames {
 	thread?: string;
 	comment?: string;
+	/** Added to each mention span in a comment's text. */
+	mention?: string;
 }
 
 export interface OfficeCommentAddDetail {
 	text: string;
+	/** The spans in `text`: only when the pane offers `mentionCandidates`. */
+	mentions?: OfficeCommentMention[];
 }
 export interface OfficeCommentReplyDetail {
 	threadId: string;
 	text: string;
+	/** The spans in `text`: only when the pane offers `mentionCandidates`. */
+	mentions?: OfficeCommentMention[];
 }
 export interface OfficeCommentEditDetail {
 	threadId: string;
 	commentId: string;
 	text: string;
+	/** The spans in `text`: when the pane offers `mentionCandidates` or the comment had mentions. */
+	mentions?: OfficeCommentMention[];
 }
 export interface OfficeCommentDeleteDetail {
 	threadId: string;

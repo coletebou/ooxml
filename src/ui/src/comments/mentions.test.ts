@@ -6,6 +6,8 @@ import {
 	insertMention,
 	matchMentionCandidates,
 	mentionQueryAt,
+	normalizeLineBreaks,
+	sameMentions,
 	trimMentionText,
 	type OfficeCommentMention,
 	type OfficeMentionCandidate,
@@ -118,6 +120,15 @@ describe('followTextEdit', () => {
 		]);
 		expect(followTextEdit('@Ada and @Bob', '@Ada and @Bob', spans)).toBe(spans);
 	});
+
+	it('places an ambiguous edit at the caret, when the text after the caret is unchanged', () => {
+		const bob: OfficeCommentMention = { start: 0, length: 4, id: 'p2' };
+		// "@" typed before "@Bob" reads as typed after its "@" without the caret.
+		expect(followTextEdit('@Bob hi', '@@Bob hi', [bob])).toStrictEqual([]);
+		expect(followTextEdit('@Bob hi', '@@Bob hi', [bob], 1)).toStrictEqual([{ ...bob, start: 1 }]);
+		// A caret that does not fit the edit falls back to the prefix rule.
+		expect(followTextEdit('@Bob hi', '@@Bob hi', [bob], 8)).toStrictEqual([]);
+	});
 });
 
 describe('trimMentionText', () => {
@@ -130,5 +141,31 @@ describe('trimMentionText', () => {
 		expect(trimMentionText('Hi @Ada', spans)).toStrictEqual({ text: 'Hi @Ada', mentions: spans });
 		expect(trimMentionText('   ', spans)).toStrictEqual({ text: '', mentions: [] });
 		expect(trimMentionText('Hi', undefined)).toStrictEqual({ text: 'Hi', mentions: [] });
+	});
+});
+
+describe('sameMentions', () => {
+	it('compares spans by place and person, in any order', () => {
+		const a: OfficeCommentMention = { start: 0, length: 4, id: 'p1', name: 'Ada' };
+		const b: OfficeCommentMention = { start: 9, length: 4, id: 'p2' };
+		expect(sameMentions([a, b], [b, { ...a, name: 'Ada L' }])).toBe(true);
+		expect(sameMentions([a], [a, b])).toBe(false);
+		expect(sameMentions([a], [{ ...a, id: 'p3' }])).toBe(false);
+		expect(sameMentions([a], [{ ...a, start: 1 }])).toBe(false);
+		expect(sameMentions([], undefined)).toBe(true);
+	});
+});
+
+describe('normalizeLineBreaks', () => {
+	it('writes CRLF and CR as LF, as a textarea holds them, and moves the spans', () => {
+		const bob: OfficeCommentMention = { start: 3, length: 4, id: 'p1' };
+		expect(normalizeLineBreaks('A\r\n@Bob\r\nZ', [bob])).toStrictEqual({
+			text: 'A\n@Bob\nZ',
+			mentions: [{ start: 2, length: 4, id: 'p1' }],
+		});
+		expect(normalizeLineBreaks('A\r@Bob', [{ ...bob, start: 2 }]).mentions).toStrictEqual([
+			{ start: 2, length: 4, id: 'p1' },
+		]);
+		expect(normalizeLineBreaks('@Bob', [bob]).text).toBe('@Bob');
 	});
 });

@@ -1,9 +1,18 @@
-import { html, nothing, type TemplateResult } from 'lit';
+import { html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { OfficeElement, controlStyles, flag } from '../base';
 import { definer, present } from '../registry';
 import css from './comments-pane.css?raw';
+import { MentionTypeahead } from './mention-typeahead';
+import {
+	commentSegments,
+	normalizeLineBreaks,
+	sameMentions,
+	trimMentionText,
+	type OfficeCommentMention,
+	type OfficeMentionCandidate,
+} from './mentions';
 import {
 	DEFAULT_COMMENTS_LABELS,
 	commentInitials,
@@ -27,10 +36,14 @@ const INTERACTIVE = new Set(['BUTTON', 'TEXTAREA', 'INPUT', 'A', 'SELECT']);
  * Properties: `threads`, `activeThreadId`, `readOnly` (controls shown but disabled),
  * `listOnly` (no composer, replies or actions: a navigation list), `closable`, `addDisabled`,
  * `currentAuthor`, `labels` (partial, English defaults), `classNames` (product hook classes),
- * `locale` (time formatting). Events (bubbling, composed): `comment-add` `{ text }`,
- * `comment-reply` `{ threadId, text }`, `comment-edit` `{ threadId, commentId, text }`,
- * `comment-delete` `{ threadId, commentId }`, `thread-resolve`, `thread-reopen` and
- * `thread-select` `{ threadId }`, `comments-close`.
+ * `locale` (time formatting), `mentionCandidates` (people an `@` in any box offers, in a list
+ * under it: arrows move, Enter, Tab or a click picks, Escape closes; none offers nothing).
+ * A comment's `mentions` are drawn as spans. Events (bubbling, composed): `comment-add`
+ * `{ text, mentions? }`, `comment-reply` `{ threadId, text, mentions? }`, `comment-edit`
+ * `{ threadId, commentId, text, mentions? }` (`mentions`, the posted text's spans, only when
+ * people are offered or the edited comment had mentions), `comment-delete`
+ * `{ threadId, commentId }`, `thread-resolve`, `thread-reopen` and `thread-select`
+ * `{ threadId }`, `comments-close`.
  */
 export class OfficeUiCommentsPane extends OfficeElement {
 	static override styles = controlStyles(css);
@@ -45,6 +58,7 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		labels: { attribute: false },
 		classNames: { attribute: false },
 		locale: { type: String },
+		mentionCandidates: { attribute: false },
 	};
 	declare threads: readonly OfficeCommentThread[];
 	declare activeThreadId: string | null;
@@ -56,8 +70,13 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	declare labels: Partial<OfficeCommentsLabels>;
 	declare classNames: OfficeCommentsClassNames;
 	declare locale: string | null;
+	declare mentionCandidates: readonly OfficeMentionCandidate[];
 	private focusedId: string | undefined;
 	private editingId: string | undefined;
+	private readonly mentions = new MentionTypeahead({
+		requestUpdate: () => this.requestUpdate(),
+		offeredMentions: () => (this.offersMentions ? this.mentionCandidates : []),
+	});
 
 	constructor() {
 		super();
@@ -71,6 +90,12 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		this.labels = {};
 		this.classNames = {};
 		this.locale = null;
+		this.mentionCandidates = [];
+	}
+
+	protected override willUpdate(changed: PropertyValues<this>): void {
+		super.willUpdate(changed);
+		if (changed.has('mentionCandidates') || changed.has('readOnly')) this.mentions.refresh();
 	}
 
 	private get text(): OfficeCommentsLabels {
@@ -79,6 +104,15 @@ export class OfficeUiCommentsPane extends OfficeElement {
 
 	private get locked(): boolean {
 		return present(this.readOnly);
+	}
+
+	private get offersMentions(): boolean {
+		return this.mentionCandidates.length > 0 && !this.locked;
+	}
+
+	/** The posted text's spans, when the event carries them (see the class comment). */
+	private carried(mentions: OfficeCommentMention[], had = false) {
+		return this.offersMentions || had ? { mentions } : {};
 	}
 
 	/** The thread that takes Tab focus: the last one focused, else the active one, else the first. */
@@ -108,41 +142,77 @@ export class OfficeUiCommentsPane extends OfficeElement {
 
 	private submitNew(): void {
 		const box = this.renderRoot.querySelector<HTMLTextAreaElement>('textarea.new');
-		const text = box?.value.trim();
-		if (!box || !text || this.locked || present(this.addDisabled)) return;
+		if (!box || this.locked || present(this.addDisabled)) return;
+		const { text, mentions } = this.mentions.take('new', box);
+		if (!text) return;
 		box.value = '';
-		this.fire('comment-add', { text });
+		this.mentions.clear('new');
+		this.fire('comment-add', { text, ...this.carried(mentions) });
 	}
 
 	private submitReply(threadId: string): void {
 		const box = this.card(threadId)?.querySelector<HTMLTextAreaElement>('textarea.reply-box');
-		const text = box?.value.trim();
-		if (!box || !text || this.locked) return;
+		const key = `reply:${threadId}`;
+		if (!box || this.locked) return;
+		const { text, mentions } = this.mentions.take(key, box);
+		if (!text) return;
 		box.value = '';
-		this.fire('comment-reply', { threadId, text });
+		this.mentions.clear(key);
+		this.fire('comment-reply', { threadId, text, ...this.carried(mentions) });
 	}
 
-	private startEdit(commentId: string): void {
-		this.editingId = commentId;
+	private startEdit(comment: OfficeComment): void {
+		this.editingId = comment.id;
+		this.mentions.seed('edit', comment.text, comment.mentions);
 		this.requestUpdate();
 		this.renderRoot.querySelector<HTMLTextAreaElement>('textarea.edit-box')?.focus();
 	}
 
 	private stopEdit(): void {
 		this.editingId = undefined;
+		this.mentions.clear('edit');
 		this.requestUpdate();
 	}
 
 	private saveEdit(thread: OfficeCommentThread, comment: OfficeComment): void {
 		const box = this.renderRoot.querySelector<HTMLTextAreaElement>('textarea.edit-box');
-		const text = box?.value.trim();
+		const posted = box ? this.mentions.take('edit', box) : undefined;
 		this.stopEdit();
-		if (!text || text === comment.text || this.locked) return;
-		this.fire('comment-edit', { threadId: thread.id, commentId: comment.id, text });
+		const text = posted?.text;
+		if (!posted || !text || this.locked) return;
+		const carried = this.carried(posted.mentions, Boolean(comment.mentions?.length));
+		// Compare with what the box held when the edit began (its line breaks, trimmed): an edit that
+		// only adds, replaces or drops a mention still changes the comment; no change sends nothing.
+		const shown = normalizeLineBreaks(comment.text, comment.mentions);
+		const before = trimMentionText(shown.text, shown.mentions);
+		const spans = 'mentions' in carried ? carried.mentions : before.mentions;
+		if (text === before.text && sameMentions(spans, before.mentions)) return;
+		this.fire('comment-edit', { threadId: thread.id, commentId: comment.id, text, ...carried });
 	}
 
-	/** Ctrl+Enter (Cmd+Enter) posts from any box, like Office. */
-	private onBoxKey(event: KeyboardEvent, submit: () => void): void {
+	/** A box and its mention list: typing, caret moves and leaving the box drive the typeahead. */
+	private field(key: string, box: TemplateResult): TemplateResult {
+		const follow = (event: Event) => {
+			if (event.target instanceof HTMLTextAreaElement) this.mentions.update(key, event.target);
+		};
+		return html`<div
+			class="field"
+			@input=${follow}
+			@keyup=${follow}
+			@click=${follow}
+			@focusout=${(event: FocusEvent) => {
+				// Focus moving onto an option (a screen reader activating it) keeps the list for its click.
+				const next = event.relatedTarget;
+				if (!(next instanceof Node && (event.currentTarget as Node).contains(next)))
+					this.mentions.close(key);
+			}}
+			>${box}${this.mentions.render(key, this.text.mentions)}</div
+		>`;
+	}
+
+	/** Ctrl+Enter (Cmd+Enter) posts from any box, like Office, unless the mention list takes the key. */
+	private onBoxKey(event: KeyboardEvent, key: string, submit: () => void): void {
+		if (this.mentions.keydown(key, event)) return;
 		if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
 			event.preventDefault();
 			submit();
@@ -150,7 +220,9 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	}
 
 	private onEditKey(event: KeyboardEvent, thread: OfficeCommentThread, comment: OfficeComment) {
-		if (event.key !== 'Escape') return this.onBoxKey(event, () => this.saveEdit(thread, comment));
+		if (this.mentions.keydown('edit', event)) return;
+		if (event.key !== 'Escape')
+			return this.onBoxKey(event, 'edit', () => this.saveEdit(thread, comment));
 		// Escape cancels the edit only; the host keeps its own Escape for the pane.
 		event.preventDefault();
 		event.stopPropagation();
@@ -202,7 +274,7 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		const threadId = thread.id;
 		const status = thread.resolved ? 'reopen' : 'resolve';
 		return html`<div class="actions"
-			>${first ? html`<button type="button" data-action=${status} ?disabled=${locked} @click=${() => (thread.resolved ? this.fire('thread-reopen', { threadId }) : this.fire('thread-resolve', { threadId }))}>${thread.resolved ? l.reopen : l.resolve}</button>` : nothing}${own && this.editingId !== comment.id ? html`<button type="button" data-action="edit" ?disabled=${locked} @click=${() => this.startEdit(comment.id)}>${l.edit}</button>` : nothing}<button
+			>${first ? html`<button type="button" data-action=${status} ?disabled=${locked} @click=${() => (thread.resolved ? this.fire('thread-reopen', { threadId }) : this.fire('thread-resolve', { threadId }))}>${thread.resolved ? l.reopen : l.resolve}</button>` : nothing}${own && this.editingId !== comment.id ? html`<button type="button" data-action="edit" ?disabled=${locked} @click=${() => this.startEdit(comment)}>${l.edit}</button>` : nothing}<button
 				type="button"
 				data-action="delete"
 				?disabled=${locked}
@@ -212,6 +284,22 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		>`;
 	}
 
+	/** A comment's text, its mentions drawn as spans (text only between nodes: `textContent` is exact). */
+	private renderText(comment: OfficeComment) {
+		if (!comment.mentions?.length) return comment.text;
+		const hook = this.classNames.mention ?? '';
+		return commentSegments(comment.text, comment.mentions).map((segment) =>
+			segment.kind === 'mention'
+				? html`<span
+						class="mention ${hook}"
+						data-office-comment-mention=${segment.id ?? ''}
+						title=${ifDefined(segment.name)}
+						>${segment.text}</span
+					>`
+				: segment.text,
+		);
+	}
+
 	private renderComment(
 		thread: OfficeCommentThread,
 		comment: OfficeComment,
@@ -219,16 +307,22 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	): TemplateResult {
 		const l = this.text;
 		const time = formatCommentTime(comment.created, this.locale ?? undefined);
+		const edit = this.mentions.aria('edit', this.offersMentions);
 		const body =
 			this.editingId === comment.id && !this.locked
 				? html`<div class="edit">
-						<textarea
-							class="edit-box"
-							aria-label=${l.edit}
-							.value=${comment.text}
-							@keydown=${(event: KeyboardEvent) => this.onEditKey(event, thread, comment)}
-						></textarea
-						><div class="actions"
+						${this.field(
+							'edit',
+							html`<textarea
+								class="edit-box"
+								aria-label=${l.edit}
+								aria-autocomplete=${ifDefined(edit.autocomplete)}
+								aria-controls=${ifDefined(edit.controls)}
+								aria-activedescendant=${ifDefined(edit.activeDescendant)}
+								.value=${comment.text}
+								@keydown=${(event: KeyboardEvent) => this.onEditKey(event, thread, comment)}
+							></textarea>`,
+						)}<div class="actions"
 							><button
 								type="button"
 								data-action="save"
@@ -239,7 +333,7 @@ export class OfficeUiCommentsPane extends OfficeElement {
 							></div
 						></div
 					>`
-				: html`<p class="text">${comment.text}</p>`;
+				: html`<p class="text">${this.renderText(comment)}</p>`;
 		return html`<div
 			class="comment ${first ? 'root' : 'reply'} ${this.classNames.comment ?? ''}"
 			data-comment-id=${comment.id}
@@ -260,6 +354,8 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		const l = this.text;
 		const [first, ...replies] = thread.comments;
 		const badge = thread.resolved && l.resolved;
+		const key = `reply:${thread.id}`;
+		const aria = this.mentions.aria(key, this.offersMentions);
 		const anchor =
 			thread.anchorLabel || badge
 				? html`<div class="anchor"
@@ -269,14 +365,20 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		const reply = present(this.listOnly)
 			? nothing
 			: html`<div class="reply">
-					<textarea
-						class="reply-box"
-						aria-label=${l.reply}
-						placeholder=${l.reply}
-						?disabled=${this.locked}
-						@keydown=${(event: KeyboardEvent) => this.onBoxKey(event, () => this.submitReply(thread.id))}
-					></textarea
-					><button
+					${this.field(
+						key,
+						html`<textarea
+							class="reply-box"
+							aria-label=${l.reply}
+							placeholder=${l.reply}
+							aria-autocomplete=${ifDefined(aria.autocomplete)}
+							aria-controls=${ifDefined(aria.controls)}
+							aria-activedescendant=${ifDefined(aria.activeDescendant)}
+							?disabled=${this.locked}
+							@keydown=${(event: KeyboardEvent) =>
+								this.onBoxKey(event, key, () => this.submitReply(thread.id))}
+						></textarea>`,
+					)}<button
 						type="button"
 						data-action="reply"
 						?disabled=${this.locked}
@@ -299,6 +401,7 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	protected override render() {
 		const l = this.text;
 		const closable = present(this.closable);
+		const aria = this.mentions.aria('new', this.offersMentions);
 		const header =
 			l.heading || closable
 				? html`<div class="header"
@@ -308,14 +411,19 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		const composer = present(this.listOnly)
 			? nothing
 			: html`<div class="composer">
-					<textarea
-						class="new"
-						aria-label=${l.newComment}
-						placeholder=${l.newComment}
-						?disabled=${this.locked}
-						@keydown=${(event: KeyboardEvent) => this.onBoxKey(event, () => this.submitNew())}
-					></textarea
-					><button
+					${this.field(
+						'new',
+						html`<textarea
+							class="new"
+							aria-label=${l.newComment}
+							placeholder=${l.newComment}
+							aria-autocomplete=${ifDefined(aria.autocomplete)}
+							aria-controls=${ifDefined(aria.controls)}
+							aria-activedescendant=${ifDefined(aria.activeDescendant)}
+							?disabled=${this.locked}
+							@keydown=${(event: KeyboardEvent) => this.onBoxKey(event, 'new', () => this.submitNew())}
+						></textarea>`,
+					)}<button
 						type="button"
 						data-action="add"
 						?disabled=${this.locked || present(this.addDisabled)}

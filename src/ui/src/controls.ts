@@ -159,6 +159,7 @@ export {
 	type OfficeCommentThread,
 	type OfficeThreadDetail,
 } from './comments/types';
+export type { OfficeCommentMention, OfficeMentionCandidate } from './comments/mentions';
 export { assignKeyTips, runKeyTips } from './ribbon/keytip-run';
 export type { KeyTipTarget } from './ribbon/keytip-run';
 export { createRibbonOverflow } from './ribbon/overflow';
