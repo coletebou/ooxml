@@ -75,6 +75,10 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	declare mentionCandidates: readonly OfficeMentionCandidate[];
 	private focusedId: string | undefined;
 	private editingId: string | undefined;
+	/** What the edit box started from: the box keeps its own text when the comment changes. */
+	private editText = '';
+	/** The comment as it was when the edit (re)opened: Save sends nothing when the box still matches it. */
+	private editStart: OfficeComment | undefined;
 	private readonly mentions = new MentionTypeahead({
 		requestUpdate: () => this.requestUpdate(),
 		offeredMentions: () => (this.offersMentions ? this.mentionCandidates : []),
@@ -97,6 +101,10 @@ export class OfficeUiCommentsPane extends OfficeElement {
 
 	protected override willUpdate(changed: PropertyValues<this>): void {
 		super.willUpdate(changed);
+		// A locked pane draws no edit box: what was typed into it waits for the unlock.
+		const box =
+			this.locked && this.renderRoot.querySelector<HTMLTextAreaElement>('textarea.edit-box');
+		if (box) this.editText = box.value;
 		if (changed.has('mentionCandidates') || changed.has('readOnly')) this.mentions.refresh();
 	}
 
@@ -149,25 +157,40 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	 */
 	drafts(): OfficeCommentDrafts {
 		const root = this.shadowRoot!;
-		const read = (key: string, box: HTMLTextAreaElement | null): OfficeCommentDraft | undefined => {
-			if (!box?.value) return undefined;
-			const { text, mentions } = this.mentions.snapshot(key, box.value);
+		const read = (key: string, value: string | undefined): OfficeCommentDraft | undefined => {
+			if (!value) return undefined;
+			const { text, mentions } = this.mentions.snapshot(key, value);
 			return mentions.length ? { text, mentions } : { text };
 		};
 		const drafts: OfficeCommentDrafts = {};
-		const comment = read('new', root.querySelector('textarea.new'));
+		const comment = read('new', root.querySelector<HTMLTextAreaElement>('textarea.new')?.value);
 		if (comment) drafts.comment = comment;
 		const replies: Record<string, OfficeCommentDraft> = {};
 		for (const card of root.querySelectorAll<HTMLElement>('[data-thread-id]')) {
 			const reply = read(
 				`reply:${card.dataset.threadId}`,
-				card.querySelector('textarea.reply-box'),
+				card.querySelector<HTMLTextAreaElement>('textarea.reply-box')?.value,
 			);
 			if (reply) replies[card.dataset.threadId!] = reply;
 		}
 		if (Object.keys(replies).length) drafts.replies = replies;
-		const edit = this.editingId && read('edit', root.querySelector('textarea.edit-box'));
-		if (edit) drafts.edit = { commentId: this.editingId!, ...edit };
+		// A locked pane draws no edit box: the edit under way waits in editText.
+		const editBox = root.querySelector<HTMLTextAreaElement>('textarea.edit-box');
+		const edit = this.editingId && read('edit', editBox ? editBox.value : this.editText);
+		const start = this.editStart;
+		if (edit)
+			drafts.edit = {
+				commentId: this.editingId!,
+				...edit,
+				...(start
+					? {
+							start: {
+								text: start.text,
+								...(start.mentions?.length ? { mentions: [...start.mentions] } : {}),
+							},
+						}
+					: {}),
+			};
 		return drafts;
 	}
 
@@ -178,7 +201,25 @@ export class OfficeUiCommentsPane extends OfficeElement {
 	 */
 	restoreDrafts(drafts: OfficeCommentDrafts | null | undefined): void {
 		const shown = (id: string) => this.threads.some((t) => t.comments.some((c) => c.id === id));
-		const edit = drafts?.edit && !this.locked && shown(drafts.edit.commentId) ? drafts.edit : null;
+		const edit = drafts?.edit && shown(drafts.edit.commentId) ? drafts.edit : null;
+		// Where the edit started: the draft's own start when it has one (another pane may have
+		// restarted the edit on a newer text), else the comment as shown.
+		const startOf = (draft: NonNullable<OfficeCommentDrafts['edit']>) => {
+			const shownComment = this.threads
+				.flatMap((t) => t.comments)
+				.find((c) => c.id === draft.commentId);
+			return shownComment && draft.start
+				? { ...shownComment, text: draft.start.text, mentions: draft.start.mentions ?? [] }
+				: shownComment;
+		};
+		// The same edit still open (another pane wrote the drafts) keeps its box; it takes the
+		// draft's start when the draft has one.
+		if (edit?.commentId !== this.editingId) {
+			this.editText = edit?.text ?? '';
+			this.editStart = edit ? startOf(edit) : undefined;
+		} else if (edit?.start) {
+			this.editStart = startOf(edit);
+		}
 		this.editingId = edit?.commentId;
 		this.requestUpdate();
 		const root = this.shadowRoot!;
@@ -188,7 +229,8 @@ export class OfficeUiCommentsPane extends OfficeElement {
 			draft?: OfficeCommentDraft | null,
 		) => {
 			if (!box) return;
-			box.value = draft?.text ?? '';
+			// A box that already holds the text is left alone, so its caret stays where it is.
+			if (box.value !== (draft?.text ?? '')) box.value = draft?.text ?? '';
 			if (draft?.text) this.mentions.seed(key, draft.text, draft.mentions);
 			else this.mentions.clear(key);
 		};
@@ -201,8 +243,13 @@ export class OfficeUiCommentsPane extends OfficeElement {
 				drafts?.replies?.[card.dataset.threadId!],
 			);
 		}
-		if (edit) fill('edit', root.querySelector('textarea.edit-box'), edit);
-		else this.mentions.clear('edit');
+		const editBox = root.querySelector<HTMLTextAreaElement>('textarea.edit-box');
+		if (edit && editBox) fill('edit', editBox, edit);
+		// Locked: no box yet; the edit's text and mentions wait for the unlock.
+		else if (edit) {
+			this.editText = edit.text;
+			this.mentions.seed('edit', edit.text, edit.mentions);
+		} else this.mentions.clear('edit');
 	}
 
 	private submitNew(): void {
@@ -228,6 +275,8 @@ export class OfficeUiCommentsPane extends OfficeElement {
 
 	private startEdit(comment: OfficeComment): void {
 		this.editingId = comment.id;
+		this.editText = comment.text;
+		this.editStart = comment;
 		this.mentions.seed('edit', comment.text, comment.mentions);
 		this.requestUpdate();
 		this.renderRoot.querySelector<HTMLTextAreaElement>('textarea.edit-box')?.focus();
@@ -245,10 +294,13 @@ export class OfficeUiCommentsPane extends OfficeElement {
 		this.stopEdit();
 		const text = posted?.text;
 		if (!posted || !text || this.locked) return;
-		const carried = this.carried(posted.mentions, Boolean(comment.mentions?.length));
 		// Compare with what the box held when the edit began (its line breaks, trimmed): an edit that
 		// only adds, replaces or drops a mention still changes the comment; no change sends nothing.
-		const shown = normalizeLineBreaks(comment.text, comment.mentions);
+		const start = this.editStart?.id === comment.id ? this.editStart : comment;
+		// The spans go out when the edit started with mentions, even if the comment lost them since.
+		const had = Boolean(start.mentions?.length || comment.mentions?.length);
+		const carried = this.carried(posted.mentions, had);
+		const shown = normalizeLineBreaks(start.text, start.mentions);
 		const before = trimMentionText(shown.text, shown.mentions);
 		const spans = 'mentions' in carried ? carried.mentions : before.mentions;
 		if (text === before.text && sameMentions(spans, before.mentions)) return;
@@ -384,7 +436,7 @@ export class OfficeUiCommentsPane extends OfficeElement {
 								aria-autocomplete=${ifDefined(edit.autocomplete)}
 								aria-controls=${ifDefined(edit.controls)}
 								aria-activedescendant=${ifDefined(edit.activeDescendant)}
-								.value=${comment.text}
+								.value=${this.editText}
 								@keydown=${(event: KeyboardEvent) => this.onEditKey(event, thread, comment)}
 							></textarea>`,
 						)}<div class="actions"

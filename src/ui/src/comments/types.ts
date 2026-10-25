@@ -126,8 +126,11 @@ export interface OfficeCommentDrafts {
 	comment?: OfficeCommentDraft;
 	/** Each shown thread's reply box, by thread id. */
 	replies?: Record<string, OfficeCommentDraft>;
-	/** The comment being edited, and its box. */
-	edit?: OfficeCommentDraft & { commentId: string };
+	/**
+	 * The comment being edited, its box, and the comment as the edit found it (`start`), so an
+	 * untouched edit still saves nothing after the comment changed.
+	 */
+	edit?: OfficeCommentDraft & { commentId: string; start?: OfficeCommentDraft };
 }
 
 /** Up to two initials from an author's name ("Ada Lovelace" is "AL", "grace" is "G"). */
