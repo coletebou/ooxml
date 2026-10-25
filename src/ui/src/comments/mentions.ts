@@ -11,6 +11,11 @@ export interface OfficeCommentMention {
 	id?: string;
 	/** The mentioned person's display name. */
 	name?: string;
+	/**
+	 * The product's own handle on the record behind the span (a mention id, say). The pane and these
+	 * rules carry it through every edit, so the product can find the record again; a new pick has none.
+	 */
+	key?: string;
 }
 
 /** A person the typeahead offers. */
