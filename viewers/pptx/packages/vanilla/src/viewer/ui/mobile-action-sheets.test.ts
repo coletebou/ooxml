@@ -1,4 +1,5 @@
-import type { PptxSlide } from 'pptx-viewer-core';
+import { createPptxCommentDrafts } from 'ooxml-ui/pptx';
+import type { PptxElement, PptxSlide } from 'pptx-viewer-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTranslator } from '../i18n';
@@ -7,7 +8,10 @@ import type { RibbonHandlers } from './ribbon/ribbon-types';
 
 afterEach(() => document.body.replaceChildren());
 
-function open(hiddenActions?: Parameters<typeof createMobileActionSheets>[5]) {
+function open(
+	hiddenActions?: Parameters<typeof createMobileActionSheets>[5],
+	comments?: Parameters<typeof createMobileActionSheets>[7],
+) {
 	const handlers = {
 		nav: { toggleNotes: vi.fn() },
 		insert: { insert: vi.fn() },
@@ -32,6 +36,7 @@ function open(hiddenActions?: Parameters<typeof createMobileActionSheets>[5]) {
 		document.createElement('div'),
 		hiddenActions,
 		() => source,
+		comments,
 	);
 	document.body.append(sheets.el);
 	sheets.update(0, [{ id: 's1' }, { id: 's2' }] as unknown as PptxSlide[], []);
@@ -41,6 +46,47 @@ function open(hiddenActions?: Parameters<typeof createMobileActionSheets>[5]) {
 		);
 	return { sheets, handlers, buttons, requests };
 }
+
+describe('mobile comments sheet', () => {
+	const SHAPE = { id: 'shape-1', type: 'shape', name: 'Title' } as unknown as PptxElement;
+	const commentsView = (draftKey: string) => ({
+		comments: [
+			{ id: 'c1', text: 'On the title', author: 'Ada', elementId: 'shape-1' },
+			{ id: 'c2', text: 'On a gone shape', author: 'Ada', elementId: 'shape-9' },
+		],
+		editable: true,
+		authorName: 'Ada',
+		elements: [SHAPE],
+		draftKey,
+	});
+	const paneRoot = (sheets: ReturnType<typeof open>['sheets']) =>
+		sheets.el.querySelector('pptx-ui-comments-pane')!.shadowRoot!;
+
+	it('selects the element a picked thread is on, when it is still on the slide', () => {
+		const selectElement = vi.fn<(id: string) => void>();
+		const { sheets } = open(undefined, { selectElement });
+		sheets.updateComments(commentsView('s1'));
+		sheets.toggle('comments');
+		const threads = paneRoot(sheets).querySelectorAll<HTMLElement>('.thread .text');
+		threads[0]!.click();
+		threads[1]!.click();
+		expect(selectElement.mock.calls).toStrictEqual([['shape-1']]);
+	});
+
+	it('keeps each slide its unposted comment in the viewer drafts store', () => {
+		const drafts = createPptxCommentDrafts();
+		const { sheets } = open(undefined, { drafts });
+		sheets.updateComments(commentsView('s1'));
+		sheets.toggle('comments');
+		const box = () => paneRoot(sheets).querySelector<HTMLTextAreaElement>('textarea.new')!;
+		box().value = 'For slide one';
+		sheets.updateComments(commentsView('s2'));
+		expect(box().value).toBe('');
+		expect(drafts.get('s1')).toStrictEqual({ comment: { text: 'For slide one' } });
+		sheets.updateComments(commentsView('s1'));
+		expect(box().value).toBe('For slide one');
+	});
+});
 
 describe('mobile action sheets bottom bar adapter', () => {
 	it('renders the five slots in the shared bar', () => {

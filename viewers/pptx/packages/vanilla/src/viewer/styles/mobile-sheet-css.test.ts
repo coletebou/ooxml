@@ -27,8 +27,16 @@ describe('phone sheet stacking and layout', () => {
 		expect(MOBILE_SHEET_CSS).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
 	});
 
-	it('gives sheet content the full row so the comment box is not half width', () => {
-		expect(MOBILE_SHEET_CSS).toContain('.pptxv-mobile-comment-add');
+	it('gives sheet content the full row so the comments pane is not half width', () => {
+		expect(MOBILE_SHEET_CSS).toContain(
+			'.pptxv-mobile-sheet-body > :is(pptx-ui-comments-pane, .pptxv-mobile-slide-list',
+		);
 		expect(MOBILE_SHEET_CSS).toContain('flex: 1 1 100%');
+	});
+
+	it('sizes the comments pane controls for touch (MIN_TOUCH_TARGET_PX)', () => {
+		expect(MOBILE_SHEET_CSS).toContain(
+			'.pptxv-mobile-sheet-body > pptx-ui-comments-pane { --office-input-height: 44px;',
+		);
 	});
 });

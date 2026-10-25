@@ -53,6 +53,7 @@ import {
 	mapActiveElement,
 	replaceActiveElements,
 } from './editor-active-elements';
+import { commentAuthorName } from './editor-comment-actions';
 import { enteredGroupBox, selectionOverlayBox } from './editor-controller-overlay';
 import { createDrawModeController } from './editor-draw-mode';
 import type { EditActions } from './editor-edit-ops';
@@ -129,6 +130,8 @@ export interface EditorController {
 	deleteSelected(): void;
 	duplicateSelected(): string | null;
 	getSelectedElementId(): string | null;
+	/** Who the comments panes write as (see `commentAuthorName`). */
+	getCommentAuthorName(): string;
 	selectElements(ids: string[]): void;
 	applyElementPatch(id: string, patch: Partial<PptxElement>): void;
 	commitSlides(slides: PptxSlide[], currentSlide?: number): void;
@@ -367,6 +370,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		layoutPreviews: ensureLayoutPreviews,
 		getHandler: deps.getHandler,
 		getHeldDeckStyle: () => editActions.heldDeckStyleState(),
+		commentAuthorName: () => commentAuthorName(deps.getUserName),
 	});
 
 	const interactions = createStageInteractions({
@@ -798,6 +802,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		deleteSelected: () => ops.deleteSelected(),
 		duplicateSelected: () => ops.duplicateSelected(),
 		getSelectedElementId: () => store.get().selectedElementId,
+		getCommentAuthorName: () => commentAuthorName(deps.getUserName),
 		selectElements: (ids) => ops.select(ids.at(-1) ?? null, ids),
 		applyElementPatch,
 		commitElementUpdates(slides, label) {

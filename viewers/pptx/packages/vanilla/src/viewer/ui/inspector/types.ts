@@ -13,10 +13,8 @@ import type {
 	MediaPptxElement,
 	ParsedTableStyleMap,
 	PptxComment,
-	PptxCommentMention,
 	PptxCustomShow,
 	PptxElement,
-	PptxModernCommentAuthor,
 	PptxPresentationProperties,
 	PptxSlide,
 	PptxSlideMaster,
@@ -43,6 +41,7 @@ import type { AnimationTimingPatch } from '../../editor/editor-animation-actions
 import type { GeometryPatch } from '../../editor/editor-edit-ops';
 import type { LiveColorEventType, LiveColorTarget } from '../../editor/editor-live-colors';
 import type { TableCellPosition, TableStructureAction } from '../../editor/table-editor-mutations';
+import type { CommentsPaneView } from '../comments-pane';
 import type { RegionSet } from '../region-set';
 
 /**
@@ -107,14 +106,8 @@ export interface InspectorHandlers {
 	 * when the deck has content and the new size differs from the current one).
 	 */
 	applySlideSizeRescale(size: SlideSizeEmu, mode: SlideSizeRescaleMode): void;
-	/** Add a comment on the current slide (Comments tab). */
-	addComment(text: string, mentions?: PptxCommentMention[]): void;
-	/** Append a reply under a top-level comment (Comments tab reply form). */
-	addCommentReply(parentId: string, text: string, mentions?: PptxCommentMention[]): void;
-	/** Replace a comment's (or reply's) text (Comments tab edit-in-place). */
-	editComment(id: string, text: string): void;
-	deleteComment(id: string): void;
-	toggleCommentResolved(id: string): void;
+	/** Write the active slide's new comment list as one undo step (the Comments tab's pane). */
+	applyComments(next: PptxComment[]): void;
 
 	/** Set/clear one effect bucket on the selected element (docked Animation panel). */
 	setAnimationEffect(group: AnimationGroup, preset: PptxAnimationPreset | 'none'): void;
@@ -424,9 +417,8 @@ export interface InspectorDeckState {
 	selectedIds: readonly string[];
 	/** Primary selected element id (docked Animation panel target), if any. */
 	selectedElementId?: string;
-	comments: readonly PptxComment[];
-	/** Authors offered by the Comments tab's `@`-mention typeahead. */
-	commentMentionAuthors: readonly PptxModernCommentAuthor[];
+	/** What the Comments tab's pane shows (the active slide's comments, the people, the selection). */
+	commentsView: CommentsPaneView;
 	/** Named custom shows, for the Action Settings panel's `customShow` picker. */
 	customShows: readonly PptxCustomShow[];
 	docTitle: string | undefined;

@@ -1,4 +1,5 @@
 import { tableStyleAssignmentUpdate } from 'ooxml-ui/pptx';
+import type { PptxCommentDrafts } from 'ooxml-ui/pptx';
 
 import type { Translator } from '../../i18n';
 import { createEl } from '../../render';
@@ -40,6 +41,8 @@ export function createInspector(
 	doc: Document,
 	t: Translator,
 	handlers: InspectorHandlers,
+	/** The viewer's store of unposted comments, for the Comments tab. */
+	commentDrafts?: PptxCommentDrafts,
 ): Inspector {
 	const el = createEl(doc, 'aside', 'pptxv-inspector');
 	el.setAttribute('data-pptx-inspector', '');
@@ -85,7 +88,7 @@ export function createInspector(
 	body.dataset.pptxChrome = 'inspector-body';
 	el.appendChild(body);
 
-	const commentsTab = createCommentsTab(doc, t, handlers);
+	const commentsTab = createCommentsTab(doc, t, handlers, commentDrafts);
 	commentsTab.el.classList.add('pptxv-inspector-body');
 	el.appendChild(commentsTab.el);
 

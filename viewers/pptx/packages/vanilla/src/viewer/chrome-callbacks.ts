@@ -76,6 +76,8 @@ export interface ChromeCallbackDeps {
 	/** The deck's slides and active slide, read straight from the store (the editor is built after the chrome). */
 	getSlides?(): readonly PptxSlide[];
 	getCurrentSlide?(): number;
+	/** The open workspace Comments pane's rows, where Review's Previous / Next reveal a comment. */
+	getCommentsRoot?(): ShadowRoot | null;
 	openHyperlink(): void;
 	openCustomShows(): void;
 	openDocumentProperties(): void;
@@ -194,13 +196,14 @@ export function buildChromeCallbacks(
 				slides: () => deps.getSlides?.() ?? [],
 				currentSlide: () => deps.getCurrentSlide?.() ?? 0,
 				goToSlide: (index) => deps.goToSlide(index),
-				// The pane renders its own rows; only open one when no comment rows are on screen.
+				// Previous / Next show the comment in the workspace Comments pane, opening it if closed.
 				ensureCommentsOpen: () => {
-					if (!document.querySelector('[data-comment-id]')) {
+					if (!deps.getCommentsRoot?.()) {
 						deps.openComments();
 					}
 				},
 				applyComments: (changes) => deps.getEditActions().comments.applyChanges(changes),
+				root: () => deps.getCommentsRoot?.() ?? null,
 			},
 			openHyperlink: () => deps.openHyperlink(),
 			toggleTemplateEditing: () => deps.toggleTemplateEditing(),
@@ -324,13 +327,10 @@ export function buildChromeCallbacks(
 		updateCanvasSize: (size) => deps.getEditActions().updateCanvasSize(size),
 		updateSlideSize: (size) => deps.getEditActions().updateSlideSize(size),
 		applySlideSizeRescale: (size, mode) => deps.getEditActions().applySlideSizeRescale(size, mode),
-		addComment: (text, mentions) =>
-			void deps.getEditActions().comments.addComment(text, undefined, mentions),
-		addCommentReply: (parentId, text, mentions) =>
-			void deps.getEditActions().comments.addCommentReply(parentId, text, mentions),
-		editComment: (id, text) => deps.getEditActions().comments.editComment(id, text),
-		deleteComment: (id) => deps.getEditActions().comments.deleteComment(id),
-		toggleCommentResolved: (id) => deps.getEditActions().comments.toggleCommentResolved(id),
+		applyComments: (next) =>
+			deps
+				.getEditActions()
+				.comments.applyChanges([{ slideIndex: deps.getCurrentSlide?.() ?? 0, comments: next }]),
 		setAnimationEffect: (group, preset) => deps.getEditActions().setAnimationEffect(group, preset),
 		applyMotionPath: (presetId) => deps.getEditActions().applyMotionPath(presetId),
 		setAnimationTiming: (elementId, patch) =>

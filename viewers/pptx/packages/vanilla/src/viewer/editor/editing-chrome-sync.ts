@@ -13,7 +13,8 @@ import { buildThemeColorMap } from 'pptx-viewer-core';
 
 import type { Store, ViewerState } from '../state';
 import type { ViewerChrome } from '../ui';
-import { combineCommentMentionAuthors } from '../ui/comment-mention-typeahead';
+import { combineCommentMentionAuthors } from '../ui/comments-pane';
+import type { CommentsPaneView } from '../ui/comments-pane';
 import type { LayoutOption } from '../ui/ribbon/ribbon-types';
 import { findActiveElement } from './editor-active-elements';
 import { chartFormatTargetOf } from './editor-chart-format-actions';
@@ -125,6 +126,8 @@ export interface EditingChromeSyncDeps {
 	getHandler?(): PptxHandler | null;
 	/** The original deck while a Design gallery hover preview shows. */
 	getHeldDeckStyle?(): DeckStyleState | undefined;
+	/** Who the comments panes write as. */
+	commentAuthorName(): string;
 }
 
 /** Build the `sync()` function that refreshes the ribbon + inspector. */
@@ -211,6 +214,17 @@ export function createEditingChromeSync(deps: EditingChromeSyncDeps): () => void
 			),
 		);
 		const activeSlide = state.slides[state.currentSlide];
+		// The inspector's Comments tab and the phone's Comments sheet show the same pane.
+		const commentsView: CommentsPaneView = {
+			comments: activeSlide?.comments ?? [],
+			editable: editingVisible,
+			authorName: deps.commentAuthorName(),
+			authors: combineCommentMentionAuthors(state.modernCommentAuthors, state.commentAuthors),
+			elements: activeSlide?.elements ?? [],
+			selectedElementId: el?.id ?? null,
+			draftKey: activeSlide?.id ?? null,
+		};
+		chrome.mobileActionSheets?.updateComments(commentsView);
 		inspector?.updateDeck({
 			slideCount: state.slides.length,
 			currentSlide: state.currentSlide,
@@ -222,11 +236,7 @@ export function createEditingChromeSync(deps: EditingChromeSyncDeps): () => void
 			elements: activeSlide?.elements ?? [],
 			selectedIds: state.selectedElementIds,
 			selectedElementId: el?.id,
-			comments: activeSlide?.comments ?? [],
-			commentMentionAuthors: combineCommentMentionAuthors(
-				state.modernCommentAuthors,
-				state.commentAuthors,
-			),
+			commentsView,
 			customShows: state.customShows,
 			docTitle: state.coreProperties?.title,
 			docAuthor: state.coreProperties?.creator,

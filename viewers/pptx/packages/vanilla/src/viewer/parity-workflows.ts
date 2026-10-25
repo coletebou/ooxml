@@ -1,4 +1,5 @@
 import type {
+	PptxCommentDrafts,
 	SlidePackageClipboard,
 	ResolvedCustomization,
 	ThemeCatalogEntry,
@@ -31,8 +32,11 @@ import { loadPresentation, revokeBlobUrls } from './load/load-presentation';
 import { createOutlineWorkflow } from './outline-workflow';
 import { createSelectionPaneWorkflow } from './selection-pane-workflow';
 import type { Store, ViewerState } from './state';
-import { combineCommentMentionAuthors } from './ui/comment-mention-typeahead';
-import { openCommentsPanel } from './ui/comments-panel';
+import {
+	combineCommentMentionAuthors,
+	commentsPanelRoot,
+	openCommentsPanel,
+} from './ui/comments-pane';
 import { openComparePanel } from './ui/compare-panel';
 import { openCustomShowsDialog } from './ui/custom-shows-dialog';
 import { openHeaderFooterDialog } from './ui/header-footer-dialog';
@@ -52,6 +56,8 @@ export interface ParityWorkflowHost {
 	t: Translator;
 	store: Store<ViewerState>;
 	editor: EditorController;
+	/** Unposted comments of every comments pane (the viewer's one store). */
+	commentDrafts?: PptxCommentDrafts;
 	/** The File > Options store the Options dialog reads and writes. */
 	optionsStore: ViewerOptionsStore;
 	/** The host `allowExternalContent` option: overrides the Trust Center setting when set. */
@@ -123,6 +129,8 @@ export interface ParityWorkflows {
 	/** Tear Outline view down (viewer teardown; it owns a store subscription). */
 	closeOutlineView(): void;
 	openComments(): void;
+	/** The open workspace Comments pane's rows (null when it is closed): Review's Previous / Next reveal there. */
+	commentsRoot(): ShadowRoot | null;
 	openHyperlink(): void;
 	openCustomShows(): void;
 }
@@ -261,26 +269,45 @@ export function createParityWorkflows(host: ParityWorkflowHost): ParityWorkflows
 			outline.close();
 		},
 		openComments() {
+			const slide = () => state().slides[state().currentSlide];
 			openCommentsPanel(
 				host.doc,
 				host.root(),
 				host.t,
 				{
-					getComments: () => {
+					read: () => {
 						const current = state();
-						return current.slides[current.currentSlide]?.comments ?? [];
-					},
-					getAuthors: () => {
-						const current = state();
-						return combineCommentMentionAuthors(
-							current.modernCommentAuthors,
-							current.commentAuthors,
-						);
+						return {
+							comments: slide()?.comments ?? [],
+							editable: current.editable,
+							authorName: host.editor.getCommentAuthorName(),
+							authors: combineCommentMentionAuthors(
+								current.modernCommentAuthors,
+								current.commentAuthors,
+							),
+							elements: slide()?.elements ?? [],
+							selectedElementId: current.selectedElementId,
+							draftKey: slide()?.id ?? null,
+						};
 					},
 					subscribe: (listener) => host.store.subscribe(() => listener()),
 				},
-				host.editor.getEditActions().comments,
+				{
+					applyComments: (next) =>
+						host.editor
+							.getEditActions()
+							.comments.applyChanges([{ slideIndex: state().currentSlide, comments: next }]),
+					selectThread: (_commentId, elementId) => {
+						if (elementId && slide()?.elements.some(({ id }) => id === elementId)) {
+							host.editor.selectElements([elementId]);
+						}
+					},
+					...(host.commentDrafts ? { drafts: host.commentDrafts } : {}),
+				},
 			);
+		},
+		commentsRoot() {
+			return commentsPanelRoot(host.root());
 		},
 		openHyperlink() {
 			if (!isAvailable('hyperlink')) {

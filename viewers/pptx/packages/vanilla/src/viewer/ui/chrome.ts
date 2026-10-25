@@ -1,6 +1,7 @@
 import type {
 	AccountAuthConfig,
 	CompatibilityWarningToast,
+	PptxCommentDrafts,
 	ReadOnlyRecommendation,
 	RunProgramNotice,
 	ToolbarActionId,
@@ -91,6 +92,8 @@ export interface ChromeOptions {
 	thumbnailMenu?: ThumbnailRailMenuDeps;
 	/** Inspector actions (geometry + shape fill/stroke). */
 	inspectorHandlers: InspectorHandlers;
+	/** Unposted comments of every comments pane (the viewer's one store). */
+	commentDrafts?: PptxCommentDrafts;
 	/**
 	 * Slide-show toolbar actions (annotation tools, presenter view, end show).
 	 * Navigation and exit reuse `ribbonHandlers.nav`; only the annotation and
@@ -331,7 +334,7 @@ export function buildViewerChrome(
 
 	let inspector: Inspector | null = null;
 	if (options.showInspector) {
-		inspector = createInspector(doc, t, options.inspectorHandlers);
+		inspector = createInspector(doc, t, options.inspectorHandlers, options.commentDrafts);
 		inspector.setEditable(options.editable);
 		body.appendChild(inspector.el);
 		replaceFrameContent(inspector.el, regions, 'inspector', { close: options.closeInspector });
@@ -393,6 +396,10 @@ export function buildViewerChrome(
 				inspector?.el ?? null,
 				options.hiddenActions,
 				() => ribbon?.el.querySelector('pptx-ui-ribbon-insert') ?? null,
+				{
+					selectElement: (id) => options.inspectorHandlers.selectElement(id),
+					...(options.commentDrafts ? { drafts: options.commentDrafts } : {}),
+				},
 			)
 		: null;
 	if (mobileActionSheets) {

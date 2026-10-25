@@ -7,7 +7,7 @@ import {
 	resolveAuthoredCustomShowId,
 	resolveInitialSlideIndex,
 } from 'ooxml-ui/pptx';
-import type { CollabLoadOrigin } from 'ooxml-ui/pptx';
+import type { CollabLoadOrigin, PptxCommentDrafts } from 'ooxml-ui/pptx';
 import type { PptxHandler } from 'pptx-viewer-core';
 import { EncryptedFileError } from 'pptx-viewer-core';
 
@@ -25,6 +25,8 @@ export interface LoadingControllerDeps {
 	store: Store<ViewerState>;
 	getTranslator(): Translator;
 	getEditor(): EditorController | undefined;
+	/** The viewer's store of unposted comments: a new deck takes none of the last one's. */
+	commentDrafts?: PptxCommentDrafts;
 	/**
 	 * Called synchronously right before a successfully parsed deck is committed
 	 * to the store. The store notifies subscribers synchronously, so this is the
@@ -133,6 +135,8 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 			blobUrls = loaded.blobUrls;
 			const partition = partitionTemplateElements(loaded.slides);
 			deps.onContentApplying?.(origin);
+			// Slide ids repeat across files; cleared before the commit notifies the comments panes.
+			deps.commentDrafts?.clear();
 			// Trust Center > "Open documents in Protected View": a freshly-opened
 			// deck (not the host's own bootstrap content, and not a same-document
 			// restore) starts read-only until "Enable Editing" is clicked, but only

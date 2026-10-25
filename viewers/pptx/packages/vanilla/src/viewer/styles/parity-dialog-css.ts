@@ -48,7 +48,6 @@ export const PARITY_DIALOG_CSS = `
 .pptxv-workspace-pane h2, .pptxv-slide-sorter h2 { margin: 0; font-size: 13px; } .pptxv-workspace-pane header button, .pptxv-slide-sorter header button { border: 0; background: transparent; color: inherit; font-size: 18px; cursor: pointer; }
 .pptxv-workspace-list { display: flex; flex-direction: column; gap: 5px; overflow: auto; padding: 8px; }
 .pptxv-selection-row { display: grid; grid-template-columns: 18px 1fr 28px; align-items: center; border-radius: 4px; background: var(--pptx-muted); } .pptxv-selection-row.is-selected { color: var(--pptx-primary); box-shadow: inset 3px 0 var(--pptx-primary); } .pptxv-selection-row button { padding: 7px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.pptxv-comment-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--pptx-border); border-radius: 6px; } .pptxv-comment-card.is-resolved { opacity: .6; } .pptxv-comment-card textarea, .pptxv-workspace-list > textarea { min-height: 58px; padding: 6px; border: 1px solid var(--pptx-border); border-radius: 4px; background: var(--pptx-muted); color: inherit; resize: vertical; } .pptxv-comment-card div { display: flex; gap: 4px; }
 .pptxv-slide-sorter { position: absolute; z-index: 50; inset: 0; display: flex; flex-direction: column; background: color-mix(in srgb, var(--pptx-background) 96%, transparent); color: var(--pptx-foreground); }
 .pptxv-sorter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; overflow: auto; padding: 18px; } .pptxv-sorter-card { overflow: hidden; border: 2px solid var(--pptx-border); border-radius: 7px; background: var(--pptx-card); } .pptxv-sorter-card.is-current { border-color: var(--pptx-primary); } .pptxv-sorter-card.is-hidden { opacity: .5; } .pptxv-sorter-card > button { display: grid; width: 100%; min-height: 90px; place-items: center; border: 0; background: var(--pptx-muted); color: inherit; font-size: 22px; cursor: pointer; } .pptxv-sorter-card div { display: flex; gap: 3px; padding: 5px; } .pptxv-sorter-card div button { flex: 1; padding: 4px; border: 0; background: transparent; color: inherit; font-size: 9px; cursor: pointer; }
 .pptxv-custom-shows-active { display: flex; align-items: center; gap: 8px; } .pptxv-custom-shows-active select { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--pptx-border); border-radius: 4px; background: var(--pptx-muted); color: inherit; }
@@ -77,12 +76,13 @@ export const PARITY_DIALOG_CSS = `
 .pptxv-ole-edit-paragraphs, .pptxv-ole-edit-deck { display: flex; flex-direction: column; gap: 8px; }
 .pptxv-ole-edit-paragraphs textarea { padding: 6px 8px; border: 1px solid var(--pptx-border); border-radius: 4px; background: var(--pptx-muted); color: inherit; resize: vertical; }
 /* Touch target: matches MIN_TOUCH_TARGET_PX (44) from pptx-viewer-shared's
-   render/responsive module, below MOBILE_BREAKPOINT (768). The workspace
-   Comments pane's "Add Comment" button (comments-panel.ts) carries no class
-   of its own; \`!important\` beats css.ts's baseline
+   render/responsive module, below MOBILE_BREAKPOINT (768). The Selection
+   pane's row buttons carry no class of their own; \`!important\` beats css.ts's baseline
    \`.pptxv :is(button, [role='button'])... { min-height: 24px; }\`, whose
    chained :not() pseudo-classes out-specificity a plain class selector. */
 @media (max-width: 767px) {
 	.pptxv-workspace-list button, .pptxv-workspace-pane header button { min-height: 44px !important; }
+	/* The Comments pane draws its buttons in its shadow root; its sizing token reaches them. */
+	pptx-ui-comments-pane.pptxv-workspace-pane { --office-input-height: 44px; }
 }
 `;

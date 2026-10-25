@@ -62,6 +62,7 @@ import {
 	THEME_CATALOG,
 	withSaveFailureToast,
 	writeStoredViewerPrefs,
+	createPptxCommentDrafts,
 } from 'ooxml-ui/pptx';
 import type {
 	DocumentStorage,
@@ -189,6 +190,8 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	readonly store: Store<ViewerState>;
 	readonly renderer: RenderController;
 	t: Translator;
+	/** Unposted comments of every comments pane, kept while a pane is gone (one store). */
+	readonly commentDrafts = createPptxCommentDrafts();
 	/** The viewer's live theme (kept in sync by `setTheme`); read by `ChromeHost` on mount/remount. */
 	currentTheme: ViewerTheme | undefined;
 	private readonly availableThemes: readonly ThemeCatalogEntry[];
@@ -288,6 +291,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			store: this.store,
 			getTranslator: () => this.t,
 			getEditor: () => this.editor,
+			commentDrafts: this.commentDrafts,
 			// Late-joiner bootstrap protection: bracket the load commit so an
 			// active collaboration session can suppress publishing the parsed
 			// deck and instead re-adopt the room's slides when the shared doc
@@ -580,6 +584,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			t: this.t,
 			store: this.store,
 			editor: this.editor,
+			commentDrafts: this.commentDrafts,
 			optionsStore: this.optionsController.optionsStore,
 			allowExternalContent: this.options.allowExternalContent,
 			clearOptionsCache: () => this.clearOptionsCache(),

@@ -44,13 +44,18 @@ export function updateSlideComments(
 	);
 }
 
+/** Who comments are written as: Options > General > "User name" (or the host's), else "You". */
+export function commentAuthorName(getUserName?: () => string | undefined): string {
+	return getUserName?.() || 'You';
+}
+
 export function createCommentActions(deps: {
 	store: Store<ViewerState>;
 	ops: EditorOps;
 	/** Options > General > "User name" override; falls back to "You" when unset/blank. */
 	getUserName?: () => string | undefined;
 }): CommentActions {
-	const authorName = (): string => deps.getUserName?.() || 'You';
+	const authorName = (): string => commentAuthorName(deps.getUserName);
 	/**
 	 * Run `transform` against the active slide's comments and, if it produced a
 	 * real change, commit the result history-aware. `transform` follows the

@@ -4,6 +4,7 @@ import type {
 	MobileInsertRequestEvent,
 	MobileBarViewState,
 	MobileSheetKey,
+	PptxCommentDrafts,
 	PptxUiMobileInsertElement,
 	PptxUiRibbonInsertElement,
 	ToolbarActionId,
@@ -20,6 +21,8 @@ import type { PptxComment, PptxSlide } from 'pptx-viewer-core';
 import type { Translator } from '../i18n';
 import { disposePptxRenderStage } from '../render';
 import { createEl } from '../render';
+import { createCommentsPane } from './comments-pane';
+import type { CommentsPaneView } from './comments-pane';
 import type { RibbonHandlers } from './ribbon/ribbon-types';
 
 /** Paint one slide at `scale`, the same callback the desktop rail is given. */
@@ -28,6 +31,8 @@ export type MobileThumbnailRenderer = (slide: PptxSlide, scale: number) => HTMLE
 export interface MobileActionSheets {
 	el: HTMLElement;
 	update(current: number, slides: readonly PptxSlide[], comments: readonly PptxComment[]): void;
+	/** What the Comments sheet's pane shows; kept while the sheet is closed. */
+	updateComments(view: CommentsPaneView): void;
 	/**
 	 * Hand the Slides sheet the deck renderer, so it can show the slides
 	 * themselves rather than a list of their titles (which is all it had, and
@@ -59,6 +64,11 @@ export function createMobileActionSheets(
 	 * request back to it, so Insert behaves exactly as on the ribbon (dialogs, undo, selection).
 	 */
 	insertSource?: () => PptxUiRibbonInsertElement | null,
+	/**
+	 * The Comments sheet's pane: picking a thread selects its element through `selectElement`,
+	 * and unposted comments wait in the viewer's `drafts` store (one for every comments pane).
+	 */
+	commentsHost: { selectElement?(id: string): void; drafts?: PptxCommentDrafts } = {},
 ): MobileActionSheets {
 	registerPptxWebControls();
 	const el = createEl(doc, 'div', 'pptxv-mobile-actions');
@@ -100,6 +110,24 @@ export function createMobileActionSheets(
 	let renderThumbnail: MobileThumbnailRenderer | null = null;
 	let canvasWidth = 960;
 	let canvasHeight = 540;
+	// One pane for the Comments sheet, kept across openings and updates so a draft survives them.
+	let commentElementIds = new Set<string>();
+	const commentsPane = createCommentsPane(
+		doc,
+		t,
+		{
+			applyComments: (next) =>
+				handlers.edit.comments.applyChanges([{ slideIndex: current, comments: next }]),
+			// A picked thread selects the element it is on, when that is still on the slide.
+			selectThread: (_commentId, elementId) => {
+				if (elementId && commentElementIds.has(elementId)) {
+					commentsHost.selectElement?.(elementId);
+				}
+			},
+			...(commentsHost.drafts ? { drafts: commentsHost.drafts } : {}),
+		},
+		{ showHeading: false },
+	);
 	const inspectorHome = inspector ? doc.createComment('inspector-home') : null;
 	inspector?.parentNode?.insertBefore(inspectorHome!, inspector);
 
@@ -187,51 +215,7 @@ export function createMobileActionSheets(
 		} else if (key === 'inspector' && inspector) {
 			body.appendChild(inspector);
 		} else if (key === 'comments') {
-			if (comments.length === 0) {
-				body.textContent = t('pptx.comments.noneOnSlide');
-			}
-			for (const comment of comments) {
-				const row = createEl(doc, 'article', 'pptxv-mobile-comment');
-				const input = doc.createElement('textarea');
-				input.value = comment.text;
-				input.setAttribute('aria-label', t('pptx.comments.edit'));
-				const actions = createEl(doc, 'div', 'pptxv-mobile-comment-actions');
-				const save = doc.createElement('button');
-				save.type = 'button';
-				save.textContent = t('pptx.comments.save');
-				save.addEventListener('click', () =>
-					handlers.edit.comments.editComment(comment.id, input.value),
-				);
-				const resolve = doc.createElement('button');
-				resolve.type = 'button';
-				resolve.textContent = comment.resolved
-					? t('pptx.comments.unresolve')
-					: t('pptx.comments.resolve');
-				resolve.addEventListener('click', () =>
-					handlers.edit.comments.toggleCommentResolved(comment.id),
-				);
-				const remove = doc.createElement('button');
-				remove.type = 'button';
-				remove.textContent = t('pptx.comments.delete');
-				remove.addEventListener('click', () => handlers.edit.comments.deleteComment(comment.id));
-				actions.append(save, resolve, remove);
-				row.append(input, actions);
-				body.appendChild(row);
-			}
-			const add = createEl(doc, 'div', 'pptxv-mobile-comment-add');
-			const draft = doc.createElement('textarea');
-			draft.placeholder = t('pptx.comments.addPlaceholder');
-			draft.setAttribute('aria-label', t('pptx.comments.addPlaceholder'));
-			const submit = doc.createElement('button');
-			submit.type = 'button';
-			submit.textContent = t('pptx.comments.addComment');
-			submit.addEventListener('click', () => {
-				if (handlers.edit.comments.addComment(draft.value)) {
-					draft.value = '';
-				}
-			});
-			add.append(draft, submit);
-			body.appendChild(add);
+			body.appendChild(commentsPane.el);
 		} else {
 			const buttons: readonly [string, () => void, ToolbarActionId | null][] = [
 				[t('pptx.ribbon.insert'), () => handlers.insert.insert('text'), null],
@@ -303,10 +287,15 @@ export function createMobileActionSheets(
 			current = nextCurrent;
 			slides = nextSlides;
 			comments = nextComments;
-			if (active) {
+			// The Comments sheet's pane follows `updateComments` in place.
+			if (active && active !== 'comments') {
 				render(active);
 			}
 			syncBar();
+		},
+		updateComments(view) {
+			commentElementIds = new Set((view.elements ?? []).map(({ id }) => id));
+			commentsPane.update(view);
 		},
 		setThumbnailRenderer(renderer, width, height) {
 			renderThumbnail = renderer;

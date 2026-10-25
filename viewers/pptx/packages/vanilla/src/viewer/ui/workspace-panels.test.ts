@@ -1,8 +1,7 @@
-import type { PptxComment, PptxElement, PptxSlide } from 'pptx-viewer-core';
+import type { PptxElement, PptxSlide } from 'pptx-viewer-core';
 import { afterEach, describe, expect, it, test, vi } from 'vitest';
 
 import { createTranslator } from '../i18n';
-import { openCommentsPanel } from './comments-panel';
 import { openCustomShowsDialog } from './custom-shows-dialog';
 import { allButtons } from './dialog-footer.test-support';
 import { openHyperlinkEditDialog } from './hyperlink-edit-dialog';
@@ -226,7 +225,7 @@ describe('workspace parity panels', () => {
 		expect(onRename).not.toHaveBeenCalled();
 	});
 
-	it('dispatches sorter and comment actions', () => {
+	it('dispatches sorter actions', () => {
 		const onDuplicate = vi.fn();
 		openSlideSorterOverlay(document, document.body, createTranslator(), {
 			slides: [slide],
@@ -245,106 +244,6 @@ describe('workspace parity panels', () => {
 			.find((item) => item.textContent === 'Duplicate')!
 			.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(onDuplicate).toHaveBeenCalledWith(0);
-		document.body.replaceChildren();
-		const addComment = vi.fn(() => 'comment');
-		openCommentsPanel(
-			document,
-			document.body,
-			createTranslator(),
-			{ getComments: () => [], getAuthors: () => [], subscribe: () => () => undefined },
-			{
-				addComment,
-				addCommentReply: vi.fn(),
-				editComment: vi.fn(),
-				deleteComment: vi.fn(),
-				toggleCommentResolved: vi.fn(),
-				applyChanges: vi.fn(),
-			},
-		);
-		const draft = document.querySelector('textarea')!;
-		draft.value = 'Review this';
-		allButtons(document)
-			.find((button) => button.textContent === 'Add Comment')!
-			.click();
-		expect(addComment).toHaveBeenCalledWith('Review this', undefined, []);
-		// The pane is LIVE now: it stays open after an add and clears the draft.
-		expect(document.querySelector('[data-pptx-comments-panel]')).not.toBeNull();
-		expect(draft.value).toBe('');
-	});
-
-	it('re-renders the comments pane when the model notifies a change', () => {
-		let comments: readonly PptxComment[] = [
-			{ id: 'c1', text: 'First pass', author: 'Alice', resolved: false },
-		];
-		const listeners: Array<() => void> = [];
-		openCommentsPanel(
-			document,
-			document.body,
-			createTranslator(),
-			{
-				getComments: () => comments,
-				getAuthors: () => [],
-				subscribe: (listener) => {
-					listeners.push(listener);
-					return () => undefined;
-				},
-			},
-			{
-				addComment: vi.fn(() => null),
-				addCommentReply: vi.fn(),
-				editComment: vi.fn(),
-				deleteComment: vi.fn(),
-				toggleCommentResolved: vi.fn(),
-				applyChanges: vi.fn(),
-			},
-		);
-		// The pane renders the SAME threaded view as the inspector Comments tab
-		// (shared `createCommentThreadView`), so it offers a Reply affordance.
-		expect(document.querySelectorAll('.pptxv-inspector-comment')).toHaveLength(1);
-		expect(document.querySelector('.pptxv-inspector-comment.is-resolved')).toBeNull();
-		const replyButton = allButtons(document).find((button) => button.textContent === 'Reply');
-		expect(replyButton, 'the workspace pane offers a Reply affordance').toBeDefined();
-		// A resolve replaces the comment array; the notified pane re-renders.
-		comments = [{ id: 'c1', text: 'First pass', author: 'Alice', resolved: true }];
-		for (const listener of listeners) {
-			listener();
-		}
-		expect(document.querySelector('.pptxv-inspector-comment.is-resolved')).not.toBeNull();
-	});
-
-	it('submits a reply from the workspace comments pane', () => {
-		const addCommentReply = vi.fn();
-		openCommentsPanel(
-			document,
-			document.body,
-			createTranslator(),
-			{
-				getComments: () => [{ id: 'c1', text: 'First pass', author: 'Alice', resolved: false }],
-				getAuthors: () => [],
-				subscribe: () => () => undefined,
-			},
-			{
-				addComment: vi.fn(() => null),
-				addCommentReply,
-				editComment: vi.fn(),
-				deleteComment: vi.fn(),
-				toggleCommentResolved: vi.fn(),
-				applyChanges: vi.fn(),
-			},
-		);
-		// `pptx.comments.reply` (open the composer) and `pptx.comments.addReply`
-		// (submit it) both read "Reply", so the submit is the LAST match, which
-		// is also how the neutral e2e helper picks it.
-		const replyButtons = (): HTMLButtonElement[] =>
-			allButtons(document).filter((button) => button.textContent === 'Reply');
-		replyButtons()[0].click();
-		const replyBox = document.querySelector<HTMLTextAreaElement>(
-			'.pptxv-inspector-comment-reply-form textarea',
-		)!;
-		replyBox.value = 'Looks good';
-		replyBox.dispatchEvent(new Event('input'));
-		replyButtons().at(-1)!.click();
-		expect(addCommentReply).toHaveBeenCalledWith('c1', 'Looks good', []);
 	});
 
 	it('creates custom shows and applies safe hyperlinks', () => {

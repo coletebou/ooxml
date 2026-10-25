@@ -12,6 +12,7 @@ import {
 } from 'ooxml-ui/pptx';
 import type {
 	FreeformToolKind,
+	PptxCommentDrafts,
 	PresentationPointerState,
 	PresentationPointerTool,
 	PresentationSnapshot,
@@ -48,6 +49,7 @@ import {
 	createPresentationController,
 	mountPresentationContextMenu,
 } from './ui';
+import { commentsPanelRoot } from './ui/comments-pane';
 import type { RegionSet, RegionSupport } from './ui/region-set';
 import { createRegionSet } from './ui/region-set';
 
@@ -73,6 +75,8 @@ export interface MountChromeDeps extends ChromeCallbackDeps {
 	options: PptxViewerOptions;
 	store: Store<ViewerState>;
 	renderer: RenderController;
+	/** Unposted comments of every comments pane; it outlives a chrome rebuild. */
+	commentDrafts?: PptxCommentDrafts;
 	/**
 	 * The theme to apply on mount: the viewer's live `currentTheme` (tracks
 	 * `setTheme` calls), not the static constructor `options.theme`. Falling
@@ -194,6 +198,7 @@ export function mountChrome(deps: MountChromeDeps): ChromeLifecycle {
 	const regions = deps.regions ?? createRegionSet(deps.getRegionSupport?.());
 	const chrome = buildViewerChrome(doc, t, {
 		regions,
+		...(deps.commentDrafts ? { commentDrafts: deps.commentDrafts } : {}),
 		closeInspector: () => store.set({ inspectorOpen: false }),
 		...resolveChromePanelFlags(customization()),
 		showToolbar: rootOptions.showToolbar,
@@ -657,6 +662,8 @@ export interface ChromeHost {
 	options: PptxViewerOptions;
 	store: Store<ViewerState>;
 	renderer: RenderController;
+	/** Unposted comments of every comments pane (the viewer's one store). */
+	commentDrafts?: PptxCommentDrafts;
 	lifecycle: ChromeLifecycle;
 	/** The host options with the UI customisation folded into the chrome flags. */
 	getChromeOptions(): PptxViewerOptions;
@@ -828,6 +835,7 @@ export function buildMountChromeDeps(host: ChromeHost): MountChromeDeps {
 		regions: host.getChromeRegions(),
 		store: host.store,
 		renderer: host.renderer,
+		...(host.commentDrafts ? { commentDrafts: host.commentDrafts } : {}),
 		initialTheme: host.currentTheme,
 		prev: () => host.prev(),
 		next: () => host.next(),
@@ -890,6 +898,7 @@ export function buildMountChromeDeps(host: ChromeHost): MountChromeDeps {
 		getThemeColorMap: () => host.getThemeColorMap(),
 		getSlides: () => host.store.get().slides,
 		getCurrentSlide: () => host.store.get().currentSlide,
+		getCommentsRoot: () => commentsPanelRoot(host.lifecycle.chrome.root),
 		toggleTemplateEditing: () => host.toggleTemplateEditing(),
 		toggleMasterNavigation: () => host.toggleMasterNavigation(),
 		toggleInspector: () => host.store.set({ inspectorOpen: !host.store.get().inspectorOpen }),

@@ -31,11 +31,6 @@ export const MOBILE_SHEET_CSS = `
 	   shows them; the five-column grid of title pills it replaced could not show
 	   the slides at all. */
 	.pptxv-mobile-slide-list { display: flex; flex-direction: column; gap: 8px; width: 100%; max-height: 46dvh; overflow-y: auto; }
-	.pptxv-mobile-comment { display: grid; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--pptx-border); }
-	.pptxv-mobile-comment textarea, .pptxv-mobile-comment-add textarea { box-sizing: border-box; width: 100%; min-height: 58px; padding: 8px; border: 1px solid var(--pptx-border); border-radius: var(--pptx-radius); background: var(--pptx-background); color: var(--pptx-foreground); font: inherit; }
-	.pptxv-mobile-comment-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-	.pptxv-mobile-comment-actions button, .pptxv-mobile-comment-add button { min-height: 44px !important; padding: 6px 10px; border: 1px solid var(--pptx-border); border-radius: var(--pptx-radius); background: var(--pptx-muted); color: var(--pptx-foreground); }
-	.pptxv-mobile-comment-add { display: grid; gap: 6px; padding-top: 10px; }
 	.pptxv-mobile-slide-list button { flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px; border: 1px solid var(--pptx-border); border-radius: 8px; background: var(--pptx-muted); color: inherit; text-align: left; }
 	.pptxv-mobile-slide-list button.is-active { border-color: var(--pptx-primary); color: var(--pptx-primary); }
 	.pptxv-mobile-slide-num { min-width: 18px; color: var(--pptx-muted-foreground); font-size: 11px; text-align: right; }
@@ -44,10 +39,11 @@ export const MOBILE_SHEET_CSS = `
 	.pptxv-mobile-slide-frame { position: relative; display: block; flex: none; overflow: hidden; border: 1px solid var(--pptx-border); border-radius: 4px; background: #fff; }
 	.pptxv-mobile-slide-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	/* Sheet children take the whole row: the body is a wrapping flex row, so a bare grid or
-	   column would shrink to its content (the half-width comment box) instead of filling it. */
-	.pptxv-mobile-sheet-body > :is(.pptxv-mobile-comment, .pptxv-mobile-comment-add, .pptxv-mobile-slide-list, pptx-ui-mobile-insert, .pptxv-inspector) { flex: 1 1 100%; min-width: 0; }
-	.pptxv-mobile-comment-add > button, .pptxv-mobile-comment-actions > button { flex: 1 1 0; }
-	.pptxv-mobile-comment-add > button { width: 100%; }
+	   column would shrink to its content (a half-width comments pane) instead of filling it. */
+	.pptxv-mobile-sheet-body > :is(pptx-ui-comments-pane, .pptxv-mobile-slide-list, pptx-ui-mobile-insert, .pptxv-inspector) { flex: 1 1 100%; min-width: 0; }
+	/* The Comments sheet is the shared comments pane at touch size: its buttons take the 44px
+	   MIN_TOUCH_TARGET_PX through its sizing tokens (an outer rule beats the pane's own :host). */
+	.pptxv-mobile-sheet-body > pptx-ui-comments-pane { --office-input-height: 44px; --office-control-height-lg: 58px; }
 	/* The Format sheet is one column. The inspector is a block on desktop (tab strip over the
 	   panes); a flex row here laid the strip and the properties side by side and clipped them. */
 	.pptxv-mobile-sheet .pptxv-inspector { display: block; width: 100%; max-height: 55dvh; overflow-x: hidden; border: 0; background: transparent; }
