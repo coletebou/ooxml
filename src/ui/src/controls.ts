@@ -152,6 +152,8 @@ export {
 	type OfficeComment,
 	type OfficeCommentAddDetail,
 	type OfficeCommentDeleteDetail,
+	type OfficeCommentDraft,
+	type OfficeCommentDrafts,
 	type OfficeCommentEditDetail,
 	type OfficeCommentReplyDetail,
 	type OfficeCommentsClassNames,

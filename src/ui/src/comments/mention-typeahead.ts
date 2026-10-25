@@ -110,6 +110,11 @@ export class MentionTypeahead {
 		return true;
 	}
 
+	/** A box's text and its spans as typed, for a host to keep while the pane is gone (see `seed`). */
+	snapshot(key: string, text: string): { text: string; mentions: OfficeCommentMention[] } {
+		return { text, mentions: [...this.spans(key, text)] };
+	}
+
 	/** What a box posts: its text trimmed and its spans moved with it. */
 	take(key: string, box: HTMLTextAreaElement): { text: string; mentions: OfficeCommentMention[] } {
 		return trimMentionText(box.value, this.spans(key, box.value));

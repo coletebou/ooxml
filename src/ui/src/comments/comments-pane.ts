@@ -18,6 +18,8 @@ import {
 	commentInitials,
 	formatCommentTime,
 	type OfficeComment,
+	type OfficeCommentDraft,
+	type OfficeCommentDrafts,
 	type OfficeCommentThread,
 	type OfficeCommentsClassNames,
 	type OfficeCommentsLabels,
@@ -138,6 +140,69 @@ export class OfficeUiCommentsPane extends OfficeElement {
 			this.card(this.rovingId) ?? this.renderRoot.querySelector<HTMLElement>('textarea');
 		if (target) target.focus(options);
 		else super.focus(options);
+	}
+
+	/**
+	 * What the boxes hold that is not posted yet (the new comment, each shown thread's reply, the
+	 * comment being edited) with their mentions, for a host that drops the pane to hand to the next
+	 * one through {@link restoreDrafts}. Empty boxes are left out.
+	 */
+	drafts(): OfficeCommentDrafts {
+		const root = this.shadowRoot!;
+		const read = (key: string, box: HTMLTextAreaElement | null): OfficeCommentDraft | undefined => {
+			if (!box?.value) return undefined;
+			const { text, mentions } = this.mentions.snapshot(key, box.value);
+			return mentions.length ? { text, mentions } : { text };
+		};
+		const drafts: OfficeCommentDrafts = {};
+		const comment = read('new', root.querySelector('textarea.new'));
+		if (comment) drafts.comment = comment;
+		const replies: Record<string, OfficeCommentDraft> = {};
+		for (const card of root.querySelectorAll<HTMLElement>('[data-thread-id]')) {
+			const reply = read(
+				`reply:${card.dataset.threadId}`,
+				card.querySelector('textarea.reply-box'),
+			);
+			if (reply) replies[card.dataset.threadId!] = reply;
+		}
+		if (Object.keys(replies).length) drafts.replies = replies;
+		const edit = this.editingId && read('edit', root.querySelector('textarea.edit-box'));
+		if (edit) drafts.edit = { commentId: this.editingId!, ...edit };
+		return drafts;
+	}
+
+	/**
+	 * Put {@link drafts} back (another pane's, or this one's from before its threads changed): each
+	 * box takes its draft or is emptied, and an edit reopens on its comment. A draft for a thread or
+	 * comment the pane does not show is skipped.
+	 */
+	restoreDrafts(drafts: OfficeCommentDrafts | null | undefined): void {
+		const shown = (id: string) => this.threads.some((t) => t.comments.some((c) => c.id === id));
+		const edit = drafts?.edit && !this.locked && shown(drafts.edit.commentId) ? drafts.edit : null;
+		this.editingId = edit?.commentId;
+		this.requestUpdate();
+		const root = this.shadowRoot!;
+		const fill = (
+			key: string,
+			box: HTMLTextAreaElement | null,
+			draft?: OfficeCommentDraft | null,
+		) => {
+			if (!box) return;
+			box.value = draft?.text ?? '';
+			if (draft?.text) this.mentions.seed(key, draft.text, draft.mentions);
+			else this.mentions.clear(key);
+		};
+		fill('new', root.querySelector('textarea.new'), drafts?.comment);
+		for (const card of root.querySelectorAll<HTMLElement>('[data-thread-id]')) {
+			const key = `reply:${card.dataset.threadId}`;
+			fill(
+				key,
+				card.querySelector('textarea.reply-box'),
+				drafts?.replies?.[card.dataset.threadId!],
+			);
+		}
+		if (edit) fill('edit', root.querySelector('textarea.edit-box'), edit);
+		else this.mentions.clear('edit');
 	}
 
 	private submitNew(): void {

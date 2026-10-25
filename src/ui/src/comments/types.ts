@@ -114,6 +114,22 @@ export interface OfficeThreadDetail {
 	threadId: string;
 }
 
+/** An unposted box: its text as typed and the spans in it. */
+export interface OfficeCommentDraft {
+	text: string;
+	mentions?: OfficeCommentMention[];
+}
+
+/** What a comments pane's boxes hold that is not posted yet (`OfficeUiCommentsPane.drafts`). */
+export interface OfficeCommentDrafts {
+	/** The new-comment box. */
+	comment?: OfficeCommentDraft;
+	/** Each shown thread's reply box, by thread id. */
+	replies?: Record<string, OfficeCommentDraft>;
+	/** The comment being edited, and its box. */
+	edit?: OfficeCommentDraft & { commentId: string };
+}
+
 /** Up to two initials from an author's name ("Ada Lovelace" is "AL", "grace" is "G"). */
 export function commentInitials(author: string): string {
 	const words = author.trim().split(/\s+/).filter(Boolean);

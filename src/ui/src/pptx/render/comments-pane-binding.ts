@@ -9,7 +9,8 @@
 import type { PptxComment, PptxElement, PptxModernCommentAuthor } from 'ooxml-core/pptx';
 
 import type { OfficeUiCommentsPane } from '../../comments/comments-pane';
-import type { OfficeCommentsLabels } from '../../comments/types';
+import type { OfficeCommentDrafts, OfficeCommentsLabels } from '../../comments/types';
+import { mergeCommentDrafts, refreshCommentDrafts, type PptxCommentDrafts } from './comment-drafts';
 import { COMMENT_MENTION_CLASS } from './comment-mentions';
 import {
 	applyCommentsPaneEvent,
@@ -29,6 +30,8 @@ export interface PptxCommentsPaneHost {
 	selectThread?(commentId: string, elementId: string | undefined): void;
 	/** The pane's close button (shown when the input asks for it). */
 	close?(): void;
+	/** Where unposted boxes wait while the pane is gone or shows another slide. */
+	drafts?: PptxCommentDrafts;
 }
 
 /** Everything the pane shows; call {@link PptxCommentsPaneBinding.sync} when it changes. */
@@ -44,6 +47,8 @@ export interface PptxCommentsPaneInput {
 	elements?: readonly PptxElement[];
 	/** A new comment goes on this element (the selection). */
 	selectedElementId?: string | null;
+	/** The slide the boxes' drafts belong to (its id), for the host's `drafts` store. */
+	draftKey?: string | null;
 	/** The thread holding this comment is marked current (the ribbon's comment cursor). */
 	activeCommentId?: string | null;
 	/** The binding's translator (pptx dictionary keys). */
@@ -106,6 +111,41 @@ export function createPptxCommentsPaneBinding(
 ): PptxCommentsPaneBinding {
 	let input: PptxCommentsPaneInput | null = null;
 	const controller = new AbortController();
+	// What the boxes held when this pane last took its slide's drafts, and the store's generation
+	// then. A pane writes back only the boxes it changed since, so panes on one slide keep each
+	// other's drafts and never put back one another pane posted; after a clear (a new document) it
+	// writes nothing back at all.
+	let taken: OfficeCommentDrafts = {};
+	let generation = host.drafts?.generation ?? 0;
+	const takeDrafts = (store: PptxCommentDrafts, key: string | null | undefined): void => {
+		element.restoreDrafts(store.get(key ?? ''));
+		taken = element.drafts();
+		generation = store.generation;
+	};
+	const keepDrafts = (store: PptxCommentDrafts, key: string | null | undefined): void => {
+		if (store.generation !== generation) {
+			return;
+		}
+		const stored = store.get(key ?? '');
+		const merged = mergeCommentDrafts(stored, taken, element.drafts());
+		if (merged === stored) {
+			return;
+		}
+		if (merged) store.set(key ?? '', merged);
+		else store.delete(key ?? '');
+		store.announce(key ?? '', self);
+	};
+	// Another pane on this slide wrote its drafts (a post among them): the boxes left alone here
+	// take the store's value, so a draft posted there does not stay here to be posted twice.
+	const self = {};
+	const stopListening = host.drafts?.listen((key, from) => {
+		const store = host.drafts!;
+		if (from === self || !input || (input.draftKey ?? '') !== key) return;
+		if (store.generation !== generation) return;
+		const fresh = refreshCommentDrafts(taken, element.drafts(), store.get(key));
+		element.restoreDrafts(fresh.boxes);
+		taken = fresh.taken;
+	});
 	const listen = (type: string, handler: (detail: never) => void): void =>
 		element.addEventListener(type, (event) => handler((event as CustomEvent).detail as never), {
 			signal: controller.signal,
@@ -126,6 +166,12 @@ export function createPptxCommentsPaneBinding(
 			);
 			if (next) {
 				host.applyComments(next);
+				// The box this posted from is empty now: the store forgets its draft at once, so a
+				// pane opened later on this slide does not bring the posted text back.
+				if (host.drafts) {
+					keepDrafts(host.drafts, input.draftKey);
+					taken = element.drafts();
+				}
 			}
 		});
 	}
@@ -148,6 +194,14 @@ export function createPptxCommentsPaneBinding(
 
 	return {
 		sync(next) {
+			const before = input;
+			const store = host.drafts;
+			const moved =
+				store !== undefined &&
+				(!before || before.draftKey !== next.draftKey || store.generation !== generation);
+			if (store && moved && before) {
+				keepDrafts(store, before.draftKey);
+			}
 			input = next;
 			const { t } = next;
 			element.threads = pptxCommentThreads(next.comments, {
@@ -173,8 +227,15 @@ export function createPptxCommentsPaneBinding(
 			};
 			element.activeThreadId = threadOf(next.comments, next.activeCommentId);
 			element.locale = next.locale ?? null;
+			if (store && moved) {
+				takeDrafts(store, next.draftKey);
+			}
 		},
 		dispose() {
+			if (host.drafts && input) {
+				keepDrafts(host.drafts, input.draftKey);
+			}
+			stopListening?.();
 			controller.abort();
 		},
 	};
