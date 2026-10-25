@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { PptxComment } from 'ooxml-core/pptx';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	adjacentComment,
@@ -14,6 +14,7 @@ import {
 } from './comment-navigation';
 import type { ReviewCommentsHost, SlideCommentsChange } from './review-comment-commands';
 import { commentCounts, runReviewCommentCommand } from './review-comment-commands';
+import { definePptxCommentsPane } from '../web-components/comments-pane';
 
 const c = (id: string, replies?: PptxComment[]): PptxComment => ({
 	id,
@@ -108,6 +109,56 @@ describe('runReviewCommentCommand', () => {
 		expect(
 			document.querySelector('[data-comment-id="d"]')?.getAttribute('data-comment-active'),
 		).toBe('true');
+	});
+
+	it('reveals the row in a pane that renders after the command, inside its own root', () => {
+		// A binding whose pane opens on its next render: root() is null when the command runs.
+		const paneHost = document.createElement('div');
+		document.body.append(paneHost);
+		const shadow = paneHost.attachShadow({ mode: 'open' });
+		let open = false;
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+			frames.push(callback),
+		);
+		try {
+			const { host } = makeHost();
+			host.root = () => (open ? shadow : null);
+			expect(runReviewCommentCommand('review.comments.next', host, 'b')).toBe('d');
+			open = true;
+			shadow.innerHTML = '<div data-comment-id="d">d</div>';
+			while (frames.length > 0) {
+				frames.shift()!(0);
+			}
+			expect(
+				shadow.querySelector('[data-comment-id="d"]')?.getAttribute('data-comment-active'),
+			).toBe('true');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('reveals the row inside a shown shared comments pane when the host names no root', () => {
+		// Bindings that mount the shared pane need not wire a root: its shadow root is searched. The
+		// real element, defined here, so the case does not depend on what ran before in the worker.
+		definePptxCommentsPane(customElements);
+		const pane = (hidden: boolean) => {
+			const el = document.createElement('pptx-ui-comments-pane');
+			el.hidden = hidden;
+			document.body.append(el);
+			const row = document.createElement('div');
+			row.dataset.commentId = 'd';
+			row.textContent = 'd';
+			el.shadowRoot!.append(row);
+			return el.shadowRoot!;
+		};
+		const hiddenPane = pane(true);
+		const shownPane = pane(false);
+		const { host } = makeHost();
+		delete host.root;
+		expect(runReviewCommentCommand('review.comments.next', host, 'b')).toBe('d');
+		expect(shownPane.querySelector('[data-comment-active]')).not.toBeNull();
+		expect(hiddenPane.querySelector('[data-comment-active]')).toBeNull();
 	});
 
 	it('does nothing without comments', () => {

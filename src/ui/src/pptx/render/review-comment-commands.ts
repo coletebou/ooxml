@@ -68,17 +68,38 @@ export function commentCounts(
 	};
 }
 
-/** Retry the reveal for a few frames: the pane and the slide's rows render after the state change. */
-function revealSoon(host: ReviewCommentsHost, id: string): void {
-	const view = (host.root?.() ??
-		(typeof document === 'undefined' ? null : document)) as ParentNode | null;
-	if (!view) {
-		return;
+/** The shared comments pane draws its rows in its shadow root, out of a document query's reach. */
+const SHARED_PANES = 'pptx-ui-comments-pane, office-ui-comments-pane';
+
+/**
+ * Where to look for the row: the host's root, else the document and the shadow roots of the
+ * shared comments panes on screen (a hidden one, such as an inactive tab's, never takes it).
+ */
+function revealRoots(host: ReviewCommentsHost): ParentNode[] {
+	const own = host.root?.();
+	if (own) {
+		return [own];
 	}
+	if (typeof document === 'undefined') {
+		return [];
+	}
+	const panes = [...document.querySelectorAll<HTMLElement>(SHARED_PANES)].filter(
+		(pane) => pane.shadowRoot && !pane.closest('[hidden]') && (pane.checkVisibility?.() ?? true),
+	);
+	return [document, ...panes.map((pane) => pane.shadowRoot!)];
+}
+
+/**
+ * Retry the reveal for a few frames: the pane and the slide's rows render after the state change.
+ * The roots are looked up on every attempt, since a pane that opens on its binding's next render
+ * has none yet when the command runs.
+ */
+function revealSoon(host: ReviewCommentsHost, id: string): void {
 	let attempts = 0;
 	const attempt = (): void => {
 		attempts += 1;
-		if (!revealComment(view, id) && attempts < 60 && typeof requestAnimationFrame === 'function') {
+		const shown = revealRoots(host).some((root) => revealComment(root, id));
+		if (!shown && attempts < 60 && typeof requestAnimationFrame === 'function') {
 			requestAnimationFrame(attempt);
 		}
 	};
