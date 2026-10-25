@@ -15,6 +15,7 @@ interface KeyTargetElement {
 	tagName?: string;
 	isContentEditable?: boolean;
 	closest?: (selector: string) => unknown;
+	shadowRoot?: { activeElement?: unknown } | null;
 }
 
 function asElement(target: unknown): (KeyTargetElement & { tagName: string }) | null {
@@ -26,12 +27,37 @@ function asElement(target: unknown): (KeyTargetElement & { tagName: string }) | 
 }
 
 /**
+ * The element a key press really came from. Outside an open shadow root an event is retargeted to
+ * the shadow host, so a field inside one (the shared comments pane's boxes) reads as its host;
+ * the host's shadow root still knows which of its elements has focus.
+ */
+function focusedWithin(element: KeyTargetElement & { tagName: string }): unknown {
+	let current: unknown = element;
+	// Bounded: shadow roots nest a few levels at most.
+	for (let depth = 0; depth < 8; depth += 1) {
+		let inner: unknown;
+		try {
+			inner = (current as KeyTargetElement).shadowRoot?.activeElement;
+		} catch {
+			// happy-dom throws here when focus sits in another shadow tree; a browser returns null.
+			inner = null;
+		}
+		if (!inner) {
+			return current;
+		}
+		current = inner;
+	}
+	return current;
+}
+
+/**
  * True when a key press is the user typing into a field rather than driving the
  * editor. Kept here so every binding classifies the same targets: a binding that
  * forgot `<select>` would swallow the arrow keys of its own dropdowns.
  */
 export function isEditorTextInputTarget(target: unknown): boolean {
-	const element = asElement(target);
+	const host = asElement(target);
+	const element = host ? asElement(focusedWithin(host)) : null;
 	if (!element) {
 		return false;
 	}

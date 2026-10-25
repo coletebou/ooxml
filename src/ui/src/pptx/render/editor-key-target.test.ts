@@ -70,3 +70,29 @@ describe('tab on a chrome control', () => {
 		);
 	});
 });
+
+describe('a field inside an open shadow root', () => {
+	/** A host whose shadow root holds a textarea and a button, as the shared comments pane's does. */
+	function shadowHost(): { host: HTMLElement; root: ShadowRoot } {
+		const host = mount('<div id="pane"></div>').querySelector<HTMLElement>('#pane')!;
+		const root = host.attachShadow({ mode: 'open' });
+		root.innerHTML = '<textarea id="t"></textarea><button id="b">b</button>';
+		return { host, root };
+	}
+
+	it('counts as text input through its host, the target a key event is retargeted to', () => {
+		const { host, root } = shadowHost();
+		root.querySelector<HTMLTextAreaElement>('#t')!.focus();
+		expect(isEditorTextInputTarget(host)).toBeTruthy();
+		root.querySelector<HTMLButtonElement>('#b')!.focus();
+		expect(isEditorTextInputTarget(host)).toBeFalsy();
+	});
+
+	it('is found through nested shadow roots', () => {
+		const { root } = shadowHost();
+		const outer = mount('<div id="outer"></div>').querySelector<HTMLElement>('#outer')!;
+		outer.attachShadow({ mode: 'open' }).append(root.host);
+		root.querySelector<HTMLTextAreaElement>('#t')!.focus();
+		expect(isEditorTextInputTarget(outer)).toBeTruthy();
+	});
+});
