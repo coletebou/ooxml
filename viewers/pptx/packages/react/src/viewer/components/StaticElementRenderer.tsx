@@ -42,6 +42,7 @@ function StaticElementRendererImpl({
 	positioned = true,
 	fieldContext,
 	tableStyleContext,
+	findHighlights,
 	parentGroupFill,
 	onActionClick,
 	actionRequiresModifier = false,
@@ -164,6 +165,7 @@ function StaticElementRendererImpl({
 							zIndex={index}
 							fieldContext={fieldContext}
 							tableStyleContext={tableStyleContext}
+							findHighlights={findHighlights}
 							// Chained, not just this group's own fill: `a:grpFill` resolves
 							// against the nearest ANCESTOR that has one, so a nested group
 							// without a fill of its own passes its parent's straight down.
@@ -220,6 +222,7 @@ function StaticElementRendererImpl({
 					sourceSlideIndex,
 					fieldContext,
 					tableStyleContext,
+					findHl: findHighlights?.get(element.id),
 					canEditSmartArt: false,
 					canEditChart: false,
 				})

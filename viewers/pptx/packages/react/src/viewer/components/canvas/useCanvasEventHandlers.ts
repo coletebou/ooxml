@@ -1,4 +1,6 @@
-import type { PptxElement } from 'pptx-viewer-core';
+import { findHighlightsByElement } from 'ooxml-ui/pptx';
+import type { FindResult } from 'ooxml-ui/pptx';
+import type { PptxElement, PptxSlide } from 'pptx-viewer-core';
 /**
  * useCanvasEventHandlers: Event delegation, guide-drag state, find-result
  * highlights, and selected-element bounds for the slide canvas.
@@ -29,14 +31,6 @@ export function isViewportBackgroundMouseDownTarget(
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-
-interface FindResult {
-	slideIndex: number;
-	elementId: string;
-	segmentIndex: number;
-	startOffset: number;
-	length: number;
-}
 
 export interface DraggingGuide {
 	id: string;
@@ -84,6 +78,7 @@ export function useCanvasEventHandlers({
 	findResults,
 	findResultIndex,
 	activeSlideIndex,
+	activeSlide,
 	selectedElement,
 	zoom,
 	onMoveGuide,
@@ -102,36 +97,27 @@ export function useCanvasEventHandlers({
 	findResults?: readonly FindResult[];
 	findResultIndex?: number;
 	activeSlideIndex?: number;
+	/** The slide the find matches are looked up in (a grouped match names its child by path). */
+	activeSlide?: PptxSlide;
 	selectedElement: PptxElement | null;
 	zoom: ZoomViewport;
 	onMoveGuide?: (guideId: string, position: number) => void;
 }): CanvasEventHandlers {
 	/* ── Per-element find highlights (memoised) ───────────────────── */
-	const elementFindHighlightsMap = useMemo(() => {
-		const map = new Map<string, ElementFindHighlights>();
-		if (!findResults || findResults.length === 0 || activeSlideIndex === null) {
-			return map;
-		}
-		for (let i = 0; i < findResults.length; i++) {
-			const r = findResults[i];
-			if (r.slideIndex !== activeSlideIndex) {
-				continue;
-			}
-			if (!map.has(r.elementId)) {
-				map.set(r.elementId, new Map());
-			}
-			const elMap = map.get(r.elementId)!;
-			if (!elMap.has(r.segmentIndex)) {
-				elMap.set(r.segmentIndex, []);
-			}
-			elMap.get(r.segmentIndex)!.push({
-				startOffset: r.startOffset,
-				length: r.length,
-				isCurrent: i === (findResultIndex ?? -1),
-			});
-		}
-		return map;
-	}, [findResults, findResultIndex, activeSlideIndex]);
+	// Shared's grouping: keyed by the element that paints each match (a grouped
+	// shape's child, not the group), spread over the segments a match covers.
+	const elementFindHighlightsMap = useMemo(
+		() =>
+			activeSlideIndex === undefined || !findResults?.length
+				? new Map<string, ElementFindHighlights>()
+				: findHighlightsByElement(
+						activeSlide,
+						activeSlideIndex,
+						findResults,
+						findResultIndex ?? -1,
+					),
+		[findResults, findResultIndex, activeSlideIndex, activeSlide],
+	);
 
 	/* ── Selected element bounds for ruler ────────────────────────── */
 	const selectedBounds = useMemo(() => {

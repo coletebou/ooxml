@@ -234,6 +234,7 @@ function SlideCanvasContent({
 		findResults,
 		findResultIndex,
 		activeSlideIndex,
+		activeSlide,
 		selectedElement,
 		zoom,
 		onMoveGuide,
@@ -480,6 +481,7 @@ function SlideCanvasContent({
 							onResizeTableColumns={stableResizeTableColumns}
 							onResizeTableRow={stableResizeTableRow}
 							findHighlights={elementFindHighlightsMap.get(element.id)}
+							groupFindHighlights={element.type === 'group' ? elementFindHighlightsMap : undefined}
 							onActionClick={onActionClick}
 							onHyperlinkClick={onHyperlinkClick}
 							animationState={presentationElementStates?.get(element.id)}

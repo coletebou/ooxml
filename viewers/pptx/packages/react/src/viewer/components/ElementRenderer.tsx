@@ -85,6 +85,7 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 		onResizeTableColumns,
 		onResizeTableRow,
 		findHighlights,
+		groupFindHighlights,
 		onActionClick,
 		onHyperlinkClick,
 		animationState,
@@ -403,6 +404,7 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 							// `data-element-id` to be addressable - the group node alone
 							// cannot express a child moving independently of its siblings.
 							animation={presentationElementStates?.get(child.id)?.cssAnimation}
+							findHighlights={groupFindHighlights}
 							exposeElementId
 							parentGroupFill={getGroupChildParentFill(el)}
 							// A grouped child keeps its own `a:hlinkClick`; PowerPoint

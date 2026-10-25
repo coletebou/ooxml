@@ -98,6 +98,8 @@ export interface ElementRendererProps {
 	onResizeTableRow?: (elementId: string, rowIndex: number, newHeight: number) => void;
 	/** Per-segment highlight ranges produced by Find & Replace. */
 	findHighlights?: ElementFindHighlights;
+	/** A group's children's highlights, by child id (a match is keyed by the shape that paints it). */
+	groupFindHighlights?: ReadonlyMap<string, ElementFindHighlights>;
 	/** Called when the user clicks an element that has an actionClick (hyperlink / slide jump). */
 	onActionClick?: (elementId: string, action: PptxAction) => void;
 	/** Called when a text-level hyperlink is clicked (e.g. in presentation mode). */

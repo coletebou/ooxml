@@ -1,3 +1,4 @@
+import type { ElementFindHighlights } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxSlide, ShapeStyle } from 'pptx-viewer-core';
 
 import type { TableStyleContext } from '../utils/table-band-style';
@@ -15,6 +16,12 @@ export interface StaticElementRendererProps {
 	fieldContext?: FieldSubstitutionContext;
 	/** Theme + table style map for resolving table band/header colours. */
 	tableStyleContext?: TableStyleContext;
+	/**
+	 * Find & Replace matches by element id (a grouped child on the editing
+	 * canvas): this element marks its own and hands the map to its children, so
+	 * a shape in a group inside a group is marked too.
+	 */
+	findHighlights?: ReadonlyMap<string, ElementFindHighlights>;
 	/**
 	 * The enclosing group's fill (`GroupPptxElement.groupFill`), passed down by
 	 * the group branch below so a child painted with `a:grpFill`
