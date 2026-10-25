@@ -122,6 +122,7 @@ function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]):
 		:comments="comments.commentsApi.slideComments.value"
 		:author-name="authorName"
 		:modern-comment-authors="deck.modernCommentAuthors.value"
+		:comment-drafts="comments.commentDrafts"
 		@slide-update="onSlideUpdate"
 		@presentation-update="onPresentationUpdate"
 		@apply-theme="deckActions.applyThemeByPath"
@@ -134,14 +135,7 @@ function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]):
 		@set-template-background="deckActions.setTemplateBackground"
 		:get-template-background-color="deckActions.getTemplateBackgroundColor"
 		@select-element="onSelectElement"
-		@comment-add="
-			(p) => commit(comments.commentsApi.addComment(p.text, undefined, undefined, p.mentions))
-		"
-		@comment-remove="(id) => commit(comments.commentsApi.removeComment(id))"
-		@comment-resolve="(id) => commit(comments.commentsApi.resolveComment(id))"
-		@comment-reply="
-			(p) => commit(comments.commentsApi.replyToComment(p.parentId, p.text, p.mentions))
-		"
+		@comments-change="commit"
 		@close="onClose"
 	/>
 

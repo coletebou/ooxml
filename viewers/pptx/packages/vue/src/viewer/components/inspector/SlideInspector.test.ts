@@ -136,13 +136,23 @@ describe('slideInspector', () => {
 		expect(wrapper.emitted('select-element')?.[0]).toStrictEqual(['a']);
 	});
 
-	it('hosts the comments panel on the Comments tab and relays adds', async () => {
-		const wrapper = mount(SlideInspector, { props: { ...baseProps, comments: [] } });
+	it('hosts the shared comments pane on the Comments tab and relays its changes', async () => {
+		const wrapper = mount(SlideInspector, {
+			props: { ...baseProps, comments: [] },
+			attachTo: document.body,
+		});
 		const commentsTab = wrapper.findAll('button').find((b) => b.text().includes('Comments'));
 		await commentsTab!.trigger('click');
-		await setControlValue(wrapper.get('textarea'), 'First!');
-		await wrapper.get('form').trigger('submit.prevent');
-		expect(wrapper.emitted('comment-add')?.[0]).toStrictEqual([{ text: 'First!', mentions: [] }]);
+		const root = wrapper.get('pptx-ui-comments-pane').element.shadowRoot!;
+		const box = root.querySelector<HTMLTextAreaElement>('textarea.new')!;
+		box.value = 'First!';
+		box.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+		[...root.querySelectorAll<HTMLButtonElement>('button')]
+			.find((button) => button.textContent === 'Add Comment')!
+			.click();
+		const [next] = wrapper.emitted('comments-change')![0]! as [{ text: string }[]];
+		expect(next.map((comment) => comment.text)).toStrictEqual(['First!']);
+		wrapper.unmount();
 	});
 
 	it('emits close from the tab strip close button', async () => {

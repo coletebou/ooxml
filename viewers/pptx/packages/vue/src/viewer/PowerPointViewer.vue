@@ -515,6 +515,8 @@ watch(activeContent, () => {
 	activeSlideIndex.value = 0;
 	selection.selectedElementIds.value = [];
 	history.clearHistory();
+	// Slide ids repeat across files: a new deck takes none of the last one's unposted comments.
+	comments.commentDrafts.clear();
 	// A newly opened document is protected again even if the previous one
 	// was unlocked via "Enable Editing" this session.
 	protectedViewDismissed.value = false;

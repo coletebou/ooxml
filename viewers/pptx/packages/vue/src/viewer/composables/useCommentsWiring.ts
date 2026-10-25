@@ -1,6 +1,7 @@
-import type { ReviewCommentsHost } from 'ooxml-ui/pptx';
+import { createPptxCommentDrafts } from 'ooxml-ui/pptx';
+import type { PptxCommentDrafts, ReviewCommentsHost } from 'ooxml-ui/pptx';
 import type { PptxComment, PptxSlide } from 'pptx-viewer-core';
-import { computed, ref } from 'vue';
+import { computed, markRaw, ref } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
 
 import { useComments } from './useComments';
@@ -22,6 +23,8 @@ export interface UseCommentsWiringResult {
 	commitComments: (next: PptxComment[] | null) => void;
 	/** Review > Comments Previous / Next / Delete over the whole deck. */
 	reviewHost: ReviewCommentsHost;
+	/** Unposted comments of every comments pane, kept while a pane is gone (one store). */
+	commentDrafts: PptxCommentDrafts;
 }
 
 /**
@@ -89,5 +92,7 @@ export function useCommentsWiring(input: UseCommentsWiringInput): UseCommentsWir
 		onCommentMarkerClick,
 		commitComments,
 		reviewHost,
+		// Not reactive state: the panes read and write it themselves.
+		commentDrafts: markRaw(createPptxCommentDrafts()),
 	};
 }

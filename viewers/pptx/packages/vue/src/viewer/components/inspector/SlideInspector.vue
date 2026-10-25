@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SlideSizeEmu } from 'ooxml-ui/pptx';
+import type { PptxCommentDrafts, SlideSizeEmu } from 'ooxml-ui/pptx';
 /**
  * SlideInspector: the right inspector shown when no element is selected,
  * mirroring React's `InspectorPane.tsx` no-selection state: an
@@ -17,7 +17,6 @@ import type { SlideSizeEmu } from 'ooxml-ui/pptx';
 import type {
 	PptxAppProperties,
 	PptxComment,
-	PptxCommentMention,
 	PptxCoreProperties,
 	PptxCustomProperty,
 	PptxHandoutMaster,
@@ -65,6 +64,8 @@ const props = withDefaults(
 		authorName?: string;
 		/** Modern comment authors (`ppt/commentAuthors.xml`), for the `@`-mention typeahead. */
 		modernCommentAuthors?: PptxModernCommentAuthor[];
+		/** The viewer's store of unposted comments (`useCommentsWiring`). */
+		commentDrafts?: PptxCommentDrafts;
 		/** Read a layout/master's current background colour (template-edit mode). */
 		getTemplateBackgroundColor?: (path: string) => string | undefined;
 	}>(),
@@ -83,10 +84,8 @@ const emit = defineEmits<{
 	'update-tag-collections': [next: PptxTagCollection[]];
 	'set-template-background': [path: string, backgroundColor: string];
 	'select-element': [id: string];
-	'comment-add': [payload: { text: string; mentions?: PptxCommentMention[] }];
-	'comment-remove': [id: string];
-	'comment-resolve': [id: string];
-	'comment-reply': [payload: { parentId: string; text: string; mentions?: PptxCommentMention[] }];
+	/** The slide's whole new comment list after a Comments-tab change (one history entry). */
+	'comments-change': [next: PptxComment[]];
 	close: [];
 }>();
 
@@ -166,10 +165,13 @@ const activeTab = ref<InspectorTab>('properties');
 				:comments="comments ?? []"
 				:author-name="authorName"
 				:modern-comment-authors="modernCommentAuthors ?? []"
-				@add="(payload) => emit('comment-add', payload)"
-				@remove="(id) => emit('comment-remove', id)"
-				@resolve="(id) => emit('comment-resolve', id)"
-				@reply="(payload) => emit('comment-reply', payload)"
+				:elements="slide?.elements ?? []"
+				:editable="canEdit"
+				:drafts="commentDrafts"
+				:draft-key="slide?.id ?? null"
+				embedded
+				@change="(next) => emit('comments-change', next)"
+				@select="(p) => p.elementId && emit('select-element', p.elementId)"
 			/>
 		</div>
 	</aside>

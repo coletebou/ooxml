@@ -147,10 +147,13 @@ function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]):
 		:comments="comments.commentsApi.slideComments.value"
 		:author-name="authorName"
 		:modern-comment-authors="deck.modernCommentAuthors.value"
-		@add="(p) => commit(comments.commentsApi.addComment(p.text, undefined, undefined, p.mentions))"
-		@remove="(id) => commit(comments.commentsApi.removeComment(id))"
-		@resolve="(id) => commit(comments.commentsApi.resolveComment(id))"
-		@reply="(p) => commit(comments.commentsApi.replyToComment(p.parentId, p.text, p.mentions))"
+		:elements="activeSlide?.elements ?? []"
+		:selected-element-id="selectedElementIds[0] ?? null"
+		:editable="canEdit"
+		:drafts="comments.commentDrafts"
+		:draft-key="activeSlide?.id ?? null"
+		@change="commit"
+		@select="(p) => p.elementId && selectionPane.onSelectionPaneSelect(p.elementId)"
 	/>
 
 	<!-- Signed-document badge (opens the signatures panel). -->
