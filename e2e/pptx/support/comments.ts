@@ -109,6 +109,47 @@ export function commentTextVisible(page: Page, text: string): Promise<boolean> {
 }
 
 /**
+ * How far the visible new-comment box sits inside the surface it is drawn on, at its start and end
+ * edges: the nearest ancestor (across shadow roots) that paints a background, measured inside that
+ * surface's border. Null when no comment box is on screen.
+ */
+export function composeBoxInset(page: Page): Promise<{ start: number; end: number } | null> {
+	return page.evaluate(() => {
+		const elements = (root: Document | ShadowRoot): HTMLElement[] =>
+			[...root.querySelectorAll<HTMLElement>('*')].flatMap((el) => [
+				el,
+				...(el.shadowRoot ? elements(el.shadowRoot) : []),
+			]);
+		const box = elements(document).find(
+			(el) =>
+				el instanceof HTMLTextAreaElement &&
+				/comment/i.test(`${el.placeholder} ${el.getAttribute('aria-label') ?? ''}`) &&
+				el.checkVisibility(),
+		);
+		if (!box) {
+			return null;
+		}
+		const up = (el: Element): Element | null =>
+			el.parentElement ??
+			(el.getRootNode() instanceof ShadowRoot ? (el.getRootNode() as ShadowRoot).host : null);
+		let surface = up(box);
+		while (surface && getComputedStyle(surface).backgroundColor === 'rgba(0, 0, 0, 0)') {
+			surface = up(surface);
+		}
+		if (!surface) {
+			return null;
+		}
+		const style = getComputedStyle(surface);
+		const outer = surface.getBoundingClientRect();
+		const inner = box.getBoundingClientRect();
+		return {
+			start: inner.left - outer.left - parseFloat(style.borderLeftWidth),
+			end: outer.right - parseFloat(style.borderRightWidth) - inner.right,
+		};
+	});
+}
+
+/**
  * Create a comment on `target` through the canvas context menu. Right-click
  * selects the element in every binding, so the comment is anchored to it where
  * anchoring is supported. Throws when the menu lacks the command, because that

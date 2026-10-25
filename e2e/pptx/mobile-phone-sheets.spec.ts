@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { composeBoxInset } from './support/comments';
 import { resetTabSession } from './support/deck';
 
 const deck = resolve(
@@ -182,6 +183,15 @@ test('the comment box fills the sheet width', async ({ page }) => {
 		),
 	);
 	expect(widest).toBeGreaterThan(412 * 0.8);
+});
+
+test('the comment box keeps a margin inside the sheet', async ({ page }) => {
+	await load(page);
+	await bar(page).getByRole('button', { name: 'Comments' }).tap();
+	await expect.poll(() => composeBoxInset(page)).not.toBeNull();
+	const inset = (await composeBoxInset(page))!;
+	expect(inset.start).toBeGreaterThanOrEqual(8);
+	expect(inset.end).toBeGreaterThanOrEqual(8);
 });
 
 /**
