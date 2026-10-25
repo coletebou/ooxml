@@ -169,4 +169,24 @@ describe('comment rows', () => {
 		revealComment(root, 'a');
 		expect(root.querySelectorAll('#pptx-comment-active-style')).toHaveLength(1);
 	});
+
+	it('reports a row a click lands in inside an open shadow root, listening on the document', () => {
+		// The shared comments pane draws its rows in its shadow root; the ribbon follows the document.
+		const host = document.createElement('div');
+		document.body.append(host);
+		const root = host.attachShadow({ mode: 'open' });
+		root.innerHTML = '<div data-comment-id="a"><button id="x">x</button></div>';
+		const button = root.getElementById('x')!;
+		const seen: string[] = [];
+		const stop = trackActiveComment(document, (id) => seen.push(id));
+		// A browser retargets the click to the host outside the shadow root (happy-dom does not):
+		// the row is only on the composed path.
+		const click = new MouseEvent('click', { bubbles: true, composed: true });
+		Object.defineProperty(click, 'composedPath', {
+			value: () => [button, button.parentElement, root, host, document.body, document],
+		});
+		host.dispatchEvent(click);
+		stop();
+		expect(seen).toStrictEqual(['a']);
+	});
 });

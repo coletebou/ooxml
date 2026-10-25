@@ -181,9 +181,13 @@ export function trackActiveComment(
 	onChange: (commentId: string) => void,
 ): () => void {
 	const handler = (event: Event): void => {
-		const target = event.target;
-		const row =
-			target instanceof Element ? target.closest<HTMLElement>(`[${COMMENT_ID_ATTR}]`) : null;
+		// The composed path, not the target: a row inside an open shadow root (the shared comments
+		// pane's) reaches a document listener retargeted to the shadow host.
+		const row = event
+			.composedPath()
+			.find(
+				(node): node is Element => node instanceof Element && node.hasAttribute(COMMENT_ID_ATTR),
+			);
 		const id = row?.getAttribute(COMMENT_ID_ATTR);
 		if (id) {
 			onChange(id);
