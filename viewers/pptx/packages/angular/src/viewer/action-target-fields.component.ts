@@ -86,8 +86,7 @@ import type { ElementAction, ElementActionType, PptxCustomShow } from 'pptx-view
 		/* Shared with ActionSettingsPanelComponent's own <pptx-ui-select>: duplicated
 		   rather than inherited, because Angular's per-component style
 		   encapsulation means the PARENT's stylesheet can never reach an
-		   element rendered inside THIS component's own template (see
-		   CommentMentionTextareaComponent for the same note in depth). */
+		   element rendered inside THIS component's own template. */
 		.pptx-ng-action__input {
 			box-sizing: border-box;
 			width: 100%;

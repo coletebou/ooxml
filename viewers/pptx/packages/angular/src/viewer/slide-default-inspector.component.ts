@@ -20,6 +20,7 @@ import {
 	signal,
 } from '@angular/core';
 import { TranslatePipe } from '@ngx-translate/core';
+import type { PptxCommentDrafts } from 'ooxml-ui/pptx';
 import type { PptxComment, PptxElement, PptxModernCommentAuthor } from 'pptx-viewer-core';
 import { hasTextProperties } from 'pptx-viewer-core';
 
@@ -132,6 +133,15 @@ interface LayerRow {
 					<pptx-comments-panel
 						[comments]="comments()"
 						[modernCommentAuthors]="modernCommentAuthors()"
+						[authorName]="commentAuthorName()"
+						[elements]="editor.slides()[slideIndex()]?.elements ?? []"
+						[selectedElementId]="selectedElement()?.id ?? null"
+						[editable]="canEdit()"
+						[showHeading]="false"
+						[drafts]="commentDrafts()"
+						[draftKey]="editor.slides()[slideIndex()]?.id ?? null"
+						(commentsChange)="commentsChange.emit($event)"
+						(threadSelect)="commentThreadSelect.emit($event)"
 						(add)="commentAdd.emit($event)"
 						(remove)="commentRemove.emit($event)"
 						(resolve)="commentResolve.emit($event)"
@@ -211,8 +221,16 @@ export class SlideDefaultInspectorComponent {
 	readonly comments = input<PptxComment[]>([]);
 	/** Office 2021 modern comment authors, for the `@`-mention typeahead. */
 	readonly modernCommentAuthors = input<readonly PptxModernCommentAuthor[]>([]);
+	/** Who new comments are written as, and whose comments offer Edit. */
+	readonly commentAuthorName = input<string>('You');
+	/** The viewer's store of unposted comments, so a draft outlives the Comments tab. */
+	readonly commentDrafts = input<PptxCommentDrafts | undefined>(undefined);
 
-	/** Re-emitted comments-panel events (the host owns the comment writes). */
+	/** The active slide's whole new comment list after a comments-tab change (one undo step). */
+	readonly commentsChange = output<PptxComment[]>();
+	/** A comment thread was picked in the comments tab. */
+	readonly commentThreadSelect = output<{ commentId: string; elementId?: string }>();
+	/** Re-emitted per-change comments-panel events, for a host that handles them itself. */
 	readonly commentAdd = output<CommentSubmission>();
 	readonly commentRemove = output<string>();
 	readonly commentResolve = output<string>();

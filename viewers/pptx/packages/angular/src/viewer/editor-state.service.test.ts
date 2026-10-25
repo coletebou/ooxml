@@ -37,6 +37,15 @@ function service(): EditorStateService {
 	return svc;
 }
 
+describe('a new deck', () => {
+	it('clears the unposted comments of the last one', () => {
+		const svc = service();
+		svc.commentDrafts.set('s1', { comment: { text: 'From the last deck' } });
+		svc.setSlides([slide('s1', [element('a')])]);
+		expect(svc.commentDrafts.size).toBe(0);
+	});
+});
+
 describe('undo of Home > Layout and of New Slide from a layout', () => {
 	const L1 = 'ppt/slideLayouts/slideLayout1.xml';
 	const L2 = 'ppt/slideLayouts/slideLayout2.xml';

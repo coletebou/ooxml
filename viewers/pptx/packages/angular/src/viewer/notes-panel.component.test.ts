@@ -8,7 +8,7 @@
  * (`resolveNotesSegments` -> `segmentsToEditorHtml`, and `buildNotesPrintHtml`)
  * to prove a deck's `<p:notesStyle>` level-0 font size reaches the rendered
  * notes text, then asserts the component/template WIRING against the real
- * source files, matching `comment-body.component.test.ts`'s pattern.
+ * source files.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

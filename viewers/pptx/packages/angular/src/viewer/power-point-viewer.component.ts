@@ -123,13 +123,6 @@ import { ChartFormatPaneHostComponent } from './chart-format-pane-host.component
 import { CollaborationCursorsComponent } from './collaboration-cursors.component';
 import { CollaborationService } from './collaboration.service';
 import { CommentMarkersOverlayComponent } from './comment-markers-overlay.component';
-import {
-	addCommentToList,
-	removeCommentFromList,
-	replyToCommentInList,
-	toggleCommentResolvedInList,
-} from './comments-helpers';
-import type { CommentSubmission } from './comments-panel.component';
 import { CommentsPanelComponent } from './comments-panel.component';
 import { CompatToastsComponent } from './compat-toasts.component';
 import { CustomShowsComponent } from './custom-shows.component';
@@ -806,10 +799,14 @@ const noopClose = (): void => undefined;
 										<pptx-comments-panel
 											[comments]="activeComments()"
 											[modernCommentAuthors]="loader.modernCommentAuthors()"
-											(add)="onCommentAdd($event)"
-											(remove)="onCommentRemove($event)"
-											(resolve)="onCommentResolve($event)"
-											(reply)="onCommentReply($event)"
+											[authorName]="commentAuthorName()"
+											[elements]="activeSlide()?.elements ?? []"
+											[selectedElementId]="selectedElement()?.id ?? null"
+											[editable]="canEdit()"
+											[drafts]="editor.commentDrafts"
+											[draftKey]="activeSlide()?.id ?? null"
+											(commentsChange)="onCommentsChange($event)"
+											(threadSelect)="onCommentThreadSelect($event)"
 										/>
 									}
 									@case ('selection') {
@@ -840,10 +837,10 @@ const noopClose = (): void => undefined;
 											[selectedElement]="selectedElement()"
 											[comments]="activeComments()"
 											[modernCommentAuthors]="loader.modernCommentAuthors()"
-											(commentAdd)="onCommentAdd($event)"
-											(commentRemove)="onCommentRemove($event)"
-											(commentResolve)="onCommentResolve($event)"
-											(commentReply)="onCommentReply($event)"
+											[commentAuthorName]="commentAuthorName()"
+											[commentDrafts]="editor.commentDrafts"
+											(commentsChange)="onCommentsChange($event)"
+											(commentThreadSelect)="onCommentThreadSelect($event)"
 										/>
 									}
 								}
@@ -4220,53 +4217,19 @@ export class PowerPointViewerComponent
 	 * Comment/reply author: the host `authorName` input wins, otherwise fall
 	 * back to Options > General > "User name" before the generic "You".
 	 */
-	private commentAuthorName(): string {
+	protected commentAuthorName(): string {
 		return this.authorName() || this.viewerOpts.options().general.userName || 'You';
 	}
 
-	/** Append a comment, with its `@`-mention spans, to the active slide (one history entry). */
-	onCommentAdd(submission: CommentSubmission): void {
-		const next = addCommentToList(
-			this.activeComments(),
-			submission.text,
-			this.commentAuthorName(),
-			undefined,
-			undefined,
-			undefined,
-			submission.mentions,
-		);
-		if (next) {
-			this.editor.updateSlide(this.activeSlideIndex(), { comments: next });
-		}
+	/** Write the comments pane's new list for the active slide (one history entry). */
+	onCommentsChange(next: PptxComment[]): void {
+		this.editor.updateSlide(this.activeSlideIndex(), { comments: next });
 	}
 
-	/** Remove a comment from the active slide. */
-	onCommentRemove(id: string): void {
-		const next = removeCommentFromList(this.activeComments(), id);
-		if (next) {
-			this.editor.updateSlide(this.activeSlideIndex(), { comments: next });
-		}
-	}
-
-	/** Toggle a comment's resolved flag on the active slide. */
-	onCommentResolve(id: string): void {
-		const next = toggleCommentResolvedInList(this.activeComments(), id);
-		if (next) {
-			this.editor.updateSlide(this.activeSlideIndex(), { comments: next });
-		}
-	}
-
-	/** Append a threaded reply, with its `@`-mention spans, under a top-level comment. */
-	onCommentReply(event: { parentId: string } & CommentSubmission): void {
-		const next = replyToCommentInList(
-			this.activeComments(),
-			event.parentId,
-			event.text,
-			this.commentAuthorName(),
-			event.mentions,
-		);
-		if (next) {
-			this.editor.updateSlide(this.activeSlideIndex(), { comments: next });
+	/** A picked comment thread selects the element it is on, when that is still on the slide. */
+	onCommentThreadSelect({ elementId }: { commentId: string; elementId?: string }): void {
+		if (elementId && this.activeSlide()?.elements.some(({ id }) => id === elementId)) {
+			this.editor.select([elementId]);
 		}
 	}
 

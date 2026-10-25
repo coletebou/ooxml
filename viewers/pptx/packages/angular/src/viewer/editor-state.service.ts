@@ -23,6 +23,7 @@ import {
 	buildSlideTemplateSlide,
 	cloneElementForPaste,
 	createEditorHistoryController,
+	createPptxCommentDrafts,
 	groupSlidesBySection,
 	insertedLayoutCompletion,
 	isTemplateElement,
@@ -112,6 +113,8 @@ export class EditorStateService {
 	})();
 	/** The shared undo/redo controller (one stack and one default depth for every binding). */
 	private readonly history = createEditorHistoryController<EditorSnapshot>();
+	/** Unposted comments of every comments panel, kept while a panel is gone (one store). */
+	readonly commentDrafts = createPptxCommentDrafts();
 	private readonly historyState = controllerSignal(this.history);
 	/**
 	 * Counts committed edits (recorded, undone or redone), never loads. The viewer component
@@ -216,6 +219,8 @@ export class EditorStateService {
 		this.headerFooter.set(structuredClone(headerFooter));
 		this.selectedIds.set([]);
 		this.history.clear();
+		// Slide ids repeat across files: a new deck takes none of the last one's unposted comments.
+		this.commentDrafts.clear();
 		this.dirty.set(false);
 	}
 
