@@ -13,6 +13,7 @@ import { computed, ref, watchPostEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { provideSlideFieldContext } from '../composables/field-context';
+import { provideStageFindHighlights } from '../composables/find-highlights';
 import { provideSlideElements } from '../composables/slide-elements';
 import { stripElementIdMarkers } from '../composables/stage-element-markers';
 import type { CanvasSize } from '../types';
@@ -103,6 +104,8 @@ const stageRef = ref<HTMLElement | null>(null);
 // presenter preview or export stage must resolve them from the slide it paints
 // rather than from the active one.
 provideSlideFieldContext(() => props.slide);
+// Find matches are marked on the editing canvas only (see `find-highlights.ts`).
+provideStageFindHighlights(() => (props.interactive ? props.slide : undefined));
 
 /**
  * Template elements render behind the slide content; default to none, and

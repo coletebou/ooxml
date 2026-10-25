@@ -15,10 +15,14 @@
  * Firefox never implemented): the wrapper style comes from shared's
  * `getTextReflectionWrapperStyle`, the text-run counterpart of a
  * shape/picture's `ShapeEffectOverlay` reflection - reused, not forked.
+ *
+ * A run a find match covers (`run.findMatch`, shared's `markFindMatches`) is
+ * wrapped in a `<mark>` around the base run; the reflected copy is not marked.
  */
 import type { ParagraphRun } from 'ooxml-ui/pptx';
 import type { CSSProperties } from 'vue';
 
+import FindMatchMark from './FindMatchMark';
 import SlideTextRunBase from './SlideTextRunBase.vue';
 import SlideTextRunContent from './SlideTextRunContent.vue';
 
@@ -27,7 +31,7 @@ const props = defineProps<{ run: ParagraphRun }>();
 
 <template>
 	<span v-if="run.reflection" style="position: relative; display: inline-block">
-		<SlideTextRunBase :run="run" />
+		<FindMatchMark :kind="run.findMatch"><SlideTextRunBase :run="run" /></FindMatchMark>
 		<span
 			class="pptx-vue-text-reflection"
 			aria-hidden="true"
@@ -35,5 +39,5 @@ const props = defineProps<{ run: ParagraphRun }>();
 			><span :style="run.style"><SlideTextRunContent :run="run" /></span
 		></span>
 	</span>
-	<SlideTextRunBase v-else :run="run" />
+	<FindMatchMark v-else :kind="run.findMatch"><SlideTextRunBase :run="run" /></FindMatchMark>
 </template>

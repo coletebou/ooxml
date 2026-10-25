@@ -121,6 +121,7 @@ import { useChartCanvasEditContext } from './composables/chart-part-selection';
 import { useCustomizedRibbonProps } from './composables/customization-ribbon-gates';
 import { readDeckData } from './composables/deck-data';
 import { FieldContextKey } from './composables/field-context';
+import { provideFindMatches } from './composables/find-highlights';
 import { InspectorPreviewKey } from './composables/inspector-preview-context';
 import { MergeCropKey } from './composables/merge-crop-context';
 import { RecentColorsKey } from './composables/recent-colors-context';
@@ -857,6 +858,13 @@ const find = useFindReplace({
 	pushHistory: history.pushHistory,
 	open: findOpen,
 });
+// The editing canvas marks the matches inside the text (see `find-highlights.ts`).
+provideFindMatches(() => ({
+	matches: find.matches.value,
+	current: find.currentMatch.value,
+	slideIndex: activeSlideIndex.value,
+	slideId: activeSlide.value?.id,
+}));
 
 // -- Export (PNG / PDF) + print ----------------------------------------
 const exporter = useExportWiring({

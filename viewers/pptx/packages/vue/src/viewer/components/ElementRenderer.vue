@@ -11,6 +11,7 @@ import {
 	inlineElementPointerEvents,
 	isElementRendered,
 	isEquationOnlyText,
+	markFindMatches,
 	placeholderPromptDescriptor,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, ShapeStyle } from 'pptx-viewer-core';
@@ -25,6 +26,7 @@ import {
 	getTextBlockStyle,
 } from '../composables/element-style';
 import { injectFieldContext, resolveFieldContext } from '../composables/field-context';
+import { injectFindHighlights } from '../composables/find-highlights';
 import { injectPresentationElementStates } from '../composables/presentation-element-states';
 import { useRendering3DFlags } from '../composables/rendering-3d-flags';
 import { injectSlideElements, resolveSlideElements } from '../composables/slide-elements';
@@ -112,6 +114,9 @@ const fieldContextSource = injectFieldContext();
 
 /** Sibling elements of the slide being painted, used to resolve linked text box chains. */
 const slideElementsSource = injectSlideElements();
+
+/** Find matches on the editing canvas's slide, by element (none on any other surface). */
+const findHighlights = injectFindHighlights();
 
 /**
  * Native-animation playback state for this element (present only during a running
@@ -241,9 +246,12 @@ const linkedSegments = computed(() =>
 	getOverflowSegments(props.element, resolveSlideElements(slideElementsSource)),
 );
 
-/** Rendered paragraphs (runs + bullet/indent), built by shared logic. */
+/** Rendered paragraphs (runs + bullet/indent), built by shared logic, with find matches marked. */
 const paragraphs = computed(() =>
-	buildParagraphs(props.element, resolveFieldContext(fieldContextSource), linkedSegments.value),
+	markFindMatches(
+		buildParagraphs(props.element, resolveFieldContext(fieldContextSource), linkedSegments.value),
+		findHighlights().get(props.element.id),
+	),
 );
 const hasText = computed(() =>
 	paragraphs.value.some((p) => p.runs.length > 0 || p.bulletMarker !== undefined),
