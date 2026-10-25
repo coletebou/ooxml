@@ -13,9 +13,9 @@
  * because a mention needs a real M365/AAD identity and cannot be authored
  * through COM. PowerPoint reopens it cleanly.
  *
- * The neutral contract every binding stamps is `data-pptx-comment-mention`
- * (`COMMENT_MENTION_ATTRIBUTE` in `pptx-viewer-shared`), carrying the
- * mentioned person's `p188:author` id.
+ * The neutral contract is a mention span carrying the mentioned person's
+ * `p188:author` id: `data-pptx-comment-mention` (`COMMENT_MENTION_ATTRIBUTE`) in a
+ * binding's own pane, `data-office-comment-mention` in the shared comments pane.
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,11 @@ const fixturePath = resolve(
 const COMMENT_TEXT = 'Please check this with @Bob Grant before Friday';
 const MENTION_TEXT = '@Bob Grant';
 const MENTION_PERSON_ID = '{7C9E4A21-5F30-4C88-9B1E-2D6A0F4B7E15}';
+/** A mention span, in a binding's own pane or in the shared comments pane. */
+const MENTION = '[data-pptx-comment-mention], [data-office-comment-mention]';
+/** A person the `@` list offers, in a binding's own list or the shared comments pane's. */
+const MENTION_OPTION =
+	'[data-testid="pptx-comment-mention-option"]:visible, .mentions[role="listbox"] [role="option"]:visible';
 
 async function openDeck(page: Page): Promise<void> {
 	await resetTabSession(page);
@@ -52,10 +57,16 @@ test.describe('modern comment mentions', () => {
 		await openDeck(page);
 		await openCommentsThread(page, COMMENT_TEXT);
 
-		const mention = page.locator('[data-pptx-comment-mention]').first();
+		const mention = page.locator(MENTION).first();
 		await expect(mention).toBeVisible();
 		await expect(mention).toHaveText(MENTION_TEXT);
-		await expect(mention).toHaveAttribute('data-pptx-comment-mention', MENTION_PERSON_ID);
+		expect(
+			await mention.evaluate(
+				(el) =>
+					el.getAttribute('data-pptx-comment-mention') ??
+					el.getAttribute('data-office-comment-mention'),
+			),
+		).toBe(MENTION_PERSON_ID);
 
 		// The rest of the body must stay outside the mention span: a segmenter
 		// that swallowed the whole string would still satisfy a text assertion
@@ -86,14 +97,14 @@ test.describe('modern comment mentions', () => {
 		const compose = page.locator(COMPOSE_BOX_SELECTOR).first();
 		await compose.click();
 		await compose.pressSequentially('  Ask @bo');
-		await page.locator('[data-testid="pptx-comment-mention-option"]:visible').first().click();
+		await page.locator(MENTION_OPTION).first().click();
 		await expect(compose).toHaveValue(`  Ask ${MENTION_TEXT} `);
 		await compose.pressSequentially('now');
 		await page.locator('button:visible:text-is("Add Comment")').last().click();
 
 		const added = `Ask ${MENTION_TEXT} now`;
 		await expect.poll(() => commentTextVisible(page, added)).toBe(true);
-		const mentions = page.locator('[data-pptx-comment-mention]');
+		const mentions = page.locator(MENTION);
 		await expect(mentions).toHaveCount(2);
 		await expect(mentions).toHaveText([MENTION_TEXT, MENTION_TEXT]);
 

@@ -170,11 +170,12 @@ test('the comment box fills the sheet width', async ({ page }) => {
 	await load(page);
 	await bar(page).getByRole('button', { name: 'Comments' }).tap();
 	await page.waitForTimeout(500);
-	// The compose box is the widest visible textarea in the lower half, where the sheet sits.
-	const widest = await page.evaluate(() =>
+	// The compose box is the widest visible textarea in the lower half, where the sheet sits. A
+	// locator, not a document query: it also finds the shared comments pane's box in its shadow root.
+	const widest = await page.locator('textarea').evaluateAll((fields) =>
 		Math.max(
 			0,
-			...[...document.querySelectorAll('textarea')]
+			...fields
 				.map((field) => field.getBoundingClientRect())
 				.filter((rect) => rect.width > 0 && rect.top > innerHeight * 0.4)
 				.map((rect) => rect.width),

@@ -81,7 +81,13 @@ export function commentMarkerGap(project: string): string | null {
  */
 export function commentTextVisible(page: Page, text: string): Promise<boolean> {
 	return page.evaluate((needle) => {
-		for (const el of document.querySelectorAll<HTMLElement>('*')) {
+		// Every element, those inside open shadow roots (the shared comments pane's) included.
+		const elements = (root: Document | ShadowRoot): HTMLElement[] =>
+			[...root.querySelectorAll<HTMLElement>('*')].flatMap((el) => [
+				el,
+				...(el.shadowRoot ? elements(el.shadowRoot) : []),
+			]);
+		for (const el of elements(document)) {
 			if (!el.textContent?.includes(needle) || !el.checkVisibility()) {
 				continue;
 			}
@@ -90,9 +96,10 @@ export function commentTextVisible(page: Page, text: string): Promise<boolean> {
 				return true;
 			}
 		}
-		for (const field of document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
-			'textarea, input',
-		)) {
+		for (const field of elements(document)) {
+			if (!(field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement)) {
+				continue;
+			}
 			if (field.value.includes(needle) && field.checkVisibility()) {
 				return true;
 			}
@@ -239,7 +246,13 @@ export function replyNestedUnderParent(
 ): Promise<boolean> {
 	return page.evaluate(
 		({ parent, reply }) => {
-			const leaves = [...document.querySelectorAll<HTMLElement>('*')].filter(
+			// Every element, those inside open shadow roots (the shared comments pane's) included.
+			const elements = (root: Document | ShadowRoot): HTMLElement[] =>
+				[...root.querySelectorAll<HTMLElement>('*')].flatMap((el) => [
+					el,
+					...(el.shadowRoot ? elements(el.shadowRoot) : []),
+				]);
+			const leaves = elements(document).filter(
 				(el) => el.children.length === 0 && el.textContent?.includes(reply) && el.checkVisibility(),
 			);
 			for (const leaf of leaves) {
@@ -279,7 +292,13 @@ export async function resolveFirstComment(page: Page): Promise<void> {
  */
 export function resolvedStateVisible(page: Page): Promise<boolean> {
 	return page.evaluate(() => {
-		for (const el of document.querySelectorAll<HTMLElement>('*')) {
+		// Every element, those inside open shadow roots (the shared comments pane's) included.
+		const elements = (root: Document | ShadowRoot): HTMLElement[] =>
+			[...root.querySelectorAll<HTMLElement>('*')].flatMap((el) => [
+				el,
+				...(el.shadowRoot ? elements(el.shadowRoot) : []),
+			]);
+		for (const el of elements(document)) {
 			if (!el.checkVisibility()) {
 				continue;
 			}
