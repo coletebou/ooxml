@@ -18,6 +18,7 @@
 
 	import { useTranslator } from '../../i18n/context';
 	import { getFieldContextGetter, provideFieldContext } from '../state/field-context';
+	import { provideStageFindHighlights } from '../state/find-highlights.svelte';
 	import { provideSlideElements } from '../state/slide-elements';
 	import { styleToString } from '../style';
 	import ActiveXOverlay from './ActiveXOverlay.svelte';
@@ -62,6 +63,9 @@
 	// can find the rest of its chain and render only its own slice of the
 	// overflow. Also a getter, for the same init-time capture reason as above.
 	provideSlideElements(() => slide?.elements);
+
+	// Find matches are marked on the editing canvas only (see `find-highlights.svelte.ts`).
+	provideStageFindHighlights(() => (interactive ? slide : undefined));
 
 	const stageStyle = $derived(
 		styleToString({

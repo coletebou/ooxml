@@ -33,6 +33,7 @@ import { usePresentationCluster } from './create-viewer-state-presentation.svelt
 import { usePresenterCluster } from './create-viewer-state-presenter.svelte';
 import type { CreateViewerStateOptions, ViewerStateBag } from './create-viewer-state-types';
 import { provideFieldContext } from './field-context';
+import { provideFindMatches } from './find-highlights.svelte';
 import { createInspectorDeckActions, provideInspectorDeck } from './inspector-deck';
 import { createOpenFile } from './open-file';
 import { PresentationLoader } from './presentation-loader.svelte';
@@ -285,6 +286,13 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 	}
 	// A getter closure (not a snapshot) keeps the runes reads live for consumers.
 	provideFieldContext(fieldContext);
+	// The editing canvas marks the find matches inside the text (see `find-highlights.svelte.ts`).
+	provideFindMatches(() => ({
+		matches: editorUi.findReplace.results,
+		current: editorUi.findReplace.index,
+		slideIndex: viewer.current,
+		slideId: derived.activeSlide?.id,
+	}));
 
 	// oxlint-disable-next-line react-hooks/rules-of-hooks
 	const presentationCluster = usePresentationCluster({

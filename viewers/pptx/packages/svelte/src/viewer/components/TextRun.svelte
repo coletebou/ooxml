@@ -15,7 +15,11 @@
 	 * Firefox never implemented): the wrapper style comes from shared's
 	 * `getTextReflectionWrapperStyle`, the text-run counterpart of a
 	 * shape/picture's `ShapeEffectOverlay` reflection - reused, not forked.
+	 *
+	 * A run a find match covers (`run.findMatch`, shared `markFindMatches`) is
+	 * wrapped in a `<mark>` around the base run; the reflected copy is not marked.
 	 */
+	import { FIND_MATCH_STYLE } from 'ooxml-ui/pptx';
 	import type { CssStyleMap, ParagraphRun } from 'ooxml-ui/pptx';
 
 	import { styleToString } from '../style';
@@ -25,11 +29,14 @@
 	const { run }: { run: ParagraphRun } = $props();
 </script>
 
-{#if run.reflection}<span style="position: relative; display: inline-block"
-		><TextRunBase {run} /><span
+{#snippet base()}{#if run.findMatch}<mark
+			data-pptx-find-match={run.findMatch}
+			style={styleToString(FIND_MATCH_STYLE[run.findMatch] as CssStyleMap)}><TextRunBase {run} /></mark
+		>{:else}<TextRunBase {run} />{/if}{/snippet}{#if run.reflection}<span style="position: relative; display: inline-block"
+		>{@render base()}<span
 			class="pptx-svelte-text-reflection"
 			aria-hidden="true"
 			style={styleToString(run.reflection as unknown as CssStyleMap)}
 			><span style={styleToString(run.style)}><TextRunContent {run} /></span></span
 		></span
-	>{:else}<TextRunBase {run} />{/if}
+	>{:else}{@render base()}{/if}

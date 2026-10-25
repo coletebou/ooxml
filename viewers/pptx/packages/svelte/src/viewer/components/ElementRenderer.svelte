@@ -7,10 +7,11 @@
 	 * `unknown` still falls through to the typed placeholder.
 	 */
 	import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
-	import { getBackgroundAnimationLayers, getBackgroundAnimationState, build3DExtrusionData, buildParagraphs, buildTextStyleOverrideCss, getGroupChildParentFill, getOverflowSegments, hasTextWarp, inlineElementPointerEvents, isElementHidden, isEquationOnlyText, isTemplateElement, placeholderPromptDescriptor, shouldRenderHitTarget } from 'ooxml-ui/pptx';
+	import { getBackgroundAnimationLayers, getBackgroundAnimationState, build3DExtrusionData, buildParagraphs, buildTextStyleOverrideCss, getGroupChildParentFill, getOverflowSegments, hasTextWarp, inlineElementPointerEvents, isElementHidden, isEquationOnlyText, isTemplateElement, markFindMatches, placeholderPromptDescriptor, shouldRenderHitTarget } from 'ooxml-ui/pptx';
 
 	import { getContainerStyle, getElementHitTargetStyle, getShapeBoxStyle, getShapeFillStrokeStyle, getTextBlockStyle, mergeStyles, styleToString } from '../style';
 	import { getFieldContextGetter } from '../state/field-context';
+	import { getFindHighlightsGetter } from '../state/find-highlights.svelte';
 	import { getSlideElementsGetter } from '../state/slide-elements';
 	import {
 		getPresentationElementStatesGetter,
@@ -154,8 +155,14 @@
 	 */
 	const linkedSegments = $derived(getOverflowSegments(element, getSlideElements?.()));
 
-	/** Rendered paragraphs (runs + bullet/indent), built by shared logic. */
-	const paragraphs = $derived(buildParagraphs(element, fieldContext, linkedSegments));
+	// Captured at init for the same reason as the field context above: the find
+	// matches on the editing canvas's slide, by element (none on any other surface).
+	const getFindHighlights = getFindHighlightsGetter();
+
+	/** Rendered paragraphs (runs + bullet/indent), built by shared logic, with find matches marked. */
+	const paragraphs = $derived(
+		markFindMatches(buildParagraphs(element, fieldContext, linkedSegments), getFindHighlights().get(element.id)),
+	);
 	const hasText = $derived(
 		paragraphs.some((p) => p.runs.length > 0 || p.bulletMarker !== undefined),
 	);
