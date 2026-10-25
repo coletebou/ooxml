@@ -11,6 +11,7 @@ import type {
 } from 'ooxml-ui/pptx';
 import {
 	canInteractWithElement,
+	createPptxCommentDrafts,
 	describeFontEmbedding,
 	isElementIdInteractive,
 	pushRecentColor,
@@ -189,6 +190,8 @@ export class EditorState {
 	 * against, never something a binding edits or that undo restores.
 	 */
 	modernCommentAuthors = $state.raw<PptxModernCommentAuthor[]>([]);
+	/** Unposted comments of every comments pane, kept while a pane is gone (one store). */
+	readonly commentDrafts = createPptxCommentDrafts();
 	/**
 	 * Legacy comment authors (`ppt/commentAuthors.xml`), offered to the
 	 * @-mention typeahead alongside {@link modernCommentAuthors}. Same

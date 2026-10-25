@@ -125,6 +125,8 @@ export function resetEditorSession(state: EditorState): void {
 	state.dirty = false;
 	state.interactionActive = false;
 	state.history.clear();
+	// Slide ids repeat across files: a new deck takes none of the last one's unposted comments.
+	state.commentDrafts.clear();
 	state.elementOps.resetNudge();
 	state.inkOps.setTool('select');
 }

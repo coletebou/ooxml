@@ -125,6 +125,13 @@ describe('editorState selection + geometry', () => {
 		expect(editor.canUndo).toBeFalsy();
 	});
 
+	it('setSlides clears the unposted comments of the last document', () => {
+		const { editor } = make();
+		editor.commentDrafts.set('a', { comment: { text: 'From the last deck' } });
+		editor.setSlides([slide('a', [shape('e1')])]);
+		expect(editor.commentDrafts.size).toBe(0);
+	});
+
 	it('resolves the selected element against the current slide', () => {
 		const { editor } = make();
 		editor.setSlides([slide('a', [shape('e1'), shape('e2')])]);

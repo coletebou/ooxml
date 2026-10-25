@@ -133,7 +133,8 @@
 			{#if activeTab === 'elements'}
 				<ElementsListSection {editor} />
 			{:else if activeTab === 'comments'}
-				<ReviewCommentsPanel {editor} />
+				<!-- The tab names the pane already. -->
+				<ReviewCommentsPanel {editor} embedded />
 			{:else if el}
 				<div class="pptx-svelte-inspector-section">
 					<PositionSection {editor} {el} />
