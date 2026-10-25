@@ -36,6 +36,7 @@ export type {
 import { definePptxSmartArtTextPane } from './smartart-text-pane';
 import { OFFICE_TOKEN_BRIDGE } from './office-token-bridge';
 import { definePptxOptionsDialog } from './options-dialog';
+import { definePptxCommentsPane } from './comments-pane';
 import { definePptxInsertChartDialog } from './insert-chart-dialog';
 import { definePptxInsertSmartArtDialog } from './insert-smartart-dialog';
 import { definePptxPresentToolbar } from './present-toolbar';
@@ -234,6 +235,7 @@ const controls = [
 	['pptx-ui-title-bar', definePptxTitleBar],
 	['pptx-ui-slide-clipboard', definePptxSlideClipboard],
 	['pptx-ui-options-dialog', definePptxOptionsDialog],
+	['pptx-ui-comments-pane', definePptxCommentsPane],
 	['pptx-ui-insert-chart-dialog', definePptxInsertChartDialog],
 	['pptx-ui-insert-smartart-dialog', definePptxInsertSmartArtDialog],
 ] as const;

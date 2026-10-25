@@ -29,6 +29,28 @@ describe('pptx chrome bridges', () => {
 		expect(css).toContain('--pptx-switch-knob-travel: 13px;');
 	});
 
+	it('themes the comments pane with the pptx panel colours, not the light defaults', () => {
+		const css = bridgeCss('pptx-ui-comments-pane');
+		// The pane paints its own host (shared `comments-pane.css`), where the palette the
+		// bridge hands to inner chrome does not reach: the host's paint comes from the theme too.
+		const host = /:host \{([^}]*comments-pane-width[^}]*)\}/u.exec(css)?.[1] ?? '';
+		expect(host).toContain('background: var(--_pptx-card, #111827)');
+		expect(host).toContain('border-inline-start-color: var(--_pptx-border, #374151)');
+		for (const [token, value] of [
+			['--office-surface', 'var(--_pptx-card, #111827)'],
+			['--office-background', 'var(--_pptx-background, #030712)'],
+			['--office-foreground', 'var(--_pptx-card-foreground, #f3f4f6)'],
+			['--office-muted-foreground', 'var(--_pptx-muted-foreground, #9ca3af)'],
+			['--office-border', 'var(--_pptx-border, #374151)'],
+			['--office-accent', 'var(--_pptx-primary, #6366f1)'],
+			['--office-accent-foreground', 'var(--_pptx-primary-foreground, #ffffff)'],
+			['--office-popover', 'var(--_pptx-popover, #111827)'],
+			['--office-popover-foreground', 'var(--_pptx-popover-foreground, #f3f4f6)'],
+		]) {
+			expect(css).toContain(`${token}: ${value}`);
+		}
+	});
+
 	it('keeps the pptx 2px between colour swatches', () => {
 		expect(bridgeCss('pptx-ui-color-grid')).toContain('--office-color-swatch-gap: 2px;');
 	});

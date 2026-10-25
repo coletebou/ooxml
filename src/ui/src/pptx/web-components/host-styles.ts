@@ -26,6 +26,11 @@ pptx-ui-checkbox {
 	border-radius: ${tok('--pptx-checkbox-radius')};
 }
 pptx-ui-checkbox[checked] { border-color: ${tok('--pptx-checkbox-accent')}; }
+pptx-ui-comments-pane {
+	padding: var(--office-space-2-5) var(--office-space-3);
+	border-inline-start: var(--office-border-width) solid var(--office-border);
+}
+pptx-ui-comments-pane:is([list-only], [data-pptx-embedded]) { padding: 0; border: 0; background: transparent; }
 :where([data-pptx-editor-chrome], [data-pptx-dialog], [role="dialog"]) :is(input[type="checkbox"], input[type="radio"]) {
 	accent-color: ${tok('--pptx-checkbox-accent')};
 }

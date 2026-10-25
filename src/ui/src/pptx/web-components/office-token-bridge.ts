@@ -33,6 +33,7 @@ export const OFFICE_ALIAS_TAGS = [
 	'pptx-ui-ribbon-actions',
 	'pptx-ui-options-dialog',
 	'pptx-ui-smartart-text-pane',
+	'pptx-ui-comments-pane',
 ] as const;
 
 /** Every alias maps the shared tokens onto the pptx theme and control tokens. */
@@ -155,6 +156,18 @@ const EXTRAS: Partial<Record<(typeof OFFICE_ALIAS_TAGS)[number], string>> = {
 	// The tab row's Comments and Share at the pptx tab-row scale (11px labels, 24px controls).
 	'pptx-ui-ribbon-actions': `:host { --office-font-size: 11px; --office-control-height-md: 24px;
 	--office-icon-size-md: 14px; --office-font-size-2xs: 8px; padding-inline-start: 0; }`,
+	// The comments pane fills the panel each binding gives it, in that panel's colours: without
+	// them it fell back to the shared light defaults inside the dark viewer. It paints its own host
+	// (shared comments-pane.css), which the palette for inner chrome does not reach, so the host's
+	// background and border come from the theme here as well.
+	'pptx-ui-comments-pane': `:host { --office-comments-pane-width: 100%;
+	background: var(--pptx-card, #111827); border-inline-start-color: var(--pptx-border, #374151);
+	--office-surface: var(--pptx-card, #111827); --office-background: var(--pptx-background, #030712);
+	--office-foreground: var(--pptx-card-foreground, #f3f4f6);
+	--office-muted-foreground: var(--pptx-muted-foreground, #9ca3af); --office-border: var(--pptx-border, #374151);
+	--office-accent: var(--pptx-primary, #6366f1); --office-accent-foreground: var(--pptx-primary-foreground, #ffffff);
+	--office-selected: var(--pptx-muted, #1f2937); --office-popover: var(--pptx-popover, #111827);
+	--office-popover-foreground: var(--pptx-popover-foreground, #f3f4f6); }`,
 	// File > Options keeps its wide footprint (56rem, a 176px rail) rather than Office's 728px.
 	'pptx-ui-options-dialog': `:host { --office-options-width: min(56rem, calc(100vw - 32px));
 	--office-options-nav-width: 176px; --office-options-height: 540px; --office-z-dialog: 1200; }`,

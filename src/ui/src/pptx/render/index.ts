@@ -1427,6 +1427,7 @@ export * from './table-inspector';
 export * from './comments-list';
 // PowerPoint's comments on the shared comments pane: threads, people, events back to the list.
 export * from './comments-pane-model';
+export * from './comments-pane-binding';
 export * from './comment-navigation';
 export * from './review-comment-commands';
 // `@`-mention segmentation (display) + `@`-typeahead insertion (authoring)
