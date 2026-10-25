@@ -197,7 +197,15 @@ test.describe('fixed tabs match the PowerPoint ribbon structure', () => {
 		// The tab is no taller than the Transitions tab (it was twice as tall with a six-row stack).
 		const view = groups[2].box.height;
 		await ribbonTab(page, 'Transitions').click();
-		const transitions = (await readGroups(page))[1].box.height;
+		// Read the Transitions groups once they are drawn: read at once after the
+		// click they can still be View's, or have no height yet.
+		await expect
+			.poll(async () => {
+				const drawn = await readGroups(page);
+				return drawn[1]?.label === 'Transition to This Slide' && drawn[1].box.height > 0;
+			})
+			.toBe(true);
+		const transitions = (await readGroups(page))[1]!.box.height;
 		expect(view).toBeLessThanOrEqual(transitions + 8);
 	});
 });
@@ -276,7 +284,8 @@ test('Picture Format stacks Corrections, Color and Artistic Effects in one colum
 	const triggers = ribbon(page).locator(
 		'[data-ribbon-group="pictureFormat.adjust"] pptx-ui-ribbon-gallery',
 	);
-	expect(await triggers.count()).toBe(3);
+	// The contextual tab draws its groups a few hundred milliseconds after the click.
+	await expect(triggers).toHaveCount(3);
 	const boxes = await triggers.evaluateAll((items) =>
 		items.map((item) => {
 			const rect = item.getBoundingClientRect();
@@ -299,7 +308,7 @@ test('SmartArt Design offers Create Graphic, Layouts and Reset with working Add 
 	const create = bar.locator(
 		'[data-ribbon-group="smartArtDesign.createGraphic"] pptx-ui-ribbon-gallery',
 	);
-	expect(await create.count()).toBe(10);
+	await expect(create).toHaveCount(10);
 	const ys = await create.evaluateAll((items) =>
 		items.map((item) => Math.round(item.getBoundingClientRect().y)),
 	);
