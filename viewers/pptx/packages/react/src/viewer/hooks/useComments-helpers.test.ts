@@ -12,6 +12,7 @@ import {
 	editCommentInSlide,
 	toggleResolvedInSlide,
 	pruneSlideDrafts,
+	setCommentsOnSlide,
 } from './useComments-helpers';
 
 // ---------------------------------------------------------------------------
@@ -380,5 +381,27 @@ describe('pruneSlideDrafts', () => {
 		const slideIds = new Set(['s2']);
 		const result = pruneSlideDrafts(drafts, slideIds);
 		expect(result).toStrictEqual({});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// setCommentsOnSlide
+// ---------------------------------------------------------------------------
+
+describe('setCommentsOnSlide', () => {
+	it('puts the whole list on the target slide only, without mutating the input', () => {
+		const slides = [makeSlide('s1', [makeComment('c1', 'old')]), makeSlide('s2')];
+		const next = [makeComment('c1', 'new'), makeComment('c2', 'added')];
+		const result = setCommentsOnSlide(slides, 0, next);
+		expect(result.didUpdate).toBeTruthy();
+		expect(result.slides[0]!.comments).toBe(next);
+		expect(result.slides[1]).toBe(slides[1]);
+		expect(slides[0]!.comments!.map((comment) => comment.text)).toStrictEqual(['old']);
+	});
+
+	it('returns didUpdate=false and the same slides when the slide index is out of range', () => {
+		const slides = [makeSlide('s1')];
+		const result = setCommentsOnSlide(slides, 3, [makeComment('c1', 'x')]);
+		expect(result).toStrictEqual({ slides, didUpdate: false });
 	});
 });

@@ -1,8 +1,7 @@
-import type { SlideSizeEmu, SlideSizeRescaleMode } from 'ooxml-ui/pptx';
+import type { PptxCommentDrafts, SlideSizeEmu, SlideSizeRescaleMode } from 'ooxml-ui/pptx';
 import type {
 	PptxAppProperties,
 	PptxComment,
-	PptxCommentMention,
 	PptxCoreProperties,
 	PptxCustomProperty,
 	PptxElement,
@@ -70,30 +69,16 @@ export interface InspectorPaneProps {
 	tagCollections?: PptxTagCollection[];
 	onUpdateTagCollections?: (next: PptxTagCollection[]) => void;
 	onApplyTheme: (themePath: string, applyToAllMasters: boolean) => void;
+	/** The active slide's comments, shown in the shared comments pane. */
 	comments: PptxComment[];
-	commentDraft: string;
-	/** `@`-mentions accumulated on the in-progress new-comment draft. */
-	commentDraftMentions?: PptxCommentMention[];
-	/** Modern comment authors, for the `@`-mention typeahead. */
+	/** Who writes new comments, and whose comments offer Edit. */
+	commentAuthorName: string;
+	/** Modern comment authors: the people an `@` offers. */
 	commentAuthors?: PptxModernCommentAuthor[];
-	editingCommentId: string | null;
-	commentEditDraft: string;
-	onSetCommentDraft: (draft: string, mentions?: PptxCommentMention[]) => void;
-	onAddComment: () => void;
-	onDeleteComment: (id: string) => void;
-	onStartEditComment: (id: string) => void;
-	onSaveEditComment: (id: string) => void;
-	onCancelEditComment: () => void;
-	onSetCommentEditDraft: (draft: string) => void;
-	onToggleCommentResolved?: (id: string) => void;
-	onStartReply?: (id: string) => void;
-	onCancelReply?: () => void;
-	onReplyDraftChange?: (commentId: string, draft: string, mentions?: PptxCommentMention[]) => void;
-	onSubmitReply?: (commentId: string) => void;
-	replyingToCommentId?: string | null;
-	replyDraftByCommentId?: Record<string, string>;
-	/** `@`-mentions accumulated on each in-progress reply draft. */
-	replyDraftMentionsByCommentId?: Record<string, PptxCommentMention[]>;
+	/** The active slide's whole new comment list, to commit as one history entry. */
+	onCommentsChange: (next: PptxComment[]) => void;
+	/** The viewer's store of unposted comments, so a draft outlives the Comments tab. */
+	commentDrafts?: PptxCommentDrafts;
 	onUpdateCanvasSize: (size: CanvasSize) => void;
 	/** The deck's `p:sldSz` in EMU, forwarded to the Slide Size card. */
 	slideSizeEmu?: SlideSizeEmu | undefined;

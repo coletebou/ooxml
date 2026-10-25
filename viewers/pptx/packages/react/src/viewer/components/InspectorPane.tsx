@@ -1,3 +1,4 @@
+import type { PptxElement, PptxModernCommentAuthor } from 'pptx-viewer-core';
 import React from 'react';
 
 import { useSheetDismissDrag } from '../hooks/useSheetDismissDrag';
@@ -14,6 +15,10 @@ import { PresentationPropertiesPanel } from './inspector/PresentationPropertiesP
 import { SlideBackgroundPanel } from './inspector/SlideBackgroundPanel';
 import { useInspectorPaneState } from './inspector/useInspectorPaneState';
 import { ResizeHandle } from './ResizeHandle';
+
+/** Stable empties, so the comments pane does not resync on every render. */
+const NO_AUTHORS: PptxModernCommentAuthor[] = [];
+const NO_ELEMENTS: readonly PptxElement[] = [];
 
 // ---------------------------------------------------------------------------
 // Main Inspector Pane (thin shell, delegates to extracted sub-panels)
@@ -52,26 +57,10 @@ export function InspectorPane(props: InspectorPaneProps): React.ReactElement {
 		onUpdateTagCollections,
 		onApplyTheme,
 		comments,
-		commentDraft,
-		commentDraftMentions,
+		commentAuthorName,
 		commentAuthors,
-		editingCommentId,
-		commentEditDraft,
-		onSetCommentDraft,
-		onAddComment,
-		onDeleteComment,
-		onStartEditComment,
-		onSaveEditComment,
-		onCancelEditComment,
-		onSetCommentEditDraft,
-		onToggleCommentResolved,
-		onStartReply,
-		onCancelReply,
-		onReplyDraftChange,
-		onSubmitReply,
-		replyingToCommentId,
-		replyDraftByCommentId,
-		replyDraftMentionsByCommentId,
+		onCommentsChange,
+		commentDrafts,
 		onUpdateCanvasSize,
 		slideSizeEmu,
 		onUpdateSlideSize,
@@ -237,29 +226,14 @@ export function InspectorPane(props: InspectorPaneProps): React.ReactElement {
 						<InspectorCommentsSection
 							comments={comments}
 							canEdit={canEdit}
-							activeSlide={activeSlide}
-							selectedElement={selectedElement}
-							editingCommentId={editingCommentId}
-							commentEditDraft={commentEditDraft}
-							commentDraft={commentDraft}
-							commentDraftMentions={commentDraftMentions ?? []}
-							commentAuthors={commentAuthors ?? []}
-							replyingToCommentId={replyingToCommentId ?? null}
-							replyDraftByCommentId={replyDraftByCommentId ?? {}}
-							replyDraftMentionsByCommentId={replyDraftMentionsByCommentId ?? {}}
-							onSetCommentDraft={onSetCommentDraft}
-							onAddComment={onAddComment}
-							onDeleteComment={onDeleteComment}
-							onStartEditComment={onStartEditComment}
-							onSaveEditComment={onSaveEditComment}
-							onCancelEditComment={onCancelEditComment}
-							onSetCommentEditDraft={onSetCommentEditDraft}
-							onToggleCommentResolved={onToggleCommentResolved}
-							onStartReply={onStartReply}
-							onCancelReply={onCancelReply}
-							onReplyDraftChange={onReplyDraftChange}
-							onSubmitReply={onSubmitReply}
+							authorName={commentAuthorName}
+							commentAuthors={commentAuthors ?? NO_AUTHORS}
+							elements={activeSlide?.elements ?? NO_ELEMENTS}
+							selectedElementId={selectedElement?.id ?? null}
+							onCommentsChange={onCommentsChange}
 							onSelectElement={onSelectElement}
+							{...(commentDrafts ? { drafts: commentDrafts } : {})}
+							draftKey={activeSlide?.id ?? null}
 						/>
 					)}
 				</div>

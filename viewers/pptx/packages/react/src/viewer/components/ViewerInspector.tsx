@@ -211,10 +211,6 @@ export function ViewerInspector({
 	// selection, which is exactly when the layer list is most useful.
 	// `InspectorPane` and each tab already handle `selectedElement === null`.
 
-	const slideId = activeSlide?.id ?? '';
-	const commentDraft = comments.commentDraftBySlideId[slideId] ?? '';
-	const editingCommentId = comments.editingCommentIdBySlideId[slideId] ?? null;
-
 	return (
 		<div
 			data-pptx-inspector
@@ -262,39 +258,10 @@ export function ViewerInspector({
 					tagCollections={tagCollections}
 					onUpdateTagCollections={onUpdateTagCollections}
 					onApplyTheme={onApplyTheme}
-					commentDraft={commentDraft}
-					commentDraftMentions={comments.commentDraftMentionsBySlideId?.[slideId] ?? []}
-					commentAuthors={commentAuthors ?? []}
-					editingCommentId={editingCommentId}
-					commentEditDraft={
-						editingCommentId ? (comments.commentEditDraftByCommentId[editingCommentId] ?? '') : ''
-					}
-					onSetCommentDraft={(draft, mentions) =>
-						comments.handleCommentDraftChange(slideId, draft, mentions)
-					}
-					onAddComment={() => comments.handleAddSlideComment(activeSlideIndex)}
-					onDeleteComment={(id) => comments.handleDeleteSlideComment(activeSlideIndex, id)}
-					onStartEditComment={(id) => comments.handleStartCommentEdit(slideId, id)}
-					onSaveEditComment={(id) => comments.handleSaveCommentEdit(activeSlideIndex, id)}
-					onCancelEditComment={() => comments.handleCancelCommentEdit(slideId)}
-					onSetCommentEditDraft={(draft) =>
-						comments.handleSetCommentEditDraft(
-							comments.editingCommentIdBySlideId[slideId] ?? '',
-							draft,
-						)
-					}
-					onToggleCommentResolved={(id) =>
-						comments.handleToggleCommentResolved(activeSlideIndex, id)
-					}
-					onStartReply={(id) => comments.handleStartReply(activeSlideIndex, id)}
-					onCancelReply={comments.handleCancelReply}
-					onReplyDraftChange={(commentId, draft, mentions) =>
-						comments.handleReplyDraftChange(commentId, draft, mentions)
-					}
-					onSubmitReply={(commentId) => comments.handleSubmitReply(activeSlideIndex, commentId)}
-					replyingToCommentId={comments.replyingToCommentId}
-					replyDraftByCommentId={comments.replyDraftByCommentId}
-					replyDraftMentionsByCommentId={comments.replyDraftMentionsByCommentId}
+					commentAuthorName={comments.authorName}
+					commentAuthors={commentAuthors}
+					onCommentsChange={(next) => comments.handleSetSlideComments(activeSlideIndex, next)}
+					commentDrafts={comments.commentDrafts}
 					onUpdateCanvasSize={onSetCanvasSize}
 					slideSizeEmu={slideSizeEmu}
 					onUpdateSlideSize={onSetSlideSize}

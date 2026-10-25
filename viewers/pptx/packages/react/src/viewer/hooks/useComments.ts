@@ -1,7 +1,8 @@
 /* oxlint-disable eslint/one-var -- pervasive pre-existing pattern in this file
    (each handler is a short sequence of independent `const`s); merging them
    isn't a style choice here. */
-import type { PptxCommentMention } from 'pptx-viewer-core';
+import { createPptxCommentDrafts } from 'ooxml-ui/pptx';
+import type { PptxComment, PptxCommentMention } from 'pptx-viewer-core';
 import { useState, useCallback, useEffect } from 'react';
 
 import { useCommentMentionDrafts } from './useCommentMentionDrafts';
@@ -12,6 +13,7 @@ import {
 	editCommentInSlide,
 	toggleResolvedInSlide,
 	pruneSlideDrafts,
+	setCommentsOnSlide,
 } from './useComments-helpers';
 import type { UseCommentsInput, UseCommentsResult } from './useComments-helpers';
 
@@ -36,6 +38,8 @@ export function useComments({
 	const [commentEditDraftByCommentId, setCommentEditDraftByCommentId] = useState<
 		Record<string, string>
 	>({});
+	// oxlint-disable-next-line react/hook-use-state -- one store for the viewer's life, never replaced
+	const [commentDrafts] = useState(createPptxCommentDrafts);
 	const {
 		commentDraftMentionsBySlideId,
 		replyDraftMentionsByCommentId,
@@ -254,6 +258,19 @@ export function useComments({
 		[canEdit, onMarkDirty, onUpdateSlides, slides],
 	);
 
+	// -- Whole list (the shared comments pane) ------------------------------
+
+	const handleSetSlideComments = useCallback(
+		(slideIndex: number, next: PptxComment[]) => {
+			if (!canEdit || !slides[slideIndex]) {
+				return;
+			}
+			onUpdateSlides((prev) => setCommentsOnSlide(prev, slideIndex, next).slides);
+			onMarkDirty();
+		},
+		[canEdit, onMarkDirty, onUpdateSlides, slides],
+	);
+
 	// -- Cleanup effect: prune drafts for deleted slides ---------------------
 
 	useEffect(() => {
@@ -283,6 +300,9 @@ export function useComments({
 		handleSaveCommentEdit,
 		handleSetCommentEditDraft,
 		handleToggleCommentResolved,
+		authorName: userName,
+		commentDrafts,
+		handleSetSlideComments,
 		...reply,
 	};
 }

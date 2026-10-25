@@ -1,3 +1,4 @@
+import { createPptxCommentDrafts } from 'ooxml-ui/pptx';
 import { translationsEn } from 'ooxml-ui/pptx/i18n';
 // @vitest-environment happy-dom
 /**
@@ -67,6 +68,9 @@ const comments = {
 	handleCancelReply: vi.fn<() => void>(),
 	handleReplyDraftChange: vi.fn<() => void>(),
 	handleSubmitReply: vi.fn<() => void>(),
+	authorName: 'You',
+	commentDrafts: createPptxCommentDrafts(),
+	handleSetSlideComments: vi.fn<() => void>(),
 } as unknown as UseCommentsResult;
 
 function renderInspector(tab: string): void {

@@ -81,16 +81,8 @@ function props(selectedElement: PptxElement | null, handlers: Handlers): Inspect
 		onUpdateCustomProperties: vi.fn(),
 		onApplyTheme: vi.fn(),
 		comments: [],
-		commentDraft: '',
-		editingCommentId: null,
-		commentEditDraft: '',
-		onSetCommentDraft: vi.fn(),
-		onAddComment: vi.fn(),
-		onDeleteComment: vi.fn(),
-		onStartEditComment: vi.fn(),
-		onSaveEditComment: vi.fn(),
-		onCancelEditComment: vi.fn(),
-		onSetCommentEditDraft: vi.fn(),
+		commentAuthorName: 'You',
+		onCommentsChange: vi.fn(),
 		onUpdateCanvasSize: vi.fn(),
 	};
 }

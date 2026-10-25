@@ -12,6 +12,7 @@ import {
 /* oxlint-disable eslint/one-var -- pervasive pre-existing pattern in this file
    (each wrapper is a short sequence of independent `const`s); merging them
    isn't a style choice here. */
+import type { PptxCommentDrafts } from 'ooxml-ui/pptx';
 import type { PptxComment, PptxCommentMention, PptxSlide } from 'pptx-viewer-core';
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,15 @@ export interface UseCommentsResult {
 		mentions?: PptxCommentMention[],
 	) => void;
 	handleSubmitReply: (slideIndex: number, commentId: string) => void;
+	/** Who writes new comments: the `userName` the hook was given. */
+	authorName: string;
+	/** Unposted comments of the viewer's comments pane, kept while the pane is gone (one store). */
+	commentDrafts: PptxCommentDrafts;
+	/**
+	 * Put a slide's whole new comment list in place as one update (the shared comments pane
+	 * reports every add, reply, edit, delete and resolve this way).
+	 */
+	handleSetSlideComments: (slideIndex: number, next: PptxComment[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +222,21 @@ export function addReplyToSlide(
 		return { slides, didAdd: false };
 	}
 	return { slides: replaceCommentsOnSlide(slides, slideIndex, next), didAdd: true };
+}
+
+/**
+ * Put a whole comment list on a specific slide.
+ * Returns the updated array and a flag indicating whether the slide exists.
+ */
+export function setCommentsOnSlide(
+	slides: PptxSlide[],
+	slideIndex: number,
+	next: PptxComment[],
+): { slides: PptxSlide[]; didUpdate: boolean } {
+	if (!slides[slideIndex]) {
+		return { slides, didUpdate: false };
+	}
+	return { slides: replaceCommentsOnSlide(slides, slideIndex, next), didUpdate: true };
 }
 
 /**

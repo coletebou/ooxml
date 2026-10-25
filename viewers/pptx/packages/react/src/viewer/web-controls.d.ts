@@ -64,6 +64,7 @@ declare module 'react' {
 			'pptx-ui-ribbon-group': WebControlProps;
 			'pptx-ui-ribbon-section': WebControlProps;
 			'pptx-ui-color-grid': WebControlProps;
+			'pptx-ui-comments-pane': WebControlProps;
 			'pptx-ui-chart-data-sheet': WebControlProps;
 			'pptx-ui-smartart-text-pane': WebControlProps;
 			'pptx-ui-ribbon-add-in': WebControlProps;

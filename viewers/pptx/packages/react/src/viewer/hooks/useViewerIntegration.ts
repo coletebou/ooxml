@@ -298,7 +298,11 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		actionSoundHandlerRef,
 		setIsEncryptedDialogOpen,
 		password: dialogs.presentationPassword ?? undefined,
-		onContentApplied: () => setLoadVersion((v) => v + 1),
+		onContentApplied: () => {
+			// Slide ids repeat across files: a new deck takes none of the last one's unposted comments.
+			editorOps.comments.commentDrafts.clear();
+			setLoadVersion((v) => v + 1);
+		},
 		allowExternalImages,
 		initialSlide,
 		googleFonts,

@@ -7,10 +7,12 @@ import { useCallback, useState } from 'react';
  *
  * Split out of `useComments` (file-size extraction) since it is a small,
  * self-contained slice: a mentions array per in-progress draft (new comment,
- * keyed by slide id; reply, keyed by parent comment id), set only when
- * `CommentMentionTextarea` reports a change (a plain keystroke passes
+ * keyed by slide id; reply, keyed by parent comment id), set only when a
+ * caller's typeahead reports a change (a plain keystroke passes
  * `mentions: undefined` through and this leaves the accumulated array alone),
- * and cleared once the draft is submitted.
+ * and cleared once the draft is submitted. The viewer's own Comments tab is
+ * the shared comments pane, which keeps its drafts itself and writes through
+ * `handleSetSlideComments`; these drafts stay for callers of the hook.
  */
 export interface UseCommentMentionDraftsResult {
 	commentDraftMentionsBySlideId: Record<string, PptxCommentMention[]>;
