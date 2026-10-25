@@ -92,7 +92,10 @@ describe('elementRenderer linked text box wiring', () => {
 	// override; passing it anywhere else (or rebuilding paragraphs locally) is
 	// how this binding drifted from the other four before.
 	it('builds its paragraphs from shared buildParagraphs, not a local copy', () => {
-		expect(shapeSource).toContain('buildAngularParagraphs(el, this.fieldContext(), segments)');
+		// The slice is the third argument; the find marks (`find-highlights.test.ts`) follow it.
+		expect(shapeSource).toMatch(
+			/buildAngularParagraphs\(\s*el,\s*this\.fieldContext\(\),\s*segments,/u,
+		);
 		expect(shapeSource).not.toContain('resolveParagraphSpacing');
 		expect(shapeSource).not.toContain('splitStyledRun');
 	});

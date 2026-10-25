@@ -14,6 +14,7 @@ import {
 } from 'ooxml-ui/pptx';
 import type {
 	ElementAnimationState,
+	ElementFindHighlights,
 	Extrusion3DData,
 	FieldSubstitutionContext,
 } from 'ooxml-ui/pptx';
@@ -31,7 +32,7 @@ import type { ReflectionOverlay } from './element-effect-defs';
 import { getTextBlockStyle } from './element-style';
 import type { StyleMap } from './element-style';
 import { Extrusion3DOverlayComponent } from './extrusion-3d-overlay.component';
-import { buildAngularParagraphs } from './paragraph-view';
+import { buildAngularParagraphs, NO_FIND_HIGHLIGHTS } from './paragraph-view';
 import type { Paragraph } from './paragraph-view';
 import { ReflectionMirrorContentComponent } from './reflection-mirror-content.component';
 import { SlideTextBlockComponent } from './slide-text-block.component';
@@ -81,6 +82,8 @@ export class ElementRendererShapeComponent {
 	readonly presenting = input<boolean>(false);
 	readonly fieldContext = input<FieldSubstitutionContext | undefined>(undefined);
 	readonly slideElements = input<readonly PptxElement[]>([]);
+	/** The find matches on the slide, by element; this element's are marked in its text. */
+	readonly findHighlights = input<ReadonlyMap<string, ElementFindHighlights>>(NO_FIND_HIGHLIGHTS);
 	readonly subElementAnimStates = input<ReadonlyMap<string, ElementAnimationState> | undefined>(
 		undefined,
 	);
@@ -230,7 +233,12 @@ export class ElementRendererShapeComponent {
 		// the normal path. Everything downstream (autofit scale, paragraph indents,
 		// bullets) still reads the element itself, exactly as React does.
 		const segments = getOverflowSegments(el, this.slideElements()) ?? el.textSegments;
-		return buildAngularParagraphs(el, this.fieldContext(), segments);
+		return buildAngularParagraphs(
+			el,
+			this.fieldContext(),
+			segments,
+			this.findHighlights().get(el.id),
+		);
 	});
 
 	readonly hasText = computed(() =>

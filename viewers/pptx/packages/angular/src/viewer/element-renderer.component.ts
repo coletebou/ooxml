@@ -9,7 +9,11 @@ import {
 	isElementHidden,
 	inlineElementPointerEvents,
 } from 'ooxml-ui/pptx';
-import type { ElementAnimationState, FieldSubstitutionContext } from 'ooxml-ui/pptx';
+import type {
+	ElementAnimationState,
+	ElementFindHighlights,
+	FieldSubstitutionContext,
+} from 'ooxml-ui/pptx';
 import type { PptxElement, PptxTableData, ShapeStyle } from 'pptx-viewer-core';
 
 import { AnimationPlaybackService } from './animation-playback.service';
@@ -32,6 +36,7 @@ import { ElementRendererShapeComponent } from './element-renderer-shape.componen
 import { getDuotoneFilterDef } from './element-style';
 import type { StyleMap } from './element-style';
 import { ImageRendererComponent } from './image-renderer.component';
+import { NO_FIND_HIGHLIGHTS } from './paragraph-view';
 import { ReflectionMirrorContentComponent } from './reflection-mirror-content.component';
 import { Rendering3DService } from './rendering-3d.service';
 import type { TableCellCommit } from './table-renderer.component';
@@ -168,6 +173,12 @@ export class ElementRendererComponent {
 	 * any slide, in which case a linked box falls back to its own segments.
 	 */
 	readonly slideElements = input<readonly PptxElement[]>([]);
+
+	/**
+	 * The find matches on the slide, by element (the editing canvas's only),
+	 * threaded down with {@link slideElements} so a grouped child's are marked.
+	 */
+	readonly findHighlights = input<ReadonlyMap<string, ElementFindHighlights>>(NO_FIND_HIGHLIGHTS);
 
 	/**
 	 * When true, inherited master/layout elements get a visual affordance

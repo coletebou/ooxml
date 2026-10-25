@@ -1,6 +1,8 @@
-import { buildParagraphs } from 'ooxml-ui/pptx';
+import { buildParagraphs, markFindMatches } from 'ooxml-ui/pptx';
 import type {
+	ElementFindHighlights,
 	FieldSubstitutionContext,
+	FindMatchKind,
 	PictureBulletMarker,
 	ReflectionWrapperStyle,
 	ScriptFontPiece,
@@ -29,6 +31,9 @@ import type { StyleMap } from './element-style';
  * What is left here is a pure rename: shared's neutral field names onto the
  * ones this binding's template already binds.
  */
+
+/** No find matches: the default every renderer's `findHighlights` input starts from. */
+export const NO_FIND_HIGHLIGHTS: ReadonlyMap<string, ElementFindHighlights> = new Map();
 
 /** A single rendered run inside an Angular paragraph. */
 export interface TextRun {
@@ -82,6 +87,8 @@ export interface TextRun {
 	 * (Firefox never implemented that property).
 	 */
 	reflection?: ReflectionWrapperStyle;
+	/** A find match covers this run (`current` for the find bar's own); the template wraps it in a `<mark>`. */
+	findMatch?: FindMatchKind;
 }
 
 /** A rendered paragraph: runs plus bullet + indent + spacing metadata. */
@@ -124,14 +131,20 @@ export interface Paragraph {
  *
  * `segmentOverrides` is the slice of an `a:linkedTxbx` chain this box paints
  * (see `getOverflowSegments`); shared threads it through so a chain resolves
- * identically in all five bindings.
+ * identically in all five bindings. `findHighlights` are this element's find
+ * matches (shared `findHighlightsByElement`), marked on the runs they cover.
  */
 export function buildAngularParagraphs(
 	element: PptxElement,
 	fieldContext?: FieldSubstitutionContext,
 	segmentOverrides?: readonly TextSegment[],
+	findHighlights?: ElementFindHighlights,
 ): Paragraph[] {
-	return buildParagraphs(element, fieldContext, segmentOverrides).map((para) => ({
+	const paragraphs = markFindMatches(
+		buildParagraphs(element, fieldContext, segmentOverrides),
+		findHighlights,
+	);
+	return paragraphs.map((para) => ({
 		runs: para.runs.map((run) => {
 			const out: TextRun = { text: run.text, style: run.style };
 			out.hyperlink = run.hyperlink;
@@ -162,6 +175,9 @@ export function buildAngularParagraphs(
 			}
 			if (run.reflection) {
 				out.reflection = run.reflection;
+			}
+			if (run.findMatch) {
+				out.findMatch = run.findMatch;
 			}
 			return out;
 		}),

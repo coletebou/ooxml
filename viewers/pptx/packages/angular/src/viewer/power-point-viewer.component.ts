@@ -38,6 +38,7 @@ import {
 	saveFailureMessage,
 	readStoredViewerPrefs,
 	findCanvasElementNode,
+	findHighlightsByElement,
 	recoverySnapshotIntent,
 	resolve3DRenderingFlags,
 	resolveAllowExternalContent,
@@ -649,6 +650,7 @@ const noopClose = (): void => undefined;
 							[aiActiveSlideIndex]="activeSlideIndex()"
 							[aiChangeBatch]="aiPanelStore.changeBatch()"
 							[aiPickMode]="aiPanelStore.pickMode()"
+							[findHighlights]="findHighlights()"
 							(elementSelect)="onCanvasElementSelect($event)"
 							(backgroundClick)="canvasEditing.onBackgroundClick()"
 							(marqueeSelect)="editor.select($event)"
@@ -2078,6 +2080,15 @@ export class PowerPointViewerComponent
 	/** Mutable copy of the merged display deck for inputs that require a non-readonly array. */
 	protected readonly displaySlidesMut = computed<PptxSlide[]>(() => [...this.mergedSlides()]);
 	protected readonly activeSlide = computed(() => this.displaySlides()[this.activeSlideIndex()]);
+	/** The find matches on the active slide, by element: the editing canvas marks them in the text. */
+	protected readonly findHighlights = computed(() =>
+		findHighlightsByElement(
+			this.activeSlide(),
+			this.activeSlideIndex(),
+			this.findReplace.results(),
+			this.findReplace.activeIndex(),
+		),
+	);
 	/** Inherited template elements for the live editor or collaboration slide source. */
 	protected readonly activeTemplateElements = computed<readonly PptxElement[]>(() => {
 		const slide = this.activeSlide();

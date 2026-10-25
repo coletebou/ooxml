@@ -1,6 +1,7 @@
 import { NgStyle, NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
-import { isRunHyperlinkClickable } from 'ooxml-ui/pptx';
+import { FIND_MATCH_STYLE, isRunHyperlinkClickable } from 'ooxml-ui/pptx';
+import type { FindMatchKind } from 'ooxml-ui/pptx';
 
 import { EquationRendererComponent } from './equation-renderer.component';
 import { shouldPreventHyperlinkNavigation } from './hyperlink-confirm';
@@ -28,6 +29,9 @@ import { ViewerOptionsService } from './viewer-options.service';
  * positioned mirror, so the positioning box has to be an outer element that
  * leaves the base run's own tag untouched.
  *
+ * A run a find match covers (`findMatch`, shared `markFindMatches`) is wrapped
+ * in a `<mark>` around the base run (`markedBase`); the mirror is not marked.
+ *
  * `@if (run(); as r)` aliases the input signal to a local template variable
  * once per template (rather than calling `run()` repeatedly): the signal is
  * `input.required`, so this is always truthy, used purely so TypeScript's
@@ -44,7 +48,7 @@ import { ViewerOptionsService } from './viewer-options.service';
 		@if (run(); as r) {
 			@if (r.reflection; as refl) {
 				<span style="position: relative; display: inline-block">
-					<ng-container [ngTemplateOutlet]="runBase" [ngTemplateOutletContext]="{ r: r }" />
+					<ng-container [ngTemplateOutlet]="markedBase" [ngTemplateOutletContext]="{ r: r }" />
 					<span class="pptx-ng-text-reflection" aria-hidden="true" [ngStyle]="refl"
 						><span [ngStyle]="r.style"
 							><ng-container
@@ -53,9 +57,19 @@ import { ViewerOptionsService } from './viewer-options.service';
 					></span>
 				</span>
 			} @else {
-				<ng-container [ngTemplateOutlet]="runBase" [ngTemplateOutletContext]="{ r: r }" />
+				<ng-container [ngTemplateOutlet]="markedBase" [ngTemplateOutletContext]="{ r: r }" />
 			}
 		}
+
+		<ng-template #markedBase let-r="r">
+			@if (r.findMatch) {
+				<mark [attr.data-pptx-find-match]="r.findMatch" [ngStyle]="findMatchStyle(r.findMatch)"
+					><ng-container [ngTemplateOutlet]="runBase" [ngTemplateOutletContext]="{ r: r }"
+				/></mark>
+			} @else {
+				<ng-container [ngTemplateOutlet]="runBase" [ngTemplateOutletContext]="{ r: r }" />
+			}
+		</ng-template>
 
 		<ng-template #runBase let-r="r">
 			@if (r.equationXml) {
@@ -142,6 +156,10 @@ import { ViewerOptionsService } from './viewer-options.service';
 })
 export class SlideTextRunComponent {
 	protected readonly isRunHyperlinkClickable = isRunHyperlinkClickable;
+	/** The mark's fill for a find match (a method: the template's `r` is untyped). */
+	protected findMatchStyle(kind: FindMatchKind): Readonly<Record<string, string | number>> {
+		return FIND_MATCH_STYLE[kind];
+	}
 	readonly run = input.required<TextRun>();
 	/**
 	 * `false` (the default) renders the hyperlink anchor with no click

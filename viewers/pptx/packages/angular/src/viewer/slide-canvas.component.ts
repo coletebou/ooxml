@@ -20,6 +20,7 @@ import {
 } from '@angular/core';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import type {
+	ElementFindHighlights,
 	GestureKind,
 	InlineListController,
 	InteractionBox,
@@ -96,6 +97,7 @@ import {
 	resolveCommitTextNormAutofitShrink,
 } from './inline-edit-autofit-commit';
 import { InlineListEditorComponent } from './inline-list-editor.component';
+import { NO_FIND_HIGHLIGHTS } from './paragraph-view';
 import { PictureCropService } from './picture-crop.service';
 import { RotateHandlePlacementDirective } from './rotate-handle-placement.directive';
 import { RulerGuidesService } from './ruler-guides.service';
@@ -335,6 +337,12 @@ export class SlideCanvasComponent implements SlideContext {
 	 * inside the scaled stage so element coords map 1:1. Empty on thumbnails.
 	 */
 	readonly aiHighlights = input<readonly AiCanvasHighlight[]>([]);
+	/**
+	 * The find session's matches on this slide, by element (shared
+	 * `findHighlightsByElement`), marked inside the text. Only the viewer's
+	 * editing canvas is given them; every other surface keeps the empty default.
+	 */
+	readonly findHighlights = input<ReadonlyMap<string, ElementFindHighlights>>(NO_FIND_HIGHLIGHTS);
 	/** True while the AI is active: enables the colour tween on slide elements. */
 	readonly aiActive = input<boolean>(false);
 	/** Zero-based active slide index, so the overlay draws only its own slide. */
