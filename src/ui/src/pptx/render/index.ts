@@ -1847,3 +1847,5 @@ export * from './viewer-event-payloads';
 // The Find and Replace bar's session (matches, cursor, replace plans) and its actions.
 export * from './find-replace-session';
 export * from './find-replace-session-actions';
+// Find matches marked inside slide text: the grouping and the run cut every binding draws.
+export * from './find-highlights';

@@ -67,6 +67,14 @@ export interface ParagraphRun {
 	 */
 	charStart?: number;
 	/**
+	 * Where in `text` the characters East Asian line breaking added are (word
+	 * joiners and zero-width spaces that stand for no character of the segment);
+	 * absent when there are none. With {@link charStart} it maps a segment
+	 * offset onto `text` exactly, a zero-width character the author typed
+	 * counting as the character it is.
+	 */
+	inserted?: number[];
+	/**
 	 * Per-script (`a:ea`/`a:cs`/`a:sym`) font-fallback pieces for this run's
 	 * text, when a script it contains needs a font distinct from its own. A
 	 * binding renders these as nested spans in place of `text` (see
@@ -102,6 +110,13 @@ export interface ParagraphRun {
 	 * `getTextReflectionWrapperStyle`.
 	 */
 	reflection?: ReflectionWrapperStyle;
+	/**
+	 * A find match covers this run (`current` when it is the one the find bar is
+	 * on). Set only by `markFindMatches` (`find-highlights.ts`), never by
+	 * `buildParagraphs`; a binding wraps the whole run in a `<mark>` styled by
+	 * `FIND_MATCH_STYLE`.
+	 */
+	findMatch?: 'match' | 'current';
 }
 
 /** A rendered paragraph: runs plus resolved bullet + hanging-indent metadata. */

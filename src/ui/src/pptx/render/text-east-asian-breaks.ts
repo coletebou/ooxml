@@ -73,6 +73,12 @@ export interface EastAsianPiece {
 	text: string;
 	/** Characters of the SOURCE text this piece stands for (inserted ones excluded). */
 	sourceLength: number;
+	/**
+	 * Where in `text` the characters this pass added are (the word joiners and
+	 * zero-width spaces); absent when it added none. A zero-width character the
+	 * source itself holds is not listed, so offsets into the source stay exact.
+	 */
+	inserted?: number[];
 	/** Style to lay over the run's own; absent for plain text. */
 	style?: RunStyle;
 	/**
@@ -227,12 +233,22 @@ export function splitEastAsianBreaks(
 	const pieces: EastAsianPiece[] = [];
 	let current = '';
 	let currentSource = 0;
+	let inserted: number[] = [];
+	const insert = (mark: string) => {
+		inserted.push(current.length);
+		current += mark;
+	};
 	const flush = () => {
 		if (current) {
-			pieces.push({ text: current, sourceLength: currentSource });
+			pieces.push({
+				text: current,
+				sourceLength: currentSource,
+				...(inserted.length > 0 ? { inserted } : {}),
+			});
 		}
 		current = '';
 		currentSource = 0;
+		inserted = [];
 	};
 	const following = next ? [...next][0] : undefined;
 	for (let i = 0; i < chars.length; i++) {
@@ -245,7 +261,7 @@ export function splitEastAsianBreaks(
 			HANGING.has(ch) &&
 			(options.breakAnywhere || after === undefined || !NO_START.has(after));
 		if (hangs) {
-			current += WORD_JOINER;
+			insert(WORD_JOINER);
 			flush();
 			pieces.push({
 				text: ch,
@@ -263,7 +279,7 @@ export function splitEastAsianBreaks(
 		current += ch;
 		currentSource += ch.length;
 		if (breaksBetween(ch, after, options)) {
-			current += ZERO_WIDTH_SPACE;
+			insert(ZERO_WIDTH_SPACE);
 		}
 	}
 	flush();
@@ -282,12 +298,19 @@ export function splitEastAsianRunPieces(
 	options: EastAsianBreakOptions | undefined,
 	font: RunFontSpec,
 	next?: string,
-): Array<{ text: string; style: RunStyle; sourceLength: number; hangingSpace?: true }> {
+): Array<{
+	text: string;
+	style: RunStyle;
+	sourceLength: number;
+	inserted?: number[];
+	hangingSpace?: true;
+}> {
 	return pieces.flatMap((piece, i) =>
 		splitEastAsianBreaks(piece.text, options, font, followingText(pieces, i, next)).map((part) => ({
 			text: part.text,
 			style: part.style ? { ...piece.style, ...part.style } : piece.style,
 			sourceLength: part.sourceLength,
+			...(part.inserted ? { inserted: part.inserted } : {}),
 			...(part.hangingSpace ? { hangingSpace: part.hangingSpace } : {}),
 		})),
 	);

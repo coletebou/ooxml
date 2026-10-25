@@ -52,6 +52,8 @@ export interface BuiltRun {
 	ruby?: RunRuby;
 	segmentIndex?: number;
 	charStart?: number;
+	/** Where in `text` the characters East Asian line breaking added are (see `ParagraphRun.inserted`). */
+	inserted?: number[];
 	/**
 	 * Per-script (`a:ea`/`a:cs`/`a:sym`) font-fallback pieces for this run's
 	 * text, when it authors a distinct east-Asian / complex-script / symbol
@@ -321,13 +323,16 @@ export function buildParagraphRuns(input: ParagraphRunBuildInput): BuiltRun[] {
 		// Vue/Svelte/Vanilla with no binding change: they already render one span
 		// per run.
 		let charStart = 0;
-		for (const { sourceLength, ...piece } of splitEastAsianRunPieces(
+		for (const { sourceLength, inserted, ...piece } of splitEastAsianRunPieces(
 			splitStyledRun(text, style, runFont, authoredLetterSpacingPx(seg.style), underlineWords),
 			eastAsianBreaksForRun(eastAsianBreaks, seg.style?.language),
 			runFont,
 			followingTexts?.[at],
 		)) {
 			const run: BuiltRun = { ...piece, segmentIndex, charStart };
+			if (inserted) {
+				run.inserted = inserted;
+			}
 			if (hyperlink) {
 				run.hyperlink = hyperlink;
 			}

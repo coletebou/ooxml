@@ -115,6 +115,21 @@ describe('splitEastAsianBreaks: eaLnBrk="0"', () => {
 	});
 });
 
+describe('splitEastAsianBreaks: where it inserts', () => {
+	it('lists the joiners and breaks it adds, not a zero-width space the text holds', () => {
+		// The ZERO WIDTH SPACE at 4 is the author's, a character of the text; the
+		// pass adds a break after each character, the author's included.
+		expect(splitEastAsianBreaks(`あい${ZW}う`, ANYWHERE, FONT)).toStrictEqual([
+			{ text: `あ${ZW}い${ZW}${ZW}${ZW}う`, sourceLength: 4, inserted: [1, 3, 5] },
+		]);
+		const [head] = splitEastAsianBreaks('あ、い', HANG, FONT);
+		expect(head).toStrictEqual({ text: `あ${WJ}`, sourceLength: 1, inserted: [1] });
+		expect(splitEastAsianBreaks('abc', ANYWHERE, FONT)).toStrictEqual([
+			{ text: 'abc', sourceLength: 3 },
+		]);
+	});
+});
+
 describe('splitEastAsianBreaks: the character after the text (run boundaries)', () => {
 	const BOTH = { hangingPunctuation: true, breakAnywhere: true };
 
