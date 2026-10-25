@@ -1,5 +1,6 @@
 import {
 	buildTextBuildSpec,
+	FIND_MATCH_STYLE,
 	isRunHyperlinkClickable,
 	runEquationMathMl,
 	textBuildSpanStyle,
@@ -84,6 +85,17 @@ function createRunBaseNode(doc: Document, run: ParagraphRun): HTMLElement {
 	return span;
 }
 
+/** `base` inside a `<mark>` when a find match covers the run, else `base` itself. */
+function markFindMatch(doc: Document, run: ParagraphRun, base: HTMLElement): HTMLElement {
+	if (!run.findMatch) {
+		return base;
+	}
+	const mark = createEl(doc, 'mark', undefined, { ...FIND_MATCH_STYLE[run.findMatch] });
+	mark.dataset['pptxFindMatch'] = run.findMatch;
+	mark.appendChild(base);
+	return mark;
+}
+
 /**
  * One rendered run, plus its optional `a:reflection` mirrored sibling.
  *
@@ -100,9 +112,12 @@ function createRunBaseNode(doc: Document, run: ParagraphRun): HTMLElement {
  * `getTextReflectionWrapperStyle`, the text-run counterpart of a
  * shape/picture's `renderReflectionOverlay` (`shape-filter-defs.ts`) - reused,
  * not forked.
+ *
+ * A run a find match covers (`run.findMatch`, `markFindMatches`) is wrapped in a
+ * `<mark>` around the base run; the reflected copy is not marked.
  */
 function createRunNode(doc: Document, run: ParagraphRun): HTMLElement {
-	const base = createRunBaseNode(doc, run);
+	const base = markFindMatch(doc, run, createRunBaseNode(doc, run));
 	if (!run.reflection) {
 		return base;
 	}

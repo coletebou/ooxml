@@ -12,6 +12,7 @@ import type {
 	ChartPartRef,
 	CssStyleMap,
 	ElementAnimationState,
+	ElementFindHighlights,
 	FieldSubstitutionContext,
 	ZoomNavigationTarget,
 } from '../index';
@@ -188,6 +189,12 @@ export interface ElementRenderContext {
 	 * targeted single-element re-render always reads current state.
 	 */
 	readonly presentationStates?: ReadonlyMap<string, ElementAnimationState>;
+	/**
+	 * The find matches on this slide, by the id of the element that paints them
+	 * (`findHighlightsByElement`); a text shape marks the runs they cover. Only
+	 * the editing canvas is given them.
+	 */
+	readonly findHighlights?: ReadonlyMap<string, ElementFindHighlights>;
 	/** The registry in effect, for renderers that need to inspect it. */
 	readonly registry: ElementRendererRegistry;
 	/**

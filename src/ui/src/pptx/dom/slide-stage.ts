@@ -14,6 +14,7 @@ import type {
 	CanvasSize,
 	ChartPartRef,
 	ElementAnimationState,
+	ElementFindHighlights,
 	FieldSubstitutionContext,
 	ZoomNavigationTarget,
 } from '../index';
@@ -51,6 +52,8 @@ export interface SlideStageOptions {
 	/** Optional parsed table-style definitions for theme-aware table rendering. */
 	tableStyleMap?: ParsedTableStyleMap;
 	fieldContext?: FieldSubstitutionContext;
+	/** The find matches on this slide, by element; the editing canvas alone passes them. */
+	findHighlights?: ReadonlyMap<string, ElementFindHighlights>;
 	registry: ElementRendererRegistry;
 	t: Translator;
 	/** Scale applied via CSS transform (default 1). */
@@ -183,6 +186,7 @@ export function renderSlideStage(options: SlideStageOptions): HTMLElement {
 		formatScheme: options.formatScheme,
 		tableStyleMap: options.tableStyleMap,
 		fieldContext: options.fieldContext,
+		findHighlights: options.findHighlights,
 		presentationStates: options.presentationStates,
 		t,
 		smartArt3D: options.smartArt3D ?? false,
