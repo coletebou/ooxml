@@ -50,16 +50,31 @@ npm i pptx-react-viewer
 
 ## 导入路径 {#import-paths}
 
-`package.json` 的 `exports` 提供两个入口：
+`package.json` 的 `exports` 提供以下入口：
 
 ```tsx
 // Root entry - viewer, theme utilities, renderToCanvas
 import { PowerPointViewer } from 'pptx-react-viewer';
+// AI assistant entry - the recommended value for the `ai` prop
+import { createAiAssistant } from 'pptx-react-viewer/ai';
 // Viewer sub-entry - same component PLUS the opt-in hooks/components surface
 import { PowerPointViewer } from 'pptx-react-viewer/viewer';
 ```
 
-两个入口均导出 `PowerPointViewer`。`pptx-react-viewer/viewer` 还提供可按需使用、支持 tree-shaking 的 hooks 和协作组件，详见 [Hooks](/zh/react/hooks)。普通场景使用根入口即可。
+| 入口                                                               | 导出内容                                                                                                                                              |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pptx-react-viewer`                                                | `PowerPointViewer`、主题工具、`renderToCanvas` 和公开类型。                                                                                           |
+| `pptx-react-viewer/no-i18next`                                     | 与根入口导出相同，但不导入 i18next 或 react-i18next（参见[不使用 react-i18next](/zh/guide/localization#without-react-i18next)）。                     |
+| `pptx-react-viewer/viewer`                                         | 同一个组件，以及可选用的 hooks 和协作组件（参见 [Hooks](/zh/react/hooks)）。                                                                          |
+| `pptx-react-viewer/ai`                                             | `createAiAssistant`、句柄类型 `PptxAiAssistant` 和 `PptxAi*` 配置类型，是传入 `ai` 的推荐方式（参见 [`/ai` 入口](/zh/guide/ai-assistant#ai-entry)）。 |
+| `pptx-react-viewer/i18n`                                           | 英文字典、`keyToLabel` 和语言目录（参见[本地化](/zh/guide/localization)）。                                                                           |
+| `pptx-react-viewer/i18n/fr`、`/i18n/es`、`/i18n/de`、`/i18n/zh-CN` | 随包提供的语言字典（`translationsFr` 等）。                                                                                                           |
+| `pptx-react-viewer/internals`                                      | `PowerPointViewer` 内部组合使用的 hooks，不受语义化版本兼容承诺保障。                                                                                 |
+| `pptx-react-viewer/styles`（或 `/styles.css`）                     | 打包好的样式表。                                                                                                                                      |
+| `pptx-react-viewer/canvas.css`                                     | 只读 `SlideCanvas` 使用的较小样式表（参见[快速上手](/zh/react/getting-started)）。                                                                    |
+| `pptx-react-viewer/theme.css`                                      | Tailwind CSS v4 的 `@theme` 令牌，供自行把查看器工具类构建进自身样式表的宿主使用。                                                                    |
+
+两个入口（`.` 和 `./viewer`）均导出 `PowerPointViewer`。`pptx-react-viewer/viewer` 还提供可按需使用、支持 tree-shaking 的 hooks 和协作组件，详见 [Hooks](/zh/react/hooks)。普通场景使用根入口即可。
 
 ## 渲染方式：CSS 与 DOM {#rendering-philosophy-css-not-canvas}
 
@@ -78,19 +93,19 @@ import { PowerPointViewer } from 'pptx-react-viewer/viewer';
 
 ## 主要导出 {#key-exports}
 
-| 导出项                                  | 类型            | 用途                                                                                           |
-| --------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
-| `PowerPointViewer`                      | 组件            | 主要预览和编辑组件。                                                                           |
-| `PowerPointViewerProps`                 | 类型            | 组件属性接口，详见[组件属性](/zh/react/props)。                                                |
-| `PowerPointViewerHandle`                | 类型            | 命令式 ref API，详见[命令式句柄](/zh/react/handle)。                                           |
-| `renderToCanvas`                        | 函数            | 将 DOM 元素绘制到 Canvas，包含 oklch 颜色兼容处理，详见[导出](/zh/react/export)。              |
-| `getAnimationInitialStyle`              | 函数            | 计算动画预设播放前的初始 CSS。                                                                 |
-| `ViewerTheme`、`ViewerThemeColors`      | 类型            | 主题配置类型，详见[主题配置](/zh/react/theming)。                                              |
-| `defaultThemeColors`、`defaultRadius`   | 常量            | 内置深色主题默认值。                                                                           |
-| `themeToCssVars`、`defaultCssVars`      | 函数            | 将主题转换为 `--pptx-*` CSS 变量。                                                             |
-| `ViewerThemeProvider`、`useViewerTheme` | Provider / Hook | 高级主题上下文。                                                                               |
-| `Toolbar`、`SlideCanvas`                | 组件            | `PowerPointViewer` 内部渲染的扁平工具栏和画布，用于自定义布局，详见 [Hooks](/zh/react/hooks)。 |
-| `useViewerBuildingBlocks`               | Hook            | 将文档、选择和导出状态接入 `Toolbar` 和 `SlideCanvas` 的属性，详见 [Hooks](/zh/react/hooks)。  |
+| 导出项                                  | 类型            | 用途                                                                                                           |
+| --------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `PowerPointViewer`                      | 组件            | 主要预览和编辑组件。                                                                                           |
+| `PowerPointViewerProps`                 | 类型            | 组件属性接口，详见[组件属性](/zh/react/props)。                                                                |
+| `PowerPointViewerHandle`                | 类型            | 命令式 ref API，详见[命令式句柄](/zh/react/handle)。                                                           |
+| `renderToCanvas`                        | 函数            | 将 DOM 元素绘制到 Canvas，包含 oklch 颜色兼容处理，详见[导出](/zh/react/export)。                              |
+| `getAnimationInitialStyle`              | 函数            | 计算动画预设播放前的初始 CSS。                                                                                 |
+| `ViewerTheme`、`ViewerThemeColors`      | 类型            | 主题配置类型，详见[主题配置](/zh/react/theming)。                                                              |
+| `defaultThemeColors`、`defaultRadius`   | 常量            | 内置深色主题默认值。                                                                                           |
+| `themeToCssVars`、`defaultCssVars`      | 函数            | 将主题转换为 `--pptx-*` CSS 变量。                                                                             |
+| `ViewerThemeProvider`、`useViewerTheme` | Provider / Hook | 高级主题上下文。                                                                                               |
+| `Toolbar`、`SlideCanvas`、`SlidesPane`  | 组件            | `PowerPointViewer` 内部渲染的扁平工具栏、画布和幻灯片缩略图栏，用于自定义布局，详见 [Hooks](/zh/react/hooks)。 |
+| `useViewerBuildingBlocks`               | Hook            | 将文档、选择和导出状态接入 `Toolbar`、`SlideCanvas` 和 `SlidesPane` 的属性，详见 [Hooks](/zh/react/hooks)。    |
 
 ## 下一步 {#next-steps}
 

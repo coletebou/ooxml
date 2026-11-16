@@ -8,6 +8,7 @@ import {
 	readCommentMentions,
 	rebaseCommentMentions,
 } from './modern-comment-xml';
+import { at } from '../../test-support/access';
 
 /**
  * The body below is the REAL `p188` markup PowerPoint 16.0 (build 20228) wrote
@@ -78,7 +79,7 @@ describe('modern comment mentions', () => {
 			},
 		]);
 		// The offsets index the flattened plain text.
-		const mention = comment.mentions![0];
+		const mention = at(comment.mentions!, 0);
 		expect(comment.text.slice(mention.startIndex, mention.startIndex + mention.length)).toBe(
 			'Bob Example',
 		);
@@ -90,7 +91,7 @@ describe('modern comment mentions', () => {
 		);
 		const mentions = readCommentMentions(node, authorName);
 		expect(mentions).toHaveLength(1);
-		expect(mentions![0].containerUri).toBe('{ABC}');
+		expect(at(mentions!, 0).containerUri).toBe('{ABC}');
 	});
 
 	it('re-emits the mention list unchanged when the text did not change', () => {
@@ -112,7 +113,7 @@ describe('modern comment mentions', () => {
 		};
 		const emitted = mentionsOf(rebuild(edited));
 		expect(emitted).toHaveLength(1);
-		expect(emitted[0]['@_startIndex']).toBe('9');
+		expect(at(emitted, 0)['@_startIndex']).toBe('9');
 		expect(edited.text.slice(9, 9 + 11)).toBe('Bob Example');
 	});
 
@@ -121,7 +122,31 @@ describe('modern comment mentions', () => {
 		// Same length either side, but the span slid one character left.
 		const edited: PptxComment = { ...comment, text: 'H Bob Example can you check thisX' };
 		expect(edited.text).toHaveLength(comment.text.length);
-		expect(mentionsOf(rebuild(edited))[0]['@_startIndex']).toBe('2');
+		expect(at(mentionsOf(rebuild(edited)), 0)['@_startIndex']).toBe('2');
+	});
+
+	it('keeps mentions an editor already moved with the edit, and new ones as they are', () => {
+		// "Hi Bob Example ..." -> "Hi there Bob Example ...", the editor having moved the span itself.
+		const comment = parseFixture();
+		const moved: PptxComment = {
+			...comment,
+			text: 'Hi there Bob Example can you check this',
+			mentions: [{ ...comment.mentions![0]!, startIndex: 9 }],
+		};
+		expect(mentionsOf(rebuild(moved)).map((m) => m['@_startIndex'])).toStrictEqual(['9']);
+		// A mention added while editing (not in the file) already indexes the new text.
+		const added: PptxComment = {
+			...moved,
+			text: `${moved.text}, @Alice`,
+			mentions: [...moved.mentions!, { id: '{NEW}', personId: ALICE, startIndex: 41, length: 6 }],
+		};
+		expect(added.text.slice(41)).toBe('@Alice');
+		expect(mentionsOf(rebuild(added)).map((m) => [m['@_startIndex'], m['@_length']])).toStrictEqual(
+			[
+				['9', '11'],
+				['41', '6'],
+			],
+		);
 	});
 
 	it('drops a mention whose span was deleted', () => {
@@ -148,7 +173,7 @@ describe('modern comment mentions', () => {
 		});
 		expect(built['p188:mentionLst']).toBeUndefined();
 		const extension = built['p188:extLst'] as XmlObject;
-		expect(mentionsOf(extension['p188:ext'] as XmlObject)[0]['@_startIndex']).toBe('10');
+		expect(at(mentionsOf(extension['p188:ext'] as XmlObject), 0)['@_startIndex']).toBe('10');
 	});
 
 	it('preserves unknown mention attributes through a round-trip', () => {
@@ -157,7 +182,7 @@ describe('modern comment mentions', () => {
 		);
 		const mentions = readCommentMentions(source, authorName)!;
 		const built = rebuild({ id: 'x', format: 'modern', text: 'Bob', mentions });
-		expect(mentionsOf(built)[0]['@_someFutureFlag']).toBe('1');
+		expect(at(mentionsOf(built), 0)['@_someFutureFlag']).toBe('1');
 	});
 
 	it('accepts the mentionCharCount spelling of length', () => {
@@ -184,12 +209,14 @@ describe('rebaseCommentMentions', () => {
 
 	it('leaves a mention before the edit alone', () => {
 		expect(
-			rebaseCommentMentions([mention(0, 3)], 'Bob and Ann', 'Bob and Anna')![0].startIndex,
+			at(rebaseCommentMentions([mention(0, 3)], 'Bob and Ann', 'Bob and Anna')!, 0).startIndex,
 		).toBe(0);
 	});
 
 	it('shifts a mention after a deletion', () => {
-		expect(rebaseCommentMentions([mention(8, 3)], 'Hi hi.. Bob', 'Hi Bob')![0].startIndex).toBe(3);
+		expect(at(rebaseCommentMentions([mention(8, 3)], 'Hi hi.. Bob', 'Hi Bob')!, 0).startIndex).toBe(
+			3,
+		);
 	});
 
 	it('returns undefined when every mention was destroyed', () => {

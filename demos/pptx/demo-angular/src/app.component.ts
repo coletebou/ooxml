@@ -21,6 +21,7 @@ import {
 } from 'pptx-angular-viewer';
 import type {
 	CollaborationConfig,
+	PptxAiAssistant,
 	PptxAiConfig,
 	ViewerCustomization,
 	ViewerTheme,
@@ -31,14 +32,17 @@ import {
 	translationsEs,
 	translationsFr,
 	translationsZhCN,
+	translationsJa,
+	translationsKo,
 } from 'pptx-viewer-locales';
 import 'pptx-angular-viewer/styles';
 
 import { installDevViewerHandle } from '../../dev-viewer-handle';
 import { currentDemoCustomization } from '../../shared/demo-customization';
+import { demoFileProviders } from '../../shared/demo-file-providers';
 import { currentDemoRootOptions } from '../../shared/demo-root-options';
 import { currentDemo3DFlags } from '../../shared/rendering-3d-flags';
-import { buildDemoAiConfig, readStoredAiFields } from './ai-config';
+import { buildDemoAi, readStoredAiFields } from './ai-config';
 import {
 	ensureAutoRoomId,
 	generateAutoName,
@@ -48,6 +52,8 @@ import {
 } from './collab-utils';
 import {
 	demoStringsZhCN,
+	demoStringsJa,
+	demoStringsKo,
 	demoStringsDe,
 	demoStringsEn,
 	demoStringsFr,
@@ -91,6 +97,7 @@ type DemoContent = Uint8Array | ArrayBuffer;
 				<pptx-viewer
 					[content]="content()!"
 					[canEdit]="true"
+					[fileProviders]="fileProviders"
 					[fileName]="fileName()"
 					[filePath]="fileName() || undefined"
 					[autosaveIntervalMs]="2000"
@@ -98,6 +105,11 @@ type DemoContent = Uint8Array | ArrayBuffer;
 					[showToolbar]="rootOptions.showToolbar"
 					[showThumbnails]="rootOptions.showThumbnails"
 					[initialSlide]="rootOptions.initialSlide"
+					[fitPadding]="rootOptions.fitPadding"
+					[googleFonts]="rootOptions.googleFonts"
+					[allowExternalContent]="rootOptions.allowExternalContent"
+					[listConversionScope]="rootOptions.listConversionScope"
+					[limits]="rootOptions.limits"
 					[inspectorInitiallyOpen]="rootOptions.inspectorInitiallyOpen"
 					[smartArt3D]="smartArt3D"
 					[surfaceChart3D]="surfaceChart3D"
@@ -126,6 +138,7 @@ type DemoContent = Uint8Array | ArrayBuffer;
 	`,
 })
 export class AppComponent {
+	protected readonly fileProviders = demoFileProviders;
 	readonly viewerRef = viewChild(PowerPointViewerComponent);
 	readonly content = signal<DemoContent | null>(null);
 	readonly fileName = signal<string>('');
@@ -178,7 +191,9 @@ export class AppComponent {
 	 * when nothing is stored. The demo ships no key and no config UI, so this is
 	 * normally undefined and the assistant simply stays off.
 	 */
-	readonly aiConfig = signal<PptxAiConfig | undefined>(buildDemoAiConfig(readStoredAiFields()));
+	readonly aiConfig = signal<PptxAiAssistant | PptxAiConfig | undefined>(
+		buildDemoAi(readStoredAiFields()),
+	);
 
 	readonly activeTheme = computed<ViewerTheme>(
 		() => (THEMES[this.themeKey()] ?? THEMES['vermilionDark']).theme,
@@ -190,7 +205,10 @@ export class AppComponent {
 
 	constructor() {
 		inject(DestroyRef).onDestroy(
-			installDevViewerHandle(() => this.viewerRef(), import.meta.env.DEV),
+			installDevViewerHandle(
+				() => this.viewerRef(),
+				import.meta.env.DEV || import.meta.env.VITE_PPTX_E2E_HANDLE === '1',
+			),
 		);
 		// Mirror the React demo's `useRootTheme`: write the active theme's
 		// `--pptx-*` / `--color-*` custom properties onto `document.documentElement`
@@ -216,6 +234,8 @@ export class AppComponent {
 		this.translate.setTranslation('es', { ...translationsEs, ...demoStringsEs });
 		this.translate.setTranslation('de', { ...translationsDe, ...demoStringsDe });
 		this.translate.setTranslation('zh-CN', { ...translationsZhCN, ...demoStringsZhCN });
+		this.translate.setTranslation('ja', { ...translationsJa, ...demoStringsJa });
+		this.translate.setTranslation('ko', { ...translationsKo, ...demoStringsKo });
 		this.translate.use(this.languageKey());
 
 		this.autoConnectFromUrl();

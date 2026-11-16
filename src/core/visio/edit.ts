@@ -1,6 +1,7 @@
 import { DEFAULTS, fail, VisioPackageError, type VisioPackageLimits } from './package-common';
 import { visioXml, related } from './parts';
 import { openEditablePackage, writeEditedPackage } from './edit-package';
+import { prepareVisioPackageForEdit } from './package-kind';
 import { serializeEditedXml } from './edit-text';
 import { masterTemplate, replaceScopedPlainText } from './edit-text-scope';
 import { measuresOwnText, refreshTextSizes, type TextSizeTarget } from './edit-text-size';
@@ -17,6 +18,10 @@ import { groupInstances } from './edit-instance-group';
 import { replaceInstanceMaster } from './edit-instance-replace';
 import { instanceOrderViews, orderTargetsAreStructural } from './edit-instance-order';
 import { assertInstanceLayerUnlocked, pageShapes } from './edit-instance-shape';
+import {
+	assertGroupMemberLayersUnlocked,
+	prepareGroupResizeInstances,
+} from './edit-group-resize-instances';
 import { attribute } from './sheet';
 import { replaceScopedTextRanges } from './edit-text-ranges';
 import { insertVisioTextField } from './edit-text-field';
@@ -56,8 +61,22 @@ import { isVisioCommentEdit, type VisioCommentEdit } from './edit-comment-comman
 import { editVsdxComments } from './edit-comments';
 import { editVsdxSubprocess } from './edit-subprocess';
 import { isVisioDiagramPartEdit } from './edit-diagram-parts-commands';
+import { applyContainerEdit, isVisioContainerEdit } from './edit-container-options';
+import { applyPictureEdit, isVisioPictureEdit } from './edit-picture-adjust';
 import { insertVisioCallout, insertVisioContainer } from './edit-diagram-parts';
+import { applySwimlaneEdit, swimlaneDeleteTargets } from './edit-swimlane-ops';
+import { isVisioSwimlaneEdit } from './edit-swimlane-commands';
+import { loadCffMasters } from './cff-masters';
+import { relateCffMasters, stampCffMasters, unstampCffMasters } from './edit-swimlane-stamp';
+import { ensureCffMasters } from './cff-author';
+import { editVsdxDataGraphics, isVisioDataGraphicEdit } from './edit-data-graphic';
+import { changesDataGraphicValues, refreshDataGraphics } from './edit-data-graphic-refresh';
+import { stripDataGraphics } from './edit-data-graphic-guard';
+import { setVisioContainerMembers } from './edit-container-members';
+import { reconcileVisioContainers } from './edit-container-fit';
 import { applyShapeDataEdit } from './edit-shape-data';
+import { applyControlEdit, isVisioControlEdit } from './edit-control';
+import { applyActionEdit, isVisioActionEdit } from './edit-action';
 import { isVisioDataEdit } from './edit-data-commands';
 import { editVsdxData } from './edit-data';
 import { editVsdxLayers } from './edit-layers';
@@ -164,7 +183,110 @@ export async function editVsdx(
 		jumpPages: new Set<string>(),
 		jumpSource: undefined as Uint8Array | undefined,
 	};
-	const edited = await editVsdxTransaction(input, edits, options, clock);
+	// Like Visio, saving drops digital signatures (an edit invalidates them) and turns a template
+	// into a drawing; the VBA project of a macro-enabled package is kept and never run.
+	// Commands and input are copied before the first await: caller mutation cannot change the edit.
+	const snapshot = snapshotVisioEdits(
+		edits,
+		positive(options.maxEdits ?? 1000),
+		positive(options.maxTextCharacters ?? 1_000_000),
+	);
+	const prepared = await prepareVisioPackageForEdit(
+		new Uint8Array(input instanceof Uint8Array ? input : new Uint8Array(input)),
+		options.limits,
+	);
+	const notes = [
+		...(prepared.signatureRemoved
+			? [
+					{
+						code: 'SIGNATURE_REMOVED',
+						message: 'The edit invalidated the digital signature, so it was removed.',
+					},
+				]
+			: []),
+		...(prepared.templateConverted
+			? [{ code: 'TEMPLATE_SAVED_AS_DRAWING', message: 'The template was saved as a drawing.' }]
+			: []),
+	];
+	const final = await editWithDeletionsLast(prepared.bytes, snapshot, options, clock);
+	return notes.length ? { ...final, diagnostics: [...notes, ...final.diagnostics] } : final;
+}
+
+/**
+ * Stencil instances can only be deleted in a transaction of deletions alone. Deletions marked
+ * `deferred` (a refresh that updates, draws and removes in one call) run after the other edits as
+ * a second transaction; the caller still sees one edit.
+ */
+async function editWithDeletionsLast(
+	input: Uint8Array,
+	edits: readonly VisioEdit[],
+	options: EditVsdxOptions,
+	clock: Parameters<typeof editVsdxTransaction>[3] & object,
+): Promise<EditVsdxResult> {
+	const deferred = edits.filter((edit) => edit.type === 'delete-shape' && edit.deferred);
+	if (!deferred.length) return editVisioPrepared(input, edits, options, clock);
+	const rest = edits.filter((edit) => !deferred.includes(edit));
+	const first = rest.length
+		? await editVsdx(input, rest, options)
+		: { bytes: input, changedParts: [], diagnostics: [] };
+	const plain = deferred.map((edit): VisioEdit => ({ ...edit, deferred: false }) as VisioEdit);
+	const second = await editVsdx(first.bytes, plain, options);
+	return {
+		bytes: second.bytes,
+		changedParts: [...new Set([...first.changedParts, ...second.changedParts])],
+		diagnostics: [...first.diagnostics, ...second.diagnostics],
+	};
+}
+
+async function editVisioPrepared(
+	input: Uint8Array,
+	edits: readonly VisioEdit[],
+	options: EditVsdxOptions,
+	clock: Parameters<typeof editVsdxTransaction>[3] & object,
+): Promise<EditVsdxResult> {
+	const limits = { ...DEFAULTS, ...options.limits };
+	// Resizing, deleting or copying a shape with a data graphic: the graphic is off while the edit
+	// runs and written again for the shape afterwards.
+	const guarded = await stripDataGraphics(
+		input,
+		edits,
+		limits,
+		positive(options.maxOutputBytes ?? limits.maxInputBytes),
+		Date.now() + limits.maxRuntimeMs,
+	);
+	if (guarded) {
+		const done = await editVisioPrepared(guarded.bytes, edits, options, clock);
+		const restored = guarded.restore.length
+			? await editVsdxDataGraphics(
+					done.bytes,
+					guarded.restore,
+					limits,
+					positive(options.maxOutputBytes ?? limits.maxInputBytes),
+					Date.now() + limits.maxRuntimeMs,
+					() => undefined,
+				)
+			: done;
+		return {
+			...done,
+			bytes: restored.bytes,
+			changedParts: [...new Set([...done.changedParts, ...restored.changedParts])],
+		};
+	}
+	// A new cross-functional flowchart is built from Visio's hidden flowchart masters, which the
+	// drawing gets first (and keeps), so the chart's parts can be instances of them.
+	const cff = edits.some((edit) => edit.type === 'create-swimlanes')
+		? await ensureCffMasters(
+				input,
+				limits,
+				positive(options.maxOutputBytes ?? limits.maxInputBytes),
+				Date.now() + limits.maxRuntimeMs,
+				() => undefined,
+			)
+		: undefined;
+	const first = await editVsdxTransaction(cff?.bytes ?? input, edits, options, clock);
+	const edited = cff
+		? { ...first, changedParts: [...new Set([...cff.changedParts, ...first.changedParts])] }
+		: first;
 	// Shapes that size themselves from their text follow it, as far as it can be measured.
 	const resized = await refreshTextSizes(clock.textSizes, edited, options, clock.deadline);
 	const result = await refreshLineJumpCaches(
@@ -174,11 +296,22 @@ export async function editVsdx(
 		options,
 		clock.deadline,
 	);
-	return growAutoSizePages(clock.autoSize, result, (bytes, growth) =>
+	const grown = await growAutoSizePages(clock.autoSize, result, (bytes, growth) =>
 		editVsdxTransaction(bytes, growth, {
 			...options,
 			limits: { ...options.limits, maxRuntimeMs: Math.max(1, clock.deadline - Date.now()) },
 		}),
+	);
+	// Data graphic callouts follow the Shape Data they show.
+	if (!edits.some((edit) => changesDataGraphicValues(edit.type))) return grown;
+	return refreshDataGraphics(
+		grown,
+		edits.some((edit) => isVisioDataEdit(edit))
+			? 'all'
+			: new Set(edits.flatMap((edit) => ('pageId' in edit ? [edit.pageId] : []))),
+		limits,
+		positive(options.maxOutputBytes ?? limits.maxInputBytes),
+		Date.now() + limits.maxRuntimeMs,
 	);
 }
 
@@ -244,6 +377,24 @@ async function editVsdxTransaction(
 			},
 			(bytes, rest) => editVsdx(bytes, rest, options),
 		);
+	if (allCommands.some(isVisioDataGraphicEdit)) {
+		// The graphic is written first, as a transaction of its own; the other edits follow it.
+		const graphic = await editVsdxDataGraphics(
+			original,
+			allCommands.filter(isVisioDataGraphicEdit),
+			limits,
+			maxOutput,
+			deadline,
+			check,
+		);
+		const rest = allCommands.filter((command) => !isVisioDataGraphicEdit(command));
+		if (!rest.length) return graphic;
+		const after = await editVsdx(graphic.bytes, rest, options);
+		return {
+			...after,
+			changedParts: [...new Set([...graphic.changedParts, ...after.changedParts])],
+		};
+	}
 	const { pkg, parts, pages } = await openEditablePackage(original, limits, check);
 	const builtIn = await changeStencilShapeToBuiltIn(
 		original,
@@ -317,8 +468,9 @@ async function editVsdxTransaction(
 	if (commands.length !== allCommands.length) {
 		const pageCommands = allCommands.filter(isVisioPageEdit);
 		// Fit to Drawing: a page resize and the moves that bring the drawing onto it, as one step.
+		// A cross-functional flowchart that outgrows the page does the same with its own edits.
 		const fit =
-			commands.every((command) => command.type === 'move-shape') &&
+			commands.every((command) => command.type === 'move-shape' || isVisioSwimlaneEdit(command)) &&
 			pageCommands.every((command) => command.type === 'set-page-size');
 		if (commands.length && !fit)
 			fail(
@@ -374,12 +526,18 @@ async function editVsdxTransaction(
 			command.type !== 'set-page-theme' &&
 			!isVisioMetadataEdit(command) &&
 			command.type !== 'set-shape-data' &&
+			!isVisioControlEdit(command) &&
+			!isVisioActionEdit(command) &&
 			!isVisioGroupEdit(command) &&
 			!isVisioDiagramPartEdit(command) &&
+			!isVisioContainerEdit(command) &&
+			!isVisioPictureEdit(command) &&
 			!isVisioGuideEdit(command) &&
 			!isVisioFormatEdit(command),
 	);
 	let document: Element | undefined;
+	// Lane commands also run on charts Visio built, whose frame, lists and lanes are master instances.
+	const cffMasters = await loadCffMasters(pkg);
 	let masterMovePins = emptyMasterMoveProof();
 	const instanceCommands = new Set<VisioGeometryEdit>();
 	let instanceDeletes: ReadonlySet<Element> = new Set();
@@ -395,19 +553,27 @@ async function editVsdxTransaction(
 				isVisioFormatEdit(command) ||
 				isVisioMetadataEdit(command) ||
 				command.type === 'set-shape-data' ||
+				isVisioControlEdit(command) ||
+				isVisioActionEdit(command) ||
 				command.type === 'reorder-shape' ||
 				command.type === 'duplicate-shapes' ||
 				command.type === 'paste-shapes' ||
 				command.type === 'change-shape' ||
 				isVisioGroupEdit(command) ||
 				isVisioDiagramPartEdit(command) ||
+				isVisioContainerEdit(command) ||
+				isVisioPictureEdit(command) ||
 				isVisioGuideEdit(command),
 		)
 	) {
 		// All pages are indexed before editing: dependencies are never inferred from only the target shape.
 		for (const [pageId, path] of pages) {
 			const sourceRoot = await visioXml(pkg, path, 'PageContents');
-			roots.set(pageId, (sourceRoot.ownerDocument!.cloneNode(true) as Document).documentElement);
+			const root = (sourceRoot.ownerDocument!.cloneNode(true) as Document).documentElement;
+			// The edits below work on the shapes of a flowchart this package built as on any plain
+			// shape; they are made instances of the flowchart masters again before the page is saved.
+			unstampCffMasters(root, cffMasters);
+			roots.set(pageId, root);
 		}
 		for (const [pageId, root] of roots) {
 			const ids = new Set(
@@ -423,6 +589,8 @@ async function editVsdxTransaction(
 		await registerStencilShapes(roots, masterTemplate(pkg), check);
 		// Stencil shapes that are grouped, or sit in a group that is ungrouped, moved or rotated.
 		groupMembers = await groupInstances(pkg, roots, commands, masterTemplate(pkg), check);
+		await prepareGroupResizeInstances(roots, geometryCommands, masterTemplate(pkg), check);
+		await assertGroupMemberLayersUnlocked(pkg, roots, geometryCommands, check);
 		// Said plainly first: the master proofs below would refuse the same edit in formula terms.
 		for (const command of geometryCommands)
 			if (!command.type.startsWith('create-') && command.type !== 'delete-shape')
@@ -443,7 +611,14 @@ async function editVsdxTransaction(
 		);
 		// Deleting a stencil shape removes it whole; it needs no proof about its master's formulas.
 		const removals = geometryCommands.filter((command) => command.type === 'delete-shape');
-		instanceDeletes = await admitInstanceDeletes(pkg, roots, removals, masterTemplate(pkg), check);
+		// Deleting a swimlane deletes the shapes in it, stencil instances included, in one step.
+		instanceDeletes = await admitInstanceDeletes(
+			pkg,
+			roots,
+			[...removals, ...commands.flatMap((command) => swimlaneDeleteTargets(roots, command))],
+			masterTemplate(pkg),
+			check,
+		);
 		for (const command of removals)
 			if (
 				pageShapes(roots.get(command.pageId)!).some(
@@ -467,6 +642,19 @@ async function editVsdxTransaction(
 					instanceCommands.add(command);
 				else instanceMoves.add(command);
 			}
+		// A local shape on a layer resizes unless one of its layers is locked, as Visio does.
+		for (const command of geometryCommands)
+			if (
+				command.type === 'resize-shape' &&
+				!instanceCommands.has(command) &&
+				!connectorCommands.has(command)
+			)
+				await assertInstanceLayerUnlocked(
+					pkg,
+					roots.get(command.pageId),
+					command.pageId,
+					command.shapeId,
+				);
 		const scope = async () => {
 			const local = geometryCommands.filter(
 				(command) => !instanceCommands.has(command) && !connectorCommands.has(command),
@@ -522,6 +710,7 @@ async function editVsdxTransaction(
 	if (deleteOnly)
 		for (const pageId of deleteVisioShapes(roots, document!, deletions, check, instanceDeletes))
 			dirty.set(pages.get(pageId)!, roots.get(pageId)!);
+	const formulaDiagnostics: { code: string; message: string }[] = [];
 	// A shape that sizes itself from its text follows it after the transaction.
 	const noteTextSize = async (target: { pageId: string; shapeId: string }, root: Element) => {
 		if (await measuresOwnText(root, target.shapeId, masterTemplate(pkg), check))
@@ -540,7 +729,15 @@ async function editVsdxTransaction(
 		if (command.type === 'replace-plain-text' || command.type === 'replace-text-ranges') {
 			if (
 				await (command.type === 'replace-plain-text'
-					? replaceScopedPlainText(pkg, new Set(pages.values()), roots, document!, command, check)
+					? replaceScopedPlainText(
+							pkg,
+							new Set(pages.values()),
+							roots,
+							document!,
+							command,
+							check,
+							formulaDiagnostics,
+						)
 					: replaceScopedTextRanges(pkg, new Set(pages.values()), roots, document!, command, check))
 			) {
 				dirty.set(path, root);
@@ -577,6 +774,11 @@ async function editVsdxTransaction(
 				dirty.set(path, root);
 				shapeDataChanged = true;
 			}
+		} else if (isVisioControlEdit(command) || isVisioActionEdit(command)) {
+			const changedPages = await (isVisioControlEdit(command)
+				? applyControlEdit(roots, command, masterTemplate(pkg), check)
+				: applyActionEdit(roots, command, masterTemplate(pkg), check));
+			for (const pageId of changedPages) dirty.set(pages.get(pageId)!, roots.get(pageId)!);
 		} else if (command.type === 'reorder-shape') {
 			const views = await instanceOrderViews(
 				pkg,
@@ -618,9 +820,25 @@ async function editVsdxTransaction(
 			if (command.type === 'insert-container') {
 				insertVisioContainer(root, document!, command, check);
 				dirty.set(path, root);
+			} else if (command.type === 'set-container-members') {
+				setVisioContainerMembers(root, command, check);
+				dirty.set(path, root);
+			} else if (isVisioSwimlaneEdit(command)) {
+				applySwimlaneEdit(roots, document!, command, check, instanceDeletes, cffMasters);
+				dirty.set(path, root);
+			} else if (command.type === 'reconcile-containers') {
+				if (reconcileVisioContainers(roots, document!, command, check)) dirty.set(path, root);
 			} else
 				for (const pageId of insertVisioCallout(roots, document!, command, check))
 					dirty.set(pages.get(pageId)!, roots.get(pageId)!);
+			partChanged = true;
+		} else if (isVisioContainerEdit(command)) {
+			applyContainerEdit(roots, document!, command, check);
+			dirty.set(pages.get(command.pageId)!, roots.get(command.pageId)!);
+			partChanged = true;
+		} else if (isVisioPictureEdit(command)) {
+			for (const pageId of applyPictureEdit(roots, command, check))
+				dirty.set(pages.get(pageId)!, roots.get(pageId)!);
 			partChanged = true;
 		} else if (isVisioGuideEdit(command)) {
 			applyGuideEdit(roots, command, check);
@@ -658,12 +876,20 @@ async function editVsdxTransaction(
 			!isVisioDataEdit(command) &&
 			command.type !== 'assign-layers' &&
 			command.type !== 'set-layer-properties' &&
-			!isVisioMasterDrop(command)
+			!isVisioMasterDrop(command) &&
+			!isVisioDataGraphicEdit(command)
 		) {
+			// A group may have been created or pasted earlier in this transaction. Its member
+			// writes were not visible to the initial package proof; check the current tree too.
+			if (command.type === 'resize-shape' && command.anchor) {
+				const target = topShape(root, command.shapeId);
+				if (attribute(target, 'Type') === 'Group' && !target?.hasAttribute('Master'))
+					await assertGeometryPackageScope(pkg, new Set(pages.values()), [command], check, roots);
+			}
 			const changedPages =
 				instanceCommands.has(command) && isInstanceGeometryEdit(roots, command)
 					? await applyInstanceGeometryEdit(roots, command, masterTemplate(pkg), check)
-					: applyGeometryEdit(roots, document!, command, check, masterMovePins);
+					: applyGeometryEdit(roots, document!, command, check, masterMovePins, formulaDiagnostics);
 			for (const pageId of changedPages) dirty.set(pages.get(pageId)!, roots.get(pageId)!);
 			// A shape moved, resized or turned onto a right-angle connector's path pushes it aside.
 			if (
@@ -686,12 +912,20 @@ async function editVsdxTransaction(
 		for (const shapeId of takeDeferredTextSizes(root)) clock.textSizes.push({ pageId, shapeId });
 	let totalBytes = [...parts.values()].reduce((sum, bytes) => sum + bytes.length, 0);
 	let nodes = 0;
+	for (const [path, root] of [...dirty]) {
+		if (![...pages.values()].includes(path)) continue;
+		const used = stampCffMasters(root, cffMasters);
+		const related = used.size
+			? await relateCffMasters(pkg, parts, path, used, cffMasters)
+			: undefined;
+		if (related) dirty.set(related.part, related.rels);
+	}
 	for (const [path, root] of dirty) {
 		const serialized = serializeEditedXml(root, limits, check);
 		nodes += serialized.nodes;
 		if (nodes > limits.maxTotalXmlNodes)
 			fail('LIMIT_XML_TOTAL', 'Edited XML node total exceeds limit.');
-		totalBytes += serialized.bytes.length - parts.get(path)!.length;
+		totalBytes += serialized.bytes.length - (parts.get(path)?.length ?? 0);
 		if (totalBytes > limits.maxTotalBytes)
 			fail('LIMIT_TOTAL', 'Edited package total exceeds limit.');
 		parts.set(path, serialized.bytes);
@@ -709,13 +943,15 @@ async function editVsdxTransaction(
 			{ ...limits, maxInputBytes: maxOutput, maxRuntimeMs: Math.max(1, deadline - Date.now()) },
 			check,
 		);
-		for (const path of dirty.keys()) await visioXml(verified.pkg, path, 'PageContents');
+		for (const path of dirty.keys())
+			if (!path.endsWith('.rels')) await visioXml(verified.pkg, path, 'PageContents');
 		check();
 	}
 	return {
 		bytes,
 		changedParts: [...dirty.keys()],
 		diagnostics: [
+			...formulaDiagnostics,
 			...(pasteChanged
 				? [
 						{
@@ -811,7 +1047,7 @@ async function editVsdxTransaction(
 						{
 							code: 'edit-diagram-part-approximate',
 							message:
-								'Containers and callouts record membership and targets in User rows, not in Visio Relationships formulas; Visio reopens them as plain shapes and a glued leader connector.',
+								'Containers record membership in Relationships formulas (DEPENDSON) and msvSDContainer rows, written from the Visio documentation and not yet confirmed against a Visio build; callouts record their target in a User row, and Visio reopens a callout as a plain shape with a glued leader connector.',
 						},
 					]
 				: []),

@@ -378,7 +378,9 @@ describe('getShapeFillStrokeStyle - outline', () => {
 				},
 			} as unknown as Partial<PptxElement>),
 		);
-		expect(style['border']).toBe('max(8px, var(--pptx-device-px, 0px)) double #FF0000');
+		expect(style['border']).toBe(
+			'max(8px, var(--pptx-device-px, 0px)) double #FF0000',
+		);
 	});
 
 	it('lets the compound type outrank the dash pattern', () => {
@@ -409,7 +411,9 @@ describe('getShapeFillStrokeStyle - outline', () => {
 				},
 			} as unknown as Partial<PptxElement>),
 		);
-		expect(style['border']).toBe('max(2px, var(--pptx-device-px, 0px)) solid rgba(255, 0, 0, 0.5)');
+		expect(style['border']).toBe(
+			'max(2px, var(--pptx-device-px, 0px)) solid rgba(255, 0, 0, 0.5)',
+		);
 	});
 
 	it('emits the inherited SVG stroke properties, including a:miter/@lim', () => {
@@ -440,7 +444,9 @@ describe('getShapeFillStrokeStyle - outline', () => {
 				},
 			} as unknown as Partial<PptxElement>),
 		);
-		expect(style['border']).toBe('max(4px, var(--pptx-device-px, 0px)) dashed #FF0000');
+		expect(style['border']).toBe(
+			'max(4px, var(--pptx-device-px, 0px)) dashed #FF0000',
+		);
 	});
 
 	it('centres a plain solid line at the default (omitted) alignment instead', () => {
@@ -513,13 +519,65 @@ describe('chart area outer shadow and glow on the chart container', () => {
 		} as unknown as PptxElement;
 	}
 
-	it('casts the shadow as a box-shadow and the glow as a drop-shadow, outside the frame', () => {
+	it('casts the shadow and the glow as box-shadows, outside the frame', () => {
 		const style = getShapeFillStrokeStyle(chart(SHADOW)) as Record<string, unknown>;
 		expect(String(style['boxShadow'])).toContain('rgba(0, 0, 0, 0.4)');
-		expect(String(style['filter'])).toContain('drop-shadow');
+		expect(String(style['boxShadow'])).toMatch(/0 0 [\d.]+px [\d.]+px rgba\(/);
 	});
 
 	it('leaves a chart without chart-area effects plain', () => {
 		expect(getShapeFillStrokeStyle(chart(undefined))).toStrictEqual({});
+	});
+});
+
+const MARKER_STROKE = { strokeColor: '#ffffff', strokeWidth: 4 };
+
+/** Stroked clip must reach past the geometry edge by half the line width (issue #144). */
+describe('angular getShapeFillStrokeStyle: centred outline is not clipped to half width', () => {
+	it('widens the clip of a solid stroked preset and leaves an unstroked one exact', () => {
+		const make = (shapeStyle: Record<string, unknown>): PptxElement =>
+			({
+				id: 'm',
+				type: 'shape',
+				shapeType: 'flowChartOffpageConnector',
+				x: 0,
+				y: 0,
+				width: 15,
+				height: 26,
+				shapeStyle,
+			}) as unknown as PptxElement;
+		const clipOf = (style: Record<string, unknown>): string =>
+			String(style['clipPath'] ?? style['clip-path'] ?? '');
+		const stroked = clipOf(getShapeFillStrokeStyle(make(MARKER_STROKE)));
+		const bare = clipOf(getShapeFillStrokeStyle(make({ strokeWidth: 0 })));
+		expect(bare).toContain('path(');
+		expect(stroked.length).toBeGreaterThan(bare.length);
+		expect(stroked.startsWith(bare.slice(0, bare.length - 2))).toBe(true);
+	});
+});
+
+describe('PowerPoint edge profiles of a shape shadow and glow', () => {
+	// Measured on PowerPoint 16 (see src/ui/src/pptx/render/effect-profile.ts): the
+	// blurred shadow is a Gaussian of 0.326 blurRad (CSS length 0.654 blurRad), the
+	// glow one box-shadow layer grown by 0.417 R and blurred by R / 3.
+	it('paints a blurRad 30 shadow at 20px and a rad 30 glow as one spread layer', () => {
+		const style = getShapeFillStrokeStyle(
+			baseElement({
+				shapeStyle: {
+					fillColor: '#C07020',
+					shadowColor: '#000000',
+					shadowBlur: 30,
+					shadowOpacity: 1,
+					outerShadowXml: {},
+					glowColor: '#FF0000',
+					glowRadius: 30,
+					glowOpacity: 0.6,
+				},
+			}),
+		);
+		expect(String(style['box-shadow'])).toBe(
+			'0px 0px 20px rgba(0, 0, 0, 1), 0 0 10px 12.5px rgba(255, 0, 0, 0.6)',
+		);
+		expect(String(style['filter'] ?? '')).not.toContain('drop-shadow');
 	});
 });

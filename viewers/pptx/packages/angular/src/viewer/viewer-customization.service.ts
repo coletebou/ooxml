@@ -28,6 +28,7 @@ import {
 	resolveEffectiveHiddenActions,
 } from 'ooxml-ui/pptx';
 import type {
+	GoogleFontsOption,
 	ResolvedCustomization,
 	ToolbarActionId,
 	ViewerCustomization,
@@ -86,6 +87,36 @@ export class ViewerCustomizationService {
 			}
 			last = next;
 			untracked(() => this.api.setCustomization(next ?? {}));
+		});
+	}
+
+	/**
+	 * Follow the host's `allowExternalContent` input: a boolean locks the Trust
+	 * Center "Allow external content" setting to it, `undefined` leaves it to
+	 * the user. Applied by an effect, so a component input set after the field
+	 * initializer runs is picked up; loads do not wait for it, because they
+	 * read the host value directly (see `LoadContentService`). Must be called
+	 * from an injection context.
+	 */
+	bindAllowExternalContent(source: () => boolean | undefined): EffectRef {
+		return effect(() => {
+			const allow = source();
+			untracked(() => this.controller.setAllowExternalContent(allow));
+		});
+	}
+
+	/**
+	 * Follow the host's `googleFonts` input: `false` (or an invalid mirror URL)
+	 * locks the Trust Center "Download fonts" setting off, a valid
+	 * `{ baseUrl }` locks it on, `undefined` leaves it to the user. Applied by an
+	 * effect like {@link bindAllowExternalContent}; the webfont paths read the
+	 * host value directly, so they never wait for the lock. Must be called from
+	 * an injection context.
+	 */
+	bindGoogleFonts(source: () => GoogleFontsOption | undefined): EffectRef {
+		return effect(() => {
+			const host = source();
+			untracked(() => this.controller.setGoogleFonts(host));
 		});
 	}
 

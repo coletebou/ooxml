@@ -17,7 +17,9 @@ import {
 } from '../../utils';
 import { writeCustomerDataScopes } from '../../utils/customer-data-package';
 import type { CustomerDataScope } from '../../utils/customer-data-package';
+import { shouldSaveEmbeddedFontVerbatim } from '../../utils/deferred-embedded-font';
 import { serializeEmbeddedFontList, setEmbeddedFontList } from '../../utils/embedded-font-list';
+import { mayNewlyEmbedFontData } from '../../utils/embedded-font-permission';
 import { obfuscateFont, generateFontGuid } from '../../utils/font-deobfuscation';
 import { safeResolveZipPath } from '../../utils/safe-path';
 import { applySmartArtConnectorLabels } from '../../utils/smartart-connector-labels';
@@ -35,19 +37,33 @@ import { synthesizeNewSmartArtStructuralPoints } from './smartart-node-synthesis
 import { applySmartArtQuickStyle } from './smartart-quick-style-builder';
 import { applySmartArtChrome } from './smartart-save-chrome';
 import {
+	applySmartArtDefinitionIdentity,
+	smartArtDefinitionPartXml,
+} from './smartart-save-definitions';
+import {
 	applySmartArtLayoutIdentity,
 	presentationIdsFromPoints,
 	resolveSmartArtSaveLayout,
 } from './smartart-save-geometry';
 import { mergeSmartArtPointXml, mergeSmartArtConnectionXml } from './smartart-xml-builders';
 import { withOrderedTableParagraphs } from './table-paragraph-save-order';
+import {
+	buildGeneratedDiagramCache,
+	withDiagramDrawingRelationship,
+} from '../../../../diagram/write/cache';
+import {
+	withDiagramPictureSources,
+	diagramPictureRelationships,
+} from '../../../../diagram/picture-layout';
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	/** Pending SmartArt data updates to process during save. */
-	protected pendingSmartArtUpdates?: Array<{
-		element: SmartArtPptxElement;
-		slidePath: string;
-	}>;
+	protected pendingSmartArtUpdates?:
+		| Array<{
+				element: SmartArtPptxElement;
+				slidePath: string;
+		  }>
+		| undefined;
 
 	/**
 	 * Collect SmartArt data for deferred async processing during save.
@@ -186,6 +202,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 						this.compatibilityService.getXmlLocalName(key),
 					);
 				}
+				applySmartArtDefinitionIdentity(dataModel, smartArtData, (key) =>
+					this.compatibilityService.getXmlLocalName(key),
+				);
 
 				// Persist chrome (background / outline) onto dgm:bg and
 				// dgm:whole/a:ln when present on the in-memory data.
@@ -193,7 +212,17 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					this.compatibilityService.getXmlLocalName(k),
 				);
 
-				this.zip.file(dataPartPath, this.builder.build(parsed));
+				this.zip.file(
+					dataPartPath,
+					withDiagramPictureSources(this.builder.build(parsed), smartArtData.pictureLayoutSource),
+				);
+				const pictureDataRelsPath = dataPartPath.replace(/([^/]+)$/, '_rels/$1.rels');
+				const pictureDataRels = diagramPictureRelationships(
+					dataPartPath,
+					smartArtData.pictureLayoutSource,
+					await this.zip.file(pictureDataRelsPath)?.async('string'),
+				);
+				if (pictureDataRels) this.zip.file(pictureDataRelsPath, pictureDataRels);
 
 				if (saveLayout && smartArtData.layoutRelId) {
 					const layoutTarget = relationships?.get(smartArtData.layoutRelId);
@@ -218,7 +247,34 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 						presentationIds,
 					);
 					if (drawingTarget && drawingXml) {
-						this.zip.file(this.resolveImagePath(slidePath, drawingTarget), drawingXml);
+						const drawingPath = this.resolveImagePath(slidePath, drawingTarget);
+						const pictureSource = smartArtData.pictureLayoutSource;
+						const savedData = await this.zip.file(dataPartPath)?.async('string');
+						const pictureCache =
+							pictureSource && savedData
+								? buildGeneratedDiagramCache(savedData, {
+										extentEmu: { width: element.width * 9525, height: element.height * 9525 },
+										source: {
+											...pictureSource,
+											...(saveLayout ? { layoutXml: saveLayout.xml } : {}),
+										},
+										minorFont: smartArtData.themeMinorFont,
+										scheme: smartArtData.pictureScheme,
+									})
+								: undefined;
+						if (pictureCache)
+							this.zip.file(
+								dataPartPath,
+								withDiagramDrawingRelationship(pictureCache.dataXml, smartArtData.drawingRelId),
+							);
+						this.zip.file(drawingPath, pictureCache?.drawingXml ?? drawingXml);
+						const relsPath = drawingPath.replace(/([^/]+)$/, '_rels/$1.rels');
+						const rels = diagramPictureRelationships(
+							drawingPath,
+							pictureSource,
+							await this.zip.file(relsPath)?.async('string'),
+						);
+						if (rels) this.zip.file(relsPath, rels);
 					}
 				}
 			} catch (e) {
@@ -269,6 +325,14 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		slidePath: string,
 		smartArtData: SmartArtPptxElement['smartArtData'],
 	): Promise<void> {
+		if (smartArtData?.colorsRelId && smartArtData.builtinColorsXml) {
+			this.writeSmartArtDefinitionPart(
+				slidePath,
+				smartArtData.colorsRelId,
+				smartArtData.builtinColorsXml,
+			);
+			return;
+		}
 		const transform = smartArtData?.colorTransform;
 		if (!smartArtData?.colorsRelId || !transform) {
 			return;
@@ -293,6 +357,14 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		slidePath: string,
 		smartArtData: SmartArtPptxElement['smartArtData'],
 	): Promise<void> {
+		if (smartArtData?.styleRelId && smartArtData.builtinQuickStyleXml) {
+			this.writeSmartArtDefinitionPart(
+				slidePath,
+				smartArtData.styleRelId,
+				smartArtData.builtinQuickStyleXml,
+			);
+			return;
+		}
 		const quickStyle = smartArtData?.quickStyle;
 		if (!smartArtData?.quickStyleDirty || !smartArtData.styleRelId || !quickStyle) {
 			return;
@@ -310,6 +382,15 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					smartArtData.style,
 				),
 		);
+	}
+
+	/** Replace a colours or quick-style part with a built-in definition picked in a gallery. */
+	private writeSmartArtDefinitionPart(slidePath: string, relId: string, xml: string): void {
+		const target = this.slideRelsMap.get(slidePath)?.get(relId);
+		if (!target) {
+			return;
+		}
+		this.zip.file(this.resolveImagePath(slidePath, target), smartArtDefinitionPartXml(xml));
 	}
 
 	/**
@@ -619,7 +700,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// - explicit list from save options takes priority
 		// - fallback: fonts loaded from the original PPTX
 		const fonts = explicitFonts ?? this.loadedEmbeddedFonts;
-		const fontsWithData = fonts.filter((f) => f.rawFontData && f.rawFontData.length > 0);
+		const fontsWithData = fonts.filter(
+			(f) => shouldSaveEmbeddedFontVerbatim(f) || (f.rawFontData && f.rawFontData.length > 0),
+		);
 		if (fontsWithData.length === 0) {
 			const metadata = explicitFontList ?? this.loadedEmbeddedFontList;
 			if (metadata && this.presentationData) {
@@ -675,7 +758,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			};
 
 			for (const variant of variants) {
-				const fontData = variant.rawFontData!;
+				// A deferred variant that was never decoded keeps its part bytes.
+				const verbatim = shouldSaveEmbeddedFontVerbatim(variant);
+				const fontData = verbatim ? undefined : variant.rawFontData!;
 
 				// Determine what we can reuse from the load side. A variant
 				// was loaded from an existing part when it has `originalRId`
@@ -684,9 +769,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				// loader couldn't resolve a GUID (e.g. EOT extraction path),
 				// we preserve the original bytes verbatim.
 				const hasOriginal = Boolean(variant.originalRId && variant.partPath);
-				const reuseObfuscation = hasOriginal && Boolean(variant.fontGuid);
+				const reuseObfuscation = hasOriginal && !verbatim && Boolean(variant.fontGuid);
 				const reuseVerbatim =
-					hasOriginal && !variant.fontGuid && Boolean(variant.originalPartBytes);
+					hasOriginal && (verbatim || !variant.fontGuid) && Boolean(variant.originalPartBytes);
 
 				let guid: string;
 				let fontPartPath: string;
@@ -701,7 +786,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 						? fontPartPath.substring(4)
 						: fontPartPath;
 					rId = variant.originalRId!;
-					bytesToWrite = obfuscateFont(fontData, guid);
+					bytesToWrite = obfuscateFont(fontData!, guid);
 				} else if (reuseVerbatim) {
 					// No usable GUID: preserve original bytes + rel unchanged.
 					guid = '';
@@ -715,12 +800,24 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					// file didn't declare one and emitting a synthetic GUID
 					// would not match the opaque bytes on disk.
 				} else {
-					// New / externally-supplied font: mint a fresh GUID-named part.
+					// New / externally-supplied font. Its licence must allow
+					// embedding into an editable file: restricted, preview & print
+					// and bitmap-only faces are left out (OS/2 fsType).
+					if (!mayNewlyEmbedFontData(variant, fontData!)) {
+						this.compatibilityService.reportWarning({
+							code: 'EMBEDDED_FONT_NOT_EMBEDDABLE',
+							message: `Font "${typeface}" was not embedded: its licence (OS/2 fsType) does not allow embedding it in an editable presentation.`,
+							scope: 'save',
+							xmlPath: `/p:presentation/p:embeddedFontLst/p:embeddedFont[@typeface="${typeface}"]`,
+						});
+						continue;
+					}
+					// Mint a fresh GUID-named part.
 					guid = variant.fontGuid ?? generateFontGuid();
 					const fileName = `{${guid}}.fntdata`;
 					fontPartPath = `ppt/fonts/${fileName}`;
 					relativeTarget = `fonts/${fileName}`;
-					bytesToWrite = obfuscateFont(fontData, guid);
+					bytesToWrite = obfuscateFont(fontData!, guid);
 
 					// Reuse an existing rel pointing at the same target,
 					// otherwise allocate a new rId.
@@ -755,6 +852,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				entry[variantKey] = { '@_r:id': rId };
 			}
 
+			if (Object.keys(entry).length === 1) {
+				// Every variant was left out: no entry for this typeface.
+				continue;
+			}
 			embeddedFontEntries.push(entry);
 		}
 
@@ -774,7 +875,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				: explicitFonts === undefined && this.loadedEmbeddedFontList
 					? serializeEmbeddedFontList(this.loadedEmbeddedFontList)
 					: generatedList;
-			setEmbeddedFontList(this.presentationData, metadata);
+			setEmbeddedFontList(
+				this.presentationData,
+				metadata === generatedList && embeddedFontEntries.length === 0 ? null : metadata,
+			);
 		}
 
 		// ── 6. Ensure [Content_Types].xml has fntdata extension ──────

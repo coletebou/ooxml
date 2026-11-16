@@ -3,6 +3,7 @@ import { escapeHtml as escapeHtmlAttr, safeHrefOrHash } from './base';
 import { isCodeLikeFont, resolveListLevel, resolveListMarker } from './ListMarkerHelper';
 import type { SegmentBulletInfo } from './ListMarkerHelper';
 import { OmmlLatexConverter } from './OmmlLatexConverter';
+import { at } from '../../geometry/indexed';
 
 /**
  * Groups text segments that belong to the same paragraph.
@@ -26,7 +27,9 @@ interface ParagraphRenderResult {
  * Options controlling how text segments are rendered.
  */
 export interface TextSegmentRenderOptions {
-	paragraphIndents?: Array<{ marginLeft?: number; indent?: number }>;
+	paragraphIndents?:
+		| Array<{ marginLeft?: number | undefined; indent?: number | undefined }>
+		| undefined;
 	slideNumber?: number;
 	dateTimeText?: string;
 	inlineMode?: boolean;
@@ -64,11 +67,11 @@ export class TextSegmentRenderer {
 		const output: string[] = [];
 		for (let index = 0; index < renderedParagraphs.length; index += 1) {
 			if (index > 0) {
-				const previous = renderedParagraphs[index - 1];
-				const current = renderedParagraphs[index];
+				const previous = at(renderedParagraphs, index - 1);
+				const current = at(renderedParagraphs, index);
 				output.push(previous.isListItem && current.isListItem ? '\n' : '\n\n');
 			}
-			output.push(renderedParagraphs[index].text);
+			output.push(at(renderedParagraphs, index).text);
 		}
 		return output.join('');
 	}

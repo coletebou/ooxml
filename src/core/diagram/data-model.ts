@@ -13,6 +13,9 @@ import {
 	type XmlElement,
 } from './dom';
 import type { DiagramConnection, DiagramDataModel, DiagramIssue, DiagramPoint } from './types';
+import { readDiagramNodeParagraphs } from './text/node-text-neutral';
+import { parseDrawingFill, parseDrawingLine } from '../drawingml/drawing-fill';
+import { GENERATED_DIAGRAM_CACHE_NS } from './cache-metadata';
 
 /** `parTrans` and `sibTrans` points carry the text drawn on an org-chart relationship line. */
 const TRANSITION_TYPES: ReadonlySet<string> = new Set(['parTrans', 'sibTrans']);
@@ -67,14 +70,22 @@ export function textBodyParagraphs(body: XmlElement | undefined): string[] {
 function parsePoint(element: XmlElement): DiagramPoint | undefined {
 	const modelId = stringAttribute(element, 'modelId');
 	if (!modelId) return undefined;
-	const paragraphs = textBodyParagraphs(first(element, 't', NS.dgm));
+	const body = first(element, 't', NS.dgm);
+	const paragraphs = textBodyParagraphs(body);
+	const textParagraphs = readDiagramNodeParagraphs(body);
 	const prSet = first(element, 'prSet', NS.dgm);
 	const point: DiagramPoint = {
 		modelId,
 		type: stringAttribute(element, 'type') ?? 'node',
 		paragraphs,
 		text: paragraphs.join('\n'),
+		...(textParagraphs ? { textParagraphs } : {}),
 	};
+	const properties = first(element, 'spPr', NS.dgm);
+	const fill = parseDrawingFill(properties);
+	const line = parseDrawingLine(first(properties, 'ln', NS.a));
+	if (fill) point.fill = fill;
+	if (line) point.line = line;
 	const optional: [keyof DiagramPoint, string | number | undefined][] = [
 		['connectionId', stringAttribute(element, 'cxnId')],
 		['presAssocId', stringAttribute(prSet, 'presAssocID')],
@@ -154,8 +165,18 @@ export function parseDiagramDataModel(
 
 	const ext = descendants(root, 'dataModelExt')[0];
 	const drawingRelId = stringAttribute(ext, 'relId');
+	const generated = descendants(root, 'generatedCache').find(
+		(node) => node.namespaceURI === GENERATED_DIAGRAM_CACHE_NS,
+	);
+	const generatedCacheDigest = generated?.getAttribute('drawingSha256');
 	return {
 		points,
+		...(descendants(root, 'generatedCache').some(
+			(node) => node.namespaceURI === GENERATED_DIAGRAM_CACHE_NS,
+		)
+			? { generatedCache: true as const }
+			: {}),
+		...(generatedCacheDigest ? { generatedCacheDigest } : {}),
 		connections,
 		nodes: points.filter((point) => !STRUCTURAL_TYPES.has(point.type)),
 		parentById,

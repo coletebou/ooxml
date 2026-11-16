@@ -36,6 +36,7 @@ export const translations = {
 	'pptx.smartart.styleIntense': 'Intenso',
 	'pptx.smartart.textPane': 'Panel de texto',
 	'pptx.smartart.addItem': 'Agregar elemento',
+	'pptx.smartart.textPaneEmpty': 'Este diagrama no tiene formas con texto.',
 	'pptx.smartart.extraConnections':
 		'Este diagrama tiene conexiones adicionales {{count}} que el panel de texto no edita.',
 	'pptx.smartart.tabHint':
@@ -50,6 +51,16 @@ export const translations = {
 	'pptx.insertSmartArt.itemsLabel': 'Elementos (uno por línea)',
 	'pptx.insertSmartArt.cancel': 'Cancelar',
 	'pptx.insertSmartArt.insert': 'Insertar',
+	'pptx.insertSmartArt.description.list':
+		'Muestra bloques de información no secuenciales o agrupados.',
+	'pptx.insertSmartArt.description.process':
+		'Muestra una progresión, una escala de tiempo o los pasos secuenciales de una tarea.',
+	'pptx.insertSmartArt.description.cycle':
+		'Muestra un proceso continuo o partes alrededor de un centro.',
+	'pptx.insertSmartArt.description.hierarchy':
+		'Muestra relaciones jerárquicas, como un organigrama.',
+	'pptx.insertSmartArt.description.relationship':
+		'Muestra conexiones, superposiciones, proporciones o contención entre ideas.',
 	'pptx.smartArt.insertTitle': 'Insertar arte inteligente',
 	'pptx.smartArt.categoriesLabel': 'Categorías de SmartArt',
 	'pptx.smartArt.layoutsLabel': 'Diseños SmartArt',

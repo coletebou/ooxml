@@ -35,7 +35,12 @@ export interface LayoutRun {
 	/** Generated text (a list label) that is not part of the paragraph's own characters. */
 	synthetic?: boolean;
 	/** Generated list marker; the remaining characters in this run are its separator. */
-	marker?: { length: number; alignment: 'left' | 'center' | 'right' };
+	marker?: {
+		length: number;
+		alignment: 'left' | 'center' | 'right';
+		/** Picture bullet: the marker occupies this width instead of its fallback glyph's. */
+		widthPx?: number;
+	};
 	/** Superscript or subscript: drawn smaller and raised or lowered (note marks are superscript). */
 	script?: 'super' | 'sub';
 	/** `#rrggbb`, display only. */
@@ -46,18 +51,28 @@ export interface LayoutRun {
 	positionalTab?: TextRun['positionalTab'];
 	underline?: boolean;
 	strike?: boolean;
+	/**
+	 * The East Asian language whose kinsoku set governs this run's characters (from the resolved
+	 * `w:lang/@w:eastAsia`); absent, the run's characters are never kept off a line start or end.
+	 */
+	kinsokuLanguage?: import('../../text/kinsoku').KinsokuLanguage;
 }
 
 /** A picture's package part and size in CSS pixels; the engine never loads its bytes. */
 export interface LayoutObject {
+	pictureFill?: Extract<import('../../drawingml/types').DrawingFill, { kind: 'picture' }>;
 	partName: string;
 	contentType: string;
 	widthPx: number;
 	heightPx: number;
 	/** How far the object extends below the baseline (an equation's descent); 0 sits on it. */
 	descentPx?: number;
-	/** A chart drawn at this size: the painted SVG markup, or only its frame label. */
-	chart?: { svg?: string; label: string };
+	/**
+	 * A chart drawn at this size: the painted SVG markup, or only its frame label.
+	 * `shape` marks a drawing shape painted the same way, whose outline may reach
+	 * past its box and which has no chart background.
+	 */
+	chart?: { svg?: string; label: string; shape?: true };
 	/** Native note separator rule, drawn without loading a media part. */
 	noteSeparator?: 'separator' | 'continuationSeparator';
 }
@@ -76,6 +91,8 @@ export interface LayoutFloat extends LayoutObject {
 	offsetYPx?: number;
 	behindText?: boolean;
 	wrap?: string;
+	/** `wrapText` of a square, tight or through wrap (bothSides, left, right, largest). */
+	wrapText?: string;
 }
 
 /** A paragraph tab stop, positioned from the paragraph's text margin (not its indent). */
@@ -144,6 +161,15 @@ export interface LayoutParagraph {
 	borders?: LayoutParagraphBorders;
 	/** `#rrggbb` shading behind the paragraph. */
 	shading?: string;
+	/** `w:kinsoku w:val="0"`: no line-start or line-end prohibition (on when absent). */
+	kinsoku?: false;
+	/** `w:autoSpaceDE w:val="0"` / `w:autoSpaceDN w:val="0"`: no space between East Asian text and Western letters / digits. */
+	autoSpaceDE?: false;
+	autoSpaceDN?: false;
+	/** `w:overflowPunct w:val="0"`: no line-end punctuation hangs past the margin. */
+	overflowPunct?: false;
+	/** The document's kinsoku settings (settings.xml), copied onto each paragraph that uses them. */
+	kinsokuSettings?: import('../../text/kinsoku').KinsokuSettings;
 }
 
 /** A resolved cell border, ready to draw. */
@@ -170,12 +196,17 @@ export interface LayoutTableCell {
 	/** Source merge provenance, retained for bounded paragraph-keeping admission. */
 	gridSpan?: number;
 	verticalMerge?: 'restart' | 'continue';
+	/** Rows a vertical merge starting at this cell covers (2 or more), for vertical alignment. */
+	rowSpan?: number;
 	/** Source child order including read-only nested table stories. */
 	blocks?: LayoutBlock[];
 	/** Column width in CSS pixels; undefined cells share the row's remaining width evenly. */
 	widthPx?: number;
 	/** Left edge from the table's left, from the table grid (merged cells span grid columns). */
 	xPx?: number;
+	/** AutoFit input: the preferred width (`w:tcW`) in pixels, or as a fraction of the table width. */
+	preferredWidthPx?: number;
+	preferredFraction?: number;
 	/** Cell margins (`w:tcMar`, else the table default); content is inset by them. */
 	padding?: LayoutCellPadding;
 	borders?: LayoutCellBorders;
@@ -195,6 +226,8 @@ export interface LayoutTableRow {
 	heightRule?: 'atLeast' | 'exact';
 	/** `w:trPr/w:tblHeader`: repeat this row at the top of every page the table continues onto. */
 	isHeader?: boolean;
+	/** Count the text of vertically merged cells in this row's height (the merge is not placed whole). */
+	mergedTextInRow?: boolean;
 }
 
 export interface LayoutTable {
@@ -207,6 +240,36 @@ export interface LayoutTable {
 	indentPx?: number;
 	/** `w:jc` on the table. */
 	alignment?: 'left' | 'center' | 'right';
+	/**
+	 * Set for an AutoFit table (`w:tblLayout` not `fixed`): its columns are sized from their
+	 * content when it is placed (table-autofit.ts), replacing the grid widths above.
+	 */
+	autofit?: LayoutTableAutofit;
+	/** `w:tblpPr`: the table is placed out of the text flow and text wraps around it. */
+	floating?: LayoutTableFloating;
+}
+
+/** A floating table's frame, in the terms floating pictures use (floats.ts). */
+export interface LayoutTableFloating {
+	relativeFromH: 'page' | 'margin' | 'column';
+	alignH?: 'left' | 'center' | 'right' | 'inside' | 'outside';
+	offsetXPx: number;
+	/** `paragraph` is the paragraph that follows the table, where the table sits in the flow. */
+	relativeFromV: 'page' | 'margin' | 'paragraph';
+	alignV?: 'top' | 'center' | 'bottom' | 'inside' | 'outside';
+	offsetYPx: number;
+	/** Distance kept between the table and the text wrapped around it. */
+	distance: { topPx: number; rightPx: number; bottomPx: number; leftPx: number };
+}
+
+export interface LayoutTableAutofit {
+	/** Grid columns. */
+	columns: number;
+	/** Preferred table width (`w:tblW`): pixels, or a fraction of the text column. */
+	widthPx?: number;
+	widthFraction?: number;
+	/** Compatibility modes before 15 let the cells' outer margins overhang the text column. */
+	legacyMargins?: boolean;
 }
 
 export type LayoutBlock = LayoutParagraph | LayoutTable;
@@ -233,6 +296,12 @@ export interface LayoutSection {
 	footnoteColumns?: LayoutColumns;
 	/** Native Word mode15 repeats the normal story on continued pages. */
 	modernFootnoteSeparator?: boolean;
+	/** `doNotUseHTMLParagraphAutoSpacing`: add the space after and before instead of the larger. */
+	addParagraphSpacing?: boolean;
+	/** Compatibility mode before 15: `pageBreakBefore` keeps the space before at the page top. */
+	keepSpaceBeforePageBreak?: boolean;
+	/** Space after (px) of the previous section's last paragraph, which collapses with this one's first. */
+	leadingSpacingAfterPx?: number;
 	/** Measured Word compatibility modes 12 and 14 attach notes to body columns. */
 	legacyFootnoteColumns?: boolean;
 	footnoteSeparators?: { separator?: LayoutParagraph[]; continuationSeparator?: LayoutParagraph[] };

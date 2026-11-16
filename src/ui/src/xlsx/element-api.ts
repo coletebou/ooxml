@@ -1,16 +1,24 @@
-import type { DocumentStorage } from 'ooxml-core/embedding';
+import type { CloudOpenedFile, DocumentStorage } from 'ooxml-core/embedding';
 /**
  * The public methods of `<xlsx-editor>` (load, newWorkbook, save, saveBytes, download, markClean,
  * select, getSelection, setActiveSheet, collaboration, share, undo, redo, focusGrid). The properties and lifecycle are
  * in component.ts; the state is the EditorCore.
  */
 import { EditorCore } from './editor-core';
-import { loadInto, newInto, saveBlob, saveBytes, type FileChrome } from './editor-files';
+import {
+	loadInto,
+	newInto,
+	openCloudFile,
+	saveBlob,
+	saveBytes,
+	type FileChrome,
+} from './editor-files';
 import { downloadBytes, saveExtension, withExtension } from './file-commands';
 import { parseSelectionRef, selectionRef } from 'ooxml-core/xlsx/ui';
 import type { XlsxCollaborationOptions, XlsxCollaborationState } from './collaboration-types';
 import { spreadsheetToolbarProps, type SpreadsheetToolbarProps } from './building-blocks';
 import type { SurfaceHostActions } from './surface-actions';
+import type { GoogleFontsOption } from 'ooxml-core/text';
 
 /** Server rendering has no HTMLElement; the class still has to be definable there. */
 export const HTMLElementBase = (
@@ -47,6 +55,25 @@ export class XlsxEditorApi extends HTMLElementBase {
 	set storage(value: DocumentStorage | null | undefined) {
 		this.core.storage = value ?? undefined;
 	}
+	/**
+	 * Webfont fallback for workbook fonts the reader has neither installed nor embedded. Unset (the
+	 * default): the reader decides with File > Options > Trust Center > "Download fonts that are
+	 * not installed or embedded", which is off until they turn it on. Set, it is the host's
+	 * decision and that toggle is shown read-only: `false` is off (no request leaves the page;
+	 * text uses installed or substitute fonts), `{ baseUrl }` requests the fonts the workbook uses
+	 * that the bundled Google Fonts catalogue serves (or their metric-compatible clone, such as
+	 * Carlito for Calibri) from that CSS2 endpoint (`https://fonts.googleapis.com/css2` for Google,
+	 * or a self-hosted mirror) with one `<link>` in the document head, then the font files it
+	 * names. Only public catalogue family names are sent, never cell text; an invalid `baseUrl`
+	 * warns and stays off. Changing it applies to the open workbook.
+	 */
+	get googleFonts(): GoogleFontsOption | undefined {
+		return this.core.webfonts.option;
+	}
+	set googleFonts(value: GoogleFontsOption | null | undefined) {
+		this.core.webfonts.option = value ?? undefined;
+		this.core.webfonts.apply();
+	}
 	get loading(): boolean {
 		return this.core.loading;
 	}
@@ -57,12 +84,24 @@ export class XlsxEditorApi extends HTMLElementBase {
 	protected readonly core: EditorCore = new EditorCore(this);
 	/** Set by the shell once connected. */
 	protected chrome: FileChrome | undefined;
-	/** Set by the shell once connected: opens File > Share. */
+	/** Set by the shell once connected: opens the Share dialog. */
 	protected openShare: (() => void) | undefined;
+	/** Set by the shell once connected: leaves the File backstage. */
+	protected closeBackstage: (() => void) | undefined;
 
 	/** Opens .xlsx, .xlsm, .xltx, .xls or .csv bytes; `fileName` helps detection and names the file. */
 	async load(bytes: Uint8Array | ArrayBuffer, fileName?: string): Promise<void> {
 		await loadInto(this.core, bytes, fileName, this.chrome);
+	}
+
+	/**
+	 * Opens a file a host got from a `CloudFileProvider` (its own picker or a start page), exactly as
+	 * File > Open > OneDrive does: the discard confirmation when there are unsaved changes, the file's
+	 * name, read-only when `file.canEdit` is false, and Save and Save As routed to `file.storage`.
+	 * Resolves once open (or when the user declines to discard); rejects when the load fails.
+	 */
+	async openCloudFile(file: CloudOpenedFile): Promise<void> {
+		await openCloudFile(this.core, file, this.chrome, () => this.closeBackstage?.());
 	}
 
 	/** Starts a blank workbook named Book1.xlsx. */
@@ -149,9 +188,9 @@ export class XlsxEditorApi extends HTMLElementBase {
 	}
 
 	/**
-	 * Opens File > Share, where the user starts or stops sharing and sees who is in the room. Without
-	 * application UI (`surfaceOnly`) it calls the host's `onOpenShareDialog` instead, and does
-	 * nothing when there is none (`getToolbarProps().enabled.openShareDialog` tells which).
+	 * Opens the Share dialog, where the user starts, joins or stops sharing, copies the invitation
+	 * link and sees who is in the room. Without application UI (`surfaceOnly`) it calls the host's
+	 * `onOpenShareDialog` instead, and does nothing when there is none (`getToolbarProps().enabled.openShareDialog` tells which).
 	 */
 	share(): void {
 		if (this.surfaceOnly) void this.getToolbarProps().onOpenShareDialog();

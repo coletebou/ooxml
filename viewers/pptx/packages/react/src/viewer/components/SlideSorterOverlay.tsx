@@ -1,10 +1,10 @@
-import { slideClipboardLabels, sorterPasteInsertAt } from 'ooxml-ui/pptx';
+import { slideClipboardLabels } from 'ooxml-ui/pptx';
 import type { PptxUiSlideClipboardElement } from 'ooxml-ui/pptx';
 import type { PptxSlide } from 'pptx-viewer-core';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { LuMinus, LuPlus } from 'react-icons/lu';
 
+import { useTranslation } from '../i18n/use-translation';
 import { SectionBlock } from './slide-sorter/SectionBlock';
 import { SlideCard } from './slide-sorter/SlideCard';
 import { SorterContextMenu } from './slide-sorter/SorterContextMenu';
@@ -111,10 +111,7 @@ export function SlideSorterOverlay({
 							: undefined;
 						node.pasteAction =
 							canEdit && onPasteSystemSlides
-								? () =>
-										onPasteSystemSlides(
-											sorterPasteInsertAt(state.selectedIndexes, activeSlideIndex, slides.length),
-										)
+								? () => onPasteSystemSlides(state.pasteInsertAt())
 								: undefined;
 					},
 				})}
@@ -186,7 +183,7 @@ export function SlideSorterOverlay({
 						type='button'
 						className='rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40'
 						disabled={state.zoom <= MIN_ZOOM}
-						onClick={() => state.setZoom((z) => Math.max(MIN_ZOOM, z - ZOOM_STEP))}
+						onClick={() => state.controller.zoomBy(-1)}
 						aria-label={t('pptx.slideSorter.zoomOut')}
 					>
 						<LuMinus className='h-3.5 w-3.5' />
@@ -205,7 +202,7 @@ export function SlideSorterOverlay({
 						type='button'
 						className='rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40'
 						disabled={state.zoom >= MAX_ZOOM}
-						onClick={() => state.setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP))}
+						onClick={() => state.controller.zoomBy(1)}
 						aria-label={t('pptx.slideSorter.zoomIn')}
 					>
 						<LuPlus className='h-3.5 w-3.5' />

@@ -1,21 +1,22 @@
 import {
-	shapeOutlineChange,
+	applyTextStyleUpdate,
 	shouldShowAccessibilitySection,
+	strokeColorChange,
 	textFontSizePtToPx,
 	textFontSizePxToPt,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, ShapeStyle, TextStyle } from 'pptx-viewer-core';
 import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 
 import { SHAPE_PRESETS } from '../../constants';
-import { cn, normalizeHexColor, sanitizeGradientStops } from '../../utils';
+import { useTranslation } from '../../i18n/use-translation';
+import { cn, normalizeHexColor } from '../../utils';
 import { WebSelect } from '../WebControls';
 import { AccessibilityTextSection } from './AccessibilityTextSection';
-import { DebouncedColorInput } from './DebouncedColorInput';
 import { FillStrokeProperties } from './FillStrokeProperties';
 import { CARD, HEADING, INPUT } from './inspector-pane-constants';
+import { LiveColorInput } from './LiveColorInput';
 import { RecentColorsRow } from './RecentColorsRow';
 import { TextAdvancedSections } from './TextAdvancedSections';
 import { ThemeColorSwatchGrid } from './ThemeColorSwatchGrid';
@@ -30,6 +31,32 @@ interface ShapeTextPanelsProps {
 	onUpdateElement: (updates: Partial<PptxElement>) => void;
 	onUpdateElementStyle: (patch: Partial<ShapeStyle>) => void;
 	onUpdateTextStyle: (patch: Partial<TextStyle>) => void;
+	/**
+	 * The Format pane section drawn; omitted, every panel (the standalone
+	 * layout). See `FORMAT_PANEL_SECTIONS` for which panel goes where.
+	 */
+	part?: ShapeTextPart;
+}
+
+/** The Format pane sections these panels fill. */
+export type ShapeTextPart =
+	| 'shapeType'
+	| 'fill'
+	| 'outline'
+	| 'effects'
+	| 'font'
+	| 'paragraph'
+	| 'altText';
+
+/**
+ * The patch a native text colour pick makes on an element: the same style update
+ * `onUpdateTextStyle` commits outside inline editing (body and runs), so the
+ * drag's shades look like its pick.
+ */
+function textColorPatch(el: PptxElement, hex: string): Partial<PptxElement> | undefined {
+	return hasTextProperties(el)
+		? applyTextStyleUpdate(el, { color: hex, colorRef: undefined }, null).patch
+		: undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,13 +69,17 @@ export function ShapeTextPanels({
 	onUpdateElement,
 	onUpdateElementStyle,
 	onUpdateTextStyle,
+	part,
 }: ShapeTextPanelsProps): React.ReactElement {
 	const { t } = useTranslation();
+	const show = (which: ShapeTextPart) => part === undefined || part === which;
+	const strokePart = part === 'fill' || part === 'outline' || part === 'effects' ? part : undefined;
+	const showFillStroke = part === undefined || strokePart !== undefined;
 
 	return (
 		<>
 			{/* Shape Type */}
-			{hasShapeProperties(selectedElement) && (
+			{show('shapeType') && hasShapeProperties(selectedElement) && (
 				<div className={CARD}>
 					<div className={HEADING}>{t('pptx.shape.type', 'Shape Type')}</div>
 					<WebSelect
@@ -75,30 +106,36 @@ export function ShapeTextPanels({
 			    pair of colour swatches. Vue's FillPanel and Svelte's
 			    FillStrokeSection already ship this; React rendered a cut-down
 			    card while the complete one sat unreferenced. */}
-			{hasShapeProperties(selectedElement) && (
-				<div className={CARD} data-pptx-fill-stroke data-pptx-inspector-section='fill-stroke'>
-					<div className={HEADING}>{t('pptx.shape.fillStroke', 'Fill & Stroke')}</div>
+			{showFillStroke && hasShapeProperties(selectedElement) && (
+				<div
+					className={CARD}
+					data-pptx-fill-stroke={part === undefined || part === 'fill' ? '' : undefined}
+					data-pptx-inspector-section={
+						part === undefined || part === 'fill' ? 'fill-stroke' : undefined
+					}
+				>
+					{part === undefined && (
+						<div className={HEADING}>{t('pptx.shape.fillStroke', 'Fill & Stroke')}</div>
+					)}
 					<FillStrokeProperties
+						part={strokePart}
 						selectedElement={selectedElement}
 						selectedShapeStyle={selectedElement.shapeStyle}
 						selectedShapeType={selectedElement.shapeType}
-						selectedGradientStops={sanitizeGradientStops(
-							selectedElement.shapeStyle?.fillGradientStops,
-						)}
 						canEdit={canEdit}
 						onUpdateShapeStyle={onUpdateElementStyle}
 						onSetFillColor={(hex, ref) =>
 							onUpdateElementStyle({ fillColor: hex, fillMode: 'solid', fillColorRef: ref })
 						}
 						onSetStrokeColor={(hex, ref) =>
-							onUpdateElementStyle(shapeOutlineChange(hex, ref, selectedElement.shapeStyle ?? {}))
+							onUpdateElementStyle(strokeColorChange(selectedElement, hex, ref))
 						}
 					/>
 				</div>
 			)}
 
 			{/* Text Color & Font Size */}
-			{hasTextProperties(selectedElement) && (
+			{show('font') && hasTextProperties(selectedElement) && (
 				<div className={CARD} data-pptx-text-card>
 					<div className={HEADING}>{t('pptx.text.title', 'Text')}</div>
 					<div className='grid grid-cols-2 gap-1.5 text-[11px]'>
@@ -123,12 +160,13 @@ export function ShapeTextPanels({
 						</label>
 						<label className='flex flex-col gap-1'>
 							<span className='text-muted-foreground'>Color</span>
-							<DebouncedColorInput
+							<LiveColorInput
 								disabled={!canEdit}
-								ariaLabel='Text Color'
+								aria-label='Text Color'
 								value={normalizeHexColor(selectedElement.textStyle?.color, '#000000')}
 								className='w-full h-7 rounded border border-border bg-transparent cursor-pointer'
-								onCommit={(hex) => onUpdateTextStyle({ color: hex, colorRef: undefined })}
+								onApply={(hex) => onUpdateTextStyle({ color: hex, colorRef: undefined })}
+								patch={textColorPatch}
 							/>
 						</label>
 						<div className='col-span-2'>
@@ -141,7 +179,6 @@ export function ShapeTextPanels({
 						</div>
 						<div className='col-span-2'>
 							<RecentColorsRow
-								prefix='text-color'
 								disabled={!canEdit}
 								onCommit={(hex) => onUpdateTextStyle({ color: hex, colorRef: undefined })}
 							/>
@@ -182,11 +219,14 @@ export function ShapeTextPanels({
 
 			{/* Warp / effects / 3D text: gated on the same text-capable check as
 			    the card above, so they appear alongside the other text sections. */}
-			<TextAdvancedSections
-				selectedElement={selectedElement}
-				canEdit={canEdit}
-				onUpdateTextStyle={onUpdateTextStyle}
-			/>
+			{(show('font') || show('paragraph')) && (
+				<TextAdvancedSections
+					selectedElement={selectedElement}
+					canEdit={canEdit}
+					onUpdateTextStyle={onUpdateTextStyle}
+					part={part === 'font' || part === 'paragraph' ? part : undefined}
+				/>
+			)}
 
 			{/* Accessibility (alt text / title): a picture's own field lives in
 			    ImagePropertiesPanel; shared's `shouldShowAccessibilitySection`
@@ -194,7 +234,7 @@ export function ShapeTextPanels({
 			    every graphic-frame kind (table/chart/smartArt/media/ole), so this
 			    stays in sync with the other four bindings without a hard-coded
 			    type list here. */}
-			{shouldShowAccessibilitySection(selectedElement) && (
+			{show('altText') && shouldShowAccessibilitySection(selectedElement) && (
 				<AccessibilityTextSection
 					selectedElement={selectedElement}
 					canEdit={canEdit}

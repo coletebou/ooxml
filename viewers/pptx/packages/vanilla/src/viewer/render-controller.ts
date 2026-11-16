@@ -1,5 +1,7 @@
 import type {
 	ChartPartRef,
+	ElementRenderErrorHandler,
+	ElementRenderFailures,
 	MasterViewCrudAction,
 	MasterViewCrudActionId,
 	ViewportFitOptions,
@@ -7,9 +9,12 @@ import type {
 } from 'ooxml-ui/pptx';
 import {
 	computeGridSpacingPx,
+	createElementRenderFailures,
 	DEFAULT_MASTER_PAGE_SIZE,
+	findTextHighlightsByElement,
 	masterViewCrudActions,
 	masterViewPseudoSlide,
+	stageKeepsElementIds,
 	visibleTemplateElements,
 } from 'ooxml-ui/pptx';
 /* oxlint-disable eslint/one-var -- pervasive pre-existing pattern in this file
@@ -36,6 +41,7 @@ import type { Store, ViewerState } from './state';
 import type { ViewerChrome } from './ui';
 import { renderHandoutMasterCanvas, renderNotesMasterCanvas } from './ui/master-canvases';
 import { fitViewerViewport } from './viewport-fit';
+import type { ViewportMeasureCache } from './viewport-fit';
 
 /** The sidebar's action list for the current master-view target, or `[]` when there is none. */
 function currentMasterViewCrudActions(state: ViewerState): MasterViewCrudAction[] {
@@ -137,6 +143,8 @@ export interface RenderControllerDeps {
 	 * `replaceChildren`); the editor re-mounts its overlay layer here.
 	 */
 	onStageRendered?(): void;
+	/** The host's `onElementRenderError`, read at render time (`console.error` when absent). */
+	getElementRenderErrorHandler?(): ElementRenderErrorHandler | undefined;
 }
 
 export interface RenderController {
@@ -144,6 +152,8 @@ export interface RenderController {
 	renderAll(): void;
 	/** Re-render the main stage + toolbar counters at the current state. */
 	renderStage(): void;
+	/** Forget the viewport measurement the fit scale reuses; call when the viewport resizes. */
+	invalidateViewportSize(): void;
 	/** Rebuild the thumbnail rail from the current slide list. */
 	renderThumbnails(): void;
 	/**
@@ -154,6 +164,11 @@ export interface RenderController {
 	renderSlideNode(slide: PptxSlide, scale: number): HTMLElement;
 	/** Resolve the requested zoom into a concrete scale factor. */
 	effectiveScale(): number;
+	/**
+	 * The editing canvas's scale, also during a slide show, which draws at its own
+	 * fit instead: the stored zoom, or at fit the editing canvas's last fit.
+	 */
+	editingScale(): number;
 	/**
 	 * Scale at which the slide exactly fits the viewport, i.e. the scale that
 	 * {@link zoomPercent} reports as 100%. The zoom controls need it because the
@@ -187,6 +202,18 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 	const captureContext = (context: ElementRenderContext): void => {
 		presentationContext = context;
 	};
+	// Failed elements per kind of surface (canvas, show, stills): an unchanged failed element is
+	// neither retried nor reported again on every rebuild; a replaced element object retries.
+	const failuresBySurface = new Map<string, ElementRenderFailures>();
+	const failuresFor = (presenting: boolean, interactive: boolean): ElementRenderFailures => {
+		const key = `${presenting}:${interactive}`;
+		let failures = failuresBySurface.get(key);
+		if (!failures) {
+			failures = createElementRenderFailures();
+			failuresBySurface.set(key, failures);
+		}
+		return failures;
+	};
 
 	const renderStageFor = (
 		slide: PptxSlide,
@@ -213,6 +240,11 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 			formatScheme: state.formatScheme,
 			tableStyleMap: state.tableStyleMap,
 			fieldContext: buildRenderFieldContext(state, slide),
+			// Only the editing canvas marks the Find bar's matches.
+			findHighlights:
+				interactive && !presenting
+					? findTextHighlightsByElement(state.findMatches, state.findMatchIndex, state.currentSlide)
+					: undefined,
 			registry,
 			t: deps.getTranslator(),
 			scale,
@@ -239,11 +271,16 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 			// chart's id), so thumbnails and export rasters never see it either way.
 			selectedElementIds: interactive ? new Set(state.selectedElementIds) : undefined,
 			interactive,
+			// Thumbnails, sorter tiles, presenter previews and the reading view are
+			// static: element ids stay unique to the canvas and the show stage.
+			exposeElementIds: stageKeepsElementIds({ interactive, presenting }),
 			templateEditing: state.editTemplateMode || state.masterViewTarget !== null,
 			// Native-animation state + context capture only for the live presentation
 			// stage; the editor canvas and thumbnails render statically.
 			presentationStates: presenting ? presentationPlayback.elementStates : undefined,
 			captureContext: presenting ? captureContext : undefined,
+			onElementRenderError: deps.getElementRenderErrorHandler?.(),
+			elementRenderFailures: failuresFor(presenting, interactive),
 		});
 	};
 
@@ -253,14 +290,28 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 			reRenderPresentationElements(presentationContext, presentationStageNode, ids);
 		}
 	};
+	// The scale is read on every pointer event; measure the viewport once per stage render or
+	// resize instead of on each read.
+	const viewportMeasure: ViewportMeasureCache = {};
+	const invalidateViewportSize = (): void => {
+		viewportMeasure.client = undefined;
+	};
 	const fitScaleFor = (canvasSize: { width: number; height: number }): number => {
 		const state = store.get();
 		const viewport = deps.getChrome().viewport;
-		return fitViewerViewport(viewport, canvasSize, deps.getFitOptions?.() ?? {}, state.presenting);
+		return fitViewerViewport(
+			viewport,
+			canvasSize,
+			deps.getFitOptions?.() ?? {},
+			state.presenting,
+			viewportMeasure,
+		);
 	};
 	const effectiveScaleFor = (canvasSize: { width: number; height: number }): number => {
 		const state = store.get();
-		return state.zoom !== 'fit' ? state.zoom : fitScaleFor(canvasSize);
+		// The zoom belongs to the editing canvas: the show always fits the slide to the
+		// screen, and the editing zoom is still there when the show ends.
+		return state.zoom !== 'fit' && !state.presenting ? state.zoom : fitScaleFor(canvasSize);
 	};
 
 	const effectiveScale = (): number => {
@@ -271,12 +322,24 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 		return fitScaleFor(store.get().canvasSize);
 	};
 
+	// The editing canvas's fit when the stage last drew outside a show. During a show
+	// the viewport has the show's layout, so the editing fit cannot be measured then.
+	let lastEditingFit: number | undefined;
+	const editingScale = (): number => {
+		const state = store.get();
+		if (state.zoom !== 'fit') {
+			return state.zoom;
+		}
+		return state.presenting ? (lastEditingFit ?? fitScale()) : fitScale();
+	};
+
 	const zoomPercent = (): number => {
 		const canvasSize = store.get().canvasSize;
 		return (effectiveScaleFor(canvasSize) / fitScaleFor(canvasSize)) * 100;
 	};
 
 	const renderStage = (): void => {
+		invalidateViewportSize();
 		const chrome = deps.getChrome();
 		const state = store.get();
 		const target = state.masterViewTarget;
@@ -299,6 +362,9 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 		const hasContent = specialMaster || Boolean(slide);
 		chrome.setEmpty(!hasContent);
 		const scale = effectiveScaleFor(pageSize);
+		if (!state.presenting) {
+			lastEditingFit = fitScaleFor(state.canvasSize);
+		}
 		chrome.stageWrap.style.width = `${pageSize.width * scale}px`;
 		chrome.stageWrap.style.height = `${pageSize.height * scale}px`;
 		// A live editor owns native selection/history. Repaint its model underneath
@@ -314,16 +380,9 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 		// Keep the outgoing stage's live 3D views for the rebuild below
 		// (render/elements/three-view-reuse.ts).
 		const liveThreeViews = collectThreeViews(chrome.stageWrap);
-		disposePptxRenderStage(chrome.stageWrap);
-		if (liveOverlay) {
-			for (const child of Array.from(chrome.stageWrap.childNodes)) {
-				if (child !== liveOverlay) {
-					child.remove();
-				}
-			}
-		} else {
-			chrome.stageWrap.replaceChildren();
-		}
+		// Build the new stage before clearing the old one: a rebuild that throws leaves the last
+		// good canvas on screen instead of an empty one (a failing element alone is omitted by
+		// the stage itself).
 		let stageNode: HTMLElement | null = null;
 		if (specialMaster) {
 			const selectedMaster =
@@ -381,6 +440,16 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 					deps.onCommentMarkerClick,
 				);
 			}
+		}
+		disposePptxRenderStage(chrome.stageWrap);
+		if (liveOverlay) {
+			for (const child of Array.from(chrome.stageWrap.childNodes)) {
+				if (child !== liveOverlay) {
+					child.remove();
+				}
+			}
+		} else {
+			chrome.stageWrap.replaceChildren();
 		}
 		if (stageNode && slide) {
 			chrome.stageWrap.insertBefore(stageNode, liveOverlay ?? null);
@@ -515,7 +584,7 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 		renderAll() {
 			const chrome = deps.getChrome();
 			const state = store.get();
-			chrome.setLoading(state.loading);
+			chrome.setLoading(state.loading, state.fontProgress);
 			chrome.setError(state.error);
 			chrome.setPresenting(state.presenting);
 			renderThumbnails();
@@ -528,9 +597,11 @@ export function createRenderController(deps: RenderControllerDeps): RenderContro
 			chrome.ribbon?.setViewOptions(state);
 		},
 		renderStage,
+		invalidateViewportSize,
 		renderThumbnails,
 		renderSlideNode: (slide, scale) => renderStageFor(slide, scale),
 		effectiveScale,
+		editingScale,
 		fitScale,
 		zoomPercent,
 		presentationPlayback,

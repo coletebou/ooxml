@@ -1,11 +1,22 @@
 import { XmlObject } from '../../types';
 import type { PptxElementWithText, TextStyle } from '../../types';
+import type {
+	DrawingAutofit,
+	DrawingBodyProperties,
+	DrawingTextWarpGuide,
+} from '../../../../drawingml/text-model';
+import {
+	assignBodyAttributes,
+	objectAutofit,
+	objectTextWarp,
+} from '../../utils/body-properties-neutral';
 import { writeBodyPrBooleanAttrs } from '../../utils/body-properties-parser';
 import { applyTextBodyScene3d } from '../../utils/text-body-scene3d';
 import { applyTextBodySp3d } from '../../utils/text-body-sp3d-writer';
 import {
 	elementBodyPropertyEditKeys,
 	shouldWriteBodyProperty,
+	type ElementBodyPropertyKey,
 	styleForBodyPropertyWrite,
 } from './element-body-properties';
 import {
@@ -16,7 +27,25 @@ import {
 } from './element-paragraph-geometry';
 import { preserveParagraphScopedState } from './paragraph-scoped-segment-state';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeSaveEffectsWriter';
+import { withRunSlideJumpTarget, withSegmentSlideJumpTargets } from './run-slide-jump-targets';
+import type { SlideTargetAt } from './run-slide-jump-targets';
 import { buildParagraphPropertiesXml } from './PptxHandlerRuntimeSaveParagraphHelpers';
+
+/** The presets whose first guide is `adj1` (the two-guide waves and pours); every other preset names it `adj`. */
+const ADJ1_WARP_PRESETS: ReadonlySet<string> = new Set([
+	'textWave1',
+	'textWave2',
+	'textWave4',
+	'textDoubleWave1',
+	'textArchUpPour',
+	'textArchDownPour',
+	'textCirclePour',
+	'textButtonPour',
+]);
+
+function firstWarpGuideName(preset: string | undefined): 'adj' | 'adj1' {
+	return preset !== undefined && ADJ1_WARP_PRESETS.has(preset) ? 'adj1' : 'adj';
+}
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	/**
@@ -33,6 +62,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		el: PptxElementWithText,
 		resolveHyperlinkRelationshipId: (target: string) => string | undefined,
 		getSlideRelationshipMap: () => Map<string, string>,
+		slideTargetAt?: SlideTargetAt,
 	): void {
 		const hasEditableTextContent =
 			typeof el.text === 'string' || (el.textSegments?.length ?? 0) > 0;
@@ -78,7 +108,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (shouldWriteBodyProperty(bodyEdits, 'vAlign')) {
 			const verticalAnchor = this.textVerticalAlignToDrawingValue(el.textStyle?.vAlign);
 			if (verticalAnchor) {
-				bodyPr['@_anchor'] = verticalAnchor;
+				assignBodyAttributes(bodyPr, { anchor: verticalAnchor });
 			} else {
 				delete bodyPr['@_anchor'];
 			}
@@ -88,7 +118,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (shouldWriteBodyProperty(bodyEdits, 'textDirection')) {
 			const bodyTextDirection = this.textDirectionToDrawingValue(el.textStyle?.textDirection);
 			if (bodyTextDirection) {
-				bodyPr['@_vert'] = bodyTextDirection;
+				assignBodyAttributes(bodyPr, { vertical: bodyTextDirection });
 			} else {
 				delete bodyPr['@_vert'];
 			}
@@ -98,7 +128,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (shouldWriteBodyProperty(bodyEdits, 'columnCount')) {
 			const bodyColumnCount = this.normalizeTextColumnCount(el.textStyle?.columnCount);
 			if (bodyColumnCount && bodyColumnCount > 1) {
-				bodyPr['@_numCol'] = String(bodyColumnCount);
+				assignBodyAttributes(bodyPr, { columnCount: bodyColumnCount });
 			} else {
 				delete bodyPr['@_numCol'];
 			}
@@ -109,18 +139,18 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			shouldWriteBodyProperty(bodyEdits, 'columnSpacing') &&
 			el.textStyle?.columnSpacing !== undefined
 		) {
-			bodyPr['@_spcCol'] = String(
-				Math.round(el.textStyle.columnSpacing * PptxHandlerRuntime.EMU_PER_PX),
-			);
+			assignBodyAttributes(bodyPr, {
+				columnSpacingEmu: el.textStyle.columnSpacing * PptxHandlerRuntime.EMU_PER_PX,
+			});
 		}
 
 		// Overflow
 		if (shouldWriteBodyProperty(bodyEdits, 'hOverflow') && el.textStyle?.hOverflow) {
-			bodyPr['@_horzOverflow'] = el.textStyle.hOverflow;
+			assignBodyAttributes(bodyPr, { horizontalOverflow: el.textStyle.hOverflow });
 			delete bodyPr['@_hOverflow'];
 		}
 		if (shouldWriteBodyProperty(bodyEdits, 'vertOverflow') && el.textStyle?.vertOverflow) {
-			bodyPr['@_vertOverflow'] = el.textStyle.vertOverflow;
+			assignBodyAttributes(bodyPr, { verticalOverflow: el.textStyle.vertOverflow });
 		}
 
 		// Auto-fit / shrink-to-fit — a mutually-exclusive node choice, so the
@@ -141,10 +171,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 		// Text wrapping mode
 		if (shouldWriteBodyProperty(bodyEdits, 'textWrap')) {
-			if (el.textStyle?.textWrap === 'none') {
-				bodyPr['@_wrap'] = 'none';
-			} else if (el.textStyle?.textWrap === 'square') {
-				bodyPr['@_wrap'] = 'square';
+			const wrap = el.textStyle?.textWrap;
+			if (wrap === 'none' || wrap === 'square') {
+				assignBodyAttributes(bodyPr, { wrap });
 			}
 		}
 
@@ -156,28 +185,20 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 		// Text warp preset
 		if (el.textStyle?.textWarpPreset) {
-			const prstTxWarpNode: XmlObject = {
-				'@_prst': el.textStyle.textWarpPreset,
-			};
-			// Round-trip adjustment values (adj / adj2)
-			const adjGds: XmlObject[] = [];
+			// Round-trip adjustment values (adj / adj2). PowerPoint always writes
+			// `a:avLst`, empty when the warp keeps its default adjustments;
+			// omitting it lost markup on every rewrite.
+			const guides: DrawingTextWarpGuide[] = [];
 			if (el.textStyle.textWarpAdj !== undefined && Number.isFinite(el.textStyle.textWarpAdj)) {
-				adjGds.push({
-					'@_name': 'adj',
-					'@_fmla': `val ${el.textStyle.textWarpAdj}`,
+				guides.push({
+					name: firstWarpGuideName(el.textStyle.textWarpPreset),
+					formula: `val ${el.textStyle.textWarpAdj}`,
 				});
 			}
 			if (el.textStyle.textWarpAdj2 !== undefined && Number.isFinite(el.textStyle.textWarpAdj2)) {
-				adjGds.push({
-					'@_name': 'adj2',
-					'@_fmla': `val ${el.textStyle.textWarpAdj2}`,
-				});
+				guides.push({ name: 'adj2', formula: `val ${el.textStyle.textWarpAdj2}` });
 			}
-			// PowerPoint always writes `a:avLst`, empty when the warp keeps its
-			// default adjustments; omitting it lost markup on every rewrite.
-			prstTxWarpNode['a:avLst'] =
-				adjGds.length > 0 ? { 'a:gd': adjGds.length === 1 ? adjGds[0] : adjGds } : {};
-			bodyPr['a:prstTxWarp'] = prstTxWarpNode;
+			bodyPr['a:prstTxWarp'] = objectTextWarp({ preset: el.textStyle.textWarpPreset, guides });
 		} else {
 			delete bodyPr['a:prstTxWarp'];
 		}
@@ -227,10 +248,17 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		}
 
 		txBody['a:bodyPr'] = bodyPr;
+		// A run slide jump made in code names its slide by index only; point it
+		// at the slide part so the run writer adds the relationship.
+		const onMissing = (index: number) => this.reportMissingSlideJumpTarget(el.id, index);
 		txBody['a:p'] = this.createParagraphsFromTextContent(
 			textValueForSave,
-			this.routeElementParagraphGeometry(txBody, el.textStyle),
-			textSegmentsForSave,
+			withRunSlideJumpTarget(
+				this.routeElementParagraphGeometry(txBody, el.textStyle),
+				slideTargetAt,
+				onMissing,
+			),
+			withSegmentSlideJumpTargets(textSegmentsForSave, slideTargetAt, onMissing),
 			resolveHyperlinkRelationshipId,
 		);
 	}
@@ -272,58 +300,46 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		return withoutElementParagraphGeometry(textStyle);
 	}
 
-	/** Apply auto-fit mode settings to bodyPr. */
+	/** Apply auto-fit mode settings to bodyPr (node values from the shared body codec). */
 	private applyAutoFitToBodyPr(bodyPr: XmlObject, el: PptxElementWithText): void {
-		if (el.textStyle?.autoFitMode !== undefined) {
+		const style = el.textStyle;
+		const normal = (fontScale: number | undefined): DrawingAutofit => ({
+			kind: 'normal',
+			...(fontScale !== undefined && fontScale < 1 ? { fontScale } : {}),
+			...(style?.autoFitLineSpacingReduction !== undefined && style.autoFitLineSpacingReduction > 0
+				? { lineSpacingReduction: style.autoFitLineSpacingReduction }
+				: {}),
+		});
+		const put = (autofit: DrawingAutofit) => {
+			const { key, node } = objectAutofit(autofit);
+			bodyPr[key] = node;
+		};
+		if (style?.autoFitMode !== undefined) {
 			delete bodyPr['a:spAutoFit'];
 			delete bodyPr['a:normAutofit'];
 			delete bodyPr['a:noAutofit'];
 
-			if (el.textStyle.autoFitMode === 'shrink') {
-				bodyPr['a:spAutoFit'] = {};
-			} else if (el.textStyle.autoFitMode === 'normal') {
-				const normNode: XmlObject = {};
-				if (el.textStyle.autoFitFontScale !== undefined && el.textStyle.autoFitFontScale < 1) {
-					normNode['@_fontScale'] = String(Math.round(el.textStyle.autoFitFontScale * 100000));
-				}
-				if (
-					el.textStyle.autoFitLineSpacingReduction !== undefined &&
-					el.textStyle.autoFitLineSpacingReduction > 0
-				) {
-					normNode['@_lnSpcReduction'] = String(
-						Math.round(el.textStyle.autoFitLineSpacingReduction * 100000),
-					);
-				}
-				bodyPr['a:normAutofit'] = normNode;
-			} else if (el.textStyle.autoFitMode === 'none') {
-				bodyPr['a:noAutofit'] = {};
+			if (style.autoFitMode === 'shrink') {
+				put({ kind: 'shape' });
+			} else if (style.autoFitMode === 'normal') {
+				put(normal(style.autoFitFontScale));
+			} else if (style.autoFitMode === 'none') {
+				put({ kind: 'none' });
 			}
-		} else if (el.textStyle?.autoFit) {
-			// Legacy path — keep backward compat
+		} else if (style?.autoFit) {
+			// Legacy path: keep backward compat
 			if (!bodyPr['a:spAutoFit'] && !bodyPr['a:normAutofit']) {
-				if (el.textStyle.autoFitFontScale !== undefined && el.textStyle.autoFitFontScale < 1) {
-					const normNode: XmlObject = {
-						'@_fontScale': String(Math.round(el.textStyle.autoFitFontScale * 100000)),
-					};
-					if (
-						el.textStyle.autoFitLineSpacingReduction !== undefined &&
-						el.textStyle.autoFitLineSpacingReduction > 0
-					) {
-						normNode['@_lnSpcReduction'] = String(
-							Math.round(el.textStyle.autoFitLineSpacingReduction * 100000),
-						);
-					}
-					bodyPr['a:normAutofit'] = normNode;
+				if (style.autoFitFontScale !== undefined && style.autoFitFontScale < 1) {
+					put(normal(style.autoFitFontScale));
 				} else {
-					bodyPr['a:spAutoFit'] = {};
+					put({ kind: 'shape' });
 				}
 			}
-			if (bodyPr['a:normAutofit'] && el.textStyle.autoFitFontScale !== undefined) {
-				(bodyPr['a:normAutofit'] as XmlObject)['@_fontScale'] = String(
-					Math.round(el.textStyle.autoFitFontScale * 100000),
-				);
+			if (bodyPr['a:normAutofit'] && style.autoFitFontScale !== undefined) {
+				const { node } = objectAutofit({ kind: 'normal', fontScale: style.autoFitFontScale });
+				Object.assign(bodyPr['a:normAutofit'] as XmlObject, node);
 			}
-		} else if (el.textStyle?.autoFit === false && el.textStyle?.autoFitMode === undefined) {
+		} else if (style?.autoFit === false && style?.autoFitMode === undefined) {
 			delete bodyPr['a:spAutoFit'];
 			delete bodyPr['a:normAutofit'];
 		}
@@ -335,41 +351,19 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		el: PptxElementWithText,
 		bodyEdits: ReturnType<typeof elementBodyPropertyEditKeys>,
 	): void {
-		if (
-			shouldWriteBodyProperty(bodyEdits, 'bodyInsetLeft') &&
-			typeof el.textStyle?.bodyInsetLeft === 'number' &&
-			Number.isFinite(el.textStyle.bodyInsetLeft)
-		) {
-			bodyPr['@_lIns'] = String(
-				Math.round(el.textStyle.bodyInsetLeft * PptxHandlerRuntime.EMU_PER_PX),
-			);
-		}
-		if (
-			shouldWriteBodyProperty(bodyEdits, 'bodyInsetTop') &&
-			typeof el.textStyle?.bodyInsetTop === 'number' &&
-			Number.isFinite(el.textStyle.bodyInsetTop)
-		) {
-			bodyPr['@_tIns'] = String(
-				Math.round(el.textStyle.bodyInsetTop * PptxHandlerRuntime.EMU_PER_PX),
-			);
-		}
-		if (
-			shouldWriteBodyProperty(bodyEdits, 'bodyInsetRight') &&
-			typeof el.textStyle?.bodyInsetRight === 'number' &&
-			Number.isFinite(el.textStyle.bodyInsetRight)
-		) {
-			bodyPr['@_rIns'] = String(
-				Math.round(el.textStyle.bodyInsetRight * PptxHandlerRuntime.EMU_PER_PX),
-			);
-		}
-		if (
-			shouldWriteBodyProperty(bodyEdits, 'bodyInsetBottom') &&
-			typeof el.textStyle?.bodyInsetBottom === 'number' &&
-			Number.isFinite(el.textStyle.bodyInsetBottom)
-		) {
-			bodyPr['@_bIns'] = String(
-				Math.round(el.textStyle.bodyInsetBottom * PptxHandlerRuntime.EMU_PER_PX),
-			);
-		}
+		const insets: DrawingBodyProperties = {};
+		const inset = (key: ElementBodyPropertyKey, value: number | undefined): number | undefined =>
+			shouldWriteBodyProperty(bodyEdits, key) && typeof value === 'number' && Number.isFinite(value)
+				? value * PptxHandlerRuntime.EMU_PER_PX
+				: undefined;
+		const left = inset('bodyInsetLeft', el.textStyle?.bodyInsetLeft);
+		if (left !== undefined) insets.insetLeftEmu = left;
+		const top = inset('bodyInsetTop', el.textStyle?.bodyInsetTop);
+		if (top !== undefined) insets.insetTopEmu = top;
+		const right = inset('bodyInsetRight', el.textStyle?.bodyInsetRight);
+		if (right !== undefined) insets.insetRightEmu = right;
+		const bottom = inset('bodyInsetBottom', el.textStyle?.bodyInsetBottom);
+		if (bottom !== undefined) insets.insetBottomEmu = bottom;
+		assignBodyAttributes(bodyPr, insets);
 	}
 }

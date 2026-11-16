@@ -7,6 +7,7 @@
  * clipboard operations, undo/redo history, geometry, and shape quick styles.
  */
 
+import type { HistoryTheme } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxSlide, ShapeStyle } from 'pptx-viewer-core';
 
 // ---------------------------------------------------------------------------
@@ -187,6 +188,8 @@ export interface EditorHistorySnapshot {
 	activeSlideIndex: number;
 	slides: PptxSlide[];
 	templateElementsBySlideId: Record<string, PptxElement[]>;
+	/** The theme at that point, so undoing a theme pick puts the theme back with the slides. */
+	theme?: HistoryTheme;
 	actionLabel?: string;
 }
 

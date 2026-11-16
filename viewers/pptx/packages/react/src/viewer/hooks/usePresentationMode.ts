@@ -120,13 +120,15 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 
 	const {
 		rehearsing,
-		setRehearsing,
 		recordedTimings,
-		slideStartTime,
+		slideElapsedMs: rehearsalSlideElapsedMs,
+		totalElapsedMs: rehearsalTotalElapsedMs,
 		showRehearsalSummary,
-		setShowRehearsalSummary,
 		rehearsalPaused,
-		recordCurrentSlideTime,
+		moveRehearsal,
+		finishRehearsal,
+		cancelRehearsal,
+		beginPendingRehearsal,
 		dismissRehearsalSummary,
 		saveRehearsalTimings,
 		enterRehearsalMode,
@@ -138,6 +140,12 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 		setPresentationStartTime,
 		setPresenterMode,
 	});
+	const beginPendingRehearsalRef = useRef(beginPendingRehearsal);
+	beginPendingRehearsalRef.current = beginPendingRehearsal;
+	// Every slide change of a rehearsal banks the slide being left.
+	useEffect(() => {
+		moveRehearsal(presentationSlideIndex);
+	}, [moveRehearsal, presentationSlideIndex]);
 
 	// Leaving the show for ANY reason also ends the presenter console. Without
 	// this the console stayed "open" after the show exited, so the audience
@@ -199,8 +207,7 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 		startSlideAnimations,
 		presentationTimersRef,
 		rehearsing,
-		recordCurrentSlideTime,
-		setShowRehearsalSummary,
+		finishRehearsal,
 		onLastViewed: actionExtensions.onLastViewed,
 		onCustomShow: actionExtensions.onCustomShow,
 		onOpenFile: actionExtensions.onOpenFile,
@@ -304,7 +311,7 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 
 	const enterPresentMode = useCallback(() => {
 		setPresenterMode(false);
-		setRehearsing(false);
+		cancelRehearsal();
 		setPresentationStartTime(Date.now());
 		// Request fullscreen synchronously within the user gesture call-stack
 		try {
@@ -318,7 +325,7 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 			/* fullscreen not supported */
 		}
 		onSetMode('present');
-	}, [containerRef, onSetMode, setRehearsing]);
+	}, [containerRef, onSetMode, cancelRehearsal]);
 
 	/**
 	 * "From Beginning" / F5: unlike {@link enterPresentMode} ("From Current
@@ -336,10 +343,10 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 
 	const enterPresenterView = useCallback(() => {
 		setPresenterMode(true);
-		setRehearsing(false);
+		cancelRehearsal();
 		setPresentationStartTime(Date.now());
 		onSetMode('present');
-	}, [onSetMode, setRehearsing]);
+	}, [onSetMode, cancelRehearsal]);
 
 	/**
 	 * Toggle between presenter view (split-screen with notes) and regular
@@ -405,10 +412,7 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 			presenterConsole.setBlackout(
 				presenterConsole.snapshot.blackout === 'white' ? 'none' : 'white',
 			),
-		rehearsing,
-		recordCurrentSlideTime,
-		presentationSlideIndex,
-		setShowRehearsalSummary,
+		finishRehearsal,
 	});
 
 	// -----------------------------------------------------------------------
@@ -469,6 +473,8 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 				visibleSlideIndexesRef.current,
 			);
 			setPresentationSlideIndex(idx);
+			// A requested rehearsal starts its clock on the slide the show opened on.
+			beginPendingRehearsalRef.current(idx);
 			// The stage paints the ACTIVE slide (navigation moves both indexes
 			// together, see `executeSlideTransition`), so an entry slide other
 			// than the active one has to move it as well or the counter says
@@ -532,10 +538,7 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 			const isFullscreen = Boolean(document.fullscreenElement);
 			if (wasFullscreen && !isFullscreen) {
 				// Transitioned FROM fullscreen TO non-fullscreen → exit present mode
-				if (rehearsing) {
-					recordCurrentSlideTime(presentationSlideIndex);
-					setShowRehearsalSummary(true);
-				}
+				finishRehearsal();
 				onSetMode('edit');
 			}
 			wasFullscreen = isFullscreen;
@@ -544,16 +547,7 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 		return () => {
 			document.removeEventListener('fullscreenchange', handleFullscreenChange);
 		};
-	}, [
-		mode,
-		onSetMode,
-		presenterMode,
-		rehearsing,
-		recordCurrentSlideTime,
-		presentationSlideIndex,
-		setShowRehearsalSummary,
-		showGuard,
-	]);
+	}, [mode, onSetMode, presenterMode, finishRehearsal, showGuard]);
 
 	// -----------------------------------------------------------------------
 	// Cleanup on unmount
@@ -590,9 +584,13 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 			// `PresentationStage` stacks the incoming slide's elements above its
 			// template shapes (`zIndex = templateElements.length + index`), so a
 			// z-index journey has to start counting where the stage does.
-			{ zIndexBase: incoming ? (templateElementsBySlideId?.[incoming.id]?.length ?? 0) : 0 },
+			// A turning flip is seen from the slide's centre (shared `morph-flip-turn`).
+			{
+				zIndexBase: incoming ? (templateElementsBySlideId?.[incoming.id]?.length ?? 0) : 0,
+				...(canvasSize ? { slideSize: canvasSize } : {}),
+			},
 		);
-	}, [transitionOverlay, slides, templateElementsBySlideId]);
+	}, [transitionOverlay, slides, templateElementsBySlideId, canvasSize]);
 
 	const morphedElementStates = useMemo(() => {
 		if (!morphPlan || morphPlan.incomingAnimations.size === 0) {
@@ -661,7 +659,8 @@ export function usePresentationMode(input: UsePresentationModeInput): UsePresent
 		rehearsing,
 		enterRehearsalMode,
 		recordedTimings,
-		slideStartTime,
+		rehearsalSlideElapsedMs,
+		rehearsalTotalElapsedMs,
 		showRehearsalSummary,
 		dismissRehearsalSummary,
 		saveRehearsalTimings,

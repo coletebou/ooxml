@@ -131,6 +131,16 @@ function remapColorWithRef(
  * Re-resolve all theme-derived colours in a ShapeStyle.
  */
 function remapShapeStyleColors(
+	style: ShapeStyle,
+	remap: Map<string, string>,
+	newColorMap: Readonly<Record<string, string>>,
+): ShapeStyle;
+function remapShapeStyleColors(
+	style: ShapeStyle | undefined,
+	remap: Map<string, string>,
+	newColorMap: Readonly<Record<string, string>>,
+): ShapeStyle | undefined;
+function remapShapeStyleColors(
 	style: ShapeStyle | undefined,
 	remap: Map<string, string>,
 	newColorMap: Readonly<Record<string, string>>,
@@ -202,7 +212,7 @@ function remapShapeStyleColors(
  * Build a simple CSS gradient string from stops (for inline style usage).
  */
 function buildSimpleGradientCss(
-	stops: Array<{ color: string; position: number; opacity?: number }>,
+	stops: Array<{ color: string; position: number; opacity?: number | undefined }>,
 	type: 'linear' | 'radial',
 	angle: number,
 ): string {
@@ -445,10 +455,10 @@ export function buildThemeColorMap(colorScheme: PptxThemeColorScheme): Record<st
 	}
 
 	// Standard aliases
-	map.tx1 = map.dk1;
-	map.bg1 = map.lt1;
-	map.tx2 = map.dk2;
-	map.bg2 = map.lt2;
+	map.tx1 = normalizeHex(colorScheme.dk1);
+	map.bg1 = normalizeHex(colorScheme.lt1);
+	map.tx2 = normalizeHex(colorScheme.dk2);
+	map.bg2 = normalizeHex(colorScheme.lt2);
 
 	return map;
 }
@@ -591,10 +601,10 @@ export function buildColorMapForBackgroundPair(
 ): Record<string, string> {
 	const map = buildThemeColorMap(colorScheme);
 	if (dark) {
-		map.tx1 = map.lt1;
-		map.bg1 = map.dk1;
-		map.tx2 = map.lt2;
-		map.bg2 = map.dk2;
+		map.tx1 = normalizeHex(colorScheme.lt1);
+		map.bg1 = normalizeHex(colorScheme.dk1);
+		map.tx2 = normalizeHex(colorScheme.lt2);
+		map.bg2 = normalizeHex(colorScheme.dk2);
 	}
 	return map;
 }

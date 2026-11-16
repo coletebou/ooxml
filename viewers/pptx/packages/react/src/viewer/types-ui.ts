@@ -1,5 +1,13 @@
 import type { CollaborationState } from 'ooxml-core/collab';
-import type { DocumentStorage } from 'ooxml-ui/pptx';
+import type {
+	CloudFileProvider,
+	DocumentStorage,
+	ElementRenderErrorHandler,
+	GoogleFontsOption,
+	ListConversionScope,
+	PptxLoadLimits,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import type {
 	AccountAuthConfig,
 	AutosaveRecord,
@@ -16,6 +24,7 @@ import type {
 	ViewportFitOptions,
 } from 'ooxml-ui/pptx';
 import type { PptxAiConfig } from 'ooxml-ui/pptx/ai';
+import type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 import type { LocaleCatalogEntry } from 'ooxml-ui/pptx/i18n';
 import type {
 	ConnectorArrowType,
@@ -134,6 +143,8 @@ export interface TableCellEditorState {
 	columnIndex: number;
 	/** When true the cell has an active text input. */
 	isEditing?: boolean;
+	/** Where the caret starts when editing begins (Tab selects the cell's text). */
+	caret?: import('ooxml-ui/pptx').TableCellCaret;
 	/** Optional multi-cell selection (Shift+Click range). Each entry is {row, col}. */
 	selectedCells?: Array<{ row: number; col: number }>;
 }
@@ -291,6 +302,19 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	onModeChange?: (mode: import('ooxml-ui/pptx').ViewerMode) => void;
 	/** Callback when the zoom level changes. */
 	onZoomChange?: (zoom: number) => void;
+	/**
+	 * Ribbon Display Options, the starting mode: `always` docks the tabs and commands above the
+	 * slide (the default), `tabs` shows only the tab row (a chosen tab lays its commands over the
+	 * slide until a press elsewhere or Escape), `fullScreen` hides the title bar and the ribbon
+	 * until the strip at the top is pressed. Changing it later applies the mode without calling
+	 * `onRibbonDisplayChange`.
+	 */
+	ribbonDisplay?: import('ooxml-ui/pptx').RibbonDisplayMode;
+	/**
+	 * Called when the user picks a Ribbon Display Option (the menu, Ctrl+F1, a double click on a
+	 * tab). Not called when the host changes `ribbonDisplay`.
+	 */
+	onRibbonDisplayChange?: (mode: import('ooxml-ui/pptx').RibbonDisplayMode) => void;
 	/** Callback when element selection changes. */
 	onSelectionChange?: (elementIds: string[]) => void;
 	/** Callback when the total slide count changes (slide added/deleted). */
@@ -302,6 +326,12 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	onLoad?: (detail: ViewerLoadDetail) => void;
 	/** Fired once per distinct load failure, and for each failed Save / Save As, with a human-readable message. */
 	onError?: (message: string) => void;
+	/**
+	 * Reports a slide element omitted after a render or lifecycle error, on every surface of the
+	 * viewer (canvas, thumbnails, slide show, reading view, previews). Defaults to
+	 * `console.error(error, context)`, also used when this callback throws.
+	 */
+	onElementRenderError?: ElementRenderErrorHandler;
 	/**
 	 * Host override for the File ▸ Open action. When provided, the built-in
 	 * native file picker is bypassed and this is invoked instead; the host is
@@ -348,6 +378,15 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	 * when it provides them.
 	 */
 	storage?: DocumentStorage;
+	/**
+	 * Cloud places for File > Open (OneDrive through `createOneDriveFileProvider` from
+	 * `ooxml-core/embedding/onedrive`, or a provider of your own). When non-empty, the Open page
+	 * lists "This device" and one place per provider. A file opened from a place loads like a
+	 * normal open (read-only when the service does not allow editing, or when `canEdit` /
+	 * `readOnly` already forbid it); File > Save, Save As and recovery of that document go to the
+	 * file's own storage instead of `storage`, until another document is loaded.
+	 */
+	fileProviders?: readonly CloudFileProvider[];
 	/** Fired with the serialised deck each time a recovery autosave snapshot is written. */
 	onAutosave?: (content: Uint8Array) => void;
 	/** Fired when the user enables or disables autosave (title bar or File > Options). */
@@ -369,6 +408,12 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	onPresentationChange?: (presenting: boolean) => void;
 	/** Fired on every collaboration connection-status transition. */
 	onCollaborationStatus?: (status: ConnectionStatus) => void;
+	/**
+	 * Fired after a vector PDF export (File > Export > PDF) that approximated something: the
+	 * elements drawn as pictures, substituted fonts and the rest, as codes with params. The user
+	 * also sees one notice in the toast stack.
+	 */
+	onPdfExportReport?: (result: VectorPdfExportResult) => void;
 	/** Optional class name */
 	className?: string;
 
@@ -424,23 +469,29 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	onThemeChange?: (key: string) => void;
 
 	/**
-	 * Initial locale code for File > Options > Language. Falls back to a
-	 * persisted `localStorage` choice, then `'en'`.
+	 * Initial locale code for File > Options > Language. Falls back to a persisted `localStorage`
+	 * choice, then `'en'`. Ignored inside a `PptxI18nProvider`, whose `locale` is the language.
+	 * Without a provider it applies only while the viewer reads a configured react-i18next
+	 * instance; with neither (for example `pptx-react-viewer/no-i18next` on its own) the viewer
+	 * shows its built-in English text and ignores it.
 	 */
 	defaultLocale?: string;
 
 	/**
-	 * Locale choices offered by File > Options > Language. Defaults to the
-	 * codes actually registered on the host's `react-i18next` instance
-	 * (mapped through the shared `LOCALE_CATALOG` for display labels).
+	 * Locale choices offered by File > Options > Language. Without a provider they default to the
+	 * codes registered on the host's `react-i18next` instance, and have no effect when the viewer
+	 * reads no configured instance (see `defaultLocale`). Inside a `PptxI18nProvider` there is no
+	 * default: pass two or more, together with `onLocaleChange`, to show the Language category.
 	 */
 	availableLocales?: LocaleCatalogEntry[];
 
 	/**
-	 * Called when the user picks a language from File > Options > Language.
-	 * When provided, the host owns applying and persisting the choice (the
-	 * viewer will not call `i18n.changeLanguage` or touch `localStorage`
-	 * itself); otherwise the viewer applies and persists it directly.
+	 * Called when the user picks a language from File > Options > Language. When provided, the
+	 * host owns applying and persisting the choice; otherwise the viewer applies and persists it
+	 * itself. Inside a `PptxI18nProvider` the host always owns the language: without this callback
+	 * the Language category is left out. Without a provider, when the viewer reads no configured
+	 * react-i18next instance (see `defaultLocale`), the Language category is left out and this is
+	 * never called.
 	 */
 	onLocaleChange?: (code: string) => void;
 
@@ -588,6 +639,30 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	initialSlide?: number;
 
 	/**
+	 * Google Fonts fallback for deck fonts that are neither installed nor
+	 * embedded. Unset: File > Options > Trust Center > "Download fonts that
+	 * are not installed or embedded" decides (on by default: the viewer
+	 * loads them from `fonts.googleapis.com`). Any other value locks that
+	 * option: off for `false` or an invalid `baseUrl`, on for a mirror.
+	 * `false`: no request goes to Google (`fonts.googleapis.com` or
+	 * `fonts.gstatic.com`); text uses installed, embedded or fallback fonts.
+	 * `{ baseUrl }`: requests go to a self-hosted mirror of the Google Fonts
+	 * CSS2 API instead, so the user's browser never contacts Google. An
+	 * invalid `baseUrl` disables the fallback (with a console warning).
+	 */
+	googleFonts?: GoogleFontsOption;
+
+	/**
+	 * How far Bullets / Numbering reach from a bare caret (no text selected).
+	 * `'paragraph'` (default, PowerPoint behaviour): only the caret's paragraph
+	 * changes. `'list'` (Word / Google Docs behaviour): when the caret's
+	 * paragraph is already a list item and the command switches it between
+	 * bullets and numbering, every adjacent item of that list converts with it.
+	 * A range selection always affects only the paragraphs it touches.
+	 */
+	listConversionScope?: ListConversionScope;
+
+	/**
 	 * Show the editor chrome: title bar, ribbon and toolbar, protected-view
 	 * and read-only banners, the mobile toolbar and the status bar. Default
 	 * `true`; `false` leaves the canvas (and the thumbnail pane, if shown).
@@ -646,22 +721,30 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 
 	/**
 	 * Opt in to the built-in AI assistant. When provided, a Sparkles toggle
-	 * appears in the toolbar and opens a chat panel wired to this config; when
-	 * omitted, no AI icon renders and no AI code is loaded (the panel and its
-	 * `@ai-sdk/react` dependency are `React.lazy`-imported only on first open).
+	 * appears in the toolbar and opens a chat panel; when omitted, no AI icon
+	 * renders and no AI code is loaded (the panel and its `@ai-sdk/react`
+	 * dependency are `React.lazy`-imported only on first open).
 	 *
-	 * The host supplies the model connection (a backend `endpoint`, an in-browser
-	 * `model`, or a custom `transport`) plus optional tool allow/deny lists and a
-	 * write policy. Requires the optional `ai` and `@ai-sdk/react` peers.
+	 * Pass a plain `PptxAiConfig` (supported and not deprecated), or the opaque
+	 * handle `createAiAssistant(config)` returns (from `pptx-react-viewer/ai`, the
+	 * opt-in entry that brings the chat panel). Both open the same panel. Only a
+	 * value from `createAiAssistant` is read as a handle; any other value is a
+	 * plain config, which the viewer does not validate. The config supplies the
+	 * model connection (a backend `endpoint`, an in-browser `model`, or a custom
+	 * `transport`) plus optional tool allow/deny lists and a write policy.
+	 * Requires the optional `ai` and `@ai-sdk/react` peers.
 	 *
 	 * @example
 	 * ```tsx
-	 * <PowerPointViewer content={bytes} ai={{ connection: { kind: 'model', model } }} />
+	 * import { createAiAssistant } from 'pptx-react-viewer/ai';
+	 *
+	 * const assistant = createAiAssistant({ connection: { kind: 'endpoint', api: '/api/chat' } });
+	 * <PowerPointViewer content={bytes} ai={assistant} />
 	 * ```
 	 *
 	 * @see {@link PptxAiConfig}
 	 */
-	ai?: PptxAiConfig;
+	ai?: PptxAiConfig | PptxAiAssistant;
 
 	/**
 	 * Framework-neutral UI customisation. See docs/guide/customization.md.
@@ -671,6 +754,27 @@ export interface PowerPointViewerProps extends ViewportFitOptions {
 	/** Initial inspector visibility; omitted preserves the desktop/mobile default. */
 	inspectorInitiallyOpen?: boolean;
 	customization?: ViewerCustomization;
+
+	/**
+	 * Host switch for content a deck links from another server (http(s)
+	 * relationship targets): pictures, picture fills and bullets, video, audio
+	 * and poster frames. `false`: none of it is fetched. `true`: it is allowed.
+	 * Either value locks File > Options > Trust Center > "Allow external
+	 * content" to match; unset keeps the user's choice there. Google Fonts
+	 * requests are separate (see `googleFonts`).
+	 * A change applies from the next load.
+	 */
+	allowExternalContent?: boolean;
+
+	/**
+	 * Bounds on the work loading a deck may do, for hosts that show untrusted
+	 * decks: `maxInputBytes`, `maxUncompressedBytes`, `maxEntries`, `maxSlides`
+	 * and `maxShapes` (see `PptxLoadLimits`). Unset keeps the core defaults
+	 * (500 MiB inflated, 65,536 ZIP entries, no other limit). A deck over a
+	 * limit shows the load-error screen with the limit and the deck's value.
+	 * A change applies from the next load.
+	 */
+	limits?: PptxLoadLimits;
 }
 
 export interface PowerPointViewerHandle

@@ -339,3 +339,9 @@ footer {
 .host-page {
 	min-height: 16rem;
 }
+
+/* File > Open places: the shared `<pptx-ui-open-places>` draws the tabs. */
+.open-places {
+	display: block;
+	max-width: 900px;
+}

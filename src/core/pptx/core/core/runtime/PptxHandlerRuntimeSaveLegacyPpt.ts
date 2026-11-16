@@ -123,7 +123,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	 * Serialise `slides` to a legacy binary PowerPoint 97-2003 (`.ppt`) file.
 	 *
 	 * @param slides - The (possibly mutated) live slide array.
-	 * @param options - Only `pptPassword` is consulted; every OOXML-specific
+	 * @param options - `pptPassword` and `rasterizeSvg` (the `.ppt`-only
+	 *   options), `customShows` and `slideMasters`; every OOXML-specific
 	 *   option (conformance, embedded fonts, table styles, ...) has no binary
 	 *   `.ppt` counterpart and is ignored.
 	 * @param saveAsPptx - Serialises the same slides as a Transitional `.pptx`
@@ -143,8 +144,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const deckMasters = pptxBytes ? await buildDeckMasterRoundTripsFromPptx(pptxBytes) : undefined;
 		this.compatibilityService.resetWarnings();
 		const resolvedMedia = await this.resolveAudioMediaBytes(slides);
-		const resolvedPictures = await resolvePictureSources(slides, async (path) =>
-			this.zip.file(path)?.async('uint8array'),
+		const resolvedPictures = await resolvePictureSources(
+			slides,
+			async (path) => this.zip.file(path)?.async('uint8array'),
+			{ rasterizeSvg: options?.rasterizeSvg },
 		);
 		const deck = convertDeckToWriteModel(
 			slides,
@@ -159,24 +162,28 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (deckMasters && deckMasters.masterPaths.length > 1) {
 			// One .ppt main master per source master a slide uses, each slide
 			// pointing at its own (see `buildDeckMasterRoundTripsFromPptx`).
-			deck.masters = deckMasters.masters.map((roundTrip, i) => ({
-				roundTrip,
-				styles: convertMasterTextStyles(
+			deck.masters = deckMasters.masters.map((roundTrip, i) => {
+				const styles = convertMasterTextStyles(
 					this.legacyMasterTextStyles(slides, options, deckMasters.masterPaths[i]),
 					roundTrip.themeFonts,
-				),
-			}));
+				);
+				return styles ? { roundTrip, styles } : { roundTrip };
+			});
 			deck.slides.forEach((slide, i) => {
-				slide.masterIndex = deckMasters.slideMasterIndex[i];
+				const masterIndex = deckMasters.slideMasterIndex[i];
+				if (masterIndex !== undefined) slide.masterIndex = masterIndex;
 			});
 		} else {
 			const master = deckMasters?.masters[0];
-			deck.masterStyles = convertMasterTextStyles(
+			const masterStyles = convertMasterTextStyles(
 				this.legacyMasterTextStyles(slides, options, deckMasters?.masterPaths[0]),
 				master?.themeFonts,
 			);
-			deck.master = master;
+			if (masterStyles) deck.masterStyles = masterStyles;
+			if (master) deck.master = master;
 		}
-		return buildPptFile(deck, { password: options?.pptPassword });
+		return buildPptFile(deck, {
+			...(options?.pptPassword !== undefined && { password: options?.pptPassword }),
+		});
 	}
 }

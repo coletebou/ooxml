@@ -5,6 +5,7 @@ import { galleryAdjustTranslationsEn } from './translations-en-galleries-adjust'
 import { galleryDataTranslationsEn } from './translations-en-galleries-data';
 import { galleryEffectsTranslationsEn } from './translations-en-galleries-effects';
 import { compareTranslationsEn } from './translations-en-compare';
+import { pdfExportTranslationsEn } from './translations-en-pdf-export';
 import { galleryPictureTranslationsEn } from './translations-en-galleries-picture';
 import { gallerySmartArtLayoutTranslationsEn } from './translations-en-galleries-smartart-layouts';
 import { shapeGalleryTranslationsEn } from './translations-en-shape-gallery';
@@ -29,6 +30,7 @@ export const translationsEn: Record<string, string> = {
 	...galleryDataTranslationsEn,
 	...galleryPictureTranslationsEn,
 	...compareTranslationsEn,
+	...pdfExportTranslationsEn,
 	...gallerySmartArtLayoutTranslationsEn,
 	...galleryAdjustTranslationsEn,
 	...tableLayoutTranslationsEn,
@@ -52,6 +54,11 @@ export const translationsEn: Record<string, string> = {
 
 	// Autosave
 	'pptx.autosave.saving': 'Saving…',
+	'pptx.autosave.progress.uploading': 'Saving… {percent}%',
+	'pptx.autosave.progress.checking': 'Checking for changes…',
+	'pptx.autosave.progress.downloading': 'Getting the latest version… {percent}%',
+	'pptx.autosave.progress.downloadingUnknown': 'Getting the latest version…',
+	'pptx.autosave.progress.merging': 'Combining edits…',
 	'pptx.autosave.saved': 'Saved {{time}}',
 	'pptx.autosave.error': 'Autosave error',
 	'pptx.autosave.disabled': 'AutoSave unavailable',
@@ -277,9 +284,7 @@ export const translationsEn: Record<string, string> = {
 	// Comments
 	'pptx.comments.addComment': 'Add Comment',
 	'pptx.comments.noComments': 'No comments',
-	'pptx.comments.author': 'Author',
 	'pptx.comments.resolved': 'Resolved',
-	'pptx.comments.clickToSelect': 'Click to select element',
 	'pptx.comments.deletedElement': 'Deleted element',
 	'pptx.comments.save': 'Save',
 	'pptx.comments.cancel': 'Cancel',
@@ -289,7 +294,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.comments.unresolve': 'Unresolve',
 	'pptx.comments.delete': 'Delete',
 	'pptx.comments.commentingOn': 'Commenting on:',
-	'pptx.comments.commentOnElement': 'Comment on {{element}}...',
 	'pptx.comments.addCommentPlaceholder': 'Add a comment...',
 
 	// Header & Footer
@@ -710,6 +714,7 @@ export const translationsEn: Record<string, string> = {
 	'pptx.chart.seriesName': 'Series name',
 	'pptx.chart.seriesValues': 'Series values',
 	'pptx.chart.seriesValueCell': '{{name}} value {{number}}',
+	'pptx.chart.dataSheetInvalidNumber': 'Enter a number',
 	'pptx.chart.seriesOptions': 'Series options',
 	'pptx.chart.dataLabelOptions': 'Data label options',
 	'pptx.chart.labelSeparator': 'Separator',
@@ -904,21 +909,17 @@ export const translationsEn: Record<string, string> = {
 	'pptx.smartart.style': 'Style',
 	'pptx.smartart.textPane': 'Text pane',
 	'pptx.smartart.addItem': 'Add item',
+	'pptx.smartart.textPaneEmpty': 'This diagram has no shapes with text.',
 	'pptx.smartart.extraConnections':
 		'This diagram has {{count}} extra connection(s) that the text pane does not edit.',
 	'pptx.smartart.tabHint':
 		'Enter adds an item, Backspace removes an empty one, Tab demotes, Shift+Tab promotes.',
 
 	// 3D text / text effects / text panel / text warp
-	'pptx.text3d.type': 'Type',
-	'pptx.text3d.width': 'Width',
-	'pptx.text3d.height': 'Height',
 	'pptx.text3d.title': '3D Text',
 	'pptx.text3d.extrusion': '3D Extrusion',
 	'pptx.text3d.depth': 'Depth (pt)',
-	'pptx.text3d.color': 'Color',
 	'pptx.text3d.topBevel': 'Top Bevel',
-	'pptx.text3d.bottomBevel': 'Bottom Bevel',
 	'pptx.text3d.material': 'Material',
 	'pptx.textEffects.title': 'Text Effects',
 	'pptx.textEffects.shadow': 'Text Shadow',
@@ -1030,6 +1031,8 @@ export const translationsEn: Record<string, string> = {
 	'pptx.fill.gradient': 'Gradient',
 	'pptx.fill.color': 'Color',
 	'pptx.fill.opacityPercent': 'Opacity ({{value}}%)',
+	'pptx.fill.picture': 'Picture',
+	'pptx.fill.slideBackground': 'Slide background',
 
 	// Inspector (additions) / arrange (additions)
 	'pptx.inspector.properties': 'Properties',
@@ -1044,6 +1047,17 @@ export const translationsEn: Record<string, string> = {
 	'pptx.inspector.fill': 'Fill',
 	'pptx.inspector.line': 'Line',
 	'pptx.inspector.effects': 'Effects',
+	'pptx.formatPane.slide': 'Slide',
+	'pptx.formatPane.font': 'Font',
+	'pptx.formatPane.paragraph': 'Paragraph',
+	'pptx.formatPane.picture': 'Picture',
+	'pptx.formatPane.object': 'Object',
+	'pptx.formatPane.outline': 'Outline',
+	'pptx.formatPane.sizePosition': 'Size and position',
+	'pptx.formatPane.altText': 'Alt Text',
+	'pptx.formatPane.action': 'Action',
+	'pptx.formatPane.mixed': 'Mixed',
+	'pptx.formatPane.sections': 'Format sections',
 	'pptx.inspector.softEdge': 'Soft Edge',
 	'pptx.inspector.softEdgeRadius': 'Soft Edge Radius',
 	'pptx.arrange.positionSize': 'Position & Size',
@@ -1294,6 +1308,12 @@ export const translationsEn: Record<string, string> = {
 	'pptx.fonts.enableEmbedding': 'Enable font embedding',
 	'pptx.fonts.missingWarning': '{{count}} font(s) could not be found and will not be embedded.',
 	'pptx.fonts.notFound': 'Not found',
+	'pptx.fonts.previewOnly': 'Preview and print only',
+	'pptx.fonts.previewOnlyReason':
+		"This font's licence allows it to be displayed and printed only. It stays in this file, but it is never embedded into another file.",
+	'pptx.fonts.restricted': 'Restricted',
+	'pptx.fonts.restrictedReason':
+		"This font's licence does not allow it to be embedded, so it is not used for display and a substitute is shown. Its font data stays in this file unchanged.",
 	'pptx.fonts.scanning': 'Scanning fonts...',
 	'pptx.fonts.usedFonts': 'Used Fonts',
 
@@ -1808,6 +1828,14 @@ export const translationsEn: Record<string, string> = {
 	'pptx.insertSmartArt.itemsLabel': 'Items (one per line)',
 	'pptx.insertSmartArt.cancel': 'Cancel',
 	'pptx.insertSmartArt.insert': 'Insert',
+	'pptx.insertSmartArt.description.list': 'Show non-sequential or grouped blocks of information.',
+	'pptx.insertSmartArt.description.process':
+		'Show a progression, a timeline or the sequential steps of a task.',
+	'pptx.insertSmartArt.description.cycle': 'Show a continual process or parts around a centre.',
+	'pptx.insertSmartArt.description.hierarchy':
+		'Show hierarchical relationships, such as an organisation chart.',
+	'pptx.insertSmartArt.description.relationship':
+		'Show connections, overlaps, proportions or containment between ideas.',
 	'pptx.smartArt.insertTitle': 'Insert SmartArt',
 	'pptx.smartArt.categoriesLabel': 'SmartArt categories',
 	'pptx.smartArt.layoutsLabel': 'SmartArt layouts',
@@ -1959,7 +1987,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.print.rangeCustom': 'Custom range',
 
 	// Document properties (Vue's variant, alongside pptx.documentProperties.*)
-	'pptx.properties.title': 'Document properties',
 	'pptx.properties.titleLabel': 'Title',
 	'pptx.properties.author': 'Author',
 	'pptx.properties.subject': 'Subject',
@@ -2024,8 +2051,19 @@ export const translationsEn: Record<string, string> = {
 
 	// Viewer root (loading/error states, notes/properties panel)
 	'pptx.viewer.loading': 'Loading presentation…',
+	'pptx.viewer.loadingFonts': 'Downloading fonts ({{loaded}} of {{total}})…',
 	'pptx.viewer.encrypted': 'This presentation is password-protected and cannot be opened.',
 	'pptx.viewer.loadError': 'Failed to load presentation.',
+	'pptx.viewer.loadLimit.maxInputBytes':
+		'This file is {{actual}}, larger than the {{maximum}} this viewer accepts.',
+	'pptx.viewer.loadLimit.maxUncompressedBytes':
+		'This presentation unpacks to at least {{actual}}, more than the {{maximum}} this viewer accepts.',
+	'pptx.viewer.loadLimit.maxEntries':
+		'This presentation contains {{actual}} parts, more than the {{maximum}} this viewer accepts.',
+	'pptx.viewer.loadLimit.maxSlides':
+		'This presentation has {{actual}} slides, more than the {{maximum}} this viewer accepts.',
+	'pptx.viewer.loadLimit.maxShapes':
+		'This presentation has at least {{actual}} shapes, more than the {{maximum}} this viewer accepts.',
 	'pptx.viewer.slide': 'Slide',
 	'pptx.viewer.background': 'Background',
 	'pptx.viewer.speakerNotesPlaceholder': 'Click to add speaker notes',
@@ -2036,6 +2074,12 @@ export const translationsEn: Record<string, string> = {
 	'pptx.common.close': 'Close',
 	'pptx.common.save': 'Save',
 	'pptx.common.ok': 'OK',
+	'pptx.dialog.confirmTitle': 'Confirm',
+	'pptx.dialog.inputTitle': 'Enter a name',
+	'pptx.dialog.noticeTitle': 'Could not complete the action',
+	'pptx.dialog.hyperlinkTitle': 'Open external hyperlink?',
+	'pptx.dialog.hyperlinkMessage': 'This link leaves the presentation:',
+	'pptx.dialog.hyperlinkOpen': 'Open',
 	'pptx.mobileToolbar.menu': 'Menu',
 	'pptx.ole.downloadFileAria': 'Download {{file}}',
 	'pptx.ole.openFileAria': 'Open {{file}} in a new tab',
@@ -2106,6 +2150,7 @@ export const translationsEn: Record<string, string> = {
 	'pptx.ribbon.tab.review': 'Review',
 	'pptx.ribbon.tab.view': 'View',
 	'pptx.ribbon.tab.help': 'Help',
+	'pptx.ribbon.tabsAria': 'Ribbon tabs',
 	'pptx.ribbon.tool.select': 'Select',
 	'pptx.ribbon.tool.pen': 'Pen',
 	'pptx.ribbon.tool.highlighter': 'Highlighter',
@@ -2123,6 +2168,11 @@ export const translationsEn: Record<string, string> = {
 	'pptx.ribbon.transitionTitle': '{{name}} transition',
 	'pptx.ribbon.collapseRibbon': 'Collapse the ribbon',
 	'pptx.ribbon.expandRibbon': 'Expand the ribbon',
+	'pptx.ribbon.displayOptions': 'Ribbon Display Options',
+	'pptx.ribbon.display.fullScreen': 'Full-screen mode',
+	'pptx.ribbon.display.tabs': 'Show tabs only',
+	'pptx.ribbon.display.always': 'Always show Ribbon',
+	'pptx.ribbon.showRibbon': 'Show the ribbon',
 	'pptx.ribbon.open': 'Open',
 	'pptx.ribbon.openAnotherPresentation': 'Open another presentation',
 	'pptx.ribbon.saveAsPptx': 'Save as .pptx',
@@ -2161,6 +2211,9 @@ export const translationsEn: Record<string, string> = {
 	'pptx.ribbon.smartArt': 'SmartArt',
 	'pptx.ribbon.insertSmartArt': 'Insert SmartArt diagram',
 	'pptx.ribbon.chartType': 'Chart type',
+	'pptx.ribbon.insertChartDialog': 'Insert Chart...',
+	'pptx.insertChart.title': 'Insert Chart',
+	'pptx.insertChart.preview': 'Preview',
 	'pptx.ribbon.chart': 'Chart',
 	'pptx.ribbon.insertChart': 'Insert chart',
 	'pptx.ribbon.equation': 'Equation',
@@ -2173,8 +2226,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.ribbon.alignTop': 'Align top',
 	'pptx.ribbon.alignMiddle': 'Align middle',
 	'pptx.ribbon.alignBottom': 'Align bottom',
-	'pptx.ribbon.distributeHorizontally': 'Distribute horizontally',
-	'pptx.ribbon.distributeVertically': 'Distribute vertically',
 	'pptx.ribbon.group': 'Group',
 	'pptx.ribbon.ungroup': 'Ungroup',
 	'pptx.ribbon.setUpShow': 'Set Up Show',
@@ -2499,7 +2550,6 @@ export const translationsEn: Record<string, string> = {
 	// truth reference these were derived from). Appended flat rather than
 	// interleaved into their semantic sections above, to keep this batch
 	// change safe/reviewable as one block.
-	'pptx.align.toolbarLabel': 'Align and distribute',
 	'pptx.arrange.deleteSelection': 'Delete selection',
 	'pptx.arrange.duplicateSelection': 'Duplicate selection',
 	'pptx.arrange.groupLabel': 'Arrange',
@@ -2510,6 +2560,14 @@ export const translationsEn: Record<string, string> = {
 	'pptx.canvas.guideTooltip': 'Drag to move guide, double-click to remove',
 	'pptx.customShows.none': 'None',
 	'pptx.customShows.noSlidesYet': 'No slides in this show yet.',
+	'pptx.customShows.copy': 'Copy',
+	'pptx.customShows.remove': 'Remove',
+	'pptx.customShows.add': 'Add',
+	'pptx.customShows.moveUp': 'Move up',
+	'pptx.customShows.moveDown': 'Move down',
+	'pptx.customShows.slidesInPresentation': 'Slides in presentation',
+	'pptx.customShows.newDefaultName': 'Custom Show',
+	'pptx.customShows.showButton': 'Show',
 	'pptx.customShows.renameNameLabel': 'Show name',
 	'pptx.customShows.renameShow': 'Rename show',
 	'pptx.customShows.slidesInShow': 'Slides in show',
@@ -2725,7 +2783,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.review.translate': 'Translate',
 	'pptx.review.translateTooltip': 'Translate selected text',
 	'pptx.shortcuts.action.cancelTextEdit': 'Cancel inline text / close menus',
-	'pptx.shortcuts.action.clearSelection': 'Clear selection / close menus / cancel edit',
 	'pptx.shortcuts.action.commitTextEdit': 'Commit inline text edit',
 	'pptx.shortcuts.action.copyElement': 'Copy selected element',
 	'pptx.shortcuts.action.cutElement': 'Cut selected element',
@@ -2736,7 +2793,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.shortcuts.action.nudgeElementLarge': 'Nudge selected element (large)',
 	'pptx.shortcuts.action.pasteElement': 'Paste element',
 	'pptx.shortcuts.action.prevSlide': 'Previous slide (no selection)',
-	'pptx.shortcuts.action.redoAlternate': 'Redo (alternate)',
 	'pptx.shortcuts.action.selectAll': 'Select all elements',
 	'pptx.shortcuts.action.zoomCanvas': 'Zoom canvas',
 	'pptx.shortcuts.close': 'Close',
@@ -2830,12 +2886,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.accessibility.typeLowContrast': 'Low contrast',
 	'pptx.accessibility.typeMissingAltText': 'Missing alt text',
 	'pptx.accessibility.typeMissingSlideTitle': 'Missing slide title',
-	'pptx.align.bottom': 'Align bottom',
-	'pptx.align.centerH': 'Align center',
-	'pptx.align.left': 'Align left',
-	'pptx.align.middle': 'Align middle',
-	'pptx.align.right': 'Align right',
-	'pptx.align.top': 'Align top',
 	'pptx.documentProperties.custom.typeDate': 'Date',
 	'pptx.documentProperties.custom.typeNumber': 'Number',
 	'pptx.documentProperties.custom.typeText': 'Text',
@@ -2973,7 +3023,6 @@ export const translationsEn: Record<string, string> = {
 	'pptx.chart.rowLabelsAria': 'Row labels',
 	'pptx.chart.seriesDefaultName': 'Series {{number}}',
 	'pptx.comments.defaultAuthorName': 'You',
-	'pptx.comments.selectSlidePrompt': 'Select a slide to view comments.',
 	'pptx.connectorOptions.bent': 'Bent',
 	'pptx.connectorOptions.curved': 'Curved',
 	'pptx.connectorOptions.curved4': 'Curved 4',
@@ -3495,6 +3544,11 @@ export const translationsEn: Record<string, string> = {
 	'pptx.options.advanced.printHiddenSlides': 'Print hidden slides',
 	'pptx.options.advanced.printScaleToFit': 'Scale to fit paper',
 	'pptx.options.advanced.printFrameSlides': 'Frame slides',
+	'pptx.options.advanced.pdf': 'Save as PDF',
+	'pptx.options.advanced.pdfIncludeHiddenSlides': 'Include hidden slides',
+	'pptx.options.advanced.pdfSlidesAsPictures': 'Save slides as pictures',
+	'pptx.options.advanced.pdfSlidesAsPicturesInfo':
+		'Writes each slide as one picture, as earlier versions of this viewer did. The text in the PDF is then not selectable or searchable. Leave this off to save shapes and text as vector graphics with the embedded fonts.',
 	'pptx.options.ribbon.label': 'Customize Ribbon',
 	'pptx.options.ribbon.description': 'Customize the ribbon.',
 	'pptx.options.ribbon.tabsTitle': 'Main Tabs',
@@ -3560,6 +3614,10 @@ export const translationsEn: Record<string, string> = {
 	'pptx.options.trust.allowExternalContent': 'Allow external content (remote images and media)',
 	'pptx.options.trust.allowExternalContentInfo':
 		'When off, only content embedded in the file is displayed.',
+	'pptx.options.trust.allowFontDownloads':
+		'Download fonts that are not installed or embedded (Google Fonts)',
+	'pptx.options.trust.allowFontDownloadsInfo':
+		'When on, your browser contacts fonts.googleapis.com and fonts.gstatic.com (or the font server your organisation set up) to get missing fonts. When off, text uses installed, embedded or substitute fonts, so line breaks can differ from PowerPoint.',
 	'pptx.options.trust.confirmHyperlinks': 'Confirm before opening external hyperlinks',
 
 	// Animations tab: Advanced Animation and Timing groups
@@ -3703,10 +3761,8 @@ export const translationsEn: Record<string, string> = {
 
 	// Text and shape effects
 	'pptx.textEffects.adjustment': 'Adjustment',
-	'pptx.textEffects.glowColor': 'Glow Color',
 	'pptx.textEffects.outline': 'Text Outline',
 	'pptx.textEffects.outlineWidth': 'Outline Width',
-	'pptx.textEffects.shadowColor': 'Shadow Color',
 	'pptx.textEffects.transform': 'Transform',
 	'pptx.textFormatting.columns': 'Columns',
 	'pptx.textFormatting.columnSpacing': 'Column Spacing',
@@ -3848,6 +3904,42 @@ export const translationsEn: Record<string, string> = {
 	'pptx.backstage.newHeading': 'New',
 	'pptx.backstage.searchPlaceholder': 'Search recent presentations',
 	'pptx.backstage.browseDevice': 'Browse this device',
+	'pptx.backstage.thisDevice': 'This device',
+	'pptx.backstage.places': 'Places',
+	'pptx.cloudFiles.signInHeading': 'Sign in to {{provider}}',
+	'pptx.cloudFiles.signInText': 'Sign in to open and save your files in {{provider}}.',
+	'pptx.cloudFiles.signIn': 'Sign in',
+	'pptx.cloudFiles.signOut': 'Sign out',
+	'pptx.cloudFiles.providers': 'Places',
+	'pptx.cloudFiles.recent': 'Recent',
+	'pptx.cloudFiles.myFiles': 'My files',
+	'pptx.cloudFiles.location': 'Location',
+	'pptx.cloudFiles.searchPlaceholder': 'Search files',
+	'pptx.cloudFiles.openLink': 'Open from a link',
+	'pptx.cloudFiles.openLinkPlaceholder': 'Paste a sharing link',
+	'pptx.cloudFiles.openLinkButton': 'Open',
+	'pptx.cloudFiles.files': 'Files',
+	'pptx.cloudFiles.name': 'Name',
+	'pptx.cloudFiles.modified': 'Modified',
+	'pptx.cloudFiles.size': 'Size',
+	'pptx.cloudFiles.loadMore': 'Load more',
+	'pptx.cloudFiles.loading': 'Loading',
+	'pptx.cloudFiles.empty': 'There are no files here.',
+	'pptx.cloudFiles.emptySearch': 'No files match your search.',
+	'pptx.cloudFiles.unsupported': 'This file cannot be opened here',
+	'pptx.cloudFiles.opening': 'Opening {{name}}',
+	'pptx.cloudFiles.openingPercent': 'Opening {{name}} ({{percent}}%)',
+	'pptx.cloudFiles.cancel': 'Cancel',
+	'pptx.cloudFiles.folder': 'Folder',
+	'pptx.cloudFiles.failed': 'Something went wrong.',
+	'pptx.cloudFiles.connectedHeading': 'Connected services',
+	'pptx.cloudFiles.connectedDescription':
+		'Link your storage to open and save files from every app.',
+	'pptx.cloudFiles.connectedNotConnected': 'Not connected',
+	'pptx.cloudFiles.connectedConnect': 'Connect',
+	'pptx.cloudFiles.connectedDisconnect': 'Disconnect',
+	'pptx.cloudFiles.connectedManaged': 'Managed by your organization',
+	'pptx.cloudFiles.connectedFailed': 'Could not update {{provider}}. Try again.',
 	'pptx.backstage.recentHeading': 'Recent',
 	'pptx.backstage.columnName': 'Name',
 	'pptx.backstage.columnModified': 'Date modified',
@@ -4086,6 +4178,10 @@ export const translationsEn: Record<string, string> = {
 		'One slide transition sound could not be saved and was skipped.',
 	'pptx.compatibility.diagramRelationshipIdsIncomplete':
 		'This SmartArt diagram is missing some internal references, so it may not display exactly as authored.',
+	'pptx.compatibility.embeddedFontRestricted':
+		'An embedded font has a licence that does not allow it to be used, so a substitute font is shown. Its font data is kept in the file.',
+	'pptx.compatibility.embeddedFontNotEmbeddable':
+		'A font was not embedded because its licence does not allow embedding it in an editable presentation.',
 	'pptx.compatibility.exportBackendUnavailable':
 		'Export to this format is not available in the current environment.',
 
@@ -4165,6 +4261,7 @@ export const translationsEn: Record<string, string> = {
 	'pptx.comments.mentionPlaceholder': 'Type @ to mention someone',
 	'pptx.comments.mentionSuggestions': 'People',
 	'pptx.colorPicker.recentColors': 'Recent Colors',
+	'pptx.colorPicker.recentColor': 'Recent {{hex}}',
 	'pptx.colorPicker.customColors': 'Custom Colors',
 	'pptx.hyperlink.actionCustomShow': 'Custom show',
 	'pptx.hyperlink.customShowLabel': 'Custom show',

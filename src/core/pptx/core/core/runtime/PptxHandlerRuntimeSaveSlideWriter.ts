@@ -5,12 +5,14 @@ import type { MediaPptxElement, PptxElementAnimation } from '../../types';
 import type { AlternateContentBlock } from '../../utils';
 import { applyActiveXControlsToSlide, SHAPE_TREE_ELEMENT_TAGS } from '../../utils';
 import { saveModernSlideComments } from '../../utils/modern-comment-package';
+import { slideBackgroundGradientToWrite } from '../../utils/slide-background-gradient';
 import { saveSlideSynchronization } from '../../utils/slide-synchronization';
 import { buildClrMapOverrideXml } from '../../utils/theme-override-utils';
 import { PptxSlideRelationshipRegistry, PptxShapeIdValidator } from '../builders';
 import type { PptxSaveState, IPptxSlideRelationshipRegistry } from '../builders';
 import type { PptxSaveConstants } from '../factories';
 import { slideBackgroundOrigin } from './authored-slide-background';
+import { relativePartTarget } from './chart-part-registration';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeSaveElementWriter';
 import type { SlideShapeCollectors, SaveSlideContext } from './PptxHandlerRuntimeSaveElementWriter';
 import { applyShapeIdMapToSlide } from './save-structural-id-gate';
@@ -25,6 +27,7 @@ import {
 	ensureMathNamespaceOnSlideRoot,
 	slideContainsMathElement,
 } from './table-structural-ops';
+import { at } from '../../../../geometry/indexed';
 
 const shapeIdValidator = new PptxShapeIdValidator();
 
@@ -44,7 +47,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				.split(/\s+/)
 				.filter(Boolean)
 				.slice(0, 2)
-				.map((token) => token[0].toUpperCase())
+				.map((token) => at(token, 0).toUpperCase())
 				.join('');
 			this.modernCommentAuthors.set(id, {
 				id,
@@ -176,6 +179,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		slide: PptxSlide,
 		saveSession: PptxSaveState,
 		constants: PptxSaveConstants,
+		slidePaths: readonly string[] = [],
 	): Promise<void> {
 		// Skip re-serialization of unmodified slides to prevent spurious diffs
 		if (this.canSkipSlideSave(slide)) {
@@ -351,6 +355,20 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					scope: 'save',
 					slideId: slide.id,
 				}),
+			buildBackgroundGradientFill: () => {
+				const gradient = slideBackgroundGradientToWrite(slide);
+				return gradient
+					? this.buildGradientFillXml({ fillMode: 'gradient', ...gradient })
+					: undefined;
+			},
+			reportUnsupportedGradient: () =>
+				this.compatibilityService.reportWarning({
+					code: 'SAVE_BACKGROUND_GRADIENT_UNSUPPORTED',
+					message:
+						'Slide background gradient has no structured form (backgroundGradientFill) matching its CSS gradient and could not be written; the slide was saved without a background of its own.',
+					scope: 'save',
+					slideId: slide.id,
+				}),
 		});
 
 		this.slideCommentPartWriter.writeComments({
@@ -431,6 +449,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			resolveHyperlinkRelationshipId: (target: string, forceExternal?: boolean) =>
 				slideRelationshipRegistry.resolveHyperlinkRelationshipId(target, forceExternal),
 			getSlideRelationshipMap: () => slideRelationshipRegistry.toRelationshipMap(),
+			slideTargetAt: (index: number) => {
+				const target = slidePaths[index];
+				return target ? relativePartTarget(slide.id, target) : undefined;
+			},
 			resolvedMediaBytes,
 			saveSession,
 			slideImageRelationshipType: constants.slideImageRelationshipType,

@@ -26,6 +26,20 @@ describe('viewerState', () => {
 		expect(state.current).toBe(0);
 	});
 
+	it('notes a slide gone to with its own selection for one slide change, clamped', () => {
+		const state = new ViewerState();
+		state.reset(3);
+		state.goToWithSelection(9);
+		expect(state.current).toBe(2);
+		expect(state.takeSelectionSlide(1)).toBeFalsy();
+		expect(state.takeSelectionSlide(2)).toBeFalsy();
+		state.goToWithSelection(1);
+		expect(state.takeSelectionSlide(1)).toBeTruthy();
+		expect(state.takeSelectionSlide(1)).toBeFalsy();
+		state.goTo(2);
+		expect(state.takeSelectionSlide(2)).toBeFalsy();
+	});
+
 	it('keeps navigation bounds in sync with edited slide count', () => {
 		const state = new ViewerState();
 		state.reset(1);
@@ -58,10 +72,15 @@ describe('viewerState', () => {
 		expect(state.zoomPercent).toBeNull();
 		state.zoomIn(80);
 		expect(state.zoomPercent).toBe(90);
+		// Stepping back to 100% is fit, which keeps following the viewport.
 		state.zoomIn(100);
-		expect(state.zoomPercent).toBe(100);
-		state.zoomOut(999);
+		expect(state.zoomPercent).toBeNull();
+		// Zooming out from fit goes below it.
+		state.zoomOut(100);
 		expect(state.zoomPercent).toBe(90);
+		state.zoomPercent = 10;
+		state.zoomOut(999);
+		expect(state.zoomPercent).toBe(10);
 		state.zoomToFit();
 		expect(state.zoomPercent).toBeNull();
 	});

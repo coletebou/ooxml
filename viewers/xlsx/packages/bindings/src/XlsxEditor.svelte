@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { deferredHandle, eventOptions, mountEditor, pickEditorProps, type EditorBinding, type EditorEventHandlers, type EditorProps, type EditorHandle } from './index';
+  import type { CloudOpenedFile } from 'ooxml-core/embedding';
+  import { deferredHandle, mountEditor, svelteEditorOptions, type EditorBinding, type EditorEventHandlers, type EditorOptions, type EditorProps, type EditorHandle } from './index';
   type Props = EditorProps & {
     onworkbookchange?: EditorEventHandlers['workbook-change'];
     onworkbookerror?: EditorEventHandlers['workbook-error'];
@@ -15,7 +16,7 @@
     oncollaborationchange?: EditorEventHandlers['collaboration-change'];
     onready?: EditorEventHandlers['ready'];
   };
-  let { workbook, bytes, src, fileName, readOnly = false, locale = 'en', theme = 'auto', authorName = 'Author', showToolbar = true, showFormulaBar = true, hiddenActions = [], ribbonAddIns, themeColors, collaboration, customization, storage, onworkbookchange, onworkbookerror, onselectionchange, ondirtychange, onreadonlychange, onfilecommand, onworkbookwarning, onribbonaction, onribboncustomize, onsheetchange, onribbonaddin, oncollaborationchange, onready }: Props = $props();
+  let { workbook, bytes, src, fileName, readOnly = false, locale = 'en', theme = 'auto', authorName = 'Author', validateReplace = false, showToolbar = true, showFormulaBar = true, hiddenActions = [], ribbonAddIns, themeColors, collaboration, customization, storage, fileProviders, onworkbookchange, onworkbookerror, onselectionchange, ondirtychange, onreadonlychange, onfilecommand, onworkbookwarning, onribbonaction, onribboncustomize, onsheetchange, onribbonaddin, oncollaborationchange, onready }: Props = $props();
   let binding: EditorBinding | undefined;
   const handle = deferredHandle(() => binding);
   // Live `element` and `dirty`, the same handle vocabulary as the other frameworks (`EDITOR_HANDLE_KEYS`).
@@ -24,9 +25,8 @@
   const element = $derived(mountedElement);
   const dirty = $derived(dirtyState);
   function attach(host: HTMLElement, options: Props) {
-    const normalized = (value: Props) => ({ ...pickEditorProps(value),
-      ...eventOptions({ 'workbook-change': value.onworkbookchange, 'workbook-error': value.onworkbookerror, 'selection-change': value.onselectionchange, 'dirty-change': value.ondirtychange, 'readonly-change': value.onreadonlychange, 'file-command': value.onfilecommand, 'workbook-warning': value.onworkbookwarning, 'ribbon-action': value.onribbonaction, 'ribbon-customize': value.onribboncustomize, 'sheet-change': value.onsheetchange, 'office-ribbon-add-in': value.onribbonaddin, 'collaboration-change': value.oncollaborationchange, ready: value.onready }) });
-    const tracked = (value: Props) => normalized({ ...value, ondirtychange: (next: boolean) => { dirtyState = next; value.ondirtychange?.(next); } });
+    // Callback props are the lower-case options (`onworkbookchange`); `dirty` is tracked on the way.
+    const tracked = (value: Props): EditorOptions => ({ ...svelteEditorOptions(value), onDirtyChange: (next: boolean) => { dirtyState = next; value.ondirtychange?.(next); } });
     binding = mountEditor(host, tracked(options));
     mountedElement = binding.element;
     dirtyState = binding.dirty;
@@ -37,6 +37,7 @@
   export function save() { return handle.save(); }
   export function saveBytes(format?: 'xlsx' | 'csv') { return handle.saveBytes(format); }
   export function download(name?: string) { return handle.download(name); }
+  export function openCloudFile(file: CloudOpenedFile) { return handle.openCloudFile(file); }
   export function markClean() { handle.markClean(); dirtyState = handle.dirty; }
   export function select(ref: string) { handle.select(ref); }
   export function getSelection() { return handle.getSelection(); }
@@ -48,4 +49,4 @@
   export function getElement() { return binding?.element; }
   export { element, dirty };
 </script>
-<div use:attach={{ workbook, bytes, src, fileName, readOnly, locale, theme, authorName, showToolbar, showFormulaBar, hiddenActions, ribbonAddIns, themeColors, collaboration, customization, storage, onworkbookchange, onworkbookerror, onselectionchange, ondirtychange, onreadonlychange, onfilecommand, onworkbookwarning, onribbonaction, onribboncustomize, onsheetchange, onribbonaddin, oncollaborationchange, onready }}></div>
+<div use:attach={{ workbook, bytes, src, fileName, readOnly, locale, theme, authorName, validateReplace, showToolbar, showFormulaBar, hiddenActions, ribbonAddIns, themeColors, collaboration, customization, storage, fileProviders, onworkbookchange, onworkbookerror, onselectionchange, ondirtychange, onreadonlychange, onfilecommand, onworkbookwarning, onribbonaction, onribboncustomize, onsheetchange, onribbonaddin, oncollaborationchange, onready }}></div>

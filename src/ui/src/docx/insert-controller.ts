@@ -4,7 +4,7 @@ import { syncRuler } from './ruler-sync';
 import { keymap } from 'prosemirror-keymap';
 import type { Plugin } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import type { DocumentModel, PendingMediaPart } from 'ooxml-core/docx';
+import type { DocumentModel, DrawingWrap, PendingMediaPart } from 'ooxml-core/docx';
 import { applyCharacterStyle } from './character-style-picker';
 import { createLinkDialog, type LinkDialog } from './link-dialog';
 import { createPictureDialog, type PictureDialog } from './picture-dialog';
@@ -22,7 +22,18 @@ import {
 	setShapeWrap,
 	type ShapeWrap,
 } from './shape-commands';
-import { insertPicture, PICTURE_TYPES, stagePicture } from './picture-commands';
+import {
+	insertPicture,
+	newPicturePartName,
+	PICTURE_TYPES,
+	readBytes,
+	stagePicture,
+} from './picture-commands';
+import { applyPictureBulletList } from './list-commands';
+import { selectedPicturePos, setPictureWrap } from './picture-format-commands';
+import { pictureClipboardPlugin } from './picture-drop';
+import { SmartArtController } from './smartart-controller';
+import { setSelectedChartLegend } from './chart-commands';
 import type { RibbonAction } from './ribbon';
 import { translate, type EditorLocale } from './localization';
 import { focusView } from './focus-view';
@@ -42,6 +53,8 @@ export interface InsertControllerHost {
 	paper(): HTMLElement | undefined;
 	toolbar(): HTMLElement | undefined;
 	reportError(error: Error): void;
+	/** Refreshes the ribbon and panes after a change that is not a document transaction. */
+	refresh?(): void;
 	/** Shared media hosts allocate immutable room-wide names and publish bytes before insertion. */
 	newMediaPartName?(contentType: string): string;
 	stageMedia?(partName: string, part: PendingMediaPart): void;
@@ -52,10 +65,14 @@ export class InsertController {
 	readonly linkDialog: LinkDialog;
 	readonly pictureDialog: PictureDialog;
 	readonly pictureInput: HTMLInputElement;
+	/** File chooser behind Bullets > Picture bullet. */
+	readonly bulletInput: HTMLInputElement;
 	/** Bytes for pictures inserted since the document was loaded; passed to save. */
 	readonly pendingMedia = new Map<string, PendingMediaPart>();
 	/** The shape Insert > Shapes armed for the next drag on the page. */
 	readonly shapeTool = new ShapeTool();
+	/** Insert > SmartArt, SmartArt Design and the SmartArt text pane. */
+	readonly smartArt: SmartArtController;
 	private showHidden = false;
 	private showMarks = false;
 	private showGridlines = false;
@@ -73,14 +90,33 @@ export class InsertController {
 		this.pictureInput.hidden = true;
 		this.pictureInput.className = 'dve-picture-input';
 		this.pictureInput.addEventListener('change', () => void this.insertSelectedPicture());
+		this.bulletInput = document.createElement('input');
+		this.bulletInput.type = 'file';
+		this.bulletInput.accept = Object.keys(PICTURE_TYPES).join(',');
+		this.bulletInput.hidden = true;
+		this.bulletInput.className = 'dve-picture-bullet-input';
+		this.bulletInput.addEventListener('change', () => void this.applySelectedPictureBullet());
+		this.smartArt = new SmartArtController({
+			view: () => host.view(),
+			contentWidth: () => host.contentWidth(),
+			stage: (partName, part) => {
+				this.pendingMedia.set(partName, part);
+				host.stageMedia?.(partName, part);
+			},
+			reportError: (error) => host.reportError(error),
+			refresh: () => host.refresh?.(),
+		});
 	}
 
 	/** Handles the actions this controller owns; returns false for everything else. */
 	handle(action: RibbonAction): boolean {
 		const view = this.host.view();
 		const editable = Boolean(view?.editable);
+		if (this.smartArt.handle(action)) return true;
 		if (action.type === 'insertPicture') {
 			if (editable) this.pictureInput.click();
+		} else if (action.type === 'pictureBullet') {
+			if (editable) this.bulletInput.click();
 		} else if (action.type === 'insertContentControl') {
 			const tr = view?.editable && insertContentControl(view.state, action.value);
 			if (view && tr) view.dispatch(tr.scrollIntoView());
@@ -89,6 +125,9 @@ export class InsertController {
 			if (editable) this.shapeTool.arm(action.preset);
 		} else if (action.type === 'shape') {
 			if (view) this.runShapeAction(view, action);
+			focusView(view);
+		} else if (action.type === 'chart' && action.key === 'legend') {
+			if (view) setSelectedChartLegend(view, action.value);
 			focusView(view);
 		} else if (action.type === 'insertEquation') {
 			const entry = EQUATION_GALLERY.find((item) => item.id === action.id);
@@ -100,6 +139,14 @@ export class InsertController {
 			const selection = view?.state.selection;
 			if (editable && selection instanceof NodeSelection && selection.node.type.name === 'image')
 				this.pictureDialog.open(selection.from);
+		} else if (action.type === 'picture') {
+			const pos = view && selectedPicturePos(view.state);
+			if (!view || !editable || pos === undefined) return true;
+			if (action.key === 'crop') this.pictureDialog.open(pos, 'crop');
+			else {
+				setPictureWrap(view, action.value as DrawingWrap);
+				focusView(view);
+			}
 		} else if (action.type === 'characterStyle') {
 			if (view?.editable) applyCharacterStyle(view, action.value);
 			focusView(view);
@@ -156,6 +203,10 @@ export class InsertController {
 	plugins(): Plugin[] {
 		return [
 			shapeDrawPlugin(this.shapeTool),
+			pictureClipboardPlugin(
+				(view) => view === this.host.view(),
+				(file) => this.insertPictureFile(file),
+			),
 			keymap({
 				'Mod-k': (_state, _dispatch, view) => {
 					if (view?.editable) this.linkDialog.open();
@@ -187,6 +238,7 @@ export class InsertController {
 	reset(): void {
 		this.shapeTool.disarm();
 		this.pendingMedia.clear();
+		this.smartArt.reset();
 		if (this.linkDialog.isOpen) this.linkDialog.close();
 		if (this.pictureDialog.isOpen) this.pictureDialog.close();
 	}
@@ -194,7 +246,9 @@ export class InsertController {
 	setLocale(locale: EditorLocale): void {
 		this.linkDialog.setLocale(locale);
 		this.pictureDialog.setLocale(locale);
+		this.smartArt.setLocale(locale);
 		this.pictureInput.setAttribute('aria-label', translate(locale, 'Insert picture'));
+		this.bulletInput.setAttribute('aria-label', translate(locale, 'Picture bullet...'));
 	}
 
 	/** Re-applies the hidden-text display state after the paper is rebuilt. */
@@ -259,6 +313,36 @@ export class InsertController {
 		const file = this.pictureInput.files?.[0];
 		this.pictureInput.value = '';
 		if (file) await this.insertPictureFile(file);
+	}
+
+	private async applySelectedPictureBullet(): Promise<void> {
+		const file = this.bulletInput.files?.[0];
+		this.bulletInput.value = '';
+		if (file) await this.applyPictureBulletFile(file);
+	}
+
+	/** Stages `file` as a new picture bullet and starts a list that uses it. */
+	async applyPictureBulletFile(file: File): Promise<boolean> {
+		const view = this.host.view();
+		if (!view?.editable) return false;
+		try {
+			const contentType = file.type.toLowerCase();
+			if (!PICTURE_TYPES[contentType])
+				throw new Error('Choose a PNG, JPEG, GIF or BMP picture for a picture bullet.');
+			const bytes = await readBytes(file);
+			if (this.host.view() !== view || !view.editable) return false;
+			const partName = (this.host.newMediaPartName ?? newPicturePartName)(contentType);
+			const part = { bytes, contentType };
+			this.host.stageMedia?.(partName, part);
+			this.pendingMedia.set(partName, part);
+			applyPictureBulletList(view, this.host.model(), { partName, contentType });
+			this.host.refresh?.();
+			focusView(view);
+			return true;
+		} catch (cause) {
+			this.host.reportError(cause instanceof Error ? cause : new Error(String(cause)));
+			return false;
+		}
 	}
 
 	/** Stages `file` and inserts it at the selection; false when it could not be inserted. */

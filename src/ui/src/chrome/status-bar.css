@@ -66,6 +66,21 @@
 	background: var(--office-border);
 	opacity: var(--office-status-bar-separator-opacity);
 }
+.item.sr,
+.item.sr::before {
+	position: absolute;
+	width: var(--office-space-px);
+	height: var(--office-space-px);
+	margin: calc(-1 * var(--office-space-px));
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+.item.sr::before {
+	display: none;
+}
 .item.saving {
 	color: var(--office-warning);
 }
@@ -80,6 +95,14 @@
 	display: flex;
 	align-items: center;
 	gap: var(--office-space-0);
+}
+/* The cards look (look.ts) turns the view switcher and the zoom into pills. */
+.group {
+	border-radius: var(--_office-look-pill, 0);
+	background: var(--_office-look-pill-track, transparent);
+}
+.group button {
+	border-radius: var(--_office-look-pill, var(--office-radius-sm));
 }
 .sep {
 	flex: none;

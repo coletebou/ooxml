@@ -5,6 +5,9 @@ import {
 	buildParagraphs,
 	connectorHitStrokeWidth,
 	connectorNeedsPath,
+	connectorSnapTransform,
+	connectorSquareCapPath,
+	connectorStrandScreenWidth,
 	DEFAULT_STROKE_COLOR,
 	getCompoundLineOffsets,
 	getCompoundLineWidths,
@@ -12,7 +15,7 @@ import {
 	getLineShadowParams,
 	markerPath,
 	normalizeArrow,
-	screenStrokeWidth,
+	svgLineCap,
 } from '../../index';
 
 import { createEl, createSvgEl } from '../dom';
@@ -40,7 +43,12 @@ export const renderConnectorElement: ElementRenderer = (element, zIndex, context
 	// Shared dash builder: honours every `prstDash` preset (dash/lgDash/dashDot/
 	// sysDashDotDot, etc.) plus a `custDash` segment list, instead of the old
 	// local `3w/w` approximation that collapsed every non-dot preset to one shape.
-	const dashArray = buildDashArray(ss?.strokeDash, strokeWidth, ss?.customDashSegments);
+	const dashArray = buildDashArray(
+		ss?.strokeDash,
+		strokeWidth,
+		ss?.customDashSegments,
+		ss?.lineCap,
+	);
 
 	const w = Math.max(element.width, 1);
 	const h = Math.max(element.height, 1);
@@ -136,10 +144,18 @@ export const renderConnectorElement: ElementRenderer = (element, zIndex, context
 
 	// Straight-connector endpoints, mirrored by flips; reused by the hit target
 	// below and by the painted `<line>` strands.
-	const x1 = element.flipHorizontal ? w : 0;
-	const y1 = element.flipVertical ? h : 0;
-	const x2 = element.flipHorizontal ? 0 : w;
-	const y2 = element.flipVertical ? 0 : h;
+	// The REAL extents, not the 1px-floored SVG box: a horizontal line is 0 high,
+	// and ending it at y = 1 tilted it by a pixel across its whole length, which
+	// anti-aliased it over two rows.
+	const rw = Math.max(element.width, 0);
+	const rh = Math.max(element.height, 0);
+	const x1 = element.flipHorizontal ? rw : 0;
+	const y1 = element.flipVertical ? rh : 0;
+	const x2 = element.flipHorizontal ? 0 : rw;
+	const y2 = element.flipVertical ? 0 : rh;
+	// A single axis-aligned straight line is snapped to the device grid the way
+	// PowerPoint's export does it (`device-pixel-stroke`).
+	const snapTransform = connectorSnapTransform(element, !usePath, offsets.length, strokeWidth);
 
 	// The only pointer-reachable part of a connector: a transparent stroke along
 	// the line that opts back into hit testing. The wrapper is
@@ -158,6 +174,15 @@ export const renderConnectorElement: ElementRenderer = (element, zIndex, context
 	hit.style.pointerEvents = 'stroke';
 	svg.appendChild(hit);
 
+	// A dashed square-cap line overshoots at its two ends only (`dash-square-cap`).
+	const cappedD = connectorSquareCapPath(
+		pathData ?? `M${x1},${y1} L${x2},${y2}`,
+		ss,
+		strokeWidth,
+		offsets.length > 1 || startMarkerId !== undefined || endMarkerId !== undefined,
+	);
+	const paintD = cappedD ?? pathData;
+
 	offsets.forEach((offset, idx) => {
 		const strandWidth = Math.max(widths[idx] ?? strokeWidth, 1);
 		const stroke: Record<string, string | number | undefined> = {
@@ -166,15 +191,15 @@ export const renderConnectorElement: ElementRenderer = (element, zIndex, context
 			'stroke-width': strandWidth,
 			'stroke-opacity': strokeOpacity,
 			'stroke-dasharray': dashArray,
-			'stroke-linecap': 'round',
+			'stroke-linecap': svgLineCap(ss?.lineCap, dashArray !== undefined),
 			'marker-start': idx === 0 && startMarkerId ? `url(#${startMarkerId})` : undefined,
 			'marker-end': idx === offsets.length - 1 && endMarkerId ? `url(#${endMarkerId})` : undefined,
 			filter: shadowId ? `url(#${shadowId})` : undefined,
 		};
 		let node: SVGElement;
-		if (pathData !== undefined) {
+		if (paintD !== undefined) {
 			node = createSvgEl(doc, 'path', {
-				d: pathData,
+				d: paintD,
 				fill: 'none',
 				'stroke-linejoin': 'round',
 				...stroke,
@@ -191,8 +216,13 @@ export const renderConnectorElement: ElementRenderer = (element, zIndex, context
 				...stroke,
 			});
 		}
+		// The strand a morph keeps at its width (see `morph-line-carry`).
+		node.setAttribute('data-pptx-line', '');
 		// On screen, never thinner than one device pixel (`device-pixel-stroke`).
-		node.style.setProperty('stroke-width', screenStrokeWidth(strandWidth));
+		node.style.setProperty('stroke-width', connectorStrandScreenWidth(widths, strokeWidth, idx));
+		if (snapTransform) {
+			node.style.transform = snapTransform;
+		}
 		svg.appendChild(node);
 	});
 

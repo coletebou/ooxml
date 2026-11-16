@@ -17,6 +17,7 @@ function setup(initial?: ViewerCustomization, hiddenActions?: ToolbarActionId[])
 		customization?: ViewerCustomization;
 		hiddenActions?: ToolbarActionId[];
 		ai?: PptxAiConfig;
+		allowExternalContent?: boolean;
 	}>({ customization: initial, hiddenActions });
 	let result: UseViewerCustomizationResult | null = null;
 	let injected: ReturnType<typeof useResolvedCustomization> | null = null;
@@ -95,5 +96,61 @@ describe('useViewerCustomization', () => {
 		result.api.setFeatureEnabled('ai', true);
 		expect(result.aiEnabled.value).toBeTruthy();
 		expect(result.aiConfig.value).toBeDefined();
+	});
+});
+
+describe('useViewerCustomization allowExternalContent host switch', () => {
+	it('locks the Trust Center setting at setup and follows prop changes', async () => {
+		const store = createViewerOptionsStore({ persist: false });
+		const props = reactive<{ allowExternalContent?: boolean }>({ allowExternalContent: false });
+		const wrapper = mount(
+			defineComponent({
+				setup() {
+					useViewerCustomization({ props, optionsStore: store });
+					return () => h('span');
+				},
+			}),
+		);
+		// Applied synchronously during setup, before the first load can read the option.
+		expect(store.getOptions().trust.allowExternalContent).toBe(false);
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+
+		props.allowExternalContent = true;
+		await nextTick();
+		expect(store.getOptions().trust.allowExternalContent).toBe(true);
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+
+		props.allowExternalContent = undefined;
+		await nextTick();
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(false);
+		wrapper.unmount();
+	});
+});
+
+describe('useViewerCustomization googleFonts host policy', () => {
+	it('locks Trust Center > Download fonts at setup and follows prop changes', async () => {
+		const store = createViewerOptionsStore({ persist: false });
+		const props = reactive<{ googleFonts?: false | { baseUrl: string } }>({ googleFonts: false });
+		const wrapper = mount(
+			defineComponent({
+				setup() {
+					useViewerCustomization({ props, optionsStore: store });
+					return () => h('span');
+				},
+			}),
+		);
+		// Applied synchronously during setup, before the first load can read the option.
+		expect(store.getOptions().trust.allowFontDownloads).toBe(false);
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(true);
+
+		props.googleFonts = { baseUrl: 'https://fonts.example.test/css2' };
+		await nextTick();
+		expect(store.getOptions().trust.allowFontDownloads).toBe(true);
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(true);
+
+		props.googleFonts = undefined;
+		await nextTick();
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(false);
+		wrapper.unmount();
 	});
 });

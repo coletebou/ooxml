@@ -91,22 +91,35 @@ function trimEndInput(target: HTMLElement): HTMLInputElement {
 	return input;
 }
 
+describe('mediaSection - shared playback options', () => {
+	it('draws the shared playback fields and writes a media patch', () => {
+		const editor = makeEditor(mediaElement());
+		const target = mountSection(editor);
+		expect(target.querySelector('[data-testid="media-playAcrossSlides"]')).toBeNull();
+		const loop = target.querySelector<HTMLInputElement>('[data-testid="media-loop"]')!;
+		loop.checked = true;
+		loop.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		expect((editor.slides[0]!.elements[0] as MediaPptxElement).loop).toBeTruthy();
+	});
+});
+
 describe('mediaSection - trim-end absolute conversion', () => {
-	it('shows 15000 (15s) for a 20s clip with trimEndMs=5000', () => {
+	it('shows the end as 15 s for a 20 s clip with trimEndMs=5000', () => {
 		const editor = makeEditor(mediaElement({ trimEndMs: 5000 }));
 		const target = mountSection(editor);
 		loadDuration(target, 20);
 
-		expect(trimEndInput(target).value).toBe('15000');
+		expect(trimEndInput(target).value).toBe('15');
 	});
 
-	it('stores 5000 (p14:trim/@end) when the user types an absolute end of 15000 on a 20s clip', () => {
+	it('stores 5000 (p14:trim/@end) when the user types an absolute end of 15 s on a 20 s clip', () => {
 		const editor = makeEditor(mediaElement({ trimEndMs: 0 }));
 		const target = mountSection(editor);
 		loadDuration(target, 20);
 
 		const input = trimEndInput(target);
-		input.value = '15000';
+		input.value = '15';
 		input.dispatchEvent(new Event('change', { bubbles: true }));
 		flushSync();
 

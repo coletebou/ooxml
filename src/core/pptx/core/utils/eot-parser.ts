@@ -33,15 +33,15 @@ const TTEMBED_XORENCRYPTDATA = 0x10000000;
 
 function readUint32LE(data: Uint8Array, offset: number): number {
 	return (
-		data[offset] |
-		(data[offset + 1] << 8) |
-		(data[offset + 2] << 16) |
-		((data[offset + 3] << 24) >>> 0)
+		(data[offset] ?? 0) |
+		((data[offset + 1] ?? 0) << 8) |
+		((data[offset + 2] ?? 0) << 16) |
+		(((data[offset + 3] ?? 0) << 24) >>> 0)
 	);
 }
 
 function readUint16LE(data: Uint8Array, offset: number): number {
-	return data[offset] | (data[offset + 1] << 8);
+	return (data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8);
 }
 
 function readUtf16LE(data: Uint8Array, offset: number, byteLength: number): string {
@@ -50,7 +50,7 @@ function readUtf16LE(data: Uint8Array, offset: number, byteLength: number): stri
 		if (offset + i + 1 >= data.length) {
 			break;
 		}
-		const code = data[offset + i] | (data[offset + i + 1] << 8);
+		const code = (data[offset + i] ?? 0) | ((data[offset + i + 1] ?? 0) << 8);
 		if (code === 0) {
 			break;
 		}
@@ -102,6 +102,15 @@ export function isEotFormat(data: Uint8Array): boolean {
 	}
 	const magic = readUint16LE(data, EOT_MAGIC_OFFSET);
 	return magic === EOT_MAGIC;
+}
+
+/**
+ * The embedded font's OS/2 `fsType` (embedding permissions) as the EOT header
+ * carries it at offset 32, or `undefined` when `data` is not an EOT container.
+ * Readable without decompressing the font data.
+ */
+export function readEotFsType(data: Uint8Array): number | undefined {
+	return isEotFormat(data) ? readUint16LE(data, 32) : undefined;
 }
 
 /**

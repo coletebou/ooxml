@@ -1,9 +1,17 @@
 import type { VisioPageLayout } from './page-layout';
+import type {
+	VisioAction,
+	VisioControl,
+	VisioScratchRow,
+	VisioTabStop,
+	VisioUserCell,
+} from './shape-sections-types';
 import type { VisioSnapGlue } from './snap-glue';
 import type { ChartViewModel } from '../chart/index';
 import type { VisioForeignVector } from './foreign-vector';
 import type { VisioHyperlink, VisioShapeData } from './shape-metadata';
 import type { VisioComment } from './comments';
+import type { VisioBevel, VisioContour, VisioExtrusion, VisioRotation3d } from './bevel-3d';
 export type { VisioComment } from './comments';
 import type { VisioDataRecordset } from './data-recordsets';
 
@@ -130,6 +138,14 @@ export interface VisioStyle {
 	/** Soft edge radius in inches. */
 	softEdges?: number;
 	reflection?: VisioReflection;
+	/** Saved top bevel (Visio types 1-12); drawn as an approximate lighting overlay. */
+	bevel?: VisioBevel;
+	/** Extrusion depth and colour; drawn as the side faces of the projected shape. */
+	extrusion?: VisioExtrusion;
+	/** Contour outline around the 3-D shape. */
+	contour?: VisioContour;
+	/** Saved 3-D rotation; projected with perspective when the field of view is set. */
+	rotation3d?: VisioRotation3d;
 }
 export interface VisioTextRun {
 	text: string;
@@ -181,6 +197,8 @@ export interface VisioParagraph {
 	lineSpacing: { kind: 'multiple' | 'exact'; value: number };
 	direction: 'ltr' | 'rtl';
 	bullet?: { text: string; fontFamily: string; fontSize: number; offset: number };
+	/** Tab stops of the Tabs row in effect, sorted by position; absent when the row has none. */
+	tabs?: VisioTabStop[];
 }
 export interface VisioText {
 	/** Logical displayed text. VSDX excludes its stored terminal paragraph marker. */
@@ -229,6 +247,9 @@ export interface VisioImage {
 	pixelWidth: number;
 	pixelHeight: number;
 	opacity?: number;
+	/** Picture Format > Brightness and Contrast, 0 to 1 (0.5 neutral); absent means neutral. */
+	brightness?: number;
+	contrast?: number;
 	/** Optional placement in local y-up inches, defaulting to the shape bounds. */
 	x?: number;
 	y?: number;
@@ -309,6 +330,14 @@ export interface VisioShape {
 	embeddedObject?: VisioEmbeddedObject;
 	foreignVector?: VisioPlacedForeignVector;
 	shapeData?: VisioShapeData[];
+	/** Controls rows: the yellow handles of the shape, in local y-up inches. */
+	controls?: VisioControl[];
+	/** Actions rows: the shape's right-click menu entries. */
+	actions?: VisioAction[];
+	/** User-defined cells (User section). */
+	userCells?: VisioUserCell[];
+	/** Scratch rows (Scratch section). */
+	scratch?: VisioScratchRow[];
 	hyperlinks?: VisioHyperlink[];
 	/** Cached Comment cell text, which Visio shows as the shape's ScreenTip. Inert plain text. */
 	screenTip?: string;
@@ -346,8 +375,50 @@ export interface VisioConnectionPoint extends VisioLocalPoint {
 	/** True when the row comes from the shape's master rather than the shape itself. */
 	inherited: boolean;
 }
+/** The options a cross-functional flowchart frame records (Design and Arrange tabs). */
+export interface VisioSwimlaneFrameOptions {
+	direction: 'horizontal' | 'vertical';
+	showTitle: boolean;
+	showSeparators: boolean;
+	rotateLabels: boolean;
+	style: number;
+}
+export type VisioSwimlaneRole =
+	/** `native`: Visio's own frame (no marker row of this editor), whose masters lay the chart out. */
+	| { role: 'frame'; options: VisioSwimlaneFrameOptions; native?: true }
+	| { role: 'lane' }
+	/** A phase separator: a member of the frame's Phase List. */
+	| { role: 'separator' };
+/** The Container Format options a container stores as User rows; absent rows mean Visio's defaults. */
+export interface VisioContainerOptions {
+	/** Visio's margin in inches (User.msvSDContainerMargin). */
+	margin?: number;
+	/** 0 no automatic resize, 1 expand as needed, 2 always fit to contents (User.msvSDContainerResize). */
+	resize?: 0 | 1 | 2;
+	/** Lock Container: membership cannot change (User.msvSDContainerLocked). */
+	locked?: boolean;
+}
 export type VisioShapeStructure =
-	| { type: 'container'; memberIds: string[] }
+	| {
+			type: 'container';
+			memberIds: string[];
+			/** Set on a cross-functional flowchart's frame, one of its lanes or a phase separator. */
+			swimlane?: VisioSwimlaneRole;
+			options?: VisioContainerOptions;
+	  }
+	/**
+	 * A Visio list (User.msvStructureType = List), in member order: a cross-functional flowchart's
+	 * Swimlane List or Phase List. `direction` is User.msvSDListDirection (0 left to right, 1 right
+	 * to left, 2 top to bottom, 3 bottom to top).
+	 */
+	| {
+			type: 'list';
+			memberIds: string[];
+			direction: number;
+			kind?: 'swimlane' | 'phase';
+			/** A Swimlane List's Rotate Lane Labels flag (User.visRotateLabel), when it has one. */
+			rotateLabels?: boolean;
+	  }
 	| { type: 'callout'; targetId?: string; leaderId?: string };
 export interface VisioConnection {
 	fromShapeId: string;
@@ -449,6 +520,8 @@ export interface VisioPage {
 	connectors: VisioConnection[];
 	layers?: VisioLayer[];
 	theme?: VisioPageTheme;
+	/** The built-in theme each scheme (colours, fonts, effects, connectors) of the page comes from. */
+	themeSchemes?: Partial<Record<'colors' | 'fonts' | 'effects' | 'connectors', string>>;
 }
 /** One master of the drawing's document stencil (visio/masters). */
 export interface VisioMaster {

@@ -1,5 +1,6 @@
 import { formulaFailure } from './formula';
-import type { VisioFormulaAst, VisioFormulaValue } from './formula';
+import type { VisioFormulaAst, VisioFormulaReference, VisioFormulaValue } from './formula';
+import { formatNumberPicture, strSameEx } from './formula-extra-functions';
 
 /**
  * ShapeSheet string functions that work on text written in the formula itself. A cell's own text
@@ -21,12 +22,15 @@ export const textResultFunctions: ReadonlySet<string> = new Set([
 	'REPLACE',
 	'CHAR',
 	'INDEX',
+	'FORMAT',
+	'SHAPETEXT',
 ]);
 /** Functions that read text and return a number. */
 export const textNumberFunctions: ReadonlySet<string> = new Set([
 	'LEN',
 	'FIND',
 	'STRSAME',
+	'STRSAMEEX',
 	'LOOKUP',
 ]);
 
@@ -36,6 +40,8 @@ const LIST_SEPARATOR = ';';
 export interface VisioTextContext {
 	/** Evaluate a numeric argument (counted against the evaluation limits). */
 	number(node: VisioFormulaAst): VisioFormulaValue;
+	/** The plain text of a `TheText` reference, or undefined when it cannot be known. */
+	textOf?(reference: VisioFormulaReference): string | undefined;
 	/** Count one evaluation step. */
 	tick(): void;
 }
@@ -56,6 +62,10 @@ function exactInteger(context: VisioTextContext, node: VisioFormulaAst, name: st
 	return value.value;
 }
 
+/** True for `TheText` and `Sheet.N!TheText`. */
+export const isTheText = (node: VisioFormulaAst): boolean =>
+	node.kind === 'reference' && node.reference.cell.toLowerCase() === 'thetext';
+
 /** The text of an argument: a literal, a text function, `&`, or a plain number written out. */
 export function evaluateFormulaText(
 	node: VisioFormulaAst,
@@ -71,6 +81,10 @@ export function evaluateFormulaText(
 	if (node.kind === 'string') return node.value;
 	if (node.kind === 'binary' && node.operator === '&')
 		return text(node.left, '&') + text(node.right, '&');
+	if (node.kind === 'reference' && isTheText(node)) {
+		const read = context.textOf?.(node.reference);
+		return read === undefined ? unsupported('Text read from a cell') : read;
+	}
 	if (node.kind !== 'call') {
 		// A number is written the way Visio writes it in a joined string: plain, no unit.
 		let value: VisioFormulaValue;
@@ -93,6 +107,13 @@ export function evaluateFormulaText(
 		const value = context.number(node);
 		if (value.unit !== 'scalar') return unsupported('Text from a number with a unit');
 		return String(value.value);
+	}
+	if (name === 'SHAPETEXT') {
+		// SHAPETEXT(TheText) or SHAPETEXT(Sheet.N!TheText): the plain text of a shape.
+		arity(1);
+		const target = args[0]!;
+		if (!isTheText(target)) return unsupported('SHAPETEXT of something other than TheText');
+		return text(target, name);
 	}
 	if (name === 'MID') {
 		arity(3);
@@ -159,6 +180,11 @@ export function evaluateFormulaText(
 		if (code >= 128 && code <= 159) return unsupported('CHAR in the Windows-1252 range');
 		return String.fromCharCode(code);
 	}
+	if (name === 'FORMAT') {
+		// FORMAT(number, picture): numeric pictures only (formula-extra-functions.ts).
+		arity(2);
+		return formatNumberPicture(context.number(args[0]!), text(args[1], name));
+	}
 	// INDEX(i, list): the zero-based item, or an empty string when there is none.
 	arity(2);
 	const index = integer(context, args[0]!, name);
@@ -201,6 +227,12 @@ export function evaluateTextNumberFunction(
 			b = text(1);
 		const ignoreCase = args[2] ? context.number(args[2]).value !== 0 : false;
 		return scalar(ignoreCase ? Number(a.toLowerCase() === b.toLowerCase()) : Number(a === b));
+	}
+	if (name === 'STRSAMEEX') {
+		// STRSAMEEX(a, b, flags): flags are Windows NORM_* bits; a locale argument is unsupported.
+		if (args.length === 4) return formulaFailure('unsupported', 'STRSAMEEX with a locale');
+		arity(3);
+		return scalar(Number(strSameEx(text(0), text(1), context.number(args[2]!).value)));
 	}
 	// LOOKUP(text, list): the zero-based place of the first item that matches without regard to
 	// case, or -1.

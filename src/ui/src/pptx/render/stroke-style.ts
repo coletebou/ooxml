@@ -27,7 +27,7 @@ import type { PptxElement, ShapeStyle } from 'ooxml-core/pptx';
 import { hasShapeProperties } from 'ooxml-core/pptx';
 
 import { DEFAULT_STROKE_COLOR } from '../constants';
-import { screenBorder, screenStrokeWidth } from './device-pixel-stroke';
+import { screenBorder, screenBorderWidth } from './device-pixel-stroke';
 import type { CssBorderStyle } from './element-style-transform';
 import { getCssBorderDashStyle, normalizeStrokeDashType } from './element-style-transform';
 import { colorWithOpacity, normalizeHexColor } from './fill-style';
@@ -125,7 +125,7 @@ function svgStrokeLineCap(cap: ShapeStyle['lineCap']): SvgStrokeLineCap | undefi
  * and must be >= 1, so the value is clamped rather than emitted invalid. Only
  * meaningful for a mitred join, which is why it is gated on one.
  */
-function strokeMiterLimit(style: ShapeStyle | undefined): number | undefined {
+export function strokeMiterLimit(style: ShapeStyle | undefined): number | undefined {
 	if (style?.lineJoin !== 'miter' || typeof style.miterLimit !== 'number') {
 		return undefined;
 	}
@@ -177,7 +177,7 @@ export function getComputedStrokeStyle(element: PptxElement): ComputedStrokeStyl
 			: colorWithOpacity(normalizeHexColor(rawColor, DEFAULT_STROKE_COLOR), style.strokeOpacity);
 	return {
 		borderWidth,
-		cssBorderWidth: screenStrokeWidth(borderWidth),
+		cssBorderWidth: screenBorderWidth(borderWidth),
 		borderStyle,
 		borderColor,
 		border: screenBorder(borderWidth, borderStyle ?? 'solid', borderColor),

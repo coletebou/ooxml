@@ -32,6 +32,8 @@ export type RibbonGalleryId =
 	| 'wordArtStyles'
 	/** The inspector's Text Warp (WordArt Transform) picker. */
 	| 'textWarp'
+	/** The inspector's Quick Styles (shape style presets) picker. */
+	| 'quickStyles'
 	| 'pictureStyles'
 	| 'pictureCorrections'
 	| 'pictureColor'
@@ -68,6 +70,8 @@ export type RibbonGalleryId =
 	| 'smartArtColors'
 	| 'smartArtLayouts'
 	| 'smartArtAddShape'
+	| 'smartArtAddShapeBefore'
+	| 'smartArtAddShapeAbove'
 	| 'smartArtAddBullet'
 	| 'smartArtTextPane'
 	| 'smartArtPromote'

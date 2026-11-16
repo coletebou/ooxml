@@ -33,16 +33,16 @@ export interface PptxChartPivotFormat {
 	 * for the raw fallback.
 	 */
 	marker?: PptxChartMarker;
-	shapePropertiesXml?: XmlObject | null;
-	txPrXml?: XmlObject | null;
-	markerXml?: XmlObject | null;
-	dataLabelXml?: XmlObject | null;
-	extensionListXml?: XmlObject | null;
-	rawXml?: XmlObject;
+	shapePropertiesXml?: XmlObject | null | undefined;
+	txPrXml?: XmlObject | null | undefined;
+	markerXml?: XmlObject | null | undefined;
+	dataLabelXml?: XmlObject | null | undefined;
+	extensionListXml?: XmlObject | null | undefined;
+	rawXml?: XmlObject | undefined;
 }
 
 /** Editable classic ChartML `c:pivotFmts` collection. */
 export interface PptxChartPivotFormats {
 	formats: PptxChartPivotFormat[];
-	rawXml?: XmlObject;
+	rawXml?: XmlObject | undefined;
 }

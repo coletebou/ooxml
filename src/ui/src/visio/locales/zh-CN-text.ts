@@ -1,5 +1,7 @@
 /** Visio ribbon strings for the zh-CN locale (text), keyed by the English text. Not reviewed by a native speaker. */
 export const zhCNText: Readonly<Record<string, string>> = {
+	'This chart contains unsupported content and is read-only. Its original workbook is preserved.':
+		'此图表包含不受支持的内容，只能以只读方式查看。其原始工作簿将予以保留。',
 	'Diagram controls': '图表控件',
 	'Home commands': '“开始”选项卡命令',
 	'Insert commands': '“插入”选项卡命令',
@@ -42,20 +44,14 @@ export const zhCNText: Readonly<Record<string, string>> = {
 	'Open a .vsdx file to add backgrounds.': '打开 .vsdx 文件以添加背景。',
 	'Open a .vsdx file to lay out its shapes.': '打开 .vsdx 文件以布局其形状。',
 	'open a .vsdx file to lay out its shapes.': '打开 .vsdx 文件以布局其形状。',
-	'3-D rotation needs a 3-D renderer.': '三维旋转需要三维渲染器。',
-	'Bevel needs 3-D lighting the SVG renderer does not draw.':
-		'棱台需要 SVG 渲染器无法绘制的三维光照。',
 	'Custom theme colour sets are not written yet; pick a theme or variant.':
 		'尚不能写入自定义主题颜色集；请选择主题或变体。',
 	'DWG and DXF import is not supported.': '不支持导入 DWG 和 DXF。',
-	'Data graphics are chosen in the Data Graphics menu; there is no fields pane.':
-		'数据图形在“数据图形”菜单中选择；没有字段窗格。',
 	'Data graphics are placed at their default position; this option is not built yet.':
 		'数据图形放置在默认位置；尚未提供此选项。',
 	'Embedded Excel charts are not supported.': '不支持嵌入的 Excel 图表。',
 	'Embedded OLE objects are not supported; only pictures can be inserted.':
 		'不支持嵌入的 OLE 对象；只能插入图片。',
-	'Embellishment needs theme-driven shape geometry.': '修饰需要由主题驱动的形状几何。',
 	'Feedback is not collected by this viewer.': '此查看器不收集反馈。',
 	'Ink strokes are not supported.': '不支持墨迹笔画。',
 	'Macros and add-ons never run in this viewer.': '宏和加载项在此查看器中从不运行。',
@@ -65,10 +61,6 @@ export const zhCNText: Readonly<Record<string, string>> = {
 	'Rows are linked by dragging them from the External Data window; the linking wizard is not built yet.':
 		'通过从“外部数据”窗口拖动行来链接；尚未提供链接向导。',
 	'The viewer shows one drawing window.': '查看器只显示一个绘图窗口。',
-	'Theme connector styles cannot be chosen separately yet.': '尚不能单独选择主题连接线样式。',
-	'Theme effect styles are not rendered yet.': '尚不能呈现主题效果样式。',
-	'Theme fonts are written to the theme part, but text does not follow theme fonts yet.':
-		'主题字体会写入主题部件，但文字尚不会跟随主题字体。',
 	'Visio rule sets (formula-based RuleFilter and RuleTest) are not evaluated; only the built-in generic rules run.':
 		'不计算 Visio 规则集（基于公式的 RuleFilter 和 RuleTest）；仅运行内置通用规则。',
 	'Bottom Right': '右下',
@@ -106,4 +98,5 @@ export const zhCNText: Readonly<Record<string, string>> = {
 	Open: '打开',
 	Options: '选项',
 	Share: '共享',
+	'Style {n}': '样式 {n}',
 };

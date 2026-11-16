@@ -7,6 +7,41 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.1.2](https://github.com/ChristopherVR/ooxml/releases/tag/ooxml-mcp@1.1.2) - 2026-11-13
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/ooxml-mcp@1.1.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/ooxml-mcp@1.1.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [1.0.1](https://github.com/ChristopherVR/ooxml/releases/tag/ooxml-mcp@1.0.1) - 2026-11-03
+
+### Dependencies
+
+- **deps:** Bump the production-minor-and-patch group with 22 updates ([8e60b14](https://github.com/ChristopherVR/ooxml/commit/8e60b14e1d8ee3a1cb507670caa15a611632ef26))
+- **deps:** Merge production dependency updates ([#236](https://github.com/ChristopherVR/ooxml/issues/236)) ([7eb137b](https://github.com/ChristopherVR/ooxml/commit/7eb137b03906ded043ce0e4adf83e01fcdaa44a9))
+
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/ooxml-mcp@1.0.0) - 2026-10-29
+
+### Features
+
+- **automation:** Release ooxml-mcp 1.0 with versioned tool schemas ([e07b773](https://github.com/ChristopherVR/ooxml/commit/e07b77322730c4b427f29ed6e3479364aea8f54f))
+
+### Other
+
+- Bring origin/main into the embedding work ([a3711a1](https://github.com/ChristopherVR/ooxml/commit/a3711a14049a2cd11b994e76eafec039db2dc2de))
+
 ## [0.1.19](https://github.com/ChristopherVR/ooxml/releases/tag/ooxml-mcp@0.1.19) - 2026-10-22
 
 ### Documentation

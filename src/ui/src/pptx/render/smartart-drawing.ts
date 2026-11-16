@@ -30,6 +30,8 @@ import { styleShadow, styleStroke } from './smartart-layout-helpers';
 import { getPresetShapeVectorGeometry } from './stroke-outline';
 import type { SvgTextLine } from './svg-text-lines';
 import { centeredSvgTextLines } from './svg-text-lines';
+import { smartArtPictureImage, needsSmartArtPictureRefresh } from './smartart-picture-image';
+export { refreshSmartArtPictureImage } from './smartart-picture-image';
 
 /** Built-in named colour palettes (mirrors the Vue/React `PALETTES`). */
 export const PALETTES: Record<SmartArtColorScheme, string[]> = {
@@ -134,6 +136,8 @@ export interface RenderedShape {
 	 * renderer that only paints `fill` turns each icon into a coloured box.
 	 */
 	imageUrl: string | undefined;
+	/** Original media needed only while a nonlinear pixel preview is resolving. */
+	pictureSource?: PptxSmartArtDrawingShape;
 	/**
 	 * The shape's authored text, wrapped to its own width and vertically centred
 	 * on {@link textY}. Cached SmartArt text is real sentence content, so it is
@@ -299,7 +303,8 @@ export function projectDrawingShapes(
 			stroke,
 			strokeWidth: shape.strokeWidth ?? sw,
 			transform,
-			imageUrl: shape.fillImageUrl,
+			imageUrl: smartArtPictureImage(shape),
+			...(needsSmartArtPictureRefresh(shape) ? { pictureSource: shape } : {}),
 			textLines: shape.text
 				? centeredSvgTextLines(shape.text, fontSize, {
 						maxWidth: textWrapWidth,

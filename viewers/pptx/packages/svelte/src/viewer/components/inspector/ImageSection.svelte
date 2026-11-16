@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
-	 * ImageSection: brightness/contrast/saturation adjustment sliders and a
-	 * basic four-edge numeric crop (each edge as a 0-90% inset), for
-	 * `isImageLikeElement` elements. Built entirely on the shared
-	 * `image-adjustments.ts` reader/patch-builder pair.
+	 * ImageSection: the picture card of an `isImageLikeElement` element. Its
+	 * adjustments and crop insets are the shared descriptors
+	 * (`PICTURE_ADJUSTMENT_SECTIONS`, `PICTURE_CROP_SECTIONS`) drawn by the
+	 * generic `InspectorFields`; the compound picture controls stay native
+	 * markup here, and `AltTextSection` draws the alt text after it.
 	 */
 	import type { PptxElement } from 'pptx-viewer-core';
 	import {
@@ -11,52 +12,25 @@
 		cropResetState,
 		imageResetPatch,
 		imageResetState,
-		imageAdjustmentsPatch,
-		imageAdjustmentsStateOf,
-		imageCropPatch,
-		imageCropStateOf,
-		ARTISTIC_EFFECTS,
 		DUOTONE_PRESETS,
+		PICTURE_ADJUSTMENT_SECTIONS,
+		PICTURE_ARTISTIC_SECTIONS,
+		PICTURE_EFFECT_SECTIONS,
+		pictureDuotonePresetPatch,
+		PICTURE_CROP_SECTIONS,
 	} from 'ooxml-ui/pptx';
 
 	import { useTranslator } from '../../../i18n/context';
 	import type { EditorState } from '../../editor/editor-state.svelte';
+	import InspectorFields from './InspectorFields.svelte';
 
 	const { editor, el }: { editor: EditorState; el: PptxElement } = $props();
 	const t = useTranslator();
 
-	const adjustments = $derived(imageAdjustmentsStateOf(el));
-	const crop = $derived(imageCropStateOf(el));
 	// G7: `a:picLocks/@noCrop` forbids cropping this specific picture.
 	const croppable = $derived(cropResetState(el, editor.editable, true).enabled);
 	const resetPictureEnabled = $derived(imageResetState(el, editor.editable, true).enabled);
-	const effects = $derived('imageEffects' in el ? el.imageEffects : undefined);
-	function setEffects(next: Record<string, unknown>): void {
-		editor.patchSelected({ imageEffects: { ...effects, ...next } } as Partial<PptxElement>);
-	}
 
-	function pct(value: number): string {
-		return `${Math.round(value)}%`;
-	}
-
-	function setBrightness(value: string): void {
-		editor.patchSelected(imageAdjustmentsPatch(el, { brightness: Number(value) }));
-	}
-	function setContrast(value: string): void {
-		editor.patchSelected(imageAdjustmentsPatch(el, { contrast: Number(value) }));
-	}
-	function setSaturation(value: string): void {
-		editor.patchSelected(imageAdjustmentsPatch(el, { saturation: Number(value) }));
-	}
-	function setCrop(edge: 'cropLeft' | 'cropTop' | 'cropRight' | 'cropBottom', value: string): void {
-		if (!croppable) {
-			return;
-		}
-		const n = Number(value);
-		if (Number.isFinite(n)) {
-			editor.patchSelected(imageCropPatch(el, { [edge]: n / 100 }));
-		}
-	}
 	function replaceImage(file: File | undefined): void {
 		if (!file) {
 			return;
@@ -79,152 +53,41 @@
 
 <div class="pptx-svelte-image-actions"><label>{t('pptx.image.replaceImage')}<input type="file" accept="image/*" onchange={(event) => replaceImage(event.currentTarget.files?.[0])} /></label><button type="button" disabled={!resetPictureEnabled} onclick={resetImage}>{t('pptx.image.resetImage')}</button></div>
 
-<label class="pptx-svelte-field">
-	<span class="pptx-svelte-field-label"
-		>{t('pptx.imageAdjustments.brightness')} <b>{pct(adjustments.brightness)}</b></span
-	>
-	<input
-		type="range"
-		min="-100"
-		max="100"
-		value={adjustments.brightness}
-		oninput={(e) => setBrightness(e.currentTarget.value)}
-	/>
-</label>
-<label class="pptx-svelte-field">
-	<span class="pptx-svelte-field-label"
-		>{t('pptx.imageAdjustments.contrast')} <b>{pct(adjustments.contrast)}</b></span
-	>
-	<input
-		type="range"
-		min="-100"
-		max="100"
-		value={adjustments.contrast}
-		oninput={(e) => setContrast(e.currentTarget.value)}
-	/>
-</label>
-<label class="pptx-svelte-field">
-	<span class="pptx-svelte-field-label"
-		>{t('pptx.image.saturation')} <b>{pct(adjustments.saturation)}</b></span
-	>
-	<input
-		type="range"
-		min="-100"
-		max="100"
-		value={adjustments.saturation}
-		oninput={(e) => setSaturation(e.currentTarget.value)}
-	/>
-</label>
-
-<div class="pptx-svelte-inspector-grid">
-	<label>
-		<span>{t('pptx.image.cropLeft')}</span>
-		<input
-			type="number"
-			min="0"
-			max="90"
-			disabled={!croppable}
-			value={Math.round(crop.cropLeft * 100)}
-			onchange={(e) => setCrop('cropLeft', e.currentTarget.value)}
-		/>
-	</label>
-	<label>
-		<span>{t('pptx.image.cropTop')}</span>
-		<input
-			type="number"
-			min="0"
-			max="90"
-			disabled={!croppable}
-			value={Math.round(crop.cropTop * 100)}
-			onchange={(e) => setCrop('cropTop', e.currentTarget.value)}
-		/>
-	</label>
-	<label>
-		<span>{t('pptx.image.cropRight')}</span>
-		<input
-			type="number"
-			min="0"
-			max="90"
-			disabled={!croppable}
-			value={Math.round(crop.cropRight * 100)}
-			onchange={(e) => setCrop('cropRight', e.currentTarget.value)}
-		/>
-	</label>
-	<label>
-		<span>{t('pptx.image.cropBottom')}</span>
-		<input
-			type="number"
-			min="0"
-			max="90"
-			disabled={!croppable}
-			value={Math.round(crop.cropBottom * 100)}
-			onchange={(e) => setCrop('cropBottom', e.currentTarget.value)}
-		/>
-	</label>
-</div>
+<InspectorFields
+	sections={PICTURE_ADJUSTMENT_SECTIONS}
+	target={el}
+	disabled={!editor.editable}
+	onpatch={(patch) => editor.patchSelected(patch)}
+/>
+<InspectorFields
+	sections={PICTURE_CROP_SECTIONS}
+	target={el}
+	disabled={!croppable}
+	onpatch={(patch) => {
+		if (croppable) {
+			editor.patchSelected(patch);
+		}
+	}}
+/>
 
 <button type="button" class="pptx-svelte-reset-crop" disabled={!croppable} onclick={resetCrop}>{t('pptx.image.resetCrop')}</button>
 
-<label class="pptx-svelte-field"><span>{t('pptx.image.artisticEffects')}</span><pptx-ui-select aria-label={t('pptx.image.artisticEffects')} value={effects?.artisticEffect ?? 'none'} onchange={(e) => setEffects({ artisticEffect: e.currentTarget.value === 'none' ? undefined : e.currentTarget.value })}>{#each ARTISTIC_EFFECTS as preset}<option value={preset[0]}>{t(preset[1])}</option>{/each}</pptx-ui-select></label>
-<div class="pptx-svelte-duotone"><span>{t('pptx.image.duotone')}</span>{#each DUOTONE_PRESETS as preset}<button type="button" title={t(preset.labelKey)} style={`--shadow:${preset.shadow};--highlight:${preset.highlight}`} onclick={() => setEffects({ duotone: { color1: preset.shadow, color2: preset.highlight } })}></button>{/each}<button type="button" title={t('pptx.image.duotoneClear')} onclick={() => setEffects({ duotone: undefined })}>×</button></div>
-<label class="pptx-svelte-field"><span>{t('pptx.imageAdjustments.transparency')} {100 - (effects?.alphaModFix ?? 100)}%</span><input type="range" min="0" max="100" value={100 - (effects?.alphaModFix ?? 100)} oninput={(event) => setEffects({ alphaModFix: 100 - Number(event.currentTarget.value) })} /></label>
-<label class="pptx-svelte-field"><span>{t('pptx.imageAdjustments.biLevelThreshold')} {effects?.biLevel ?? 0}%</span><input type="range" min="0" max="100" value={effects?.biLevel ?? 0} oninput={(event) => setEffects({ biLevel: Number(event.currentTarget.value) || undefined })} /></label>
-<label class="pptx-svelte-field-checkbox"><pptx-ui-checkbox checked={Boolean(effects?.colorWash)} onchange={(event) => setEffects({ colorWash: event.currentTarget.checked ? { color: '#0066cc', opacity: 40 } : undefined })} ></pptx-ui-checkbox><span>{t('pptx.image.colorWash')}</span></label>
-{#if effects?.colorWash}<div class="pptx-svelte-inspector-grid"><label><span>{t('pptx.image.washColor')}</span><input type="color" value={effects.colorWash.color} onchange={(event) => { setEffects({ colorWash: { ...effects.colorWash, color: event.currentTarget.value } }); editor.recordRecentColor(event.currentTarget.value); }} /></label><label><span>{t('pptx.image.washOpacity')}</span><input type="number" min="0" max="100" value={effects.colorWash.opacity ?? 40} onchange={(event) => setEffects({ colorWash: { ...effects.colorWash, opacity: Number(event.currentTarget.value) } })} /></label></div>{/if}
+<InspectorFields
+	sections={PICTURE_ARTISTIC_SECTIONS}
+	target={el}
+	disabled={!editor.editable}
+	onpatch={(patch) => editor.patchSelected(patch)}
+/>
+<InspectorFields
+	sections={PICTURE_EFFECT_SECTIONS}
+	target={el}
+	disabled={!editor.editable}
+	onpatch={(patch) => editor.patchSelected(patch)}
+	oncolorcommit={(hex) => editor.recordRecentColor(hex)}
+/>
+<div class="pptx-svelte-duotone"><span>{t('pptx.image.duotonePresets')}</span>{#each DUOTONE_PRESETS as preset}<button type="button" data-testid="picture-duotone-preset" title={t(preset.labelKey)} aria-label={t(preset.labelKey)} disabled={!editor.editable} style={`--shadow:${preset.shadow};--highlight:${preset.highlight}`} onclick={() => editor.patchSelected(pictureDuotonePresetPatch(el, preset))}></button>{/each}</div>
 
 <style>
-	.pptx-svelte-field {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-		margin-top: 10px;
-	}
-
-	.pptx-svelte-field:first-child {
-		margin-top: 0;
-	}
-
-	.pptx-svelte-field-label {
-		color: var(--pptx-muted-foreground, var(--office-muted-foreground, #6b7280));
-	}
-
-	.pptx-svelte-field-label b {
-		color: inherit;
-		font-weight: 600;
-	}
-
-	.pptx-svelte-field input[type='range'] {
-		width: 100%;
-	}
-
-	.pptx-svelte-inspector-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 8px;
-		margin-top: 10px;
-	}
-
-	.pptx-svelte-inspector-grid label {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-	}
-
-	.pptx-svelte-inspector-grid span {
-		color: var(--pptx-muted-foreground, var(--office-muted-foreground, #6b7280));
-	}
-
-	.pptx-svelte-inspector-grid input {
-		width: 100%;
-		height: 26px;
-		box-sizing: border-box;
-		padding: 0 6px;
-		border: 1px solid var(--pptx-border, var(--office-border, #d1d5db));
-		border-radius: var(--pptx-radius, var(--office-radius, 4px));
-		background: var(--pptx-background, var(--office-background, #ffffff));
-		color: inherit;
-		font: inherit;
-	}
-	.pptx-svelte-field select{height:26px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:6px;background:var(--pptx-background, var(--office-background, #ffffff));color:inherit}.pptx-svelte-duotone{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-top:10px}.pptx-svelte-duotone>span{width:100%;color:var(--pptx-muted-foreground, var(--office-muted-foreground, #6b7280));font-size:10px}.pptx-svelte-duotone button{width:24px;height:24px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:50%;background:linear-gradient(135deg,var(--shadow) 50%,var(--highlight) 50%);color:inherit}
-	.pptx-svelte-image-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.pptx-svelte-image-actions label,.pptx-svelte-image-actions button{display:grid;place-items:center;min-height:28px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:5px;background:var(--pptx-muted, var(--office-surface, #f3f4f6));color:inherit;font-size:10px}.pptx-svelte-image-actions input{position:absolute;width:1px;height:1px;opacity:0}.pptx-svelte-reset-crop{width:100%;min-height:28px;margin-top:8px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:5px;background:var(--pptx-muted, var(--office-surface, #f3f4f6));color:inherit;font-size:10px}.pptx-svelte-field-checkbox{display:flex;align-items:center;gap:5px;margin-top:8px}
+	.pptx-svelte-duotone{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-top:10px}.pptx-svelte-duotone>span{width:100%;color:var(--pptx-muted-foreground, var(--office-muted-foreground, #6b7280));font-size:10px}.pptx-svelte-duotone button{width:24px;height:24px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:50%;background:linear-gradient(135deg,var(--shadow) 50%,var(--highlight) 50%);color:inherit}
+	.pptx-svelte-image-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.pptx-svelte-image-actions label,.pptx-svelte-image-actions button{display:grid;place-items:center;min-height:28px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:5px;background:var(--pptx-muted, var(--office-surface, #f3f4f6));color:inherit;font-size:10px}.pptx-svelte-image-actions input{position:absolute;width:1px;height:1px;opacity:0}.pptx-svelte-reset-crop{width:100%;min-height:28px;margin-top:8px;border:1px solid var(--pptx-border, var(--office-border, #d1d5db));border-radius:5px;background:var(--pptx-muted, var(--office-surface, #f3f4f6));color:inherit;font-size:10px}
 </style>

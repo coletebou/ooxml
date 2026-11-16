@@ -4,10 +4,13 @@
 		<meta charset="utf-8" />
 		<!-- GitHub Pages cannot send headers, so the policy is a meta tag. connect-src stays broad on
 		     purpose: the assistant and team servers are user-configured endpoints. ipc: and
-		     http://ipc.localhost are the Tauri desktop IPC channel (the desktop shell loads this page). -->
+		     http://ipc.localhost are the Tauri desktop IPC channel (the desktop shell loads this page).
+		     fonts.googleapis.com and fonts.gstatic.com serve fonts a document uses but neither the
+		     device nor the file has (Settings > Fonts turns that off); a deployment that
+		     points the setting at its own font server adds that server here. See docs/font-loading.md. -->
 		<meta
 			http-equiv="Content-Security-Policy"
-			content="default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https: wss: ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*; worker-src 'self' blob:; frame-src 'self' https://christophervr.github.io; manifest-src 'self'"
+			content="default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' ipc: http://ipc.localhost https: wss: ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*; worker-src 'self' blob:; frame-src 'self' https://christophervr.github.io; manifest-src 'self'"
 		/>
 		<meta name="ooxml-root" content="./" />
 		<meta name="theme-color" content="#0f6cbd" />
@@ -121,10 +124,64 @@
 				</div>
 			</aside>
 			<div class="suite-body">
-				<div id="tabs" class="tabs" role="tablist" aria-label="Open documents"></div>
+				<div class="tab-row">
+					<div id="tabs" class="tabs" role="tablist" aria-label="Open documents"></div>
+					<div class="document-commandbar">
+						<button id="back-teams" hidden>‹ Back to Teams</button
+						><button id="back-parent" hidden>‹ Parent document</button>
+						<div id="doc-title" class="doc-title"></div>
+						<button id="save" data-menu>Save</button><button id="rename" data-menu>Rename</button
+						><button id="download" data-menu>Download</button
+						><button id="embedded" data-menu>Embedded files</button
+						><button id="versions" data-menu>Versions</button>
+						<div id="doc-view" class="doc-view" role="group" aria-label="Document view">
+							<button id="doc-undo" aria-label="Undo" title="Undo (Ctrl+Z)"></button
+							><button id="doc-redo" aria-label="Redo" title="Redo (Ctrl+Y)"></button>
+							<div id="doc-format" class="doc-format" role="group" aria-label="Formatting">
+								<button
+									data-format="bold"
+									aria-label="Bold"
+									aria-pressed="false"
+									title="Bold (Ctrl+B)"
+								>
+									B</button
+								><button
+									data-format="italic"
+									aria-label="Italic"
+									aria-pressed="false"
+									title="Italic (Ctrl+I)"
+								>
+									I</button
+								><button
+									data-format="underline"
+									aria-label="Underline"
+									aria-pressed="false"
+									title="Underline (Ctrl+U)"
+								>
+									U
+								</button>
+							</div>
+							<div id="doc-nav" class="doc-nav">
+								<button id="doc-previous"></button
+								><output id="doc-position" aria-live="off"></output><button id="doc-next"></button>
+							</div>
+						</div>
+						<span id="save-state" role="status"></span><button id="layout-toggle"></button
+						><button id="ask-ai" class="ask-ai ai-only" aria-label="Ask AI about this file"></button
+						><button id="share" class="primary" data-menu>Share in Teams</button
+						><button id="actions-more" aria-label="More actions" aria-haspopup="menu"></button
+						><button id="focus-toggle" aria-pressed="false"></button>
+					</div>
+				</div>
 				<div class="work-row">
 					<main class="work-main">
 						<section id="chat" class="chat-view" aria-label="Chat" hidden></section>
+						<section
+							id="cloud-view"
+							class="cloud-view"
+							aria-label="OneDrive files"
+							hidden
+						></section>
 						<section id="home" class="home">
 							<svg class="rings rings--home" viewBox="0 0 100 100" aria-hidden="true">
 								<circle cx="50" cy="50" r="47" />
@@ -141,7 +198,8 @@
 								</div>
 								<div class="page-actions">
 									<button id="create-new" class="primary">Create</button
-									><button id="upload">Upload file</button>
+									><button id="upload">Upload file</button
+									><button id="open-onedrive">Open from OneDrive</button>
 								</div>
 							</div>
 							<form
@@ -212,21 +270,6 @@
 						</section>
 						<section id="teams-host" class="teams-host" hidden></section>
 						<section id="editor-area" class="editor-area" hidden>
-							<div class="document-commandbar">
-								<button id="back-teams" hidden>‹ Back to Teams</button
-								><button id="back-parent" hidden>‹ Parent document</button
-								><button id="save">Save</button><button id="rename" data-menu>Rename</button
-								><button id="download" data-menu>Download</button
-								><button id="embedded" data-menu>Embedded files</button
-								><button id="versions" data-menu>Versions</button><span id="save-state"></span
-								><button
-									id="ask-ai"
-									class="ask-ai ai-only"
-									aria-label="Ask AI about this file"
-								></button
-								><button id="share" class="primary" data-menu>Share in Teams</button
-								><button id="actions-more" aria-label="More actions" aria-haspopup="menu"></button>
-							</div>
 							<div id="editors"></div>
 						</section>
 					</main>

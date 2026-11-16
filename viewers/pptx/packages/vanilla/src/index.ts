@@ -18,6 +18,7 @@ export type { ElementUpdate, ElementUpdateOptions } from 'ooxml-ui/pptx';
 // ── Viewer ─────────────────────────────────────────────────────────────
 export { createPptxViewer, PptxViewer } from './viewer';
 export type { ViewportFitOptions, ViewportFitPadding } from 'ooxml-ui/pptx';
+export type { ListConversionScope } from 'ooxml-ui/pptx';
 export type {
 	ExternalCollaborationAwareness,
 	ExternalCollaborationSession,
@@ -86,6 +87,8 @@ export type {
 	PptxAiToolName,
 	PptxAiWritePolicy,
 } from 'ooxml-ui/pptx/ai';
+// `createAiAssistant` is exported from `pptx-vanilla-viewer/ai`.
+export type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 
 // ── Element renderer extension surface ─────────────────────────────────
 export type {
@@ -102,8 +105,38 @@ export {
 	createEl,
 	createElementRendererRegistry,
 	createSvgEl,
+	disposePptxRenderStage,
 	renderSlideStage,
 } from './viewer';
+
+// ── Building blocks (compose your own shell from canvas, toolbar and slides pane) ─
+export { createViewerBuildingBlocks } from './building-blocks';
+export type {
+	ViewerBuildingBlocks,
+	ViewerBuildingBlocksOptions,
+	ViewerBuildingBlocksState,
+} from './building-blocks';
+export type {
+	BuildingBlockFailureCode,
+	BuildingBlockRequest,
+	BuildingBlockResult,
+	BuildingBlockToolbarGroupId,
+	HyperlinkEditData,
+	ViewerBuildingBlockActions,
+} from 'ooxml-ui/pptx';
+// The reporter every viewer and building-blocks entry takes as `onElementRenderError`.
+export type { ElementRenderErrorContext, ElementRenderErrorHandler } from 'ooxml-ui/pptx';
+
+// ── Slide thumbnail rail (place it beside your own `renderSlideStage` canvas) ─
+export type { SlidesPane, SlidesPaneLayoutGalleryRequest, SlidesPaneOptions } from './viewer';
+export { createSlidesPane } from './viewer';
+// One slide drawn the way the rail draws it, for a host that keeps its own thumbnail strip.
+export type { SlideThumbnailOptions } from './viewer';
+export { renderSlideThumbnail } from './viewer';
+// Lifts single-slide operations to the rail's multi-selection commands
+// (`onDuplicateSlides` / `onDeleteSlides` / `onHideSlides`).
+export { createSlidesPaneBulkSlideOps } from 'ooxml-ui/pptx';
+export type { SlidesPaneBulkSlideOps, SlidesPaneSingleSlideOps } from 'ooxml-ui/pptx';
 
 // ── Ribbon / chrome builder (buildable standalone against your own store) ─
 export type { Ribbon } from './viewer';

@@ -8,6 +8,7 @@
  */
 
 import type { PptxCustomShow, PptxSlide } from '../types/presentation';
+import { at } from '../../../geometry/indexed';
 
 /**
  * Find a custom show by name (case-insensitive) or by id.
@@ -40,7 +41,7 @@ export function resolveCustomShowSlideIndices(
 ): number[] {
 	const rIdToIndex = new Map<string, number>();
 	for (let i = 0; i < slides.length; i++) {
-		rIdToIndex.set(slides[i].rId, i);
+		rIdToIndex.set(at(slides, i).rId, i);
 	}
 
 	const indices: number[] = [];
@@ -85,17 +86,17 @@ export function navigateCustomShow(
 	const posInShow = filteredIndices.indexOf(currentSlideIndex);
 	if (posInShow === -1) {
 		// Current slide not in custom show — jump to the nearest slide in the show
-		return filteredIndices[0];
+		return at(filteredIndices, 0);
 	}
 
 	const nextPos = posInShow + direction;
 	if (nextPos < 0) {
-		return wrap ? filteredIndices[filteredIndices.length - 1] : currentSlideIndex;
+		return wrap ? at(filteredIndices, filteredIndices.length - 1) : currentSlideIndex;
 	}
 	if (nextPos >= filteredIndices.length) {
-		return wrap ? filteredIndices[0] : currentSlideIndex;
+		return wrap ? at(filteredIndices, 0) : currentSlideIndex;
 	}
-	return filteredIndices[nextPos];
+	return at(filteredIndices, nextPos);
 }
 
 /**

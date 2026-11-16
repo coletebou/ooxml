@@ -7,6 +7,45 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.1.2](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-react-viewer@1.1.2) - 2026-11-13
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-react-viewer@1.1.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-react-viewer@1.1.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-react-viewer@1.0.0) - 2026-10-29
+
+### Features
+
+- **teams:** Release openteams 1.0 on the versioned sync protocol ([e035417](https://github.com/ChristopherVR/ooxml/commit/e035417be1285095f9bbe1b9655743dcd059b55a))
+
+## [0.2.1](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-react-viewer@0.2.1) - 2026-10-23
+
+### Other
+
+- Shared binding kit (wave6-1) ([98ab396](https://github.com/ChristopherVR/ooxml/commit/98ab396a11b31675c0266acd5242060412642bd3))
+
+### Refactor
+
+- **teams:** Move bindTeams into ooxml-ui/teams on the binding kit ([fd417a5](https://github.com/ChristopherVR/ooxml/commit/fd417a515f76b580af69acc5b1e319d15d41fee5))
+
+### Dependencies
+
+- **deps:** Bump the production-minor-and-patch group with 22 updates ([02d7713](https://github.com/ChristopherVR/ooxml/commit/02d7713ceb301921fd6c7706138d64f4c10a9d38))
+- **deps:** Merge dependency update ([#94](https://github.com/ChristopherVR/ooxml/issues/94)) ([e381aba](https://github.com/ChristopherVR/ooxml/commit/e381abaa11794233cdea85a9dc6d098d4cb338c4))
+
 ## [0.2.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-react-viewer@0.2.0) - 2026-10-16
 
 ### Features

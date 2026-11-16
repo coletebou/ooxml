@@ -37,13 +37,31 @@ import { getShapeType, hasShapeProperties } from 'ooxml-core/pptx';
 
 import { DEFAULT_STROKE_COLOR } from '../constants';
 import { getCompoundLineOffsets, getCompoundLineWidths, svgLineCap } from './connector-style';
-import { screenStrokeWidth } from './device-pixel-stroke';
+import { snapPlacement } from './device-pixel-group';
+import {
+	DEVICE_PX_VAR,
+	screenBorderWidth,
+	screenStrokeWidth,
+	snappedStrokeTransform,
+} from './device-pixel-stroke';
 import { buildCustomPathMarkers, isArrowedCustomPath } from './custom-path-markers';
 import type { CustomPathMarkers } from './custom-path-markers';
+import { dashStartPathData } from './dash-path-start';
+import { isDashedStroke } from './dash-pattern';
+import { squareCapDashedPathData } from './dash-square-cap';
 import { getSvgStrokeDasharray, normalizeStrokeDashType } from './element-style-transform';
 import { colorWithOpacity } from './fill-style';
-import { getResolvedShapeClipPath, getResolvedShapeClipPathFor } from './shape-geometry';
-import { strokeOnlyPresetPathData } from './stroke-only-preset';
+import {
+	getResolvedShapeClipPath,
+	getResolvedShapeClipPathFor,
+	isIdentityRectClip,
+} from './shape-geometry';
+import { outerStrokeEdgePath } from './stroke-clip-edge';
+import type { StrokeClipJoin } from './stroke-clip-outset';
+import { traceCompoundStrands } from './stroke-compound-strands';
+import { splitStrokePresetPathData, strokeOnlyPresetPathData } from './stroke-only-preset';
+import { usesSilhouetteEffects } from './silhouette-effects';
+import { strokeMiterLimit } from './stroke-style';
 import { hasStrokePaint } from './stroke-paint';
 import {
 	buildSvgStrokeGradientDef,
@@ -76,6 +94,18 @@ export interface StrokeOutlineStrand {
 	 */
 	cssStrokeWidth: string;
 	offset: number;
+	/**
+	 * An inline CSS `transform` that snaps this strand to the device grid the way
+	 * PowerPoint's export does (see `snappedStrokeTransform`), set only for the
+	 * axis-aligned outline of a plain rectangle or a horizontal / vertical line.
+	 * Write it as a style property next to {@link cssStrokeWidth}.
+	 */
+	cssTransform?: string;
+	/**
+	 * Path data for this strand when it is not the outline's own `d`: the
+	 * edge bleed (see {@link buildStrokeOutline}) traces the widened clip's edge.
+	 */
+	d?: string;
 }
 
 /** Everything needed to stroke one shape's outline as an SVG overlay. */
@@ -252,7 +282,7 @@ function outlineStrands(
 	const widths = getCompoundLineWidths(compoundLine, strokeWidth);
 	return offsets.map((offset, idx) => {
 		const width = widths[idx] ?? strokeWidth;
-		return { strokeWidth: width, cssStrokeWidth: screenStrokeWidth(width), offset };
+		return { strokeWidth: width, cssStrokeWidth: screenBorderWidth(width), offset };
 	});
 }
 
@@ -292,6 +322,169 @@ function needsCenteredStrokeOverlay(
 }
 
 /**
+ * A thin strand along the outer edge of the shape's widened clip, so the
+ * outline, not the fill, owns every pixel that clip cuts through (see
+ * `stroke-clip-edge`). Two device pixels wide, centred on that edge: the clip
+ * trims its outer half and its inner half lies on the outline it matches.
+ * None for a translucent line, where a second pass would darken that edge, or
+ * when the geometry cascade does not widen the clip at all.
+ */
+function clipEdgeBleed(
+	element: PptxElement,
+	d: string,
+	style: ShapeStyle | undefined,
+): StrokeOutlineStrand | undefined {
+	// A picture's outline already sits outside its clipped surface (`picture-frame`).
+	if (
+		(style?.strokeOpacity ?? 1) < 1 ||
+		element.type === 'picture' ||
+		element.type === 'image' ||
+		isArrowedCustomPath(element) ||
+		// A silhouette shape keeps no clip on its container (its fill is the SVG
+		// overlay's), so there is no cut to cover; and the filter shadows the painted
+		// alpha, which the hairline would thicken (a hollow triangle's shadow read
+		// 25 % darker than PowerPoint's).
+		usesSilhouetteEffects(element)
+	) {
+		return undefined;
+	}
+	const width = straddlingStrokeWidth(element);
+	const shapeType = getShapeType((element as { shapeType?: string }).shapeType);
+	if (
+		width <= 0 ||
+		shapeType === 'roundRect' ||
+		shapeType === 'ellipse' ||
+		isIdentityRectClip(element) ||
+		getResolvedShapeClipPath(element) === undefined
+	) {
+		return undefined;
+	}
+	const edge = outerStrokeEdgePath(d, width, outlineStrokeJoin(element));
+	return edge
+		? {
+				d: edge,
+				strokeWidth: 1,
+				cssStrokeWidth: `max(1px, calc(2 * var(${DEVICE_PX_VAR}, 0px)))`,
+				offset: 0,
+			}
+		: undefined;
+}
+
+/**
+ * Whether a closed shape's line is inset (`a:ln/@algn="in"`) on a shape whose
+ * box is clipped to its geometry (anything but a rectangle, a rounded
+ * rectangle or an ellipse, which keep their box and a CSS border).
+ *
+ * The binding's CSS border sits on the bounding box, so under the clip it only
+ * survived where the geometry touches that box: a chevron or a pin drew its
+ * inset line on the straight sides of its box and none on its diagonals. The
+ * overlay paints it along the real outline instead.
+ */
+function insetLineOnClippedShape(
+	element: PptxElement,
+	style: ShapeStyle | undefined,
+	declaredWidth: number,
+): boolean {
+	if (
+		!style ||
+		style.lineAlignment !== 'in' ||
+		declaredWidth <= 0 ||
+		element.type === 'connector' ||
+		element.type === 'picture' ||
+		element.type === 'image' ||
+		!hasStrokePaint(style)
+	) {
+		return false;
+	}
+	const shapeType = getShapeType((element as { shapeType?: string }).shapeType);
+	if (shapeType === 'line' || shapeType === 'roundRect' || shapeType === 'ellipse') {
+		return false;
+	}
+	return !isIdentityRectClip(element) && getResolvedShapeClipPath(element) !== undefined;
+}
+
+/**
+ * The width of a centred, solid outline that straddles a clipped shape's edge,
+ * or `0` when the shape has none (inset, dashed, absent, or not a closed shape).
+ * The geometry cascade widens the shape's clip by this much; a dashed line is
+ * excluded because fill would show through its gaps in the widened band.
+ */
+export function straddlingStrokeWidth(element: PptxElement): number {
+	if (!hasShapeProperties(element)) {
+		return 0;
+	}
+	const style = element.shapeStyle;
+	const width = Math.max(0, style?.strokeWidth ?? 0);
+	if (!needsCenteredStrokeOverlay(element, style, width)) {
+		return 0;
+	}
+	const dash = normalizeStrokeDashType(style?.strokeDash);
+	return !dash || dash === 'solid' ? width : 0;
+}
+
+/**
+ * How the outline overlay joins its segments: the shape's `a:ln` join (round
+ * when it declares none) and the miter limit the overlay inherits from its
+ * wrapper (`a:miter/@lim`, else SVG's default of 4). The geometry cascade
+ * shapes the corners of a widened clip to match.
+ */
+export function outlineStrokeJoin(element: PptxElement): StrokeClipJoin {
+	const style = hasShapeProperties(element) ? element.shapeStyle : undefined;
+	const join =
+		style?.lineJoin === 'bevel' ? 'bevel' : style?.lineJoin === 'miter' ? 'miter' : 'round';
+	return { join, miterLimit: strokeMiterLimit(style) ?? 4 };
+}
+
+/**
+ * The device-grid snap for an outline that is axis-aligned in the stage: a
+ * plain, unrotated rectangle (every edge rounds on its own, so the far edges are
+ * snapped too) or an unrotated horizontal / vertical `line` preset. Anything
+ * else (rounded corners, diagonals, rotation) is anti-aliased in PowerPoint's
+ * export too and stays unshifted.
+ */
+function snapTransform(
+	element: PptxElement,
+	isOpenPreset: boolean,
+	strokeWidth: number,
+): string | undefined {
+	if (element.rotation) {
+		return undefined;
+	}
+	const place = snapPlacement(element);
+	if (!place) {
+		return undefined;
+	}
+	const shapeType = getShapeType((element as { shapeType?: string }).shapeType);
+	if (isOpenPreset) {
+		if (shapeType !== 'line') {
+			return undefined;
+		}
+		const axis = element.height === 0 ? 'h' : element.width === 0 ? 'v' : undefined;
+		return axis
+			? snappedStrokeTransform(
+					axis,
+					place.x,
+					place.y,
+					strokeWidth,
+					undefined,
+					place.exact,
+					isDashedStroke(hasShapeProperties(element) ? element.shapeStyle?.strokeDash : undefined),
+				)
+			: undefined;
+	}
+	return shapeType === 'rect'
+		? snappedStrokeTransform(
+				'box',
+				place.x,
+				place.y,
+				strokeWidth,
+				{ width: element.width, height: element.height },
+				place.exact,
+			)
+		: undefined;
+}
+
+/**
  * Resolve the SVG overlay that paints an element's outline, or `undefined` when
  * the binding's CSS border is correct and cheaper (a closed shape whose line is
  * explicitly inset, `a:ln/@algn="in"`).
@@ -320,38 +513,71 @@ export function buildStrokeOutline(element: PptxElement): StrokeOutline | undefi
 			? (buildSvgStrokeGradientDef(style, element.id) ??
 				buildSvgStrokePatternDef(style, element.id))
 			: undefined;
+	// A split-layout preset (unstroked fill path + stroked path) is outlined along
+	// its stroked sub-paths only, never along the merged clip outline.
+	const splitD = !openPresetD && declaredWidth > 0 ? splitStrokePresetPathData(element) : undefined;
+	const ownPathD = openPresetD ?? splitD;
+	const insetOnClip = !ownPathD && insetLineOnClippedShape(element, style, declaredWidth);
 	const centeredFlatStroke =
 		!paint &&
-		!openPresetD &&
+		!ownPathD &&
 		(isArrowedCustomPath(element) || needsCenteredStrokeOverlay(element, style, declaredWidth));
-	if (!paint && !openPresetD && !centeredFlatStroke) {
+	if (!paint && !ownPathD && !centeredFlatStroke && !insetOnClip) {
 		return undefined;
 	}
 	const d =
-		openPresetD ??
-		outlinePathData(getResolvedShapeClipPath(element), element.width, element.height);
+		ownPathD ?? outlinePathData(getResolvedShapeClipPath(element), element.width, element.height);
 	if (!d) {
 		return undefined;
 	}
-	const strokeWidth = declaredWidth > 0 ? declaredWidth : DEFAULT_OPEN_PRESET_STROKE_WIDTH;
+	const lineWidth = declaredWidth > 0 ? declaredWidth : DEFAULT_OPEN_PRESET_STROKE_WIDTH;
+	// An inset line is stroked at twice its width on the outline and the shape's
+	// exact clip keeps the inner half: precisely the authored line, inside.
+	const strokeWidth = insetOnClip ? lineWidth * 2 : lineWidth;
 	const stroke = paint
 		? svgGradientFillRef(paint)
 		: colorWithOpacity(style?.strokeColor ?? DEFAULT_STROKE_COLOR, style?.strokeOpacity);
-	return {
-		markers: buildCustomPathMarkers(element, stroke),
+	const strands = traceCompoundStrands(
+		outlineStrands(style?.compoundLine, strokeWidth),
 		d,
+		outlineStrokeJoin(element),
+	);
+	const bleed = !ownPathD ? clipEdgeBleed(element, d, style) : undefined;
+	const snap =
+		paint || strands.length !== 1 ? undefined : snapTransform(element, !!openPresetD, strokeWidth);
+	const snapped = snap ? strands.map((strand) => ({ ...strand, cssTransform: snap })) : strands;
+	// A dashed closed outline starts its pattern where PowerPoint does (see `dash-path-start`).
+	const dashStartD =
+		!ownPathD && isDashedStroke(style?.strokeDash)
+			? dashStartPathData(d, (element as { shapeType?: string }).shapeType)
+			: d;
+	const markers = buildCustomPathMarkers(element, stroke);
+	// A dashed square-cap line overshoots at its two ends only (see `dash-square-cap`).
+	const dashedD =
+		ownPathD && !markers && isDashedStroke(style?.strokeDash)
+			? squareCapDashedPathData(
+					dashStartD,
+					Math.max(lineWidth, 1),
+					style?.strokeDash,
+					style?.lineCap,
+					style?.customDashSegments,
+				)
+			: dashStartD;
+	return {
+		markers,
+		d: dashedD,
 		paint,
 		stroke,
 		strokeWidth,
-		strands: outlineStrands(style?.compoundLine, strokeWidth),
+		strands: bleed ? [...snapped, bleed] : snapped,
 		dashArray: getSvgStrokeDasharray(
 			normalizeStrokeDashType(style?.strokeDash),
-			Math.max(strokeWidth, 1),
+			Math.max(lineWidth, 1),
 			style?.customDashSegments,
+			style?.lineCap,
 		),
-		lineCap: svgLineCap(style?.lineCap),
-		lineJoin:
-			style?.lineJoin === 'bevel' ? 'bevel' : style?.lineJoin === 'miter' ? 'miter' : 'round',
+		lineCap: svgLineCap(style?.lineCap, isDashedStroke(style?.strokeDash)),
+		lineJoin: outlineStrokeJoin(element).join,
 	};
 }
 

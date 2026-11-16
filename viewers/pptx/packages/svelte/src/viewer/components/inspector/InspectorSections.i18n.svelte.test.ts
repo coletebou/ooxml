@@ -326,10 +326,9 @@ function mountAll(translator: Translator): HTMLElement[] {
 	const table = editorWith(TABLE);
 	const text = editorWith(TEXT);
 	const smartArt = editorWith(SMART_ART);
-	// A selected node reveals the Fill, Font, Bold and Italic controls.
+	// The text pane is the shared `pptx-ui-smartart-text-pane`, translated through the same
+	// translator (its own tests cover the strings in its shadow root).
 	const smartArtTarget = render(SmartArtSection, { editor: smartArt, el: SMART_ART }, translator);
-	smartArtTarget.querySelector<HTMLButtonElement>('.pptx-svelte-smartart-nodes button')?.click();
-	flushSync();
 	return [
 		render(MediaSection, { editor: media }, translator),
 		render(ImageSection, { editor: image, el: IMAGE }, translator),
@@ -371,7 +370,8 @@ describe('inspector sections translation', () => {
 			expect(painted.filter((text) => text.includes(literal))).toStrictEqual([]);
 		}
 		for (const expected of [
-			'Automatisch wiedergeben',
+			// The shared playback options' Start choice (On click / Automatically).
+			'Auf Klick',
 			'Endlosschleife',
 			'Vollbild',
 			'Lautstärke',
@@ -385,12 +385,14 @@ describe('inspector sections translation', () => {
 			'Gleichmäßig verteilen',
 			'Zellformatierung',
 			'Anpassung 2',
-			'Element 1 auswählen',
 			'Texteffekte',
 			'Rahmenfarbe',
 			'Elemente',
 		]) {
-			expect(painted.some((text) => text.includes(expected))).toBeTruthy();
+			expect(
+				painted.some((text) => text.includes(expected)),
+				expected,
+			).toBeTruthy();
 		}
 	});
 });

@@ -4,8 +4,8 @@ import type {
 	PptxChartSeries,
 	PptxChartType,
 } from 'pptx-viewer-core';
-import { useTranslation } from 'react-i18next';
 
+import { useTranslation } from '../../i18n/use-translation';
 import { WebSelect } from '../WebControls';
 import {
 	CARD,
@@ -14,7 +14,7 @@ import {
 	MARKER_SUPPORTED_TYPES,
 	MARKER_SYMBOL_OPTIONS,
 } from './chart-panel-constants';
-import { useRecentColors } from './RecentColorsContext';
+import { useRecentColorCommit } from './useRecentColorCommit';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -40,7 +40,7 @@ export function ChartMarkerOptions({
 	onSetMarker,
 }: ChartMarkerOptionsProps) {
 	const { t } = useTranslation();
-	const { pushColor } = useRecentColors();
+	const commitRecentColor = useRecentColorCommit();
 
 	if (!MARKER_SUPPORTED_TYPES.has(chartType) || series.length === 0) {
 		return null;
@@ -105,10 +105,8 @@ export function ChartMarkerOptions({
 											disabled={!canEdit}
 											className='h-6 w-8 cursor-pointer rounded border border-border bg-transparent'
 											value={marker.spPr?.fillColor ?? '#4472c4'}
-											onChange={(e) => {
-												onSetMarker(i, { fillColor: e.target.value });
-												pushColor(e.target.value);
-											}}
+											ref={commitRecentColor}
+											onChange={(e) => onSetMarker(i, { fillColor: e.target.value })}
 										/>
 									</label>
 								</div>

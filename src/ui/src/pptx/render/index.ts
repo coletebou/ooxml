@@ -25,6 +25,8 @@ export * from './custom-geometry-live-path';
 export * from './shape-geometry';
 export * from './wheel-intent';
 export * from './shape-geometry-cascade';
+export * from './silhouette-effects';
+export * from './silhouette-fill-layer';
 export * from './fill-style';
 // `a:gradFill/a:path@type="rect"`: nested-rectangle SVG data-URI approximation
 // (PowerPoint's own rect path gradient has square corners, which no native
@@ -59,6 +61,7 @@ export * from './subpath-fill-overlay';
 export * from './stroke-style';
 // On-screen strokes and borders never thinner than one device pixel (issue #23):
 // the stage publishes the device pixel, widths are written as `max()` against it.
+export * from './device-pixel-group';
 export * from './device-pixel-stroke';
 // `a:blipFill/a:tile`: scale, offset, alignment and mirror-flip of a tiled
 // picture, which four of five bindings used to render as one stretched copy.
@@ -70,7 +73,11 @@ export * from './image-native-size';
 export * from './group-fill';
 // Stroke/dash normalisation, compound-line box-shadow + dasharray, element
 // transform strings (flip/rotation/skew), and OOXML drawing-percent parsing.
+export * from './dash-path-start';
+export * from './dash-pattern';
+export * from './dash-square-cap';
 export * from './element-style-transform';
+export * from './text-flip-compensation';
 export * from './image-fill-counter-transform';
 // OOXML drawing-colour resolution: colour-choice parsing (srgb/scrgb/sys/scheme/
 // hsl/preset), the 26 colour transforms via core, scheme inheritance, alpha.
@@ -92,15 +99,24 @@ export * from './image-effect-filter-values';
 export * from './image-fill-overlay';
 export * from './text-segment-paragraph-break';
 export * from './text-warp';
+export * from './text-warp-arch-fit';
+export * from './text-warp-run-paint';
 export * from './text-warp-envelope-curves';
 export * from './text-warp-envelope-block';
 export * from './text-warp-envelope-layout';
 export * from './text-warp-envelope-map';
 export * from './text-warp-envelope-types';
+export * from './text-warp-envelope-wrap';
 export * from './text-warp-glyph-outline';
 export * from './text-warp-glyph-slicing';
 export * from './text-warp-glyph-trace';
 export * from './text-warp-outline-font-cache';
+export {
+	createEmbeddedOutlineFontsSlot,
+	type EmbeddedOutlineFontsRegistrar,
+	type EmbeddedOutlineFontsSlot,
+	type ReleaseEmbeddedFonts,
+} from './glyph-outline-font-registration';
 export * from './text-warp-outline-webfont-fetch';
 export * from './text-warp-preset-definitions';
 export * from './text-warp-preset-sampler';
@@ -110,6 +126,7 @@ export * from './equation-templates';
 // LaTeX -> OMML -> sanitised MathML, the pipeline every binding's equation
 // editor drives its live preview and insert payload from.
 export * from './equation-compile';
+export * from './equation-box-style';
 export * from './chart-helpers';
 export * from './chart-area-fill';
 export * from './chart-font';
@@ -525,6 +542,9 @@ export * from './table-style-builtins';
 // bindings; React had lost the band layer on programmatic tables and Angular the
 // colour floor, so both are decided here now.
 export * from './table-cell-css';
+// Half of each painted border taken out of a cell's padding (PowerPoint measures a
+// margin from the grid line); the React raw-XML table path composes cells itself.
+export * from './table-cell-border-inset';
 // A cell's paragraphs as blocks, each with its own alignment, indent and line
 // spacing, for cells whose paragraphs set them.
 export * from './table-cell-paragraphs';
@@ -538,6 +558,16 @@ export * from './table-layout';
 // Immutable single-cell text edit (`setCellText`) for inline cell editing,
 // shared by every binding's table renderer.
 export * from './table-cell-edit';
+// Rich cell text editing: the cell's runs as segments, the editor every binding
+// mounts in an edited cell, Tab/arrow navigation, range formatting and
+// tab-separated paste.
+export * from './table-cell-rich-text';
+export * from './table-cell-navigation';
+export * from './table-cell-text-editor';
+export * from './table-cell-edit-outcome';
+export * from './table-cells-paste-listener';
+export * from './table-cells-format';
+export * from './table-tsv-paste';
 // Inspector table data grid: normalised render model (`buildTableDataGrid`) plus
 // element-level row/column operations, so all five bindings edit cell text from
 // the sidebar through one implementation.
@@ -596,12 +626,15 @@ export * from './selection-transform';
 // binding's element renderer. Each binding casts the neutral CSS map to its
 // framework's style type.
 export * from './element-style';
+export * from './abutting-edge-bleed';
+export * from './abutting-edge-bleed-style';
 // Pure, immutable group/ungroup tree operations (union bbox, slide-absolute <->
 // group-relative coordinate conversion) for the editor.
 export * from './group-ops';
 // Slide-background style cascade: resolved background fields -> CSS map
 // (image -> gradient -> pattern -> solid colour precedence).
 export * from './slide-background';
+export * from './slide-background-fill';
 export * from './slide-background-patch';
 // Legacy PowerPoint 97-2003 `shadeToTitle` background hint: anchors a slide's
 // gradient background as a rectangular path gradient on its title
@@ -615,6 +648,9 @@ export * from './background-shade-to-title';
 export * from './editor-insert';
 export * from './element-operations';
 export * from './editor-history';
+// Headless controllers (`getSnapshot` / `subscribe` / typed actions) that every
+// binding adapts with one store adapter; the history controller is the first.
+export * from './controller';
 // Section CRUD: pure immutable transforms over the sections + slides arrays
 // (add/rename/delete/move section, move-slides-to-section) + GUID-like section
 // id + OOXML slide-id resolution. Each binding wires its reactive state through
@@ -644,6 +680,7 @@ export * from './ole-edit-model';
 // model), snap-to-box (closest-per-axis span guides, Angular model), grid
 // snapping. Pure maths; the pointer/drag driver stays in each binding.
 export * from './snap-guides';
+export * from './span-snap-move';
 // Ruler tick generation + constants (View ▸ Ruler). Pure; each binding renders.
 export * from './ruler';
 export * from './bullet-autonum';
@@ -697,6 +734,7 @@ export * from './text-field-substitution';
 // resolves field runs from the same inputs (and a thumbnail can re-point the
 // deck context at its own slide).
 export * from './field-context';
+export * from './slides-pane-model';
 export * from './text-fill';
 export * from './text-effects';
 export * from './text-effects-3d';
@@ -738,6 +776,9 @@ export * from './text-paragraphs';
 // Per-paragraph spacing resolver (`a:spcBef`/`a:spcAft`/`a:lnSpc`), consumed by
 // `buildParagraphs` and exported directly rather than via a `./text-paragraphs`
 // re-export shim.
+export * from './paragraph-baseline';
+export * from './paragraph-baseline-settle';
+export * from './text-tracking-settle';
 export * from './paragraph-spacing';
 export * from './paragraph-strut';
 // `a:spAutoFit` editor-time shape resize: the pure height decision plus the
@@ -751,6 +792,7 @@ export * from './shape-autofit-resize';
 export * from './text-autofit-shrink';
 export * from './text-autofit-shrink-measure';
 export * from './morph-plan';
+export type { MorphCopyPart } from './morph-text-body';
 export * from './text-advanced';
 export * from './text-theme';
 export * from './kinsoku-styles';
@@ -862,6 +904,10 @@ export * from './collaboration-load-origin';
 // removing the viewer iframe) leaves the room instead of lingering as a ghost
 // collaborator until the awareness timeout.
 export * from './collaboration-teardown';
+// The Yjs transport provider and the session's document, factories and transport,
+// shared by every binding (each passes its own lazy `yjs` / `y-*` loaders).
+export * from './collaboration-provider';
+export * from './collaboration-yjs-session';
 // Synchronous "I am leaving" BroadcastChannel announcement: a provider destroyed
 // inside `pagehide` cannot get its awareness removal out (y-webrtc broadcasts it
 // a microtask later, after the frame's channels are dead), so peers drop the
@@ -883,6 +929,7 @@ export * from './morph-matching';
 export * from './morph-flatten';
 // One merged z-order over both slides, so the transition overlay knows which
 // arriving shapes it would otherwise hide behind a ghost.
+export * from './morph-overlay-layers';
 export * from './morph-overlay-order';
 export * from './morph-text';
 // "Same slot, new wording": the pair PowerPoint dissolves where it stands
@@ -891,6 +938,7 @@ export * from './morph-text-slot';
 // The two halves of such a dissolve, paired so the overlay can sum them inside
 // an isolated group rather than stacking two fades (issue #161).
 export * from './morph-crossfade-group';
+export * from './morph-overlay-stack';
 // Intelligent token-level text morph: LCS diff (shared/added/removed) + per-
 // token slide/fade keyframe building, consumed by `morph-animation`.
 export * from './morph-text-tokens';
@@ -924,6 +972,7 @@ export * from './slide-transition-fragments';
 // Inspector-side option catalogues for the transition section: the type list,
 // the orientation-vs-direction rule, and the arrow-grid tables.
 export * from './slide-transition-options';
+export * from './slide-thumbnail-badge';
 export * from './slide-transition-edits';
 // What the Transitions ribbon's Sound picker shows and what picking a file
 // (or clearing one) writes; packages/core embeds the picked file on save.
@@ -982,6 +1031,9 @@ export * from './smartart-node-limits';
 // function delegates to the core editing ops; each binding's own
 // `smartart-node-pane-handlers.ts` is a thin re-export of this module.
 export * from './smartart-node-pane-handlers';
+// SmartArt text pane model: the outline lines, notes and append state
+// `pptx-ui-smartart-text-pane` shows, and the edit each pane request makes.
+export * from './smartart-text-pane-model';
 // Vanilla three.js GLTF/GLB model scene controller: mounts an interactive 3D
 // model into a container element (auto-centre/fit, lights, OrbitControls, RAF
 // loop) and exposes resize()/dispose(). `three` is dynamically imported and
@@ -1066,6 +1118,7 @@ export {
 	computeDrawingViewBox,
 	drawingShapeLabelColor,
 	projectDrawingShapes,
+	refreshSmartArtPictureImage,
 	styleShadowFilter,
 } from './smartart-drawing';
 export type {
@@ -1106,15 +1159,23 @@ export { fontFamilyStyleUpdates, mergeTextStyleUpdate } from './font-family-upda
 // Effects panel: shadow/inner-shadow/glow/reflection/soft-edge state readers +
 // enable/disable/update shapeStyle merge patch builders.
 export * from './effects-helpers';
+// Descriptor-driven inspector sections (field model + section descriptors) that
+// every binding draws with its one generic field renderer.
+export * from './inspector';
 // Embedded-font @font-face assembly: URL/format validation, XOR de-obfuscation
 // fallback, and the resolved-variant -> stylesheet/family-list build (the
 // managed <style> id + object-URL minting stay per-binding).
 export * from './embedded-fonts';
+export * from './embedded-fonts-sheet';
 // Pure Google Fonts webfont-fallback helpers: referenced-family collection,
 // known-family selection, and CSS2 href building (the managed <link> id +
 // injection stay per-binding).
 export * from './google-webfonts';
 export * from './google-webfonts-link';
+export * from './deck-webfont-readiness';
+export * from './deck-webfont-outlines';
+// The host `limits` option: the localized load-error text for a deck over a load limit.
+export * from './load-limits';
 // Weight variants named as their own family ("DM Sans Light"): the Google
 // Fonts face that serves them and the CSS weight their text renders at.
 export * from './font-weight-names';
@@ -1194,6 +1255,9 @@ export * from './presentation-session';
 export * from './viewer-store';
 // The canvas zoom slice, first vertical slice on that runtime.
 export * from './viewer-zoom-store';
+// Zoom at the pointer and drag to pan in the slide viewport, shared by every binding.
+export { attachViewportNavigation, resetViewportScroll } from './viewport-navigation';
+export type { ViewportNavigationOptions } from './viewport-navigation';
 // No-op-write guards for the hot state paths (presenter snapshot, presence
 // list). Shared so a write that carries no new information is dropped once,
 // rather than re-rendering each binding in turn (issue #145).
@@ -1248,10 +1312,15 @@ export * from './outline-view';
 export * from './outline-view-edit';
 // `outline-view-dismiss` is Escape back to Normal view, shared so no binding misses it.
 export * from './outline-view-dismiss';
+// `outline-view-session` is the edit-and-caret shell every binding's Outline view runs on.
+export * from './outline-view-session';
 // Editor keyboard map: the editing shortcut set (clipboard, history, nudge,
 // group, select-all, slide paging, help) as one shared mapping, so the five
 // bindings cannot disagree about what Ctrl+D or an arrow key does.
 export * from './editor-keymap';
+// The action-to-handler switch every binding used to copy, keyed by the
+// keymap's own action names (`dispatchEditorKey` + `EditorKeyHandlers`).
+export * from './editor-key-dispatch';
 export * from './selection-cycle';
 // Start-a-show keys (F5 / Shift+F5): kept apart from the editor keymap because
 // they must fire on a read-only host and from inside a text field, which the
@@ -1282,6 +1351,9 @@ export * from './context-menu-commands';
 // per-element menu above, offered when the right-click hits no element.
 export * from './canvas-context-menu-commands';
 export * from './canvas-element-node';
+// Which stages keep `data-element-id` (canvas, show, Morph layers) and the pass
+// that strips it from every static stage, so element ids stay unique.
+export * from './stage-element-ids';
 // Which inspector section a "format object" command (Edit Alt Text, Size and
 // Position, Format Shape) should scroll into view once the properties tab is open.
 export * from './context-menu-inspector-anchor';
@@ -1314,6 +1386,7 @@ export * from './image-duotone-canvas';
 export * from './hyperlink-dialog';
 // Find & replace across slide text segments (immutable transforms).
 export * from './find-replace';
+export * from './find-text-highlight';
 // Accessibility issue aggregation over a slide array (mirrors core's
 // `checkPresentation`) + severity grouping/labels for the panel.
 export * from './accessibility-issues';
@@ -1348,10 +1421,13 @@ export * from './element-aria-attributes';
 export * from './element-non-visual-description';
 // `[data-element-id="..."]` selector escaping with a safe non-`CSS.escape` fallback.
 export * from './css-escape';
+export * from './svg-id-scope';
+export * from './silhouette-morph-refresh';
 // Pointer-to-element hit-test: a click on a grouped child selects the GROUP
 // (PowerPoint's rule), with the innermost id kept available for drill-in.
 export * from './element-hit-test';
 export * from './group-drill';
+export * from './group-press-target';
 export * from './modal-focus';
 // Freehand ink: points -> SVG path `d`, completed-stroke -> `InkPptxElement`.
 export * from './ink-drawing';
@@ -1429,6 +1505,7 @@ export * from './sheet-dismiss';
 // list shown in the insert dropdown. The single source of truth every binding's
 // "Insert > Chart" toolbar action calls; wraps core's `createChartElement`.
 export * from './insert-chart';
+export * from './insert-chart-preview';
 
 // SmartArt reflow: convert algorithmic layout results back to PptxSmartArtDrawingShape[]
 // so the drawing-shape renderer handles post-edit display and shapes round-trip through save.
@@ -1446,6 +1523,7 @@ export * from './smartart-reflow-element';
 // + swallowed autoplay-blocked rejection) each binding calls when present mode
 // makes a media element's slide the live surface.
 export * from './media-playback';
+export * from './media-control-bar';
 // `fullScrn` full-slide playback overlay trigger + style descriptor (issue
 // wave item 10): split out of media-playback.ts (file-size cap) so all five
 // bindings' `<video>`/`<audio>` play/pause listeners share one decision.
@@ -1483,13 +1561,29 @@ export * from './element-clipboard';
 export * from './element-insertion';
 export * from './image-file-insertion';
 export * from './editor-image-paste';
+export * from './html-text-paste';
+export * from './inline-rich-paste';
+export * from './inline-caret-offset';
+export * from './system-clipboard-copy';
 export * from './header-footer-dialog';
 export * from './media-file-type';
+export * from './building-block-actions';
+export * from './building-block-document-properties';
+export * from './building-block-font-embedding';
+export * from './building-block-password';
+export * from './building-block-signatures';
+export * from './building-block-show-settings';
+export * from './building-block-custom-shows';
+export * from './building-block-show-dialogs';
+export * from './building-blocks';
 export * from './template-background-rows';
 export * from './template-editing';
+export * from './transition-template-elements';
 // Ordered + capped element composition for slide previews / sidebar thumbnails,
 // mirroring `buildSaveSlides` (template elements first, then slide-owned).
 export * from './preview-elements';
+// Per-element render error containment: the report payload, the safe reporter, the retry key.
+export * from './element-render-error';
 // Insert > Shape picker catalogue: preset geometry types + labels/i18n keys +
 // framework-neutral glyph descriptors; each binding maps glyphs to its icons.
 export * from './shape-preset-catalog';
@@ -1522,6 +1616,10 @@ export * from './theme-color-swatches';
 export * from './theme-color-picker-state';
 export * from './theme-color-grid';
 export * from './theme-color-field-commit';
+// A native colour input's drag: live preview on `input`, one undo step and one recent colour
+// on `change` (or `blur`); a pick that settles where it started is no undo step, though its
+// `change` is still a recent colour.
+export * from './live-color-input';
 
 // PowerPoint-style title bar (AutoSave toggle + quick access + file name +
 // search) and the shared IndexedDB autosave recovery store behind it. Pure
@@ -1537,6 +1635,8 @@ export * from './chrome-metrics';
 // every binding's presentation-mode navigation.
 export * from './zoom-return-navigation';
 export * from './zoom-step';
+// Zoom to Selection: the zoom that fits the selection and the scroll that centres it.
+export * from './zoom-to-selection';
 export * from './command-search';
 export * from './autosave-store';
 // Recovery-snapshot housekeeping (clear, retention) against IndexedDB or the host's store.
@@ -1552,12 +1652,18 @@ export * from './autosave-file-key';
 // say?" One decision, five dialogs.
 export * from './autosave-recovery';
 export * from './autosave-recovery-acknowledgement';
+// In-progress inline text counts as an autosave edit and reaches the snapshot.
+export * from './autosave-inline-draft';
 export * from './backstage';
+export * from './cloud-open';
+export * from './read-only-badge';
 export * from './backstage-cards';
 export * from './master-page-layout';
 export * from './master-view';
 export * from './master-view-editing';
 export * from './master-view-crud';
+// The undo and redo steps a Delete Layout or Delete Slide Master leaves behind.
+export * from './master-view-crud-history';
 export * from './virtualized-list';
 export * from './document-statistics';
 export * from './used-fonts';
@@ -1581,6 +1687,7 @@ export * from './presentation-ole-verb';
 // runs; the rest of the slide is scenery the click passes through.
 export * from './presentation-hit-test';
 export * from './presentation-show-order';
+export * from './presentation-show-step';
 // The slide a show opens on: the active slide when the show includes it, else
 // the first show slide after it. Entering on an excluded slide is a parity bug.
 export * from './presentation-entry-slide';
@@ -1604,6 +1711,11 @@ export * from './options';
 export * from './customization';
 export * from './ribbon-galleries';
 export * from './deck-style';
+// A theme change as an undo step: what each snapshot records, what an undo writes back into the
+// handler's theme parts, and the write queue every save waits for.
+export * from './theme-history';
+// Presentation properties > Theme: masters pointed at another theme part, in place, as one undo step.
+export * from './theme-by-path';
 // Host ribbon tabs (`ribbonAddIns`): which show, which is active and how a command runs.
 export * from './ribbon-add-ins';
 
@@ -1642,6 +1754,7 @@ export * from './editor-geometry';
 export * from './editor-mutations';
 // Pointer move/resize/rotate gesture state machine for the editing overlay.
 export * from './editor-gestures';
+export * from './editor-gesture-frames';
 // Read a contenteditable inline-edit surface's plain text back out.
 export * from './inline-text-extract';
 // No-op detection plus rich-run preservation for committed inline text.
@@ -1671,8 +1784,11 @@ export * from './slide-size-rescale';
 export * from './read-only-recommendation';
 // Password check against p:modifyVerifier for the read-only banner's unlock prompt.
 export * from './modify-password-check';
+// The read-only banner's session (hidden, Edit anyway, password prompt) and its transitions.
+export * from './read-only-session';
 // getCompatibilityWarnings() -> toast descriptors, deduped by code.
 export * from './compatibility-warning-toasts';
+export * from './pdf-export-range';
 // `ppaction://program` ("Run program" action): turns the resolved command
 // string into a non-blocking notice descriptor (message + Copy button i18n
 // keys), since a browser cannot launch a local executable. Consumed by every
@@ -1736,6 +1852,7 @@ export * from './foreign-object-font-embed';
 export * from './foreign-object-image-embed';
 export * from './foreign-object-svg-document';
 export * from './viewport-fit';
+export * from './viewport-size';
 export type {
 	InlineTextEditSnapshot,
 	InlineListSeed,
@@ -1763,6 +1880,9 @@ export { createInlineListModelObserver } from './inline-list-model';
 export type { InlineListModelChange } from './inline-list-model';
 export { transformInlineListCase } from './inline-list-case';
 export { initializeInlineListDom } from './inline-list-dom';
+export { applyInlineRunStyle, seedPlainInlineText } from './inline-text-seed';
+export { markInsertedParagraph } from './inline-text-paragraph-marker';
+export { spaceBeforeCaretRange } from './inline-trailing-space';
 export type { InlineListController, InlineListControllerOptions } from './inline-list-controller';
 export { readInlineListSelection, restoreInlineListBodySelection } from './inline-list-selection';
 export type { InlineListSelectionResult } from './inline-list-selection';
@@ -1792,11 +1912,16 @@ export * from './status-bar-state';
 export * from './notes-toolbar-state';
 export * from './title-bar-state';
 export * from './tab-row-actions';
+export * from './ribbon-tab-row';
 
 export * from './slide-sorter-state';
+// What a binding does with a new slide's layout once the core has re-mapped it.
+export * from './inserted-slide-layout';
 
 export * from './viewer-root-options';
+export * from './ribbon-display';
 export * from './viewer-hyperlinks';
+export * from './viewer-dialogs';
 export * from './slide-package-clipboard';
 export * from './custom-path-markers';
 
@@ -1804,3 +1929,7 @@ export * from './custom-path-markers';
 export * from './collaboration-state';
 // The payload the host-facing `autosaveStatus` event reports in every binding.
 export * from './viewer-event-payloads';
+// The Find and Replace bar's session (matches, cursor, replace plans) and its actions.
+export * from './find-replace-session';
+export * from './find-replace-session-actions';
+export * from './viewer-api-guard';

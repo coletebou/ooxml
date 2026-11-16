@@ -15,6 +15,7 @@ import { parseOverrideClrMapping } from './color-scheme-index';
 import { parseMasterColorMap } from './master-color-map';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeDocProperties';
 import { parseHeaderFooterFlags } from './PptxHandlerRuntimeMasterElements';
+import { at } from '../../../../geometry/indexed';
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	/**
@@ -116,7 +117,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// Load M1: enforce allowed-roots prefix. Any first segment outside
 		// the OPC-defined directories is treated as an escape attempt.
 		const firstSegment = baseParts[0];
-		if (!PptxHandlerRuntime.ALLOWED_PATH_ROOTS.has(firstSegment)) {
+		if (!PptxHandlerRuntime.ALLOWED_PATH_ROOTS.has(firstSegment ?? '')) {
 			return '';
 		}
 
@@ -139,7 +140,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		}
 		const firstSlash = resolved.indexOf('/');
 		const firstSegment = firstSlash === -1 ? resolved : resolved.substring(0, firstSlash);
-		if (!PptxHandlerRuntime.ALLOWED_PATH_ROOTS.has(firstSegment)) {
+		if (!PptxHandlerRuntime.ALLOWED_PATH_ROOTS.has(firstSegment ?? '')) {
 			return '';
 		}
 		return resolved;
@@ -158,7 +159,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 			for (const file of masterFiles) {
 				const path = file.name;
-				const xml = await file.async('string');
+				const xml = (await this.readPartText(path)) ?? '';
 				const data = this.parser.parse(xml) as XmlObject;
 				const sldMaster = data?.['p:sldMaster'] as XmlObject | undefined;
 				if (!sldMaster) {
@@ -181,11 +182,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					xmlAttr(sldMaster['p:cSld'] as XmlObject | undefined, 'name') ?? ''
 				).trim();
 
-				// Background
-				const bg = (sldMaster['p:cSld'] as XmlObject | undefined)?.['p:bg'] as
-					| XmlObject
-					| undefined;
-				const backgroundColor = this.parseBackgroundColor(bg);
+				// The background (`backgroundColor`) is resolved later, by
+				// `enrichSlideMasterElements`: a `p:bgRef` on `bg1` means whatever
+				// this master's `p:clrMap` routes it to, which needs the master's
+				// colour state active, and no master state is active yet here.
 
 				// Placeholders
 				const spTree = (sldMaster['p:cSld'] as XmlObject | undefined)?.['p:spTree'] as
@@ -211,8 +211,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				);
 				const relsFile = this.zip.file(relsPath);
 				if (relsFile) {
-					const relsXml = await relsFile.async('string');
-					const relsData = this.parser.parse(relsXml) as XmlObject;
+					const relsData = await this.readPartXml(relsPath);
 					const rels = this.ensureArray(
 						xmlChild(relsData, 'Relationships')?.['Relationship'],
 					) as XmlObject[];
@@ -228,8 +227,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				// Layouts associated with this master
 				const layoutPaths: string[] = [];
 				if (relsFile) {
-					const relsXml = await relsFile.async('string');
-					const relsData = this.parser.parse(relsXml) as XmlObject;
+					const relsData = await this.readPartXml(relsPath);
 					const rels = this.ensureArray(
 						xmlChild(relsData, 'Relationships')?.['Relationship'],
 					) as XmlObject[];
@@ -255,7 +253,6 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				results.push({
 					path,
 					name: masterCSldName.length > 0 ? masterCSldName : undefined,
-					backgroundColor,
 					themePath,
 					layoutPaths: layoutPaths.length > 0 ? layoutPaths : undefined,
 					layouts: layouts.length > 0 ? layouts : undefined,
@@ -279,8 +276,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				return undefined;
 			}
 
-			const path = files[0].name;
-			const xml = await files[0].async('string');
+			const path = at(files, 0).name;
+			const xml = (await this.readPartText(path)) ?? '';
 			const data = this.parser.parse(xml) as XmlObject;
 			const master = data?.['p:handoutMaster'] as XmlObject | undefined;
 			if (!master) {
@@ -316,8 +313,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				return undefined;
 			}
 
-			const path = files[0].name;
-			const xml = await files[0].async('string');
+			const path = at(files, 0).name;
+			const xml = (await this.readPartText(path)) ?? '';
 			const data = this.parser.parse(xml) as XmlObject;
 			const master = data?.['p:notesMaster'] as XmlObject | undefined;
 			if (!master) {
@@ -354,7 +351,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			if (!layoutFile) {
 				return undefined;
 			}
-			const xml = await layoutFile.async('string');
+			const xml = (await this.readPartText(layoutPath)) ?? '';
 			const data = this.parser.parse(xml) as XmlObject;
 			const sldLayout = data?.['p:sldLayout'] as XmlObject | undefined;
 			if (!sldLayout) {
@@ -440,12 +437,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				}
 			}
 
-			// Background
-			const bg = xmlPath(sldLayout, 'p:cSld', 'p:bg');
-			const bgColor = this.parseBackgroundColor(bg);
-			if (bgColor) {
-				layout.backgroundColor = bgColor;
-			}
+			// The layout's own background is resolved with its master's, in
+			// `enrichSlideMasterElements`, through the master's colour map.
 
 			// Placeholders
 			const spTree = xmlPath(sldLayout, 'p:cSld', 'p:spTree');

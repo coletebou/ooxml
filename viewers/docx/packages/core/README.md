@@ -36,6 +36,19 @@ It handles modern `.docx` only. To open legacy `.doc` files use one of the edito
 
 [Full docs](https://christophervr.github.io/ooxml/docx/) | [Core source](https://github.com/ChristopherVR/ooxml)
 
+## Privacy and network use
+
+By default the Word packages make no network request when opening, rendering, editing or saving a document: linked pictures are not fetched, linked data is not refreshed, and fonts come from the device only. The `googleFonts` option, or turning on Google Fonts in File > Options > Trust Center (off by default), requests a document's missing fonts from Google Fonts or the endpoint the host sets. Hyperlinks open only when the reader follows them. Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 Apache-2.0.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#word-docx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

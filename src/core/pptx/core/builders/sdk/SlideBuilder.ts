@@ -11,6 +11,7 @@ import type { PptxHandlerCore } from '../../PptxHandlerCore';
 import type { PptxChartType } from '../../types/chart';
 import type { PptxElement } from '../../types/elements';
 import type { PptxSlide } from '../../types/presentation';
+import { mapBackgroundGradientInput } from './background-gradient-input';
 import {
 	createTextElement,
 	createShapeElement,
@@ -39,6 +40,7 @@ import type {
 	BackgroundInput,
 	TransitionInput,
 	AnimationInput,
+	ShapeDefaultsInput,
 } from './types';
 
 /**
@@ -62,12 +64,15 @@ export class SlideBuilder {
 	 * @param layoutPath - Optional layout archive path.
 	 * @param layoutName - Optional layout display name.
 	 * @param handler - Loaded deck context for placeholder geometry and text styles.
+	 * @param shapeDefaults - What `addShape` uses for an omitted option
+	 *   (`PresentationOptions.shapeDefaults`).
 	 */
 	constructor(
 		slideNumber: number,
 		layoutPath?: string,
 		layoutName?: string,
 		private readonly handler?: PptxHandlerCore,
+		private readonly shapeDefaults?: ShapeDefaultsInput,
 	) {
 		this.slide = {
 			id: `slide${slideNumber}`,
@@ -131,7 +136,7 @@ export class SlideBuilder {
 
 	/** Add a shape to the slide. */
 	addShape(shapeType: string, options?: ShapeOptions): this {
-		this.slide.elements.push(createShapeElement(shapeType, options));
+		this.slide.elements.push(createShapeElement(shapeType, options, this.shapeDefaults));
 		return this;
 	}
 
@@ -181,13 +186,15 @@ export class SlideBuilder {
 	setBackground(bg: BackgroundInput): this {
 		switch (bg.type) {
 			case 'solid':
+				// A solid colour replaces a gradient set before, which would
+				// otherwise paint (and save) over it.
 				this.slide.backgroundColor = bg.color;
+				delete this.slide.backgroundGradient;
+				delete this.slide.backgroundGradientFill;
 				break;
-			case 'gradient': {
-				const stops = bg.stops.map((s) => `${s.color} ${Math.round(s.position * 100)}%`).join(', ');
-				this.slide.backgroundGradient = `linear-gradient(${bg.angle ?? 180}deg, ${stops})`;
+			case 'gradient':
+				Object.assign(this.slide, mapBackgroundGradientInput(bg));
 				break;
-			}
 			case 'image':
 				this.slide.backgroundImage = bg.source;
 				break;

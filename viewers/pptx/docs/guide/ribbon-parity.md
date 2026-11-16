@@ -5,6 +5,11 @@ This page records an audit of the Home, Insert, Draw and Design tabs against Mic
 pixel parity: icons, tooltips and several galleries still differ, and the gap table says which.
 It is a point-in-time audit (October 2026): the "Not fixed" rows are findings from then, not a live status.
 
+Reconciled 2026-10-26: current chart/SmartArt controls and implementation evidence are tracked in
+the [shared delivery ledger](https://github.com/ChristopherVR/ooxml/blob/main/docs/office-shared-parity-delivery.md).
+Missing dedicated ribbon placement must be distinguished from commands already available through
+the shared Format pane, inspector or SmartArt text pane.
+
 Evidence lives in `/assets/ribbon-parity/<tab>/`:
 
 - `powerpoint.png`: PowerPoint, captured from a throwaway presentation (nothing saved).
@@ -83,15 +88,15 @@ Severity: H = obvious at a glance, M = noticeable, L = detail.
 
 ### Insert
 
-| Gap vs PowerPoint                                                                                                   | Sev | Status       | Notes / next step                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------- | --- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Compact 24px rows                                                                                                   | H   | Fixed        | Large 66px tiles, chevron under dropdown commands                                                                                                                                                |
-| Shape and Chart pickers were native selects beside a button                                                         | H   | Fixed        | Shapes (8-column glyph grid) and Chart (list) galleries; a pick stages then inserts, as Office does                                                                                              |
-| Chart before SmartArt                                                                                               | L   | Fixed        | SmartArt, then Chart                                                                                                                                                                             |
-| Missing groups: Slides (New Slide), Camera, Comments                                                                | M   | Fixed        | Twelve groups in Office order. New Slide (split, layout gallery) and Comment are wired in all five bindings; Reuse Slides, Cameo, Forms and Add-ins are listed disabled with an honest ScreenTip |
-| Missing commands: Screenshot, Photo Album, Icons, 3D Models, Zoom, WordArt, Object, Symbol, Audio, Screen Recording | M   | Partly fixed | Date & Time, Slide Number and Audio (file picker) work; the others are disabled until the editor has a feature behind them                                                                       |
-| Labels: Pictures, Link, Video and Audio                                                                             | L   | Fixed        | Pictures, Table, Video and Audio open dropdowns like Office (This Device works; stock and online sources are disabled)                                                                           |
-| Freeform: Shape and Curve stack (not in Office)                                                                     | L   | Kept         | Viewer-specific                                                                                                                                                                                  |
+| Gap vs PowerPoint                                                                                                   | Sev | Status    | Notes / next step                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------- | --- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Compact 24px rows                                                                                                   | H   | Fixed     | Large 66px tiles, chevron under dropdown commands                                                                                                                                                                                                                 |
+| Shape and Chart pickers were native selects beside a button                                                         | H   | Fixed     | Shapes (8-column glyph grid) and Chart (list) galleries; a pick stages then inserts, as Office does                                                                                                                                                               |
+| Chart before SmartArt                                                                                               | L   | Fixed     | SmartArt, then Chart                                                                                                                                                                                                                                              |
+| Missing groups: Slides (New Slide), Camera, Comments                                                                | M   | Fixed     | Twelve groups in Office order. New Slide (split, layout gallery) and Comment are wired in all five bindings; Reuse Slides, Cameo, Forms and Add-ins are listed disabled with an honest ScreenTip                                                                  |
+| Missing commands: Screenshot, Photo Album, Icons, 3D Models, Zoom, WordArt, Object, Symbol, Audio, Screen Recording | M   | Not fixed | Audio (This Device) works. Screenshot, Photo Album, Icons, 3D Models, Zoom, WordArt, Object, Symbol and Screen Recording are disabled until the editor has a feature behind them, and Record Audio has no command. Date & Time and Slide Number (Text group) work |
+| Labels: Pictures, Link, Video and Audio                                                                             | L   | Fixed     | Pictures, Table, Video and Audio open dropdowns like Office (This Device works; stock and online sources are disabled)                                                                                                                                            |
+| Freeform: Shape and Curve stack (not in Office)                                                                     | L   | Kept      | Viewer-specific                                                                                                                                                                                                                                                   |
 
 ### Draw
 
@@ -104,14 +109,14 @@ Severity: H = obvious at a glance, M = noticeable, L = detail.
 
 ### Design
 
-| Gap vs PowerPoint                                    | Sev | Status | Notes / next step                                                                                                                                                                    |
-| ---------------------------------------------------- | --- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Compact commands                                     | H   | Fixed  | Large Browse Themes, Edit Theme, Slide Size, Format Background                                                                                                                       |
-| Variants Colors and Fonts as bordered pills in a row | M   | Fixed  | Borderless small dropdowns stacked in a column                                                                                                                                       |
-| Inline theme gallery (thumbnails, scroll, more)      | H   | Partly | Four inline tiles and the More dropdown over the ten built-in themes; a pick applies colours, fonts and name. No live preview on hover (the shared gallery has no hover event)       |
-| Variants gallery                                     | M   | Fixed  | Four variants computed from the theme colours (original, light and dark inverted, accents shifted by two and by four)                                                                |
-| Variants: Colors, Fonts, Effects, Background Styles  | M   | Partly | Colors and Fonts apply. Effects and Background Styles are listed disabled with a reason (no engine yet). They are sibling dropdowns beside the Variants gallery, not nested submenus |
-| Designer                                             | M   | Fixed  | Listed disabled: Design Ideas needs an online service the viewer does not have                                                                                                       |
+| Gap vs PowerPoint                                    | Sev | Status        | Notes / next step                                                                                                                                                                                |
+| ---------------------------------------------------- | --- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Compact commands                                     | H   | Fixed         | Large Browse Themes, Edit Theme, Slide Size, Format Background                                                                                                                                   |
+| Variants Colors and Fonts as bordered pills in a row | M   | Fixed         | Borderless small dropdowns stacked in a column                                                                                                                                                   |
+| Inline theme gallery (thumbnails, scroll, more)      | H   | Partly        | Four inline tiles and the More dropdown over the ten built-in themes; a pick applies colours, fonts and name. No live preview on hover (the shared gallery has no hover event)                   |
+| Variants gallery                                     | M   | Fixed         | Four variants computed from the theme colours (original, light and dark inverted, accents shifted by two and by four)                                                                            |
+| Variants: Colors, Fonts, Effects, Background Styles  | M   | Fixed         | Colors, Fonts, Effects and Background Styles all apply (`theme-effects-gallery.ts`, `theme-backgrounds-gallery.ts`). They are sibling dropdowns beside the Variants gallery, not nested submenus |
+| Designer                                             | M   | Not supported | Listed disabled: Design Ideas needs an online service the viewer does not have                                                                                                                   |
 
 ## Tests
 

@@ -4,22 +4,30 @@ Every framework adapter wraps the same `<docx-editor>` custom element. The adapt
 
 ## Attributes and properties
 
-| Property         | Attribute         | Description                                                                                                                       |
-| ---------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `documentModel`  |                   | The `DocumentModel` shown. Assigning it is an external replacement, not an edit event.                                            |
-| `readOnly`       | `read-only`       | Blocks local edits. Remote collaboration batches still apply.                                                                     |
-| `locale`         | `locale`          | Interface language: `en`, `fr`, `de`, `es` or `zh-CN`. Document content is never translated.                                      |
-| `fileName`       | `file-name`       | Name of the open document (default `Document1.docx`).                                                                             |
-| `reviewAuthor`   | `review-author`   | Author recorded on tracked changes and comments (default `Author`).                                                               |
-| `theme`          | `theme`           | `light`, `dark` or `auto`. See [theming](/theming).                                                                               |
-| `themeColors`    |                   | Partial token overrides applied as `--dve-*` custom properties.                                                                   |
-| `showThumbnails` | `show-thumbnails` | Left rail of page thumbnails (Print Layout only).                                                                                 |
-| `showToolbar`    | `show-toolbar`    | `false` hides the ribbon; the title bar and status bar remain.                                                                    |
-| `hiddenActions`  |                   | Ribbon controls to hide by stable id; see the table in [bindings](/bindings).                                                     |
-| `ribbonAddIns`   |                   | Tabs the host adds after the built-in ones; see [bindings](/bindings#ribbon-add-in-tabs).                                         |
-| `collaboration`  |                   | Declarative collaboration (`DocxCollaborationOptions` or `null`); see [collaboration](/collaboration#the-collaboration-property). |
-| `customization`  |                   | Capabilities, host File tab pages and host menu commands; see [Customization](#customization).                                    |
-| `dirty` (read)   |                   | True after an edit, false after save, load or `markClean()`.                                                                      |
+| Property                    | Attribute         | Description                                                                                                                                                                                           |
+| --------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `documentModel`             |                   | The `DocumentModel` shown. Assigning it is an external replacement, not an edit event.                                                                                                                |
+| `readOnly`                  | `read-only`       | Blocks local edits. Remote collaboration batches still apply.                                                                                                                                         |
+| `locale`                    | `locale`          | Interface language: `en`, `fr`, `de`, `es` or `zh-CN`. Document content is never translated.                                                                                                          |
+| `fileName`                  | `file-name`       | Name of the open document (default `Document1.docx`).                                                                                                                                                 |
+| `reviewAuthor`              | `review-author`   | Author recorded on tracked changes and comments (default `Author`).                                                                                                                                   |
+| `theme`                     | `theme`           | `light`, `dark` or `auto`. See [theming](/theming).                                                                                                                                                   |
+| `themeColors`               |                   | Partial token overrides applied as `--dve-*` custom properties.                                                                                                                                       |
+| `showThumbnails`            | `show-thumbnails` | Left rail of page thumbnails (Print Layout only).                                                                                                                                                     |
+| `readAloud`                 |                   | Read Aloud options. `stopOnEdit` (default `false`) also stops playback when the document is edited; replacing, loading or unmounting always stops it.                                                 |
+| `showToolbar`               | `show-toolbar`    | `false` hides the ribbon; the title bar and status bar remain.                                                                                                                                        |
+| `hiddenActions`             |                   | Ribbon controls to hide by stable id; see the table in [bindings](/bindings).                                                                                                                         |
+| `ribbonAddIns`              |                   | Tabs the host adds after the built-in ones; see [bindings](/bindings#ribbon-add-in-tabs).                                                                                                             |
+| `collaboration`             |                   | Declarative collaboration (`DocxCollaborationOptions` or `null`); see [collaboration](/collaboration#the-collaboration-property).                                                                     |
+| `customization`             |                   | Capabilities, host File tab pages and host menu commands; see [Customization](#customization).                                                                                                        |
+| `surfaceOnly`               |                   | Mounts only the document and its editing surface. Choose it before the element connects.                                                                                                              |
+| `surfaceActions`            |                   | Host dialogs for surface mode: `onOpenHyperlinkDialog`, `onOpenFindReplace` and `onOpenImagePicker`.                                                                                                  |
+| `googleFonts`               |                   | Webfonts for document fonts that are neither installed nor embedded. Unset follows File > Options > Trust Center (off until turned on); `false` turns them off; `{ baseUrl }` sets the CSS2 endpoint. |
+| `storage`                   |                   | Host-owned storage for Save, Save As and Open; see [Host-owned storage](#host-owned-storage).                                                                                                         |
+| `fileProviders`             |                   | Cloud places for File > Open; see [Cloud places in File > Open](#cloud-places-in-file-open).                                                                                                          |
+| `loading` (read)            |                   | True while a document loads.                                                                                                                                                                          |
+| `collaborationState` (read) |                   | The collaboration room: whether it is active, its room id, status, sync state and people.                                                                                                             |
+| `dirty` (read)              |                   | True after an edit, false after save, load or `markClean()`.                                                                                                                                          |     |
 
 ## Customization
 
@@ -57,20 +65,24 @@ editor.customization = {
 
 ## Methods
 
-| Method                                                | Description                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `load(bytes)`                                         | Load DOCX or legacy DOC bytes. Rejects and emits `document-error` on failure.  |
-| `save()`                                              | Resolves to a `Blob` of the serialized document.                               |
-| `saveBytes()`                                         | Resolves to the raw `Uint8Array`.                                              |
-| `download(fileName?)`                                 | Saves and starts a browser download.                                           |
-| `markClean()`                                         | Clears the dirty flag after the host persisted the document.                   |
-| `startCollaboration(config)`                          | Join a collaboration session; see [collaboration](/collaboration).             |
-| `startYjsCollaboration(session, options)`             | Join a synchronized Yjs room with its matching source package.                 |
-| `reconnectCollaboration()`, `resyncCollaboration()`   | Recover the Yjs connection or request provider state exchange.                 |
-| `getPendingCollaboration()`                           | The pending step batch, or `null`.                                             |
-| `receiveCollaboration(batch)`                         | Apply an accepted batch from the authority.                                    |
-| `stopCollaboration(discardPending?)`                  | Leave the session; pending edits must be acknowledged or explicitly discarded. |
-| `publishPresence`, `receivePresence`, `leavePresence` | Transient presence channel; see [collaboration](/collaboration#presence).      |
+| Method                                                          | Description                                                                                                                           |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `load(bytes)`                                                   | Load DOCX or legacy DOC bytes. Rejects and emits `document-error` on failure.                                                         |
+| `save()`                                                        | Resolves to a `Blob` of the serialized document.                                                                                      |
+| `saveBytes()`                                                   | Resolves to the raw `Uint8Array`.                                                                                                     |
+| `download(fileName?)`                                           | Saves and starts a browser download.                                                                                                  |
+| `markClean()`                                                   | Clears the dirty flag after the host persisted the document.                                                                          |
+| `setLoadedDocument(session)`                                    | Mounts a `LoadedDocument` already parsed by `loadDocument`.                                                                           |
+| `openCloudFile(file)`                                           | Opens a file from a `CloudFileProvider`, as File > Open > OneDrive does.                                                              |
+| `getToolbarProps()`, `getNavigationProps()`, `getStatusProps()` | State and callbacks for host-built toolbar, page and status controls.                                                                 |
+| `subscribeEditorState(listener)`                                | Calls `listener` on selection and formatting changes, including ones that do not dirty the document. Returns an unsubscribe function. |
+| `startCollaboration(config)`                                    | Join a collaboration session; see [collaboration](/collaboration).                                                                    |
+| `startYjsCollaboration(session, options)`                       | Join a synchronized Yjs room with its matching source package.                                                                        |
+| `reconnectCollaboration()`, `resyncCollaboration()`             | Recover the Yjs connection or request provider state exchange.                                                                        |
+| `getPendingCollaboration()`                                     | The pending step batch, or `null`.                                                                                                    |
+| `receiveCollaboration(batch)`                                   | Apply an accepted batch from the authority.                                                                                           |
+| `stopCollaboration(discardPending?)`                            | Leave the session; pending edits must be acknowledged or explicitly discarded.                                                        |
+| `publishPresence`, `receivePresence`, `leavePresence`           | Transient presence channel; see [collaboration](/collaboration#presence).                                                             |
 
 ## Events
 
@@ -95,6 +107,20 @@ All events bubble and are composed, so they cross the shadow boundary.
 The package exports the typed event map (`DocxEditorEventMap`) and the runtime list `DOCX_EDITOR_EVENTS`.
 
 The framework bindings forward the props `fileName`, `reviewAuthor` and `themeColors`, and the events `file-command`, `document-warning`, `readonly-change`, `ribbon-action` and `ribbon-customize`, under their framework names (for example `onFileCommand`, `fileCommand` and `onfilecommand`). The table is in [framework bindings](/bindings#binding-props-and-events).
+
+## Shadow parts
+
+The title bar (file name, save state, quick access and "Tell me") is the shadow part `title-bar`.
+A host that draws its own document bar hides it with `docx-editor::part(title-bar) { display: none; }`;
+the ribbon and the status bar stay.
+
+## Cloud places in File > Open
+
+`fileProviders` (a property of the element and a prop of every binding) takes
+`CloudFileProvider`s from `ooxml-core/embedding`, for example `createOneDriveFileProvider`. File >
+Open then lists "This device" and one place per provider. A file opened from a place saves through
+its own storage and is read-only when the provider says it cannot be edited; see
+[OneDrive integration](/onedrive#open-from-onedrive-in-file-open).
 
 ## Host-owned storage
 
@@ -129,3 +155,61 @@ editor.storage = {
 	},
 };
 ```
+
+## Read Aloud {#read-aloud}
+
+The building-blocks hook (`useViewerBuildingBlocks`) puts five Read Aloud fields on `toolbarProps`.
+They are not element properties or events. They use the editor's own implementation (the browser's
+speech synthesis; nothing is sent anywhere), and the [building-blocks guide](/building-blocks#read-aloud)
+describes how they behave.
+
+| Field             | Type                     | Behaviour                                                                                                                                                    |
+| ----------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `canReadAloud`    | `boolean`                | True when a document is on screen and the browser can speak. Read-only documents count.                                                                      |
+| `readingAloud`    | `boolean`                | True only in the editor that owns the voice. Another editor reading leaves it false.                                                                         |
+| `readAloudIssue`  | `ReadAloudIssue \| null` | The last problem: `'unsupported'` while the browser has no speech synthesis, `'empty'` or `'error'`. `null` when there is none.                              |
+| `onReadAloud`     | `() => ReadAloudStart`   | Reads the selection, or from the caret to the end when nothing is selected. Restarts if already reading. Returns `'started'`, or the reason nothing started. |
+| `onStopReadAloud` | `() => boolean`          | Stops this editor's playback. Returns whether it was playing.                                                                                                |
+
+The codes are plain string unions. The library supplies the codes only; the host words the message.
+
+```ts
+type ReadAloudIssue = 'unsupported' | 'empty' | 'error';
+type ReadAloudStart = 'started' | ReadAloudIssue;
+```
+
+`'error'` means the voice failed. A cancelled or interrupted utterance is not reported as an error.
+
+A React host button that toggles reading and words the empty case:
+
+```tsx
+import { DocumentCanvas, useViewerBuildingBlocks } from 'docx-react-viewer';
+
+function EmbeddedWord({ documentModel }) {
+	const { canvasProps, toolbarProps } = useViewerBuildingBlocks({ documentModel });
+	return (
+		<>
+			{toolbarProps && toolbarProps.readAloudIssue !== 'unsupported' && (
+				<>
+					<button
+						disabled={!toolbarProps.canReadAloud}
+						aria-pressed={toolbarProps.readingAloud}
+						onClick={() =>
+							toolbarProps.readingAloud
+								? toolbarProps.onStopReadAloud()
+								: toolbarProps.onReadAloud()
+						}
+					>
+						{toolbarProps.readingAloud ? 'Stop reading' : 'Read aloud'}
+					</button>
+					{toolbarProps.readAloudIssue === 'empty' && <span role="status">Nothing to read.</span>}
+				</>
+			)}
+			<DocumentCanvas {...canvasProps} />
+		</>
+	);
+}
+```
+
+Playback stops when the document is replaced or reloaded and when the editor unmounts; an ordinary edit stops it only with `readAloud: { stopOnEdit: true }`. The
+optional `Toolbar` draws its own "Read aloud" toggle from the same fields.

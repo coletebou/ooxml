@@ -20,12 +20,41 @@ import type {
 } from '../../types/chart';
 import type { PptxThemeColorRef } from '../../types/color-ref';
 import type { StrokeDashType, ConnectorArrowType } from '../../types/common';
+import type { CustomGeometrySegment } from '../../types/geometry';
 import type { PptxTransitionType } from '../../types/transition';
 import type { ChartGradientInput } from './chart-gradient-input';
+import type { ChartContentInput, ChartSeriesContentInput } from './chart-content-input';
 import type { ChartAreaFormatInput } from './chart-layout-input';
 import type { ChartAxisEdit, PptxChartAxisType } from './chart-operations';
+import type { PresentationAppPropertiesInput } from './presentation-app-properties';
+import type {
+	GlowInput,
+	InnerShadowInput,
+	LineEndInput,
+	PictureTileInput,
+	ReflectionInput,
+	RelativeRectInput,
+} from './shape-style-input-types';
 
 export type { ChartGradientInput, ChartGradientStopInput } from './chart-gradient-input';
+export type { PresentationAppPropertiesInput } from './presentation-app-properties';
+export type {
+	GlowInput,
+	InnerShadowInput,
+	LineEndInput,
+	PictureTileInput,
+	ReflectionInput,
+	RelativeRectInput,
+} from './shape-style-input-types';
+export type {
+	ChartComboSeriesType,
+	ChartDataLabelsInput,
+	ChartDisplayBlanksAs,
+	ChartFontInput,
+	ChartSeriesLineInput,
+	ChartSeriesMarkerInput,
+	ChartTitleRunInput,
+} from './chart-content-input';
 
 // ---------------------------------------------------------------------------
 // Position & layout
@@ -70,7 +99,7 @@ export type FillInput =
 	| {
 			type: 'solid';
 			color: string;
-			opacity?: number;
+			opacity?: number | undefined;
 			/**
 			 * A theme colour to use instead of a plain hex. When set, the shape
 			 * saves as `<a:schemeClr>` (e.g. `{ scheme: 'accent1', lumMod: 0.8 }`
@@ -89,21 +118,79 @@ export type FillInput =
 			 * what lands in `ShapeStyle.fillGradientAngle` and what is written back
 			 * to the file, NOT a CSS `linear-gradient()` angle.
 			 */
-			angle?: number;
+			angle?: number | undefined;
 			gradientType?: 'linear' | 'radial';
-			stops: Array<{ color: string; position: number; opacity?: number }>;
+			/**
+			 * A path gradient (`a:path/@path`) instead of a linear one. Setting it
+			 * makes the gradient radial; `'circle'` is what `gradientType: 'radial'`
+			 * alone gives.
+			 */
+			path?: 'circle' | 'rect' | 'shape';
+			/** Where a path gradient reaches its last stop (`a:fillToRect`). */
+			focus?: RelativeRectInput;
+			/** The rectangle one gradient tile occupies (`a:tileRect`). */
+			tile?: RelativeRectInput;
+			/** Whether a linear gradient scales with the shape (`a:lin/@scaled`). */
+			scaled?: boolean;
+			/** Whether the gradient rotates with the shape (`@rotWithShape`). */
+			rotWithShape?: boolean;
+			stops: Array<{ color: string; position: number; opacity?: number | undefined }>;
 	  }
-	| { type: 'pattern'; preset: string; foreground?: string; background?: string }
-	| { type: 'image'; url: string; mode?: 'stretch' | 'tile' }
+	| {
+			type: 'pattern';
+			preset: string;
+			/** Pattern colour (`a:fgClr`). */
+			foreground?: string;
+			/** Colour behind the pattern (`a:bgClr`). */
+			background?: string;
+	  }
+	| {
+			type: 'image';
+			/** The picture as a data URL (`data:image/png;base64,...`). */
+			url: string;
+			/**
+			 * Stretch the picture over the shape (the default) or tile it.
+			 * `tile` alone implies `'tile'`.
+			 */
+			mode?: 'stretch' | 'tile';
+			/** How the tiles repeat (`a:tile`); only with `mode: 'tile'`. */
+			tile?: PictureTileInput;
+			/**
+			 * Where the stretched picture lands, as insets from each edge of the
+			 * shape (`a:stretch/a:fillRect`, -10 to 10); a negative inset pushes the
+			 * picture past that edge. Only with `mode: 'stretch'`.
+			 */
+			fillRect?: RelativeRectInput;
+	  }
 	| { type: 'none' };
 
 export interface StrokeInput {
+	/** Outline colour; `'transparent'` writes an explicit empty outline (`<a:ln><a:noFill/></a:ln>`). */
 	color?: string;
 	width?: number;
-	dash?: StrokeDashType;
+	/**
+	 * A preset dash, or an exact pattern of dash and gap lengths in px
+	 * (`[dash, gap, dash, gap, ...]`, repeated once when odd, as in SVG's
+	 * `stroke-dasharray`), written as `a:custDash` relative to `width`.
+	 */
+	dash?: StrokeDashType | number[];
 	opacity?: number;
 	join?: 'round' | 'bevel' | 'miter';
+	/**
+	 * Miter limit as a ratio of the line width (e.g. 8). Implies `join: 'miter'`
+	 * when `join` is omitted; ignored with `'round'` or `'bevel'`, which have no
+	 * limit in DrawingML.
+	 */
+	miterLimit?: number;
 	cap?: 'flat' | 'rnd' | 'sq';
+	/** Compound line type (`a:ln/@cmpd`). */
+	compound?: 'sng' | 'dbl' | 'thickThin' | 'thinThick' | 'tri';
+	/** Pen alignment (`a:ln/@algn`): centred on the outline or inside it. */
+	align?: 'ctr' | 'in';
+	/** Decoration on the start of the outline (`a:headEnd`). */
+	headEnd?: LineEndInput;
+	/** Decoration on the end of the outline (`a:tailEnd`). */
+	tailEnd?: LineEndInput;
 	/** A theme colour for the outline; see {@link FillInput}'s `themeColorRef`. */
 	themeColorRef?: PptxThemeColorRef;
 }
@@ -116,25 +203,45 @@ export interface ShadowInput {
 	opacity?: number;
 }
 
+/**
+ * Where a click goes: an address (`a:hlinkClick` with an external
+ * relationship) or a slide of this deck by 0-based position (`action=
+ * "ppaction://hlinksldjump"` with a `…/relationships/slide` relationship,
+ * added on save). An empty `url` or a `slideIndex` that is not a whole
+ * number from 0 throws a `RangeError`; an index past the last saved slide is
+ * written without a target and reported as `SAVE_SLIDE_JUMP_TARGET_MISSING`
+ * in `getCompatibilityWarnings()`.
+ */
+export type LinkInput =
+	| { url: string; tooltip?: string }
+	| { slideIndex: number; tooltip?: string };
+
 // ---------------------------------------------------------------------------
 // Text input
 // ---------------------------------------------------------------------------
 
 export interface TextStyleInput {
-	fontSize?: number;
-	fontFamily?: string;
-	bold?: boolean;
-	italic?: boolean;
-	underline?: boolean;
-	strikethrough?: boolean;
-	color?: string;
+	fontSize?: number | undefined;
+	fontFamily?: string | undefined;
+	bold?: boolean | undefined;
+	italic?: boolean | undefined;
+	underline?: boolean | undefined;
+	strikethrough?: boolean | undefined;
+	color?: string | undefined;
 	/** A theme colour for the run; see {@link FillInput}'s `themeColorRef`. */
 	themeColorRef?: PptxThemeColorRef;
-	alignment?: 'left' | 'center' | 'right' | 'justify';
-	verticalAlignment?: 'top' | 'middle' | 'bottom';
-	lineSpacing?: number;
+	alignment?: 'left' | 'center' | 'right' | 'justify' | undefined;
+	verticalAlignment?: 'top' | 'middle' | 'bottom' | undefined;
+	lineSpacing?: number | undefined;
 	spaceBefore?: number;
 	spaceAfter?: number;
+	/**
+	 * Extra space between characters in px (`a:rPr/@spc`, written in
+	 * hundredths of a point); negative condenses, `0` is the default spacing.
+	 */
+	characterSpacing?: number;
+	/** A hyperlink on the run (`a:rPr/a:hlinkClick`). */
+	link?: LinkInput;
 }
 
 export interface TextSegmentInput {
@@ -142,7 +249,39 @@ export interface TextSegmentInput {
 	style?: Partial<TextStyleInput>;
 }
 
-export interface TextOptions extends Partial<ElementPosition> {
+/**
+ * Mirroring of an element (`a:xfrm/@flipH`, `@flipV`), applied before its
+ * rotation. Omitted or `false`: not mirrored.
+ */
+export interface ElementFlipInput {
+	/** Mirror left to right (`a:xfrm/@flipH`). */
+	flipHorizontal?: boolean;
+	/** Mirror top to bottom (`a:xfrm/@flipV`); not the same as a 180 degree rotation. */
+	flipVertical?: boolean;
+}
+
+/**
+ * Text body options of a new text box or shape (`a:bodyPr`). Each one is
+ * written only when given; the deck's defaults apply otherwise.
+ */
+export interface TextBodyInput {
+	/**
+	 * Space between the frame and the text, in px (`lIns` / `tIns` / `rIns` /
+	 * `bIns`). A side that is omitted keeps the default (0.1 in left and right,
+	 * 0.05 in top and bottom). A value that is not finite throws a `RangeError`.
+	 */
+	insets?: { left?: number; top?: number; right?: number; bottom?: number };
+	/**
+	 * What happens when the text overflows: `'shrinkText'` lets PowerPoint
+	 * shrink the text (`a:normAutofit`), `'resizeShape'` grows the shape to fit
+	 * (`a:spAutoFit`), `'none'` does neither (`a:noAutofit`).
+	 */
+	autoFit?: 'none' | 'shrinkText' | 'resizeShape';
+	/** Whether lines wrap at the frame's width (`wrap="square"`) or never (`wrap="none"`). */
+	wrap?: boolean;
+}
+
+export interface TextOptions extends Partial<ElementPosition>, ElementFlipInput, TextBodyInput {
 	fontSize?: number;
 	fontFamily?: string;
 	bold?: boolean;
@@ -156,34 +295,101 @@ export interface TextOptions extends Partial<ElementPosition> {
 	fill?: FillInput;
 	stroke?: StrokeInput;
 	shadow?: ShadowInput;
+	innerShadow?: InnerShadowInput;
+	glow?: GlowInput;
+	/** Soft-edge radius in px (`a:softEdge`). */
+	softEdge?: number;
+	reflection?: ReflectionInput;
 	opacity?: number;
+	/** What clicking the text box does (`p:cNvPr/a:hlinkClick`). */
+	link?: LinkInput;
 }
 
 // ---------------------------------------------------------------------------
 // Shape input
 // ---------------------------------------------------------------------------
 
-export interface ShapeOptions extends Partial<ElementPosition> {
+/**
+ * One `a:path` of a custom geometry. Its `width` x `height` box is stretched
+ * over the shape (`a:path/@w`, `@h`). Give `d` (SVG path data: any command,
+ * absolute or relative, arcs written as cubic Beziers) or `segments`, not
+ * both. A path starts with a moveto (`M`, or a `moveTo` segment). Path data
+ * that cannot be read throws a `SyntaxError`; an empty path, segments that do
+ * not start with a `moveTo`, a box that is not positive, or a coordinate that
+ * is not finite throws a `RangeError`.
+ */
+export interface CustomPathInput {
+	d?: string;
+	segments?: CustomGeometrySegment[];
+	width: number;
+	height: number;
+	/** How the path is filled (`a:path/@fill`); `'none'` for an outline-only path. Default: filled. */
+	fill?: 'norm' | 'lighten' | 'lightenLess' | 'darken' | 'darkenLess' | 'none';
+	/** Whether the path is stroked (`a:path/@stroke`). Default: stroked. */
+	stroke?: boolean;
+}
+
+export interface ShapeOptions extends Partial<ElementPosition>, ElementFlipInput, TextBodyInput {
 	fill?: FillInput;
 	stroke?: StrokeInput;
-	text?: string;
+	/**
+	 * Text inside the shape: a plain string, or rich segments that are written
+	 * as given, each run with its own style on top of {@link textStyle}.
+	 */
+	text?: string | TextSegmentInput[];
 	textStyle?: Partial<TextStyleInput>;
 	adjustments?: Record<string, number>;
 	shadow?: ShadowInput;
+	innerShadow?: InnerShadowInput;
+	glow?: GlowInput;
+	/** Soft-edge radius in px (`a:softEdge`). */
+	softEdge?: number;
+	reflection?: ReflectionInput;
 	opacity?: number;
+	/** What clicking the shape does (`p:cNvPr/a:hlinkClick`). */
+	link?: LinkInput;
+	/**
+	 * A custom geometry (`a:custGeom`) instead of the preset: one `a:path` per
+	 * entry. The shape type argument is then not used. An empty list is no
+	 * custom geometry.
+	 */
+	paths?: CustomPathInput[] | undefined;
 }
 
 // ---------------------------------------------------------------------------
 // Image input
 // ---------------------------------------------------------------------------
 
-export interface ImageOptions extends Partial<ElementPosition> {
+export interface ImageOptions extends Partial<ElementPosition>, ElementFlipInput {
 	altText?: string;
 	cropLeft?: number;
 	cropTop?: number;
 	cropRight?: number;
 	cropBottom?: number;
+	/**
+	 * Opacity from 0 (transparent) to 1 (opaque, the default), saved as the
+	 * picture's transparency (`a:blip/a:alphaModFix`).
+	 */
 	opacity?: number;
+	/** Tile the picture inside its frame (`a:tile`) instead of stretching it. */
+	tile?: PictureTileInput;
+	/**
+	 * Where the stretched picture lands inside its frame, as insets from each
+	 * edge (`a:stretch/a:fillRect`, -10 to 10). Not together with `tile`.
+	 */
+	fillRect?: RelativeRectInput;
+	/** What clicking the picture does (`p:cNvPr/a:hlinkClick`). */
+	link?: LinkInput;
+	/**
+	 * For an SVG source: the raster (data URL) that readers without SVG
+	 * support show. The SVG is saved as the blip's `asvg:svgBlip` extension;
+	 * without a fallback the raster is a 1x1 transparent PNG.
+	 */
+	svgFallback?: string;
+	/** Brightness change in percent, -100 to 100 (`a:blip/a:lum/@bright`). */
+	brightness?: number;
+	/** Contrast change in percent, -100 to 100 (`a:blip/a:lum/@contrast`). */
+	contrast?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,8 +398,27 @@ export interface ImageOptions extends Partial<ElementPosition> {
 
 export interface TableInput {
 	rows: TableRowInput[];
+	/**
+	 * Column widths, relative to each other (fractions, or px that add up to
+	 * the table's width), one per column. Omitted: equal columns. Widths that
+	 * are not one finite value of 0 or more per column, or that add up to 0,
+	 * throw a `RangeError`.
+	 */
 	columnWidths?: number[];
+	/**
+	 * Table style id (`a:tableStyleId`). Omitted: PowerPoint's default
+	 * (Medium Style 2 - Accent 1). `'none'` (or `''`): no table style, so only
+	 * the cells' own formatting shows.
+	 */
 	style?: string;
+	/**
+	 * Opt-in: `rows[].cells` list only the real cells, and the slots that a
+	 * `gridSpan` / `rowSpan` covers are added as empty `hMerge` / `vMerge`
+	 * cells. Without it the cells are taken as given, one per grid slot. A
+	 * span that is not a whole number from 1, reaches past the last row or
+	 * overlaps another merge throws a `RangeError`.
+	 */
+	fillMergedCells?: boolean;
 	bandRows?: boolean;
 	bandColumns?: boolean;
 	firstRow?: boolean;
@@ -208,11 +433,60 @@ export interface TableRowInput {
 }
 
 export interface TableCellInput {
-	text: string;
+	/** Plain text of the cell; may be left out when {@link runs} gives the text. */
+	text?: string;
+	/**
+	 * Cell text style. Its `fontSize` is in POINTS (cells always took points),
+	 * unlike every other SDK text input, which takes px; inside {@link runs}
+	 * `fontSize` is px as in `addText`.
+	 */
 	style?: Partial<TextStyleInput>;
+	/**
+	 * Rich text written as given: one `a:r` per segment, each with its own
+	 * style on top of {@link style} (font, size in px, strike, link or slide
+	 * jump); a `\n` in a segment's text starts a new paragraph. An empty list
+	 * is no runs. Giving both `text` and `runs` whose text differs throws a
+	 * `RangeError`.
+	 */
+	runs?: TextSegmentInput[];
+	/**
+	 * The cell's own fill, written in `a:tcPr` over the table style's. Solid
+	 * (no opacity below 1), gradient (no `tile`, `scaled: false` or
+	 * `rotWithShape`), pattern and `none` (an explicit `a:noFill`). A fill a
+	 * cell cannot carry, such as an image, throws a `RangeError`.
+	 */
 	fill?: FillInput;
+	/** The cell's own edge lines, written over the table style's. */
+	borders?: TableCellBordersInput;
 	gridSpan?: number;
 	rowSpan?: number;
+}
+
+/**
+ * A table cell's edge lines: `all` for the four edges, and each edge on its
+ * own (`a:lnT` / `a:lnR` / `a:lnB` / `a:lnL`), which overrides `all`.
+ */
+export interface TableCellBordersInput {
+	all?: TableCellBorderInput;
+	top?: TableCellBorderInput;
+	right?: TableCellBorderInput;
+	bottom?: TableCellBorderInput;
+	left?: TableCellBorderInput;
+}
+
+/** One edge line of a table cell. */
+export interface TableCellBorderInput {
+	color?: string;
+	/** Line width in px. */
+	width?: number;
+	/**
+	 * A preset dash, or an exact pattern of dash and gap lengths in px
+	 * (`[dash, gap, dash, gap, ...]`, repeated once when odd, as in SVG's
+	 * `stroke-dasharray`), written as `a:custDash` relative to `width` (1 px
+	 * when `width` is omitted or 0). An empty pattern, or a length that is
+	 * not a finite number above 0, throws a `RangeError`.
+	 */
+	dash?: Exclude<StrokeDashType, 'custom'> | number[];
 }
 
 export interface TableOptions extends Partial<ElementPosition> {}
@@ -221,10 +495,12 @@ export interface TableOptions extends Partial<ElementPosition> {}
 // Chart input
 // ---------------------------------------------------------------------------
 
-export interface ChartSeriesInput {
+export interface ChartSeriesInput extends ChartSeriesContentInput {
 	name: string;
-	values: number[];
-	color?: string;
+	/** One value per category; `null` is a blank point, drawn as `ChartInput.dispBlanksAs` says. */
+	values: (number | null)[];
+	/** Series colour, a hex colour (`#RRGGBB` or `RRGGBB`). */
+	color?: string | undefined;
 	/**
 	 * Gradient fill for the whole series, written as `c:ser/c:spPr/a:gradFill`.
 	 * Takes precedence over `color`. Area-filled chart types only (bar, area,
@@ -239,7 +515,7 @@ export interface ChartSeriesInput {
 	treemapOptions?: PptxChartTreemapOptions;
 }
 
-export interface ChartInput {
+export interface ChartInput extends ChartContentInput {
 	series: ChartSeriesInput[];
 	categories: string[];
 	/** ChartEx hierarchy levels in leaf-to-root XML order. */
@@ -247,12 +523,16 @@ export interface ChartInput {
 	title?: string;
 	hasLegend?: boolean;
 	legendPosition?: 't' | 'b' | 'l' | 'r' | 'tr';
-	grouping?: 'clustered' | 'stacked' | 'percentStacked';
+	grouping?: 'clustered' | 'stacked' | 'percentStacked' | undefined;
 	/** Bar series direction (`c:barDir`): vertical columns (default) or horizontal bars. */
 	barDirection?: 'col' | 'bar';
 	/** Bar cluster gap, % of bar width (`c:gapWidth`, 0..500; default 150). Bar, bar3D, ofPie. */
 	gapWidth?: number;
-	/** Bar overlap within a cluster, % (`c:overlap`, -100..100). 2-D bar only. */
+	/**
+	 * Bar overlap within a cluster, % (`c:overlap`, -100..100). 2-D bar only. When omitted,
+	 * stacked and 100% stacked bars overlap fully (100, as PowerPoint draws them) and other bars
+	 * write none.
+	 */
 	overlap?: number;
 	/** First slice angle in degrees (`c:firstSliceAng`, 0..360). Pie, doughnut. */
 	firstSliceAngle?: number;
@@ -264,6 +544,15 @@ export interface ChartInput {
 	plotArea?: ChartAreaFormatInput;
 	/** Axis edits by axis type, as `setChartAxis` takes them (e.g. `{ valAx: { visible: false } }`). */
 	axes?: Partial<Record<PptxChartAxisType, ChartAxisEdit>>;
+	/**
+	 * Writes the chart's data to an embedded workbook (`ppt/embeddings/*.xlsx`)
+	 * that the chart reads through cell references, so PowerPoint's Edit Data
+	 * opens it; blank (`null`) values are empty cells. Classic charts only: an
+	 * extended chart type throws here, and a chart the shared chart core cannot
+	 * write with references fails the save with the reason. Default: literal
+	 * data, no workbook.
+	 */
+	embedWorkbook?: boolean;
 }
 
 export interface ChartOptions extends Partial<ElementPosition> {}
@@ -272,10 +561,13 @@ export interface ChartOptions extends Partial<ElementPosition> {}
 // Connector input
 // ---------------------------------------------------------------------------
 
-export interface ConnectorOptions extends Partial<ElementPosition> {
+export interface ConnectorOptions extends Partial<ElementPosition>, ElementFlipInput {
 	type?: 'straight' | 'bent' | 'curved';
+	/** The outline; an omitted `color` is black and an omitted `width` 1 px. */
 	stroke?: StrokeInput;
+	/** Arrow on the start; replaces `stroke.headEnd`, its size included. */
 	startArrow?: ConnectorArrowType;
+	/** Arrow on the end; replaces `stroke.tailEnd`, its size included. */
 	endArrow?: ConnectorArrowType;
 	from?: { elementId: string; site: number };
 	to?: { elementId: string; site: number };
@@ -285,7 +577,7 @@ export interface ConnectorOptions extends Partial<ElementPosition> {
 // Media input
 // ---------------------------------------------------------------------------
 
-export interface MediaOptions extends Partial<ElementPosition> {
+export interface MediaOptions extends Partial<ElementPosition>, ElementFlipInput {
 	autoPlay?: boolean;
 	loop?: boolean;
 	volume?: number;
@@ -298,7 +590,7 @@ export interface MediaOptions extends Partial<ElementPosition> {
 // Group input
 // ---------------------------------------------------------------------------
 
-export interface GroupOptions extends Partial<ElementPosition> {}
+export interface GroupOptions extends Partial<ElementPosition>, ElementFlipInput {}
 
 // ---------------------------------------------------------------------------
 // Slide-level inputs
@@ -309,13 +601,24 @@ export type BackgroundInput =
 	| {
 			type: 'gradient';
 			/**
-			 * Slide backgrounds are stored as a ready-made CSS gradient string
-			 * (`PptxSlide.backgroundGradient`), so this is a CSS
-			 * `linear-gradient()` angle: degrees clockwise from "to top"
-			 * (`90` = left to right, `180` = top to bottom). Defaults to `180`.
+			 * A CSS `linear-gradient()` angle, as the slide's CSS
+			 * `backgroundGradient` has always used: degrees clockwise from "to
+			 * top" (`90` = left to right, `180` = top to bottom). Defaults to
+			 * `180`. Saved as `a:lin/@ang` (a quarter turn less). Not with `path`.
 			 */
 			angle?: number;
-			stops: Array<{ color: string; position: number }>;
+			/**
+			 * A path gradient (`a:path/@path`) growing from `focus` outwards
+			 * instead of a linear one.
+			 */
+			path?: 'circle' | 'rect' | 'shape';
+			/** Where a path gradient starts (`a:fillToRect`). Default: the slide centre. */
+			focus?: RelativeRectInput;
+			/**
+			 * At least two stops: `color` as `#RRGGBB`, `position` 0-1, `opacity`
+			 * 0-1 (default opaque).
+			 */
+			stops: Array<{ color: string; position: number; opacity?: number | undefined }>;
 	  }
 	| { type: 'image'; source: string };
 
@@ -339,46 +642,74 @@ export interface AnimationInput {
 
 export interface PresentationOptions {
 	/** Slide width in EMU. Default: 12192000 (16:9 widescreen). */
-	width?: number;
+	width?: number | undefined;
 	/** Slide height in EMU. Default: 6858000 (16:9 widescreen). */
-	height?: number;
+	height?: number | undefined;
 	/** Theme configuration. */
-	theme?: PresentationThemeInput;
+	theme?: PresentationThemeInput | undefined;
 	/** Presentation title (stored in docProps/core.xml). */
-	title?: string;
+	title?: string | undefined;
 	/** Presentation author. */
-	creator?: string;
+	creator?: string | undefined;
 	/**
 	 * Number of blank slides to include in the initial presentation.
 	 * Default: 0 (no slides). Slides use the "Blank" layout.
 	 */
-	initialSlideCount?: number;
+	initialSlideCount?: number | undefined;
 	/**
 	 * `p:presentation/@firstSlideNum` (ECMA-376 §19.2.1.26): the number a
 	 * slide-number field shows on the first slide. Omitted when undefined, so
 	 * the spec default (`1`) applies.
 	 */
-	firstSlideNumber?: number;
+	firstSlideNumber?: number | undefined;
+	/**
+	 * Defaults for the shapes that `createSlide(...).addShape` adds. Opt-in:
+	 * without it a shape with no `fill` keeps the solid `#4472C4` fill the SDK
+	 * has always given it. Pass `{ fill: { type: 'none' } }` so that an omitted
+	 * `fill` means no fill (`a:noFill`).
+	 */
+	shapeDefaults?: ShapeDefaultsInput | undefined;
+	/**
+	 * Application properties written to `docProps/app.xml` when the package
+	 * is created. Without them the part names `pptx-viewer-sdk`, version
+	 * `1.0000`. `appVersion` takes Office's form (`16.0000`); an empty string
+	 * leaves the element out.
+	 *
+	 * Precedence: `save(slides, { appProperties })` still applies on top,
+	 * field by field. A field the save option sets wins; a field it omits
+	 * keeps the value given here.
+	 */
+	appProperties?: PresentationAppPropertiesInput | undefined;
+}
+
+/** What an omitted shape option falls back to; see {@link PresentationOptions.shapeDefaults}. */
+export interface ShapeDefaultsInput {
+	/** The fill of a shape whose options give none. Default: solid `#4472C4`. */
+	fill?: FillInput;
 }
 
 export interface PresentationThemeInput {
-	name?: string;
-	colors?: {
-		dk1?: string;
-		lt1?: string;
-		dk2?: string;
-		lt2?: string;
-		accent1?: string;
-		accent2?: string;
-		accent3?: string;
-		accent4?: string;
-		accent5?: string;
-		accent6?: string;
-		hlink?: string;
-		folHlink?: string;
-	};
-	fonts?: {
-		majorFont?: string;
-		minorFont?: string;
-	};
+	name?: string | undefined;
+	colors?:
+		| {
+				dk1?: string;
+				lt1?: string;
+				dk2?: string;
+				lt2?: string;
+				accent1?: string;
+				accent2?: string;
+				accent3?: string;
+				accent4?: string;
+				accent5?: string;
+				accent6?: string;
+				hlink?: string;
+				folHlink?: string;
+		  }
+		| undefined;
+	fonts?:
+		| {
+				majorFont?: string | undefined;
+				minorFont?: string | undefined;
+		  }
+		| undefined;
 }

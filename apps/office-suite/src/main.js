@@ -8,6 +8,7 @@ import { blankDocument, preloadEditor } from './editors.js';
 import { mountTeams, shareDocument, localDocumentId } from './teams.js';
 import { $, apps, badge, escape, notify, task, download, choose, tag, teamsApp } from './ui.js';
 import { mountThemes } from './themes.js';
+import { settings } from './settings.js';
 import { mountProfile } from './profile.js';
 import { documentDatabase } from './profile-state.js';
 import { renderLibrary, toggleFavourite } from './home.js';
@@ -17,8 +18,11 @@ import { mountDiskSearch } from './disk-search.js';
 import { mountPwa } from './pwa.js';
 import { mountResources, mountStart } from './start.js';
 import { mountShell } from './shell.js';
+import { mountDocumentBar } from './document-bar.js';
 import { icon } from './icons.js';
 import { localAttachmentId, showAttachment } from './attachments.js';
+import { mountOneDrive } from './onedrive.js';
+import { cloudSaveLabel, cloudProviderLabel } from './cloud-files.js';
 
 // Every write keeps the bytes it replaces as a version, unless the AI policy turns history off.
 const store = withVersions(
@@ -36,16 +40,59 @@ let files = [],
 	assistant;
 const origins = new Map();
 let disk;
-const sessions = new SuiteSessions(store, $('editors'), renderTabs, (command, id) =>
-	task(async () => {
+const sessions = new SuiteSessions(store, $('editors'), renderTabs, async (command, id) => {
+	try {
 		if (command === 'save') {
 			await sessions.save(id);
 			await refresh();
-			notify('Saved to this device');
-		} else if (command === 'open') $('file-input').click();
+			notify(cloudSaveLabel(await store.get(id)));
+		} else if (command === 'open') chooseOpen();
+		else if (command === 'share') await share(id);
 		else await create((await store.get(id)).kind);
-	}),
-);
+	} catch (error) {
+		notify(error);
+		throw error;
+	}
+});
+const cloud = mountOneDrive({
+	store,
+	sessions,
+	open,
+	refresh,
+	isActive: (id) => id === active,
+	showView: () => {
+		view = 'cloud';
+		renderTabs();
+		history.replaceState(null, '', '#/onedrive');
+	},
+});
+sessions.remote = cloud;
+function chooseOpen() {
+	const content = document.createElement('div');
+	content.className = 'cloud-recovery-actions';
+	for (const [label, action] of [
+		[
+			'From this device',
+			() => {
+				$('dialog').close();
+				$('file-input').click();
+			},
+		],
+		[
+			`From ${cloud.label}`,
+			() => {
+				$('dialog').close();
+				void task(cloud.showFiles);
+			},
+		],
+	]) {
+		const button = document.createElement('button');
+		button.textContent = label;
+		button.onclick = action;
+		content.append(button);
+	}
+	choose('Open a file', content);
+}
 
 async function refresh() {
 	files = await store.list();
@@ -76,6 +123,7 @@ function chooseBlank() {
 	choose('Create something new', content);
 }
 let applyShell = () => {};
+let renderDocumentBar = () => {};
 function renderTabs() {
 	document.body.dataset.view = view;
 	$('tabs').hidden = !teamsTabOpen && !chatTabOpen && !sessions.sessions.size;
@@ -90,11 +138,18 @@ function renderTabs() {
 		[...sessions.sessions.values()]
 			.map(
 				(s) =>
-					`<span class="file-tab" draggable="true" data-tab="${s.doc.id}" title="Drag to reorder, or onto a chat to attach it"><button role="tab" aria-selected="${s.doc.id === active && view === 'editor'}" data-open="${s.doc.id}">${badge(s.doc.kind)}${escape(s.doc.name)}${sessions.isDirty(s.doc.id) ? ' •' : ''}</button><button data-close="${s.doc.id}" aria-label="Close ${escape(s.doc.name)}">×</button></span>`,
+					`<span class="file-tab" draggable="true" data-tab="${s.doc.id}" title="Drag to reorder, or onto a chat to attach it"><button role="tab" aria-selected="${s.doc.id === active && view === 'editor'}" data-open="${s.doc.id}">${badge(s.doc.kind)}<span class="tab-name">${escape(s.doc.name)}</span>${sessions.isDirty(s.doc.id) ? ' •' : ''}</button><button data-close="${s.doc.id}" aria-label="Close ${escape(s.doc.name)}">×</button></span>`,
 			)
 			.join('');
-	$('save-state').textContent =
-		active && sessions.isDirty(active) ? 'Unsaved changes' : 'Saved to this device';
+	const activeSession = sessions.sessions.get(active);
+	const activeDoc = activeSession?.doc;
+	$('save').disabled = !activeSession || activeSession.cloudReadOnly;
+	$('save-state').textContent = activeSession?.cloudReadOnly
+		? `${cloudProviderLabel(activeDoc)}: read-only`
+		: cloudSaveLabel(activeDoc, active && sessions.isEdited(active));
+	$('share').textContent = activeDoc?.cloud
+		? `Share in ${cloudProviderLabel(activeDoc)}`
+		: 'Share in Teams';
 	for (const s of sessions.sessions.values()) {
 		const hide = view !== 'editor' || s.doc.id !== active;
 		// A hidden editor must not keep a full-screen layer (a Visio presentation) over the next tab.
@@ -104,6 +159,7 @@ function renderTabs() {
 	}
 	$('home').hidden = view !== 'home';
 	$('chat').hidden = view !== 'chat';
+	$('cloud-view').hidden = view !== 'cloud';
 	$('teams-host').hidden = view !== 'teams';
 	$('editor-area').hidden = view !== 'editor';
 	$('back-teams').hidden = !origins.has(active);
@@ -127,6 +183,7 @@ function renderTabs() {
 					(view === 'editor' && button.dataset.app === sessions.sessions.get(active)?.doc.kind),
 			),
 		);
+	renderDocumentBar();
 	applyShell();
 }
 /**
@@ -147,11 +204,15 @@ async function open(id, origin, { focus = false } = {}) {
 	renderTabs();
 	await refresh();
 	notify(
-		doc.parent
-			? 'Embedded document: Save updates its parent package.'
-			: origin?.remote
-				? 'Local copy of a Teams attachment. Share in Teams uploads a new copy.'
-				: 'Ready',
+		doc.cloud
+			? doc.cloud.pending
+				? `Local changes are waiting to save to ${cloudProviderLabel(doc)}.`
+				: `Connected to ${cloudProviderLabel(doc)}. Save updates the original file.`
+			: doc.parent
+				? 'Embedded document: Save updates its parent package.'
+				: origin?.remote
+					? 'Local copy of a Teams attachment. Share in Teams uploads a new copy.'
+					: 'Ready',
 	);
 	history.replaceState(null, '', `#/file/${id}`);
 	if (focus && active === id && view === 'editor' && !matchMedia('(pointer: coarse)').matches)
@@ -279,8 +340,16 @@ async function embeddings() {
 	}
 	choose('Embedded documents', content);
 }
-async function share() {
-	const doc = await sessions.save(active);
+async function share(id = active) {
+	// A connected file is shared where it lives: the link needs no save, and saving first turned
+	// Share into a sync that could stop at a conflict dialog. The dialog says when local edits are
+	// not in OneDrive yet.
+	const stored = await store.get(id);
+	if (stored?.cloud) {
+		cloud.showShare(stored, { unsaved: stored.cloud.pending || sessions.isDirty(id) });
+		return;
+	}
+	const doc = await sessions.save(id);
 	if (!teams) {
 		teams = await mountTeams($('teams-host'), store, open, refresh);
 	}
@@ -309,7 +378,7 @@ async function share() {
 }
 
 $('rail').innerHTML =
-	`<span class="nav-caption">Workspace</span><button class="ai-only" data-chat data-view="chat">${icon('spark')}<span>Chat</span></button><button data-home data-view="home" aria-current="true">${icon('home')}<span>Home</span></button><button data-library="files">${icon('folder')}<span>My files</span></button><button data-library="favourites">${icon('star')}<span>Favourites</span></button><span class="nav-caption">Apps</span><button data-teams data-view="teams">${badge('teams')}<span>Teams</span>${tag(teamsApp.tag)}</button>` +
+	`<span class="nav-caption">Workspace</span><button class="ai-only" data-chat data-view="chat">${icon('spark')}<span>Chat</span></button><button data-home data-view="home" aria-current="true">${icon('home')}<span>Home</span></button><button data-cloud data-view="cloud">${icon('folder')}<span>${escape(cloud.label)}</span></button><button data-library="files">${icon('folder')}<span>My files</span></button><button data-library="favourites">${icon('star')}<span>Favourites</span></button><span class="nav-caption">Apps</span><button data-teams data-view="teams">${badge('teams')}<span>Teams</span>${tag(teamsApp.tag)}</button>` +
 	apps
 		.map(
 			(a) =>
@@ -346,6 +415,7 @@ document.addEventListener('click', (event) => {
 	if (b.hasAttribute('data-chat')) task(() => showChat());
 	if (b.hasAttribute('data-import')) $('file-input').click();
 	if (b.hasAttribute('data-teams')) task(showTeams);
+	if (b.hasAttribute('data-cloud')) task(cloud.showFiles);
 	if (b.dataset.app) {
 		view = 'home';
 		filter = b.dataset.app;
@@ -366,7 +436,7 @@ document.addEventListener('click', (event) => {
 	// A tab keeps the focus (arrow keys move along the tab strip); a file in the list moves it in.
 	if (b.dataset.open)
 		task(() => open(b.dataset.open, undefined, { focus: b.getAttribute('role') !== 'tab' }));
-	if (b.dataset.download) task(async () => download(await sessions.save(b.dataset.download)));
+	if (b.dataset.download) task(async () => download(await sessions.export(b.dataset.download)));
 	if (b.dataset.close) task(() => fileActions.closeTabs([b.dataset.close]));
 });
 $('upload').onclick = () => $('file-input').click();
@@ -393,9 +463,9 @@ $('save').onclick = () =>
 	task(async () => {
 		await sessions.save(active);
 		await refresh();
-		notify('Saved to this device');
+		notify(cloudSaveLabel(await store.get(active)));
 	});
-$('download').onclick = () => task(async () => download(await sessions.save(active)));
+$('download').onclick = () => task(async () => download(await sessions.export(active)));
 $('embedded').onclick = () => task(embeddings);
 $('versions').onclick = () => aiDeps.showVersions(active);
 $('share').onclick = () => task(share);
@@ -444,6 +514,8 @@ $('home-ask').onsubmit = (event) => {
 	});
 };
 window.addEventListener('beforeunload', (event) => {
+	// Settings > General > "Warn me before leaving with unsaved changes".
+	if (!settings().confirmClose) return;
 	if ([...sessions.sessions.keys()].some((id) => sessions.isDirty(id))) {
 		event.preventDefault();
 		event.returnValue = '';
@@ -566,6 +638,10 @@ applyShell = mountShell(() => ({
 	documents: sessions.sessions.size,
 	teamsOpen: teamsTabOpen,
 }));
+renderDocumentBar = mountDocumentBar({
+	sessions,
+	active: () => (view === 'editor' ? active : null),
+});
 mountPwa({ idle: () => sessions.sessions.size === 0 && view === 'home' });
 mountStart();
 mountResources();

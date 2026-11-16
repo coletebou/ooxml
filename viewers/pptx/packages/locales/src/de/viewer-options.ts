@@ -154,6 +154,11 @@ export const translations = {
 	'pptx.options.advanced.printHiddenSlides': 'Ausgeblendete Folien drucken',
 	'pptx.options.advanced.printScaleToFit': 'An Papierformat anpassen',
 	'pptx.options.advanced.printFrameSlides': 'Folien einrahmen',
+	'pptx.options.advanced.pdf': 'Als PDF speichern',
+	'pptx.options.advanced.pdfIncludeHiddenSlides': 'Ausgeblendete Folien einschließen',
+	'pptx.options.advanced.pdfSlidesAsPictures': 'Folien als Bilder speichern',
+	'pptx.options.advanced.pdfSlidesAsPicturesInfo':
+		'Schreibt jede Folie als ein Bild, wie frühere Versionen dieses Viewers. Der Text in der PDF-Datei ist dann nicht auswählbar oder durchsuchbar. Lassen Sie diese Option deaktiviert, um Formen und Text als Vektorgrafik mit den eingebetteten Schriftarten zu speichern.',
 	'pptx.options.ribbon.label': 'Menüband anpassen',
 	'pptx.options.ribbon.description': 'Passen Sie das Menüband an.',
 	'pptx.options.ribbon.tabsTitle': 'Hauptregisterkarten',
@@ -222,5 +227,9 @@ export const translations = {
 	'pptx.options.trust.allowExternalContent': 'Externe Inhalte zulassen (Remotebilder und -medien)',
 	'pptx.options.trust.allowExternalContentInfo':
 		'Wenn deaktiviert, wird nur in der Datei eingebetteter Inhalt angezeigt.',
+	'pptx.options.trust.allowFontDownloads':
+		'Nicht installierte oder eingebettete Schriftarten herunterladen (Google Fonts)',
+	'pptx.options.trust.allowFontDownloadsInfo':
+		'Wenn aktiviert, ruft Ihr Browser fehlende Schriftarten von fonts.googleapis.com und fonts.gstatic.com (oder vom Schriftartserver Ihrer Organisation) ab. Wenn deaktiviert, verwendet Text installierte, eingebettete oder Ersatzschriftarten, sodass Zeilenumbrüche von PowerPoint abweichen können.',
 	'pptx.options.trust.confirmHyperlinks': 'Vor dem Öffnen externer Hyperlinks bestätigen',
 };

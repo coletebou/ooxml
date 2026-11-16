@@ -12,6 +12,11 @@ export const translations = {
 	'pptx.statusBar.zoomOut': 'Verkleinern',
 	'pptx.statusBar.zoomToFit': 'An Fenster anpassen',
 	'pptx.autosave.saving': 'Speichern...',
+	'pptx.autosave.progress.uploading': 'Speichern… {percent}%',
+	'pptx.autosave.progress.checking': 'Auf Änderungen prüfen…',
+	'pptx.autosave.progress.downloading': 'Neueste Version wird abgerufen… {percent}%',
+	'pptx.autosave.progress.downloadingUnknown': 'Neueste Version wird abgerufen…',
+	'pptx.autosave.progress.merging': 'Änderungen werden zusammengeführt…',
 	'pptx.autosave.saved': 'Gespeichert {{time}}',
 	'pptx.autosave.error': 'Fehler beim automatischen Speichern',
 	'pptx.autosave.disabled': 'Automatisches Speichern nicht verfügbar',
@@ -112,9 +117,20 @@ export const translations = {
 	'pptx.toolbar.save': 'Speichern',
 	'pptx.settings.done': 'Erledigt',
 	'pptx.viewer.loading': 'Präsentation wird geladen…',
+	'pptx.viewer.loadingFonts': 'Schriftarten werden heruntergeladen ({{loaded}} von {{total}})…',
 	'pptx.viewer.encrypted':
 		'Diese Präsentation ist passwortgeschützt und kann nicht geöffnet werden.',
 	'pptx.viewer.loadError': 'Präsentation konnte nicht geladen werden.',
+	'pptx.viewer.loadLimit.maxInputBytes':
+		'Diese Datei ist {{actual}} groß und damit größer als die {{maximum}}, die dieser Viewer annimmt.',
+	'pptx.viewer.loadLimit.maxUncompressedBytes':
+		'Diese Präsentation wird entpackt mindestens {{actual}} groß, mehr als die {{maximum}}, die dieser Viewer annimmt.',
+	'pptx.viewer.loadLimit.maxEntries':
+		'Diese Präsentation enthält {{actual}} Teile, mehr als die {{maximum}}, die dieser Viewer annimmt.',
+	'pptx.viewer.loadLimit.maxSlides':
+		'Diese Präsentation hat {{actual}} Folien, mehr als die {{maximum}}, die dieser Viewer annimmt.',
+	'pptx.viewer.loadLimit.maxShapes':
+		'Diese Präsentation hat mindestens {{actual}} Formen, mehr als die {{maximum}}, die dieser Viewer annimmt.',
 	'pptx.viewer.slide': 'Folie',
 	'pptx.viewer.background': 'Hintergrund',
 	'pptx.viewer.speakerNotesPlaceholder': 'Klicken Sie hier, um Sprechernotizen hinzuzufügen',
@@ -124,6 +140,12 @@ export const translations = {
 	'pptx.common.close': 'Schließen',
 	'pptx.common.save': 'Speichern',
 	'pptx.common.ok': 'OK',
+	'pptx.dialog.confirmTitle': 'Bestätigen',
+	'pptx.dialog.inputTitle': 'Namen eingeben',
+	'pptx.dialog.noticeTitle': 'Aktion konnte nicht abgeschlossen werden',
+	'pptx.dialog.hyperlinkTitle': 'Externen Link öffnen?',
+	'pptx.dialog.hyperlinkMessage': 'Dieser Link verlässt die Präsentation:',
+	'pptx.dialog.hyperlinkOpen': 'Öffnen',
 	'pptx.toolbar.findAndReplace': 'Suchen und ersetzen',
 	'pptx.mode.closeMasterViewTooltip': 'Masteransicht schließen',
 	'pptx.mode.masterView': 'Masteransicht',

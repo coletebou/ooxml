@@ -171,6 +171,11 @@ export const translations = {
 	'pptx.options.advanced.printHiddenSlides': 'Imprimer les diapositives masquées',
 	'pptx.options.advanced.printScaleToFit': "Mettre à l'échelle de la feuille",
 	'pptx.options.advanced.printFrameSlides': 'Encadrer les diapositives',
+	'pptx.options.advanced.pdf': 'Enregistrer au format PDF',
+	'pptx.options.advanced.pdfIncludeHiddenSlides': 'Inclure les diapositives masquées',
+	'pptx.options.advanced.pdfSlidesAsPictures': 'Enregistrer les diapositives comme images',
+	'pptx.options.advanced.pdfSlidesAsPicturesInfo':
+		"Écrit chaque diapositive sous la forme d'une seule image, comme les versions précédentes de cette visionneuse. Le texte du PDF ne peut alors être ni sélectionné ni recherché. Laissez cette option désactivée pour enregistrer les formes et le texte en graphiques vectoriels avec les polices incorporées.",
 	'pptx.options.ribbon.label': 'Personnaliser le ruban',
 	'pptx.options.ribbon.description': 'Personnalisez le ruban.',
 	'pptx.options.ribbon.tabsTitle': 'Onglets principaux',
@@ -240,5 +245,9 @@ export const translations = {
 		'Autoriser le contenu externe (images et médias distants)',
 	'pptx.options.trust.allowExternalContentInfo':
 		'Lorsque cette option est désactivée, seul le contenu incorporé dans le fichier est affiché.',
+	'pptx.options.trust.allowFontDownloads':
+		'Télécharger les polices non installées ni incorporées (Google Fonts)',
+	'pptx.options.trust.allowFontDownloadsInfo':
+		"Lorsque cette option est activée, votre navigateur contacte fonts.googleapis.com et fonts.gstatic.com (ou le serveur de polices de votre organisation) pour obtenir les polices manquantes. Lorsqu'elle est désactivée, le texte utilise des polices installées, incorporées ou de substitution, et les sauts de ligne peuvent donc différer de PowerPoint.",
 	'pptx.options.trust.confirmHyperlinks': "Confirmer avant d'ouvrir des liens hypertexte externes",
 };

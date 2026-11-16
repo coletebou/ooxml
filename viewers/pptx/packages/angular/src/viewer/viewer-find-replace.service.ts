@@ -1,24 +1,26 @@
 /**
- * viewer-find-replace.service.ts: Viewer-scoped state + logic for the
- * find-in-slides bar and the edit-mode find-and-replace bar. Owns the two bar
- * visibility flags, the current match list, and the active-match cursor, and
- * runs the searches/replacements against the editable deck.
+ * viewer-find-replace.service.ts: Viewer-scoped state for the find-in-slides bar
+ * and the edit-mode find-and-replace bar. Owns the two bar visibility flags and
+ * keeps the shared Find and Replace session (`find-replace-session`: matches,
+ * cursor, replace plans, the search after a replace) in a signal.
  *
  * Extracted from {@link PowerPointViewerComponent}: the component binds a slide
- * navigation callback via {@link bind} (so a match can scroll its slide into
- * view) and the template reads the flags / invokes the handlers off the injected
- * instance.
+ * navigation callback via {@link bind} (so a match can bring its slide into
+ * view, and the editor selects its element) and the template reads the flags /
+ * invokes the handlers off the injected instance.
  *
  * Provide it once on the viewer component (`providers: [ViewerFindReplaceService]`).
  */
 
-import { inject, Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable } from '@angular/core';
+import type { Signal } from '@angular/core';
 import { TranslateService } from '@ngx-translate/core';
+import { createFindReplaceController, DEFAULT_FIND_REPLACE_OPTIONS } from 'ooxml-ui/pptx';
+import type { FindReplaceMode, FindReplaceSession } from 'ooxml-ui/pptx';
 
+import { controllerSignal } from './controller-signal';
 import { EditorStateService } from './editor-state.service';
 import type { FindEvent, ReplaceEvent } from './find-replace-bar.component';
-import { findInSlides, replaceInSlides, replaceMatch } from './find-replace-helpers';
-import type { FindResult } from './find-replace-helpers';
 
 @Injectable()
 export class ViewerFindReplaceService {
@@ -26,95 +28,103 @@ export class ViewerFindReplaceService {
 	private readonly translate = inject(TranslateService);
 
 	/** Find-in-slides bar visibility. */
-	readonly showFind = signal(false);
-	/** Find-and-replace bar visibility (edit mode only). */
-	readonly showFindReplace = signal(false);
-	readonly results = signal<readonly FindResult[]>([]);
-	readonly activeIndex = signal(-1);
-	private matchCase = false;
-	private includeNotes = false;
-	private includeChartTitles = true;
-	private includeChartData = false;
-
-	/** Navigate the viewer to a slide index (bound from the host component). */
 	private goTo: (index: number) => void = () => undefined;
 
-	/** Wire the host's slide-navigation callback (called once from the constructor). */
+	/** The bar's open state and mode plus the search session: the shared controller. */
+	private readonly actions = createFindReplaceController({
+		slides: () => this.editor.slides(),
+		commit: (slides, scope) =>
+			this.editor.applyReplacement(
+				slides,
+				this.translate.instant(
+					scope === 'all' ? 'pptx.undoAction.replaceAll' : 'pptx.undoAction.replace',
+				),
+			),
+		navigate: ({ slideIndex, elementId }) => {
+			this.goTo(slideIndex);
+			this.editor.select(elementId ? [elementId] : []);
+		},
+	});
+	private readonly state = controllerSignal(this.actions);
+
+	/** Whether the bar is open (either mode). */
+	readonly isOpen: Signal<boolean> = computed(() => this.state().open);
+	/** Find mode (Ctrl+F). */
+	readonly showFind: Signal<boolean> = computed(
+		() => this.state().open && this.state().mode === 'find',
+	);
+	/** Find and Replace mode (Ctrl+H). */
+	readonly showFindReplace: Signal<boolean> = computed(
+		() => this.state().open && this.state().mode === 'replace',
+	);
+	readonly session: Signal<FindReplaceSession> = computed(() => this.state().session);
+	readonly results = computed(() => this.session().matches);
+	readonly activeIndex = computed(() => this.session().current);
+
 	bind(goTo: (index: number) => void): void {
 		this.goTo = goTo;
 	}
 
-	/** Open the find/replace bar (mutually exclusive with the find-only bar). */
+	/** Open the bar in `mode` (searching the kept query again), or switch an open bar's mode. */
+	open(mode: FindReplaceMode = 'find'): void {
+		this.actions.open(mode);
+	}
+
 	openFindReplace(): void {
-		this.showFind.set(false);
-		this.showFindReplace.set(true);
+		this.actions.open('replace');
+	}
+
+	/** Close the bar: the matches go, the query, replacement and scopes stay. */
+	close(): void {
+		this.actions.close();
+	}
+
+	closeFindReplace(): void {
+		this.actions.close();
+	}
+
+	/** Ctrl+F / Ctrl+H and the toolbar: close the bar open in `mode`, switch, or open it. */
+	toggle(mode: FindReplaceMode = 'find'): void {
+		this.actions.toggle(mode);
+	}
+
+	/** The deck changed (a replace searches again once the replaced slides land). */
+	slidesChanged(): void {
+		this.actions.slidesChanged();
 	}
 
 	onFind(evt: FindEvent): void {
-		this.matchCase = evt.matchCase;
-		this.includeNotes = evt.includeNotes ?? false;
-		this.includeChartTitles = evt.includeChartTitles ?? true;
-		this.includeChartData = evt.includeChartData ?? false;
-		this.refreshResults(evt.query);
+		this.actions.search({
+			query: evt.query,
+			options: {
+				matchCase: evt.matchCase,
+				includeNotes: evt.includeNotes ?? DEFAULT_FIND_REPLACE_OPTIONS.includeNotes,
+				includeChartTitles:
+					evt.includeChartTitles ?? DEFAULT_FIND_REPLACE_OPTIONS.includeChartTitles,
+				includeChartData: evt.includeChartData ?? DEFAULT_FIND_REPLACE_OPTIONS.includeChartData,
+			},
+		});
+	}
+
+	onReplacementChange(replacement: string): void {
+		this.actions.setReplacement(replacement);
 	}
 
 	onNavigate(dir: 1 | -1): void {
-		const results = this.results();
-		if (results.length === 0) {
-			return;
+		if (dir > 0) {
+			this.actions.next();
+		} else {
+			this.actions.previous();
 		}
-		const next = (this.activeIndex() + dir + results.length) % results.length;
-		this.activeIndex.set(next);
-		this.goTo(results[next].slideIndex);
 	}
 
 	onReplaceOne(evt: ReplaceEvent): void {
-		const results = this.results();
-		const idx = this.activeIndex();
-		if (idx < 0 || idx >= results.length || results[idx]?.readOnly) {
-			return;
-		}
-		const updated = replaceMatch(this.editor.slides(), results, idx, evt.replacement);
-		this.editor.applyReplacement(updated.slides, this.translate.instant('pptx.undoAction.replace'));
-		this.refreshResults(evt.query);
+		this.actions.setReplacement(evt.replacement);
+		this.actions.replaceCurrent();
 	}
 
 	onReplaceAll(evt: ReplaceEvent): void {
-		if (this.results().some((match) => match.readOnly)) {
-			return;
-		}
-		const updated = replaceInSlides(this.editor.slides(), evt.query, evt.replacement, {
-			matchCase: this.matchCase,
-			includeNotes: this.includeNotes,
-			includeChartTitles: this.includeChartTitles,
-			includeChartData: this.includeChartData,
-		});
-		if (updated.replacements > 0) {
-			this.editor.applyReplacement(
-				updated.slides,
-				this.translate.instant('pptx.undoAction.replaceAll'),
-			);
-		}
-		this.refreshResults(evt.query);
-	}
-
-	/** Re-run the search over the editable deck and refresh the match list. */
-	private refreshResults(query: string): void {
-		if (query.length === 0) {
-			this.results.set([]);
-			this.activeIndex.set(-1);
-			return;
-		}
-		const results = findInSlides(this.editor.slides(), query, {
-			matchCase: this.matchCase,
-			includeNotes: this.includeNotes,
-			includeChartTitles: this.includeChartTitles,
-			includeChartData: this.includeChartData,
-		});
-		this.results.set(results);
-		this.activeIndex.set(results.length > 0 ? 0 : -1);
-		if (results.length > 0) {
-			this.goTo(results[0].slideIndex);
-		}
+		this.actions.setReplacement(evt.replacement);
+		this.actions.replaceAll();
 	}
 }

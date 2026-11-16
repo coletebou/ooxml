@@ -10,11 +10,12 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@ai-sdk/openai-compatible": "^3.0.70",
-		"ai": "^7.0.142",
-		"emf-converter": "4.21.0",
-		"fast-xml-parser": "^5.11.2",
+		"@ai-sdk/openai-compatible": "^3.0.92",
+		"ai": "^7.0.172",
+		"emf-converter": "4.28.1",
+		"fast-xml-parser": "^5.12.0",
 		"jszip": "^3.10.2",
+		"ooxml-demo-onedrive": "workspace:*",
 		"pptx-vanilla-viewer": "workspace:*",
 		"pptx-viewer-core": "workspace:*",
 		"pptx-viewer-locales": "workspace:*",
@@ -23,13 +24,13 @@
 		"yjs": "^13.6.33"
 	},
 	"devDependencies": {
-		"@tailwindcss/vite": "^4.3.3",
-		"@types/node": "^26.6.5",
+		"@tailwindcss/vite": "^4.3.4",
+		"@types/node": "^26.6.6",
 		"pptx-viewer-shared": "workspace:*",
-		"tailwindcss": "^4.3.3",
+		"tailwindcss": "^4.3.4",
 		"typescript": "^7.0.2",
-		"vite": "^8.3.4",
-		"vitest": "^5.0.5",
+		"vite": "^8.3.8",
+		"vitest": "^5.1.0",
 		"y-protocols": "^1.0.7"
 	}
 }

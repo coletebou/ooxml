@@ -1,6 +1,6 @@
 /**
  * Ribbon stylesheet fragment: the tab bar, tab content groups, the reusable
- * dropdown / swatch-picker popovers, the Insert shape grid, and the docked
+ * dropdown popover, the Insert shape grid, and the docked
  * Find & Replace panel. Concatenated after `editor-css.ts` by
  * {@link buildViewerCss}. All colours come from the shared `--pptx-*` theme
  * custom properties so the vermilion light/dark presets keep working.
@@ -26,36 +26,8 @@ export const RIBBON_CSS = `
 }
 .pptxv-ribbon-primary:empty { display: none; }
 .pptxv-ribbon-primary[hidden] { display: none; }
-/* ── Tab bar ─────────────────────────────────────────────────────────── */
-.pptxv-ribbon-tabs {
-	display: flex;
-	align-items: center;
-	gap: 2px;
-	padding: 0 6px;
-	border-bottom: 1px solid var(--pptx-border);
-	overflow-x: auto;
-}
-.pptxv-ribbon-tabs[hidden] { display: none; }
-.pptxv-ribbon-tab {
-	padding: 6px 12px;
-	border: none;
-	border-bottom: 2px solid transparent;
-	background: transparent;
-	color: var(--pptx-muted-foreground);
-	font: inherit;
-	font-size: 12px;
-	font-weight: 500;
-	white-space: nowrap;
-	cursor: pointer;
-}
-.pptxv-ribbon-tab:hover { color: var(--pptx-foreground); background: var(--pptx-accent); }
-.pptxv-ribbon-tab.is-active { color: var(--pptx-foreground); border-bottom-color: var(--pptx-primary); }
-.pptxv-ribbon-tab-file { color: var(--pptx-primary); }
-.pptxv-ribbon-tab-file.is-active {
-	color: #fff;
-	background: color-mix(in srgb, var(--pptx-primary) 80%, transparent);
-	border-radius: var(--pptx-radius);
-}
+/* ── Tab bar: the shared pptx-ui-ribbon-tabs draws its tabs in its shadow root ── */
+pptx-ui-ribbon-tabs[hidden] { display: none; }
 
 /* ── Tab content + groups ────────────────────────────────────────────── */
 /* One horizontal row (React: flex flex-nowrap + overflow-x) instead of the
@@ -276,68 +248,9 @@ export const RIBBON_CSS = `
 .pptxv-dropdown-item:hover { background: var(--pptx-accent); color: var(--pptx-accent-foreground); }
 .pptxv-dropdown-item.is-selected { font-weight: 600; color: var(--pptx-primary); }
 
-/* ── Swatch colour picker ────────────────────────────────────────────── */
-.pptxv-swatch-picker { position: relative; display: inline-flex; }
-.pptxv-swatch-trigger { flex-direction: column; height: 28px; padding: 2px 6px; gap: 0; }
-.pptxv-swatch-swab { display: block; width: 16px; height: 3px; border-radius: 1px; margin-top: 1px; }
-.pptxv-swatch-menu {
-	/* Positioned by attachAnchoredPopup (position: fixed + inline top/left),
-	   which escapes the ribbon row's overflow-x clip (issue #183). */
-	z-index: 30;
-	padding: 8px;
-	border: 1px solid var(--pptx-border);
-	border-radius: var(--pptx-radius);
-	background: var(--pptx-card);
-	color: var(--pptx-card-foreground);
-	box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
-}
-.pptxv-swatch-menu[hidden] { display: none; }
-/* B6: "Recent colours" row (ui/recent-colors-row.ts), shared by the swatch
-   picker's popup menu and the property inspector's colour inputs. */
-.pptxv-recent-colors[hidden] { display: none; }
-.pptxv-recent-colors-label {
-	margin-bottom: 4px;
-	color: var(--pptx-muted-foreground);
-	font-size: 10px;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-}
-.pptxv-swatch-standard-label {
-	margin-bottom: 4px;
-	color: var(--pptx-muted-foreground);
-	font-size: 10px;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-}
-.pptxv-swatch-grid { display: grid; grid-template-columns: repeat(5, 20px); gap: 4px; margin-bottom: 6px; }
-.pptxv-swatch {
-	width: 20px;
-	height: 20px;
-	padding: 0;
-	border: 1px solid var(--pptx-border);
-	border-radius: 50%;
-	cursor: pointer;
-}
-.pptxv-swatch:hover { transform: scale(1.15); }
-.pptxv-swatch.is-selected { outline: 2px solid var(--pptx-ring); outline-offset: 1px; }
-.pptxv-swatch-custom {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 6px;
-	font-size: 11px;
-	color: var(--pptx-muted-foreground);
-	cursor: pointer;
-}
-.pptxv-swatch-custom-input {
-	width: 20px;
-	height: 20px;
-	padding: 0;
-	border: 1px solid var(--pptx-border);
-	border-radius: 4px;
-	background: none;
-	cursor: pointer;
-}
+/* B6: "Recent colours" row (ui/recent-colors-row.ts, the shared colour grid) under the
+   property inspector's colour inputs. */
+.pptxv-recent-colors { margin-top: 4px; }
 
 /* ── Find & Replace docked panel ─────────────────────────────────────── */
 .pptxv-findreplace {
@@ -401,6 +314,8 @@ export const RIBBON_CSS = `
 .pptxv-bs-back-row{display:flex;height:40px;flex:none;border-bottom:1px solid var(--pptx-border,#ddd)}
 .pptxv-bs-back{width:100%;height:40px;border-bottom:0}
 .pptxv-backstage nav{padding:0 0 8px}
+/* File > Open places ("This device" and the host's cloud providers). */
+.pptxv-bs-places{display:block;max-width:900px}
 /* Mobile: stack the backstage and turn the vertical rail into a horizontal,
    scrollable tab bar with a bottom indicator, and compact the content pane.
    Same breakpoint as the rest of the mobile chrome (mobile-sheet-css.ts). */

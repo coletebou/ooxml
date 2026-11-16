@@ -1,13 +1,12 @@
 import {
 	collectReferencedFontFamilies,
-	fetchGoogleWebfontOutlineBytes,
-	resolveFontItalic,
-	resolveFontWeight,
+	createEmbeddedFontsSheet,
+	loadDeckWebfontOutlines,
+	resolveGoogleFontsCss2Base,
 	resolveGoogleWebfontHref,
-	selectGoogleWebfontFamilies,
-	selectTrustedEmbeddedFonts,
 	syncGoogleWebfontStylesheet,
 } from 'ooxml-ui/pptx';
+import type { GoogleFontsOption } from 'ooxml-ui/pptx';
 import type { PptxEmbeddedFont, PptxSlide } from 'pptx-viewer-core';
 /**
  * useFontInjection: Injects @font-face declarations for embedded PPTX fonts
@@ -22,7 +21,8 @@ import { glyphOutlineFontCache } from '../utils/glyph-outline-cache';
 /* ------------------------------------------------------------------ */
 
 const EMBEDDED_FONTS_STYLE_ID = 'pptx-embedded-fonts';
-const GOOGLE_FONTS_LINK_ID = 'pptx-google-fonts';
+/** The managed Google Fonts `<link>`; the loader injects it first, while it waits for the fonts. */
+export const GOOGLE_FONTS_LINK_ID = 'pptx-google-fonts';
 const SYMBOL_FONTS_STYLE_ID = 'pptx-symbol-font-fallback';
 
 /**
@@ -45,6 +45,8 @@ const SYMBOL_FONT_FAMILIES: readonly string[] = [
 export interface UseFontInjectionInput {
 	embeddedFonts: PptxEmbeddedFont[];
 	slides: PptxSlide[];
+	/** Host `googleFonts` policy: unset loads from Google, `false` disables, `{ baseUrl }` mirrors. */
+	googleFonts?: GoogleFontsOption;
 }
 
 /**
@@ -58,79 +60,24 @@ export interface UseFontInjectionInput {
 // a hostile PPTX can break out of the @font-face rule via `"; }` and inject
 // global selectors that exfiltrate data via `url()` or deface the page.
 const FONT_NAME_UNSAFE_CHARS = /["\\\n\r;}<>]/u;
-const FONT_FORMAT_ALLOWED = new Set([
-	'truetype',
-	'opentype',
-	'woff',
-	'woff2',
-	'svg',
-	'embedded-opentype',
-]);
-const FONT_DATA_URL_PATTERN =
-	/^data:font\/[a-z0-9+.-]+(?:;charset=[a-z0-9-]+)?;base64,[A-Za-z0-9+/=]+$/iu;
-function isFontDataUrlSafe(url: string): boolean {
-	if (typeof url !== 'string' || url.length === 0) {
-		return false;
-	}
-	if (url.startsWith('blob:')) {
-		return true;
-	}
-	return FONT_DATA_URL_PATTERN.test(url);
-}
 
-export function useFontInjection({ embeddedFonts, slides }: UseFontInjectionInput): void {
+export function useFontInjection({
+	embeddedFonts,
+	slides,
+	googleFonts,
+}: UseFontInjectionInput): void {
+	// A string (or `null` when disabled), so an inline `{ baseUrl }` object does not re-run the effects.
+	const googleFontsBase = resolveGoogleFontsCss2Base(googleFonts);
 	// ── Inject @font-face for embedded fonts ─────────────────────────
 	useEffect(() => {
 		if (!embeddedFonts.length) {
 			return;
 		}
-
-		const styleEl = document.createElement('style');
-		styleEl.id = EMBEDDED_FONTS_STYLE_ID;
-
-		// Only typefaces whose files match them; the rest are requested from
-		// Google Fonts by the effect below (see `selectTrustedEmbeddedFonts`).
-		const cssRules = selectTrustedEmbeddedFonts(embeddedFonts)
-			.flatMap((font) => {
-				// Reject fonts whose name, dataUrl, or format would let the value
-				// escape the @font-face block and inject arbitrary CSS rules.
-				if (
-					typeof font.name !== 'string' ||
-					font.name.length === 0 ||
-					FONT_NAME_UNSAFE_CHARS.test(font.name)
-				) {
-					return [];
-				}
-				if (!isFontDataUrlSafe(font.dataUrl)) {
-					return [];
-				}
-				const fontFormat = font.format ?? 'truetype';
-				if (!FONT_FORMAT_ALLOWED.has(fontFormat)) {
-					return [];
-				}
-				const fontWeight = String(resolveFontWeight(font.name, font.bold));
-				const fontStyleCss = resolveFontItalic(font.name, font.italic) ? 'italic' : 'normal';
-				return [
-					`@font-face {
-	font-family: "${font.name}";
-	src: url("${font.dataUrl}") format("${fontFormat}");
-	font-weight: ${fontWeight};
-	font-style: ${fontStyleCss};
-	font-display: swap;
-}`,
-				];
-			})
-			.join('\n');
-
-		styleEl.textContent = cssRules;
-		document.head.appendChild(styleEl);
-
-		return () => {
-			const existing = document.getElementById(EMBEDDED_FONTS_STYLE_ID);
-			if (existing) {
-				document.head.removeChild(existing);
-			}
-		};
+		// Only typefaces whose files match them are registered; the rest are
+		// requested from Google Fonts by the effect below.
+		const sheet = createEmbeddedFontsSheet(document, EMBEDDED_FONTS_STYLE_ID);
+		sheet.set(embeddedFonts);
+		return () => sheet.dispose();
 	}, [embeddedFonts]);
 
 	// ── Inject Google Fonts fallback <link> for missing fonts ────────
@@ -143,18 +90,20 @@ export function useFontInjection({ embeddedFonts, slides }: UseFontInjectionInpu
 		// local-install check for already-resolved families, so a webfont that has loaded is
 		// not mistaken for an installed one and dropped on the next pass.
 		let cancelled = false;
-		void resolveGoogleWebfontHref(slides, embeddedFonts).then((href) => {
-			if (cancelled) {
-				return null;
-			}
-			syncGoogleWebfontStylesheet(document, GOOGLE_FONTS_LINK_ID, href);
-			return href;
-		});
+		void resolveGoogleWebfontHref(slides, embeddedFonts, undefined, googleFontsBase).then(
+			(href) => {
+				if (cancelled) {
+					return null;
+				}
+				syncGoogleWebfontStylesheet(document, GOOGLE_FONTS_LINK_ID, href);
+				return href;
+			},
+		);
 
 		return () => {
 			cancelled = true;
 		};
-	}, [embeddedFonts, slides]);
+	}, [embeddedFonts, slides, googleFontsBase]);
 	// Updates cancel stale resolutions; only unmount removes the loaded link.
 	useEffect(() => () => document.getElementById(GOOGLE_FONTS_LINK_ID)?.remove(), []);
 
@@ -170,44 +119,14 @@ export function useFontInjection({ embeddedFonts, slides }: UseFontInjectionInpu
 	const [, setOutlineFontsTick] = useState(0);
 	useEffect(() => {
 		let cancelled = false;
-		const referenced = collectReferencedFontFamilies(slides);
-		const candidates = selectGoogleWebfontFamilies(
-			referenced,
-			selectTrustedEmbeddedFonts(embeddedFonts).map((font) => font.name),
-		);
-		if (candidates.length === 0) {
-			return;
-		}
-		void resolveGoogleWebfontHref(slides, embeddedFonts).then(async (href) => {
-			if (cancelled || !href) {
-				return;
-			}
-			const boldItalicVariants: Array<{ bold: boolean; italic: boolean }> = [
-				{ bold: false, italic: false },
-				{ bold: true, italic: false },
-			];
-			let registeredAny = false;
-			for (const family of candidates) {
-				for (const variant of boldItalicVariants) {
-					if (cancelled) {
-						return;
-					}
-					const bytes = await fetchGoogleWebfontOutlineBytes(
-						href,
-						family,
-						variant.bold,
-						variant.italic,
-						fetch,
-					);
-					if (
-						bytes &&
-						glyphOutlineFontCache.registerFontBytes(family, variant.bold, variant.italic, bytes)
-					) {
-						registeredAny = true;
-					}
-				}
-			}
-			if (registeredAny && !cancelled) {
+		void loadDeckWebfontOutlines({
+			slides,
+			embeddedFonts,
+			googleFontsBase,
+			cache: glyphOutlineFontCache,
+			isCancelled: () => cancelled,
+		}).then((registered) => {
+			if (registered && !cancelled) {
 				setOutlineFontsTick((tick) => tick + 1);
 			}
 			return undefined;
@@ -215,7 +134,7 @@ export function useFontInjection({ embeddedFonts, slides }: UseFontInjectionInpu
 		return () => {
 			cancelled = true;
 		};
-	}, [embeddedFonts, slides]);
+	}, [embeddedFonts, slides, googleFontsBase]);
 
 	// ── Wingdings and symbol font fallback ────────────────────────
 	useEffect(() => {

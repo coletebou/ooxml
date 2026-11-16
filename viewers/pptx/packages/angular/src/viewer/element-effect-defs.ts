@@ -4,6 +4,8 @@ import {
 	getBevelLightingSvgFilter,
 	getComputedEffectStyle,
 	getEffectStyleSource,
+	getSilhouetteFillLayer,
+	getSilhouetteEffects,
 	getSoftEdgeSvgFilter,
 } from 'ooxml-ui/pptx';
 import type {
@@ -80,6 +82,18 @@ export function getBevelLightingFilterDef(el: PptxElement): SvgFilterDefinition 
 }
 
 /**
+ * The silhouette shadow / glow `<filter>` of a shape whose clip-path would cut
+ * its box-shadow off (shared `getSilhouetteEffects`), or `undefined`. The
+ * renderer injects `filterMarkup` verbatim, like the bevel lighting filter.
+ */
+export function getSilhouetteFilterDef(el: PptxElement): SvgFilterDefinition | undefined {
+	const def = getSilhouetteEffects(el);
+	return def
+		? { id: def.filterId, cssReference: def.cssReference, filterMarkup: def.filterMarkup }
+		: undefined;
+}
+
+/**
  * DAG fill-overlay tint (colour + blend mode) for an element, or `undefined`
  * when none applies. The renderer paints this as a separate absolutely
  * positioned, blended layer over the shape (rather than blending the whole
@@ -133,6 +147,11 @@ export function getStrokeOutline(el: PptxElement): StrokeOutline | undefined {
 	return buildStrokeOutline(el);
 }
 
+/** The clipped child layer that paints a gradient, pattern or picture silhouette fill. */
+export function getFillLayer(el: PptxElement): { cssText: string } | undefined {
+	return getSilhouetteFillLayer(el);
+}
+
 /**
  * Per-sub-path fill overlay for a multi-sub-path preset (`smileyFace`'s open
  * eyes, `actionButtonBlank`'s darkened bevel well) or custom geometry whose
@@ -167,13 +186,16 @@ export function resolveShapeFilterCss(
 	fxFilter: string | undefined,
 	duotone: DuotoneFilterDef | undefined,
 	softEdge: SoftEdgeFilterDef | undefined,
+	/** Ids of other injected filters (the silhouette shadow / glow filter). */
+	extraKeepIds: readonly string[] = [],
 ): string | undefined {
 	if (fxFilter) {
 		let filter: string;
+		const keep = [...(softEdge ? [softEdge.id] : []), ...extraKeepIds];
 		if (duotone) {
 			filter = fxFilter;
-		} else if (softEdge) {
-			filter = stripUnresolvedFilterRefs(fxFilter, [softEdge.id]);
+		} else if (keep.length > 0) {
+			filter = stripUnresolvedFilterRefs(fxFilter, keep);
 		} else {
 			filter = fxFilter.replace(/\s*url\(#[^)]*\)/gu, '').trim();
 		}

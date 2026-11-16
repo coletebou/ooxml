@@ -1,6 +1,7 @@
 import {
 	describeCollaborationShellState,
 	SlideCanvas,
+	SlidesPane,
 	Toolbar,
 	useViewerBuildingBlocks,
 } from 'pptx-react-viewer';
@@ -9,6 +10,11 @@ import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { HostOwnedShellHandle } from '../shared/host-owned-shell-controls';
+import { hostThumbnailStripRequested } from '../shared/host-thumbnail-strip';
+import { HostOwnedFileDialogs } from './HostOwnedFileDialogs';
+import { HostOwnedShowDialogs } from './HostOwnedShowDialogs';
+import { HostOwnedWorkflows } from './HostOwnedWorkflows';
+import { HostSlideStrip } from './HostSlideStrip';
 
 /** A custom host shell uses the same collaboration session as the full editor. */
 export const HostOwnedHeadlessEditor = forwardRef<
@@ -50,17 +56,28 @@ export const HostOwnedHeadlessEditor = forwardRef<
 					{describeCollaborationShellState(blocks.shellState, t)}
 				</output>
 				<Toolbar {...blocks.toolbarProps} />
+				<HostOwnedWorkflows blocks={blocks} />
+				<HostOwnedFileDialogs blocks={blocks} />
+				<HostOwnedShowDialogs blocks={blocks} />
 				{blocks.error && <p role='alert'>{blocks.error}</p>}
-				<div
-					style={{
-						flex: 1,
-						minHeight: 0,
-						position: 'relative',
-						display: 'flex',
-						flexDirection: 'column',
-					}}
-				>
-					<SlideCanvas {...blocks.canvasProps} />
+				<div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+					{hostThumbnailStripRequested() ? (
+						<HostSlideStrip {...blocks.slidesPaneProps} />
+					) : (
+						<SlidesPane {...blocks.slidesPaneProps} />
+					)}
+					<div
+						style={{
+							flex: 1,
+							minWidth: 0,
+							minHeight: 0,
+							position: 'relative',
+							display: 'flex',
+							flexDirection: 'column',
+						}}
+					>
+						<SlideCanvas {...blocks.canvasProps} />
+					</div>
 				</div>
 			</section>
 		);

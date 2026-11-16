@@ -1,3 +1,4 @@
+import { parseDrawingPictureFill } from '../drawingml/picture-fill';
 // Reads the cached drawing part of a diagram (`dsp:drawing`): the shape tree the producing
 // application last laid out, as a renderer-neutral model in EMU. Generalises
 // `parseSmartArtDrawingShapes`/`parseDrawingShape` of the pptx runtime without its theme and
@@ -7,7 +8,11 @@ import { parseStyleReferences } from './definitions';
 import { parseDrawingFill, parseDrawingLine } from '../drawingml/drawing-fill';
 import { parseDrawingGeometry, parseFrame, parseTransform } from '../drawingml/drawing-geometry';
 import { parseDrawingTextBody } from '../drawingml/drawing-text';
+import { parseDrawingColorIn } from '../drawingml/drawing-color';
+import { parseDrawingRichTextBody } from '../drawingml/read-text-body';
+import { parseDrawingEffects } from '../drawingml/drawing-effects';
 import { NS, first, stringAttribute, type XmlElement } from './dom';
+import { readDiagramShape3d } from './scene-3d';
 import type { DiagramDrawing, DiagramDrawingShape, DiagramIssue } from './types';
 
 interface GroupTransform {
@@ -88,19 +93,31 @@ function parseShape(
 		geometry,
 		has3d: Boolean(first(spPr, 'scene3d', NS.a) || first(spPr, 'sp3d', NS.a)),
 	};
+	if (shape.has3d) {
+		const view3d = readDiagramShape3d(spPr);
+		if (view3d) shape.view3d = view3d;
+	}
 	if (transform.rotation !== undefined) shape.rotation = transform.rotation;
 	if (transform.flipHorizontal) shape.flipHorizontal = true;
 	if (transform.flipVertical) shape.flipVertical = true;
 	if (adjustments) shape.adjustments = adjustments;
 	if (paths) shape.paths = paths;
-	const fill = parseDrawingFill(spPr);
+	const picture = first(sp, 'blipFill', NS.dsp);
+	const fill = picture ? parseDrawingPictureFill(picture) : parseDrawingFill(spPr);
 	if (fill) shape.fill = fill;
 	const line = parseDrawingLine(first(spPr, 'ln', NS.a));
 	if (line) shape.line = line;
 	const style = first(sp, 'style', NS.dsp);
 	if (style) shape.style = parseStyleReferences(style);
-	const text = parseDrawingTextBody(first(sp, 'txBody', NS.dsp));
+	const shadow = parseDrawingColorIn(first(first(spPr, 'effectLst', NS.a), 'outerShdw', NS.a));
+	if (shadow) shape.shadowColor = shadow;
+	const effects = parseDrawingEffects(first(spPr, 'effectLst', NS.a));
+	if (effects) shape.effects = effects;
+	const txBody = first(sp, 'txBody', NS.dsp);
+	const text = parseDrawingTextBody(txBody);
 	if (text) shape.text = text;
+	const body = parseDrawingRichTextBody(txBody);
+	if (body) shape.body = body;
 	const textFrame = parseFrame(first(sp, 'txXfrm', NS.dsp));
 	if (textFrame) shape.textFrame = applyGroup(textFrame, group);
 	return shape;
@@ -118,15 +135,16 @@ export function parseDiagramDrawing(source: string | XmlDocument, part?: string)
 		for (const child of Array.from(container.childNodes)) {
 			if (child.nodeType !== 1) continue;
 			const element = child as XmlElement;
-			if (element.localName === 'sp') {
+			if (element.localName === 'sp' || element.localName === 'pic') {
 				const shape = parseShape(element, counter++, group, issues);
 				if (shape) shapes.push(shape);
+				else if (element.localName === 'pic')
+					issues.push({
+						code: 'DIAGRAM_DRAWING_PICTURE_UNREADABLE',
+						message:
+							'A cached picture has no usable frame; its source is retained in the drawing part.',
+					});
 			} else if (element.localName === 'grpSp') visit(element, groupTransform(element, group));
-			else if (element.localName === 'pic')
-				issues.push({
-					code: 'DIAGRAM_DRAWING_PICTURE_SKIPPED',
-					message: 'A dsp:pic in the cached drawing is not modelled; the part still holds it.',
-				});
 		}
 	};
 	if (tree) visit(tree, IDENTITY);

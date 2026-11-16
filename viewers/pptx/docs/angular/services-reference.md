@@ -12,8 +12,8 @@ subset that has a semver-stable public API, see
 
 ::: warning Internal building blocks
 Everything below is importable from the `pptx-angular-viewer/internals` subpath (ng-packagr builds
-this package as a single compilation unit, so `internals` is an alias over the same bundle and these
-symbols stay importable from the root too). They are **not covered by semver**: signatures,
+the package root as a single compilation unit, so `internals` is an alias over the same bundle and
+these symbols stay importable from the root too). They are **not covered by semver**: signatures,
 behavior, and existence can change without a major bump. Reach for `internals` only when the curated
 services/inputs/outputs/[public API](/angular/api) genuinely can't do what you need. Pin an exact
 version if you depend on it.
@@ -36,7 +36,6 @@ each service's own `bind()` handoff of host accessors.
 | `FieldContextService`               | Field/placeholder context (date, slide number, ...) for text rendering.             |
 | `InkDrawingService`                 | Freehand ink stroke state for the drawing tools.                                    |
 | `RulerGuidesService`                | Ruler tick and guide-line state for the editor canvas.                              |
-| `SmartArt3DService`                 | Gates the opt-in Three.js SmartArt renderer via the `smartArt3D` input.             |
 | `ViewerCanvasEditingService`        | Canvas editing orchestration: element select, transform, text/ink/table-cell edits. |
 | `ViewerCollabCursorService`         | Local pointer tracking for broadcasting the user's cursor position.                 |
 | `ViewerCollaborationSessionService` | Share/Broadcast dialog state and session connect/disconnect orchestration.          |
@@ -94,23 +93,23 @@ Back the curated `chart-*-options` components ([Services › Public services](/a
 | Export                                                                                                                                                                                       | Concern                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SmartArt3DRendererComponent`                                                                                                                                                                | Renders SmartArt diagrams as extruded 3D blocks on WebGL (opt-in via `smartArt3D`).                                                                                                                                                            |
-| `SmartArtPreviewComponent`                                                                                                                                                                   | Live-renders a SmartArt layout preset for gallery previews.                                                                                                                                                                                    |
 | `SmartArtPropertiesComponent`                                                                                                                                                                | SmartArt-specific inspector panel.                                                                                                                                                                                                             |
 | `SMARTART_PALETTES`, `SMARTART_DEFAULT_PALETTE`, `smartArtPaletteColour`, `resolveSmartArtPalette`, `buildChromeStyle`, `computeDrawingViewBox`, `projectDrawingShapes`, `styleShadowFilter` | Drawing-shape view-model helpers (palette, chrome, viewBox, `RenderedShape` projection). Aliased with a `SmartArt`/`SMARTART_` prefix here because the bare names collide with the chart palette of the same name (see chart internals above). |
 | `smart-art-inline-edit` exports                                                                                                                                                              | On-canvas inline SmartArt text/node editing.                                                                                                                                                                                                   |
 | `smart-art-insert-helpers` exports (`buildSmartArtInsertElement`)                                                                                                                            | Builds a new SmartArt element from a chosen preset + item texts.                                                                                                                                                                               |
-| `smart-art-node-style-helpers` exports                                                                                                                                                       | Per-node style resolution helpers.                                                                                                                                                                                                             |
 | `smart-art-properties-helpers` exports                                                                                                                                                       | Helpers backing `SmartArtPropertiesComponent`.                                                                                                                                                                                                 |
 | `smart-art-renderer-helpers` exports                                                                                                                                                         | Helpers backing the curated `SmartArtRendererComponent`.                                                                                                                                                                                       |
 
 ## Table internals
 
-| Export                             | Concern                                               |
-| ---------------------------------- | ----------------------------------------------------- |
-| `table-cell-style` exports         | Table cell style resolution.                          |
-| `table-data-helpers` exports       | Table row/column/cell data editing helpers.           |
-| `table-properties-helpers` exports | Helpers backing `TablePropertiesComponent`.           |
-| `table-renderer-helpers` exports   | Helpers backing the curated `TableRendererComponent`. |
+| Export                             | Concern                                                          |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `table-cell-style` exports         | Table cell style resolution.                                     |
+| `table-data-helpers` exports       | Table row/column/cell data editing helpers.                      |
+| `table-properties-helpers` exports | Helpers backing `TablePropertiesComponent`.                      |
+| `table-renderer-helpers` exports   | Helpers backing the curated `TableRendererComponent`.            |
+| `table-style-context` exports      | `TABLE_STYLE_CONTEXT_OVERRIDE`, a subtree's table style context. |
+| `slides-panel-contexts` exports    | Field and table contexts of the thumbnail rail.                  |
 
 ## Ribbon (toolbar sub-sections)
 
@@ -133,7 +132,6 @@ Composed by `RibbonComponent`, itself composed by `PowerPointViewerComponent`.
 | `RibbonEditingSectionComponent`                                   | Editing tab controls (find/replace entry point).             |
 | `RibbonFileSectionComponent`                                      | File tab: open/save actions.                                 |
 | `RibbonFontControlsComponent`, `RibbonParagraphControlsComponent` | Shared font/paragraph control groups reused across sections. |
-| `RibbonColorPopoverComponent`                                     | Shared color-swatch popover reused across sections.          |
 | `ribbon-text-helpers` exports (`patchTextStyle`)                  | Applies a text-style patch to the selected element.          |
 
 ## Presentation, navigation & touch internals
@@ -154,8 +152,9 @@ Composed by `RibbonComponent`, itself composed by `PowerPointViewerComponent`.
 The framework-independent renderer is published as `ooxml-ui/pptx`, which hosts can import
 directly. Angular also re-exports these helpers from `transition-helpers.ts`
 via the CURATED `pptx-angular-viewer` root (`viewer/index.ts`), not only `internals`: ng-packagr
-compiles this library from a single entry file, so `pptx-angular-viewer/internals` is the exact
-same built bundle as the root (see `src/internals.ts`'s own header comment) and both resolve to
+compiles the package root from a single entry file (its one secondary entry point,
+`pptx-angular-viewer/ai`, holds only `createAiAssistant`), so `pptx-angular-viewer/internals` is the
+exact same built bundle as the root (see `src/internals.ts`'s own header comment) and both resolve to
 these same names.
 
 | Export                                                                                                                            | Concern                                                                                                                                                                                           |
@@ -193,6 +192,12 @@ the curated public surface).
 | `color-changed-image-helpers` exports | Helpers backing `ColorChangedImageComponent`.               |
 | `eyedropper` exports                  | Screen eyedropper (`EyeDropper` API) color-picking helpers. |
 
+## AI assistant internals
+
+| Export                    | Concern                                                                                                                                                                                                                    |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAiAssistantHandle` | Backs `createAiAssistant` of the `pptx-angular-viewer/ai` secondary entry point, which ng-packagr builds on its own and which can import only package entries. It takes a config only; import `createAiAssistant` instead. |
+
 ## Mobile chrome internals
 
 | Export                          | Concern                                                  |
@@ -208,7 +213,6 @@ Not part of the curated root export, but composed directly by `PowerPointViewerC
 | `CustomShowsComponent`, `custom-shows-helpers` exports   | Custom-show create/rename/delete dialog.                                     |
 | `ExportProgressModalComponent`                           | Progress modal shown during PDF/GIF/video export.                            |
 | `FollowModeBarComponent`                                 | "Follow presenter" mode banner.                                              |
-| `InsertSmartArtDialogComponent`, `SmartArtInsertEvent`   | The Insert ▸ SmartArt gallery dialog.                                        |
 | `NotesToolbarComponent`                                  | Speaker-notes panel toolbar.                                                 |
 | `RemoteSelectionOverlayComponent`                        | Renders remote users' element-selection highlights.                          |
 | `SelectionPaneComponent`                                 | The Selection Pane (Arrange tab) listing/toggling elements.                  |

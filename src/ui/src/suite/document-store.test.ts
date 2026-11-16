@@ -1,8 +1,97 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import { SuiteDocumentStore, suiteFileKind } from './document-store';
+import type { SuiteCloudSource, SuiteFileKind } from './document-store';
+
+for (const kind of ['docx', 'xlsx', 'pptx', 'vsdx'] as SuiteFileKind[]) {
+	it(`${kind} derives pending cloud state for direct writes and clears it only with an acknowledged baseline`, async () => {
+		const store = new SuiteDocumentStore(`cloud-${crypto.randomUUID()}`);
+		const baseline = new Uint8Array([1]);
+		const source: SuiteCloudSource = {
+			file: {
+				driveId: 'drive',
+				itemId: 'item',
+				name: `File.${kind}`,
+				kind,
+				eTag: 'v1',
+				access: 'write',
+			},
+			baseline,
+			pending: false,
+		};
+		const doc = await store.create(`File.${kind}`, baseline, { cloud: source });
+		const edited = { ...doc, bytes: new Uint8Array([2]), revision: 2 };
+		await store.commit([{ document: edited, expected: 1 }]);
+		expect((await store.get(doc.id)).cloud?.pending).toBe(true);
+		await store.commit([
+			{
+				document: {
+					...edited,
+					revision: 3,
+					cloud: { ...source, file: { ...source.file, eTag: 'v2' }, baseline: edited.bytes },
+				},
+				expected: 2,
+			},
+		]);
+		expect((await store.get(doc.id)).cloud?.pending).toBe(false);
+	});
+}
+
+it('does not persist cloud capabilities or allow direct edits of read-only connected files', async () => {
+	const store = new SuiteDocumentStore(`safe-cloud-${crypto.randomUUID()}`);
+	const source = {
+		file: {
+			driveId: 'drive',
+			itemId: 'item',
+			name: 'File.docx',
+			kind: 'docx',
+			eTag: 'v1',
+			access: 'read',
+			webUrl: 'secret-link',
+			accessToken: 'secret',
+		},
+		baseline: new Uint8Array([1]),
+		pending: false,
+	} as SuiteCloudSource;
+	const doc = await store.create('File.docx', source.baseline, { cloud: source });
+	expect(JSON.stringify((await store.get(doc.id)).cloud)).not.toContain('secret');
+	await expect(
+		store.commit([{ document: { ...doc, bytes: new Uint8Array([2]), revision: 2 }, expected: 1 }]),
+	).rejects.toThrow('read-only');
+	expect(Array.from((await store.get(doc.id)).bytes)).toEqual([1]);
+});
 
 describe('suite document identity', () => {
+	it('retains safe custom provider metadata across store instances and direct commits', async () => {
+		const name = `custom-${crypto.randomUUID()}`;
+		const store = new SuiteDocumentStore(name);
+		const cloud: SuiteCloudSource = {
+			providerId: 'company/account-1',
+			providerLabel: 'Company Files',
+			file: {
+				key: 'report',
+				revision: 9,
+				name: 'File.docx',
+				kind: 'docx',
+				access: 'write',
+				webUrl: 'private-link',
+				accessToken: 'secret',
+			},
+			baseline: new Uint8Array([1]),
+			pending: false,
+		};
+		const doc = await store.create('File.docx', cloud.baseline, { cloud });
+		await store.commit([
+			{ document: { ...doc, bytes: new Uint8Array([2]), revision: 2 }, expected: 1 },
+		]);
+		const restored = await new SuiteDocumentStore(name).get(doc.id);
+		expect(restored.cloud?.providerId).toBe(cloud.providerId);
+		expect(restored.cloud?.providerLabel).toBe(cloud.providerLabel);
+		expect(restored.cloud?.file.key).toBe('report');
+		expect(restored.cloud?.file.revision).toBe(9);
+		expect(restored.cloud?.pending).toBe(true);
+		expect(JSON.stringify(restored.cloud)).not.toMatch(/private-link|secret/u);
+	});
 	it('persists the same id across store instances and rejects stale writes', async () => {
 		const name = `suite-${crypto.randomUUID()}`;
 		const first = new SuiteDocumentStore(name),
@@ -51,4 +140,33 @@ it('removes a parent with cached descendants and restores the same identities', 
 	await expect(store.get(child.id)).rejects.toThrow('not found');
 	await store.commit(removed.map((document) => ({ document, expected: 0 })));
 	expect((await store.get(child.id)).parent?.id).toBe(parent.id);
+});
+
+describe('connected document index', () => {
+	const cloud = (itemId: string): SuiteCloudSource => ({
+		file: { driveId: 'drive', itemId, name: 'F.docx', kind: 'docx', eTag: 'v1', access: 'write' },
+		baseline: new Uint8Array([1]),
+		pending: false,
+	});
+	it('lists connected documents without bytes and follows commit and remove', async () => {
+		const store = new SuiteDocumentStore(`index-${crypto.randomUUID()}`);
+		const local = await store.create('local.docx', new Uint8Array([9]));
+		const a = await store.create('F.docx', new Uint8Array([1]), { cloud: cloud('a') });
+		const b = await store.create('F.docx', new Uint8Array([1]), { cloud: cloud('b') });
+		let listed = await store.listCloud();
+		expect(listed.map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+		expect(JSON.stringify(listed)).not.toContain('baseline');
+		expect(listed.find((d) => d.id === a.id)?.cloud.file.itemId).toBe('a');
+		await store.commit([
+			{ document: { ...a, bytes: new Uint8Array([2]), revision: 2 }, expected: 1 },
+		]);
+		expect((await store.listCloud()).find((d) => d.id === a.id)).toMatchObject({
+			revision: 2,
+			cloud: { pending: true },
+		});
+		await store.remove(b.id, 1);
+		listed = await store.listCloud();
+		expect(listed.map((d) => d.id)).toEqual([a.id]);
+		expect(listed.some((d) => d.id === local.id)).toBe(false);
+	});
 });

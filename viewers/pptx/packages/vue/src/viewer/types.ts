@@ -1,5 +1,13 @@
 import type { CollaborationState } from 'ooxml-core/collab';
-import type { DocumentStorage } from 'ooxml-ui/pptx';
+import type {
+	CloudFileProvider,
+	DocumentStorage,
+	GoogleFontsOption,
+	ListConversionScope,
+	PptxLoadLimits,
+	RibbonDisplayMode,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import type {
 	AccountAuthConfig,
 	AutosaveRecord,
@@ -19,6 +27,7 @@ import type {
 	ViewportFitPadding,
 } from 'ooxml-ui/pptx';
 import type { PptxAiConfig } from 'ooxml-ui/pptx/ai';
+import type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 import type { PptxCoreProperties } from 'pptx-viewer-core';
 
 import type { LocaleCatalogEntry } from '../i18n';
@@ -87,6 +96,14 @@ export interface PowerPointViewerProps {
 	/** Fired before following a link; return false to cancel its default action. */
 	onHyperlinkClick?: import('ooxml-ui/pptx').HyperlinkClickHandler;
 	/**
+	 * Reports a slide element omitted after a render, setup or lifecycle error, on every surface
+	 * of the viewer (canvas, thumbnails, slide show, reading view, previews), with
+	 * `{ elementId, elementType, slideId }`. A prop, not an emit, so `@element-render-error` binds
+	 * it too and its absence keeps the default: `console.error(error, context)`, also used when
+	 * this callback throws.
+	 */
+	onElementRenderError?: import('ooxml-ui/pptx').ElementRenderErrorHandler;
+	/**
 	 * Recovery autosave: after an edit the deck is re-serialised (always as a
 	 * plain, unencrypted package, because recovery has no password), stashed in
 	 * the shared IndexedDB store keyed by {@link filePath}, and emitted as
@@ -119,6 +136,15 @@ export interface PowerPointViewerProps {
 	 * when it provides them.
 	 */
 	storage?: DocumentStorage;
+	/**
+	 * Cloud places for File > Open (OneDrive through `createOneDriveFileProvider` from
+	 * `ooxml-core/embedding/onedrive`, or a provider of your own). When non-empty, the Open page
+	 * lists "This device" and one place per provider. A file opened from a place loads like a
+	 * normal open (read-only when the service does not allow editing, or when `canEdit` /
+	 * `readOnly` already forbid it); File > Save, Save As and recovery of that document go to the
+	 * file's own storage instead of `storage`, until another document is loaded.
+	 */
+	fileProviders?: readonly CloudFileProvider[];
 	/** Optional class name applied to the root element. */
 	class?: string;
 	/**
@@ -238,11 +264,60 @@ export interface PowerPointViewerProps {
 	 */
 	initialSlide?: number;
 	/**
+	 * Google Fonts fallback for deck fonts that are neither installed nor
+	 * embedded. Unset: File > Options > Trust Center > "Download fonts that
+	 * are not installed or embedded" decides (on by default: the viewer
+	 * loads them from `fonts.googleapis.com`). Any other value locks that
+	 * option: off for `false` or an invalid `baseUrl`, on for a mirror.
+	 * `false`: no request goes to Google (`fonts.googleapis.com` or
+	 * `fonts.gstatic.com`); text uses installed, embedded or fallback fonts.
+	 * `{ baseUrl }`: requests go to a self-hosted mirror of the Google Fonts
+	 * CSS2 API instead, so the user's browser never contacts Google. An
+	 * invalid `baseUrl` disables the fallback (with a console warning).
+	 */
+	googleFonts?: GoogleFontsOption;
+	/**
+	 * How far Bullets / Numbering reaches when the text caret has no selection.
+	 * `'paragraph'` (the default, PowerPoint behaviour): only the caret's
+	 * paragraph changes. `'list'` (opt-in, word-processor behaviour): when the
+	 * caret switches a list paragraph between bullets and numbering, the whole
+	 * adjacent list converts with it. A range selection always affects exactly
+	 * the selected paragraphs. Unset means `'paragraph'`.
+	 */
+	listConversionScope?: ListConversionScope;
+	/**
+	 * Host switch for content a deck links from another server (http(s)
+	 * relationship targets): pictures, picture fills and bullets, video, audio
+	 * and poster frames. `false`: none of it is fetched. `true`: it is allowed.
+	 * Either value locks File > Options > Trust Center > "Allow external
+	 * content" to match; unset keeps the user's choice there. Google Fonts
+	 * requests are separate (see `googleFonts`).
+	 * A change applies from the next load.
+	 */
+	allowExternalContent?: boolean;
+	/**
+	 * Bounds on the work loading a deck may do, for hosts that show untrusted
+	 * decks: `maxInputBytes`, `maxUncompressedBytes`, `maxEntries`, `maxSlides`
+	 * and `maxShapes` (see `PptxLoadLimits`). Unset keeps the core defaults
+	 * (500 MiB inflated, 65,536 ZIP entries, no other limit). A deck over a
+	 * limit shows the load-error screen with the limit and the deck's value.
+	 * A change applies from the next load.
+	 */
+	limits?: PptxLoadLimits;
+	/**
 	 * Show the editor chrome: title bar, ribbon and toolbar, protected-view
 	 * and read-only banners, the mobile toolbar and the status bar. Default
 	 * `true`; `false` leaves the canvas (and the thumbnail pane, if shown).
 	 */
 	showToolbar?: boolean;
+	/**
+	 * Ribbon Display Options: the starting mode. `always` (the default) docks
+	 * the tabs and commands above the slide; `tabs` shows only the tab row and
+	 * lays a chosen tab's commands over the slide; `fullScreen` hides the title
+	 * bar and the ribbon behind a strip. A later change from the host applies
+	 * without firing `ribbon-display-change`.
+	 */
+	ribbonDisplay?: RibbonDisplayMode;
 	/**
 	 * Show the slide thumbnail pane. Default `true`. The pane still follows
 	 * the user's own collapse toggle and the `slidesPane` customisation panel.
@@ -317,9 +392,15 @@ export interface PowerPointViewerProps {
 	 * lazily loaded only when first opened; omit this prop to disable the
 	 * assistant entirely.
 	 *
+	 * Pass a plain `PptxAiConfig` (supported and not deprecated), or the opaque
+	 * handle `createAiAssistant(config)` returns (from `pptx-vue-viewer/ai`, the
+	 * opt-in entry that brings the chat panel). Both open the same panel. Only a
+	 * value from `createAiAssistant` is read as a handle; any other value is a
+	 * plain config, which the viewer does not validate.
+	 *
 	 * @see {@link PptxAiConfig}
 	 */
-	ai?: PptxAiConfig;
+	ai?: PptxAiConfig | PptxAiAssistant;
 }
 
 /**
@@ -331,6 +412,7 @@ export interface PowerPointViewerProps {
  *  - `onActiveSlideChange` → `@active-slide-change`
  *  - `onModeChange`        → `@mode-change`
  *  - `onZoomChange`        → `@zoom-change`
+ *  - `onRibbonDisplayChange` → `@ribbon-display-change`
  *  - `onSelectionChange`   → `@selection-change`
  *  - `onSlideCountChange`  → `@slide-count-change`
  *  - `onLoad`              → `@load`
@@ -346,6 +428,11 @@ export interface PowerPointViewerEmits {
 	(e: 'content-change' | 'autosave', content: Uint8Array): void;
 	/** Fired when the active slide, zoom level, or slide count changes. */
 	(e: 'active-slide-change' | 'zoom-change' | 'slide-count-change', value: number): void;
+	/**
+	 * Fired only when the user picks a Ribbon Display Options mode (the menu,
+	 * Ctrl+F1, a double click on a tab), never for a change of the `ribbonDisplay` prop.
+	 */
+	(e: 'ribbon-display-change', mode: RibbonDisplayMode): void;
 	/** Fired when the viewer mode changes. */
 	(e: 'mode-change', mode: string): void;
 	/** Fired when element selection changes. */
@@ -383,6 +470,11 @@ export interface PowerPointViewerEmits {
 	(e: 'presentation-change', presenting: boolean): void;
 	/** Fired on every collaboration connection-status transition. */
 	(e: 'collaboration-status', status: ConnectionStatus): void;
+	/**
+	 * Fired after a vector PDF export (File > Export > PDF) that approximated something: effects
+	 * drawn as pictures, substituted fonts, content left out. The viewer also shows a notice.
+	 */
+	(e: 'pdf-export-report', result: VectorPdfExportResult): void;
 }
 
 /**

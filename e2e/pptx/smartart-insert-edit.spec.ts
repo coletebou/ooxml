@@ -19,6 +19,7 @@ import type { Locator, Page } from '@playwright/test';
 import { savePptxViaBackstage } from './save-pptx';
 import { loadDeck as loadDeckFile, resetTabSession } from './support/deck';
 import { chooseSelectValue } from './support/select-control';
+import { unobstructedNodePoint } from './support/smartart-hit-target';
 
 const fixturePath = resolve(fileURLToPath(new URL('./fixtures/sample-deck.pptx', import.meta.url)));
 const drawingFixturePath = resolve(
@@ -62,15 +63,17 @@ async function clickSmartArtButton(page: Page): Promise<void> {
 async function insertSmartArtPreset(page: Page, pattern?: RegExp): Promise<void> {
 	await clickSmartArtButton(page);
 	const dialog = page.getByRole('dialog', { name: /Insert SmartArt/iu });
+	// The picker and its buttons are slotted into the shared dialog element, not the shadow box.
+	const smartArtDialog = page.locator('pptx-ui-insert-smartart-dialog');
 	await expect(dialog).toBeVisible();
 	if (pattern) {
-		const category = dialog.getByRole('button').filter({ hasText: pattern }).first();
+		const category = smartArtDialog.getByRole('button').filter({ hasText: pattern }).first();
 		await expect(category).toBeVisible();
 		await category.click();
 		await page.waitForTimeout(200);
 	}
-	await dialog.getByRole('option').first().click();
-	await dialog.getByRole('button', { name: /^Insert$/iu }).click();
+	await smartArtDialog.getByRole('option').first().click();
+	await smartArtDialog.getByRole('button', { name: /^Insert$/iu }).click();
 	await page.waitForTimeout(600);
 }
 
@@ -99,26 +102,6 @@ function firstSmartArtNode(smartArt: Locator): Locator {
 async function renderedNodeText(smartArt: Locator): Promise<string> {
 	const labels = await firstSmartArtNode(smartArt).locator('text').allTextContents();
 	return labels.join(' ').replace(/\s+/g, ' ').trim();
-}
-
-async function unobstructedNodePoint(node: Locator): Promise<{ x: number; y: number }> {
-	const point = await node.evaluate((element) => {
-		const box = element.getBoundingClientRect();
-		for (const yFraction of [0.8, 0.65, 0.5, 0.35, 0.2]) {
-			for (const xFraction of [0.25, 0.5, 0.75, 0.1, 0.9]) {
-				const x = box.left + box.width * xFraction;
-				const y = box.top + box.height * yFraction;
-				if (document.elementFromPoint(x, y)?.closest('[data-smartart-node-id]') === element) {
-					return { x, y };
-				}
-			}
-		}
-		return null;
-	});
-	if (!point) {
-		throw new Error('SmartArt node has no unobstructed browser hit target');
-	}
-	return point;
 }
 
 async function openFocusedNodeEditor(
@@ -286,6 +269,7 @@ async function exerciseDirectKeyboardNodeEdit(
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 test.describe('smartart insert and edit', () => {
+	test.describe.configure({ mode: 'parallel' });
 	test.use({ viewport: { width: 1440, height: 900 } });
 
 	test('keeps the node editor in local coordinates at fitted and enlarged zoom', async ({

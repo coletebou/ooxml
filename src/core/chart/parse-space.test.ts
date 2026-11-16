@@ -52,7 +52,8 @@ describe('parseChartSpace', () => {
 			kind: 'solid',
 			color: { kind: 'srgb', value: 'ff0000', transforms: [] },
 		});
-		expect(series?.spPr?.line).toEqual({ widthEmu: 12700, fill: { kind: 'none' } });
+		expect(series?.spPr?.line).toMatchObject({ widthEmu: 12700, fill: { kind: 'none' } });
+		expect(series?.spPr?.line?.sourceXml).toContain('<a:noFill');
 		expect(series?.spPr?.effectsXml).toContain('a:glow');
 		expect(series?.marker).toEqual({ symbol: 'diamond', size: 7 });
 		expect(series?.dataPoints).toEqual([
@@ -132,7 +133,6 @@ describe('parseChartSpace', () => {
 		);
 		expect(chartSpace.plotArea.groups[0]?.gapWidth).toBeUndefined();
 		expect(issues.map((issue) => issue.message)).toEqual([
-			'c:chartSpace/c:protection is not modelled; it is kept only in the source part.',
 			'c:barChart/c:mystery is not modelled; it is kept only in the source part.',
 			'c:errBars/c:mystery is not modelled; it is kept only in the source part.',
 			'c:errBars/c:errValType has an unreadable value "bogus".',

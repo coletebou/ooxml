@@ -14,9 +14,11 @@ export interface Exclusion {
 	heightPx: number;
 	/** Top-and-bottom wrapping keeps both sides empty. */
 	topAndBottom: boolean;
+	/** `wrapText="bothSides"`: text fills both sides of the picture on the same line. */
+	bothSides?: boolean;
 }
 
-/** Areas that wrapped floating pictures take from the text, per page index. */
+/** Areas that wrapped floating pictures and floating tables take from the text, per page index. */
 export function wrapExclusions(pages: LayoutPageBox[]): Map<number, Exclusion[]> {
 	const exclusions = new Map<number, Exclusion[]>();
 	for (const page of pages) {
@@ -28,7 +30,22 @@ export function wrapExclusions(pages: LayoutPageBox[]): Map<number, Exclusion[]>
 				widthPx: float.widthPx + SIDE_DISTANCE_PX * 2,
 				heightPx: float.heightPx,
 				topAndBottom: float.wrap === 'topAndBottom',
+				...(float.wrapText === 'bothSides' ? { bothSides: true } : {}),
 			}));
+		// Floating tables (`w:tblpPr`): text may run on both sides, kept at their distances.
+		for (const column of page.columns)
+			for (const block of column.blocks) {
+				if (block.kind !== 'table' || !block.floating) continue;
+				const distance = block.floating;
+				list.push({
+					xPx: page.marginLeftPx + column.xPx + (block.xPx ?? 0) - distance.leftPx,
+					yPx: page.marginTopPx + block.yPx - distance.topPx,
+					widthPx: (block.widthPx ?? 0) + distance.leftPx + distance.rightPx,
+					heightPx: block.heightPx + distance.topPx + distance.bottomPx,
+					topAndBottom: false,
+					bothSides: true,
+				});
+			}
 		if (list.length) exclusions.set(page.index, list);
 	}
 	return exclusions;
@@ -62,6 +79,7 @@ export function lineBoxesFor(
 		let leftInsetPx = 0;
 		let rightInsetPx = 0;
 		let gapBeforePx = 0;
+		const shared: { start: number; end: number }[] = [];
 		for (const exclusion of exclusions) {
 			const overlapsLine =
 				exclusion.yPx < top + heightPx && exclusion.yPx + exclusion.heightPx > top;
@@ -74,9 +92,27 @@ export function lineBoxesFor(
 				gapBeforePx = Math.max(gapBeforePx, exclusion.yPx + exclusion.heightPx - top);
 				continue;
 			}
+			if (exclusion.bothSides && Math.min(left, right) >= MIN_SIDE_WIDTH_PX) {
+				shared.push({ start, end });
+				continue;
+			}
 			if (left >= right) rightInsetPx = Math.max(rightInsetPx, columnWidthPx - start);
 			else leftInsetPx = Math.max(leftInsetPx, end);
 		}
-		return { leftInsetPx, rightInsetPx, gapBeforePx };
+		// One picture with room on both sides lets a line continue past it; with several pictures or
+		// an inset already taken, fall back to the larger side of each.
+		const single = shared.length === 1 && !leftInsetPx && !rightInsetPx ? shared[0] : undefined;
+		if (!single)
+			for (const { start, end } of shared) {
+				if (start >= columnWidthPx - end)
+					rightInsetPx = Math.max(rightInsetPx, columnWidthPx - start);
+				else leftInsetPx = Math.max(leftInsetPx, end);
+			}
+		return {
+			leftInsetPx,
+			rightInsetPx,
+			gapBeforePx,
+			...(single ? { hole: { startPx: single.start, endPx: single.end } } : {}),
+		};
 	};
 }

@@ -41,8 +41,9 @@ import {
 	resetTabSession,
 	selectElement,
 	slideStage,
-	thumbnail,
 } from './support/deck';
+import { formatSection, openFormatSection } from './support/format-pane';
+import { selectSlide } from './support/render-ready';
 
 const CHART_FIXTURE = fixture('chart-title-runs.pptx');
 const ENTERED_TITLE = 'Committed with Enter';
@@ -305,11 +306,14 @@ async function loadAxisDeck(page: Page, deck: DeckPayload | string): Promise<voi
 }
 
 async function axisChart(page: Page, slideNumber: number): Promise<Locator> {
-	await thumbnail(page, slideNumber).click();
+	// Wait for the slide to be current, so the chart clicked is not the previous slide's.
+	await selectSlide(page, slideNumber);
 	const chart = slideStage(page).locator('[aria-roledescription="chart"]').first();
 	await chart.waitFor();
 	await selectElement(page, chart);
 	await expect(inspector(page)).toBeVisible();
+	// The chart, not the slide, is what the Format pane now formats.
+	await expect(formatSection(page, 'chart')).toBeVisible();
 	return chart;
 }
 
@@ -687,6 +691,7 @@ test.describe('chart title rich text (multi-run titles)', () => {
 		await expect.poll(() => renderedTextCount(chart, AXIS_TITLE)).toBe(1);
 		await expect(await visibleInputWithValue(page, AXIS_TITLE)).toBeVisible();
 
+		await openFormatSection(page, 'sizePosition');
 		const x = inspector(page).getByRole('spinbutton', { name: 'X', exact: true });
 		const previousX = Number(await x.inputValue());
 		await x.fill(String(previousX + 1));

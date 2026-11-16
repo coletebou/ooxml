@@ -14,6 +14,8 @@ export {
 	PowerPointViewer,
 	SlideCanvas,
 	SlideStage,
+	SlidesPane,
+	SlideThumbnail,
 	ElementRenderer,
 	RibbonToolbar,
 	CollaborationCursors,
@@ -40,6 +42,8 @@ export type {
 	CollaborationConfig,
 	CollaborationRole,
 	CanvasSize,
+	SlidesPaneLayoutGalleryRequest,
+	SlideThumbnailProps,
 	RemoteCursor,
 	RemotePresence,
 	RemoteSelectionBox,
@@ -58,6 +62,7 @@ export type {
 	ElementClipboardPayload,
 	TableCellEditorState,
 	LayoutOption,
+	PptxAiAssistant,
 	PptxAiConfig,
 	PptxAiConnection,
 	PptxAiContextStrategy,
@@ -69,6 +74,7 @@ export type {
 
 // ── Shared API types ──
 export { createImageElementFromFile } from 'ooxml-ui/pptx';
+export type { ListConversionScope } from 'ooxml-ui/pptx';
 export type {
 	ViewerMode,
 	PowerPointViewerAPI,
@@ -186,3 +192,23 @@ export type { SavedPresentationFormat } from 'ooxml-ui/pptx';
 // theme tokens are authored in). React and Angular have always exported this;
 // the other three did not, which is the asymmetry this closes.
 export { renderToCanvas } from './lib/canvas-export';
+
+// ── Building blocks: compose your own shell from the canvas, toolbar and slides pane ──
+export {
+	BuildingBlocksCanvas,
+	BuildingBlocksSlidesPane,
+	BuildingBlocksToolbar,
+	useViewerBuildingBlocks,
+} from './building-blocks';
+export type {
+	ViewerBuildingBlocks,
+	ViewerBuildingBlocksOptions,
+	ViewerBuildingBlocksState,
+} from './building-blocks';
+export type {
+	BuildingBlockRequest,
+	BuildingBlockResult,
+	ViewerBuildingBlockActions,
+} from 'ooxml-ui/pptx';
+// The reporter every viewer and building-blocks entry takes as `onElementRenderError`.
+export type { ElementRenderErrorContext, ElementRenderErrorHandler } from 'ooxml-ui/pptx';

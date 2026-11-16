@@ -1,3 +1,4 @@
+export * from './audit-state';
 export * from './backstage/templates';
 export * from './commands';
 export * from './customization';
@@ -35,6 +36,9 @@ export * from './dialogs';
 export * from './dialogs/format-cells/number-categories';
 export * from './dialogs/format-cells/types';
 export * from './dialogs/insert-chart-model';
+export * from './dialogs/insert-chart-ex-model';
+export * from './dialogs/forecast-sheet';
+export * from './dialogs/scenario-summary';
 export * from './dialogs/grid-chart';
 export * from './dirty-state';
 export * from './formula-bar/name-resolve';
@@ -59,3 +63,14 @@ export * from './theme/defaults';
 export * from './theme/element';
 export * from './theme/types';
 export { selectionFormatting } from './selection-format';
+export { formatCellsState, FORMAT_CELLS_SAMPLE } from './format-cells-state';
+export type { FormatAspect, FormatCellsState } from './format-cells-state';
+export { orderFrom, stepMatch } from './find-order';
+export {
+	replaceAllValidated,
+	replaceOneValidated,
+	validateReplacements,
+	type RefusedReplacement,
+	type ReplaceOptions,
+	type ValidatedMatches,
+} from './replace-validation';

@@ -2,6 +2,7 @@
 // number formats, editing commands and the DOM-free grid layout the Excel viewer paints.
 // Legacy .xls and CSV loading live in the `xlsx/load` subpath so this entry never pulls in ole2.
 export * from './model';
+export { drawingSchemeColors } from './drawing-theme';
 export * from './address';
 export * from './address-r1c1';
 export * from './cells';
@@ -9,6 +10,9 @@ export * from './workbook';
 export * from './styles';
 export * from './cell-styles';
 export * from './time-period';
+export * from './filter-menu';
+export { compileAutoFilter, rowMatchesFilter } from './filter-criteria';
+export type { FilterEvalOptions } from './filter-criteria';
 export * from './numfmt/index';
 export * from './formula/index';
 export * from './read/index';
@@ -18,3 +22,8 @@ export * from './layout/index';
 export * from './pivot/index';
 export * from './slicer/index';
 export * from './compare/index';
+export * from './audit/index';
+export * from './embedded-chart-space';
+export * from './embedded-chart-ex-space';
+
+export { xlsxChartExDataSheet } from './edit/chart-ex';

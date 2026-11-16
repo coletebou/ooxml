@@ -21,14 +21,15 @@ import type {
 	ViewerCustomization,
 } from 'pptx-vue-viewer';
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watchEffect } from 'vue';
-import 'pptx-vue-viewer/styles';
 import { useI18n } from 'vue-i18n';
+import 'pptx-vue-viewer/styles';
 
 import { installDevViewerHandle } from '../../dev-viewer-handle';
 import { currentDemoCustomization } from '../../shared/demo-customization';
+import { demoFileProviders } from '../../shared/demo-file-providers';
 import { currentDemoRootOptions } from '../../shared/demo-root-options';
 import { currentDemo3DFlags } from '../../shared/rendering-3d-flags';
-import { useDemoAiConfig } from './ai-config';
+import { useDemoAiAssistant } from './ai-config';
 import {
 	isTrustedServerUrl,
 	randomUserColor,
@@ -51,7 +52,10 @@ import { themes } from './themes';
 const viewerRef = shallowRef<PowerPointViewerExpose>();
 let removeDevViewerHandle: (() => void) | undefined;
 onMounted(() => {
-	removeDevViewerHandle = installDevViewerHandle(() => viewerRef.value, import.meta.env.DEV);
+	removeDevViewerHandle = installDevViewerHandle(
+		() => viewerRef.value,
+		import.meta.env.DEV || import.meta.env.VITE_PPTX_E2E_HANDLE === '1',
+	);
 });
 onBeforeUnmount(() => removeDevViewerHandle?.());
 
@@ -65,7 +69,7 @@ const restoreChecked = ref(false);
 // localStorage-supplied fields and passes it to the viewer's optional `ai`
 // prop. The demo ships no key and no config UI, so this is normally undefined
 // and the assistant simply stays off.
-const aiConfig = useDemoAiConfig();
+const aiAssistant = useDemoAiAssistant();
 
 const themeKey = ref<string>(readStoredTheme());
 
@@ -544,6 +548,7 @@ function onZoneClick(e: MouseEvent): void {
 			autosave
 			:autosave-interval-ms="2000"
 			can-edit
+			:file-providers="demoFileProviders"
 			:smartArt3D="smartArt3D"
 			:surfaceChart3D="surfaceChart3D"
 			:barChart3D="barChart3D"
@@ -554,8 +559,13 @@ function onZoneClick(e: MouseEvent): void {
 			:show-toolbar="rootOptions.showToolbar"
 			:show-thumbnails="rootOptions.showThumbnails"
 			:initial-slide="rootOptions.initialSlide"
+			:fit-padding="rootOptions.fitPadding"
+			:google-fonts="rootOptions.googleFonts"
+			:allow-external-content="rootOptions.allowExternalContent"
+			:list-conversion-scope="rootOptions.listConversionScope"
+			:limits="rootOptions.limits"
 			:inspector-initially-open="rootOptions.inspectorInitiallyOpen"
-			:ai="aiConfig"
+			:ai="aiAssistant"
 			:author-name="collaborationConfig?.userName ?? autoName"
 			:collaboration="collaborationConfig ?? undefined"
 			:share-defaults="{ roomId: autoRoomId, userName: autoName, serverUrl: defaultServerUrl }"

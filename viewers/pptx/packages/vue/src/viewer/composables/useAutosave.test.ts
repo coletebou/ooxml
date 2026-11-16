@@ -202,4 +202,49 @@ describe('useAutosave', () => {
 		await vi.runOnlyPendingTimersAsync();
 		expect(onSave).not.toHaveBeenCalled();
 	});
+
+	it('reads the one shared engine: isDirty = true is an edit, inactive reads disabled', async () => {
+		const slides = ref<PptxSlide[]>([slide('a')]);
+		const enabled = ref(true);
+		const onSave = vi.fn(() => Promise.resolve());
+		const scope = effectScope();
+		let api!: UseAutosaveResult;
+		scope.run(() => {
+			api = useAutosave({ slides, enabled, intervalMs: 1000, onSave });
+		});
+
+		api.isDirty.value = true;
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(onSave).toHaveBeenCalledOnce();
+
+		enabled.value = false;
+		await Promise.resolve();
+		expect(api.status.value).toBe('disabled');
+
+		scope.stop();
+	});
+});
+
+describe('useAutosave inline drafts', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('counts uncommitted inline typing as an edit', async () => {
+		const slides = ref<PptxSlide[]>([slide('a')]);
+		const onSave = vi.fn(() => Promise.resolve());
+		const scope = effectScope();
+		let api!: UseAutosaveResult;
+		scope.run(() => {
+			api = useAutosave({ slides, intervalMs: 1000, onSave, getInlineEditingId: () => 'a' });
+		});
+		api.engine.noteInlineDraft({ slideId: 's1', elementId: 'a', text: 'Typed' });
+		expect(api.isDirty.value).toBeTruthy();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(onSave).toHaveBeenCalledOnce();
+		scope.stop();
+	});
 });

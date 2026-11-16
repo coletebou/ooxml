@@ -5,6 +5,8 @@ export { PowerPointViewer } from './component';
 export {
 	Ribbon,
 	SlideCanvas,
+	SlidesPane,
+	SlideThumbnail,
 	ViewerToolbar,
 	CollaborationCursors,
 	RemoteSelectionOverlay,
@@ -16,6 +18,14 @@ export type {
 } from './collab/components/props';
 export type { RibbonProps } from './components/ribbon/ribbon-types';
 export type { SlideCanvasProps, ViewerToolbarProps, EditorLayerProps } from './components/props';
+export { createSlidesPaneProps } from './components/slides-pane-props';
+export type {
+	CreateSlidesPanePropsOptions,
+	SlidesPaneLayoutGalleryRequest,
+	SlidesPaneProps,
+	SlidesPaneTableStyleContext,
+} from './components/slides-pane-props';
+export type { SlideThumbnailProps } from './components/slide-thumbnail-props';
 export type { EditorController } from './editor/editor-controller.svelte';
 export type {
 	ExportGifOptions,
@@ -48,6 +58,8 @@ export type {
 	PptxAiUIMessage,
 	PptxAiWritePolicy,
 } from 'ooxml-ui/pptx/ai';
+// `createAiAssistant` is exported from `pptx-svelte-viewer/ai`.
+export type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 export type { SvelteAiBridgeDeps } from './ai';
 export type {
 	ExternalCollaborationSession,

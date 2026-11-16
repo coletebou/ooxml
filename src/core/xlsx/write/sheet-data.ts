@@ -84,7 +84,7 @@ function cellXml(
 			v = escapeText(encodeEscapes(text));
 		} else {
 			t = 's';
-			v = String(ctx.strings.id(text, cell.richText));
+			v = String(ctx.strings.id(text, cell.richText, cell.phonetic));
 		}
 	} else if (isCellError(value)) {
 		t = 'e';
@@ -117,6 +117,8 @@ function rowAttrs(ctx: CellWriteContext, row: number, info: RowInfo | undefined)
 		customHeight: info?.customHeight || undefined,
 		outlineLevel: info?.outlineLevel || undefined,
 		collapsed: info?.collapsed || undefined,
+		thickTop: info?.thickTop || undefined,
+		thickBot: info?.thickBot || undefined,
 	});
 }
 

@@ -2,6 +2,8 @@ import { XmlObject } from '../../types';
 import type { PptxChartData } from '../../types';
 import { extractMultiLevelCategoryValues } from '../../utils/chart-multi-level-category-parser';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeSmartArt';
+import { isFiniteNumber } from '../../../../units/finite';
+import { at } from '../../../../geometry/indexed';
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	protected detectChartType(plotArea: XmlObject | undefined): PptxChartData['chartType'] {
@@ -45,8 +47,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		}
 
 		// Single match
-		if (matchedKeys.length === 1) {
-			return chartElementMap[matchedKeys[0]];
+		// Each matched key was found in `chartElementMap`.
+		const only = matchedKeys.length === 1 ? chartElementMap[at(matchedKeys, 0)] : undefined;
+		if (only) {
+			return only;
 		}
 
 		// Check for Office 2016+ chart extension types (cx:chart namespace)
@@ -171,7 +175,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		let maxIndex = -1;
 		for (const point of points) {
 			const index = Number.parseInt(String(point?.['@_idx'] ?? '0'), 10);
-			if (!Number.isFinite(index) || index < 0) {
+			if (!isFiniteNumber(index) || index < 0) {
 				continue;
 			}
 			const value = String(
@@ -193,7 +197,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			10,
 		);
 		const length =
-			Number.isFinite(declaredCount) && declaredCount > maxIndex + 1 ? declaredCount : maxIndex + 1;
+			isFiniteNumber(declaredCount) && declaredCount > maxIndex + 1 ? declaredCount : maxIndex + 1;
 
 		const result: string[] = [];
 		for (let index = 0; index < length; index++) {
@@ -225,7 +229,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 		const namePoints = this.extractChartPointValues(textNode, false);
 		if (namePoints.length > 0) {
-			return namePoints[0];
+			return at(namePoints, 0);
 		}
 		return 'Series';
 	}

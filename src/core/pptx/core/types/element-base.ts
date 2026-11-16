@@ -50,9 +50,9 @@ export interface PptxElementBase {
 	 * animation to the element it animates across a save/reload round trip.
 	 * Absent on SDK-created elements until one is minted at save time.
 	 */
-	shapeId?: string;
+	shapeId?: string | undefined;
 	/** Element name from `cNvPr/@name`. Used for morph transition matching via the `!!` naming convention. */
-	name?: string;
+	name?: string | undefined;
 	/**
 	 * `p:nvSpPr/p:nvPr/p:ph/@type` (lower-cased) when the shape is a placeholder:
 	 * `title`, `ctrtitle`, `body`, `subtitle`, `ftr`, `dt`, `sldnum`, ...
@@ -61,7 +61,7 @@ export interface PptxElementBase {
 	 * without re-walking `rawXml`. Absent on non-placeholder shapes and on
 	 * SDK-created elements.
 	 */
-	placeholderType?: string;
+	placeholderType?: string | undefined;
 	/**
 	 * `p:nvSpPr/p:nvPr/p:ph/@sz` (lower-cased): `"full"`, `"half"`, or
 	 * `"quarter"`. Captured on load for round-trip completeness. Per
@@ -71,7 +71,7 @@ export interface PptxElementBase {
 	 * that carries `@sz` already has an explicit `a:xfrm` at the master
 	 * level, so no renderer currently derives a size from this field.
 	 */
-	placeholderSz?: string;
+	placeholderSz?: string | undefined;
 	/**
 	 * `p:nvSpPr/p:nvPr/p:ph/@orient` (only `"vert"` is meaningful per
 	 * `ST_Direction`). Captured on load for round-trip completeness. In
@@ -79,7 +79,7 @@ export interface PptxElementBase {
 	 * an explicit `a:bodyPr/@vert`, which already drives vertical-text
 	 * rendering, so this field is not currently read by any renderer.
 	 */
-	placeholderOrient?: 'vert';
+	placeholderOrient?: 'vert' | undefined;
 	x: number;
 	y: number;
 	width: number;
@@ -100,44 +100,46 @@ export interface PptxElementBase {
 	 * `undefined` for an SDK-created element or one whose transform could not
 	 * be resolved to a usable `a:off` on load.
 	 */
-	xEmu?: number;
+	xEmu?: number | undefined;
 	/** The exact EMU integer `y` was parsed from (`a:off/@_y`). See {@link xEmu}. */
-	yEmu?: number;
+	yEmu?: number | undefined;
 	/** The exact EMU integer `width` was parsed from (`a:ext/@_cx`). See {@link xEmu}. */
-	widthEmu?: number;
+	widthEmu?: number | undefined;
 	/** The exact EMU integer `height` was parsed from (`a:ext/@_cy`). See {@link xEmu}. */
-	heightEmu?: number;
+	heightEmu?: number | undefined;
 	/** Resolved load-time transform for a shape with no own a:xfrm. Used only to detect edits. */
-	inheritedTransform?: Pick<
-		PptxElementBase,
-		| 'x'
-		| 'y'
-		| 'width'
-		| 'height'
-		| 'rotation'
-		| 'skewX'
-		| 'skewY'
-		| 'flipHorizontal'
-		| 'flipVertical'
-	>;
-	rotation?: number;
+	inheritedTransform?:
+		| Pick<
+				PptxElementBase,
+				| 'x'
+				| 'y'
+				| 'width'
+				| 'height'
+				| 'rotation'
+				| 'skewX'
+				| 'skewY'
+				| 'flipHorizontal'
+				| 'flipVertical'
+		  >
+		| undefined;
+	rotation?: number | undefined;
 	/** Skew along the X axis in degrees (parsed from `@_skewX` in 1/60000ths of a degree). */
-	skewX?: number;
+	skewX?: number | undefined;
 	/** Skew along the Y axis in degrees (parsed from `@_skewY` in 1/60000ths of a degree). */
-	skewY?: number;
-	flipHorizontal?: boolean;
-	flipVertical?: boolean;
+	skewY?: number | undefined;
+	flipHorizontal?: boolean | undefined;
+	flipVertical?: boolean | undefined;
 	/** Whether this element is hidden (used by the Elements Panel visibility toggle). */
-	hidden?: boolean;
+	hidden?: boolean | undefined;
 	/** Element-level opacity (0-1). */
-	opacity?: number;
-	rawXml?: XmlObject;
+	opacity?: number | undefined;
+	rawXml?: XmlObject | undefined;
 	/** Shape-level click action (from `a:hlinkClick` on `p:cNvPr`). */
-	actionClick?: PptxAction;
+	actionClick?: PptxAction | undefined;
 	/** Shape-level hover action (from `a:hlinkHover` on `p:cNvPr`). */
-	actionHover?: PptxAction;
+	actionHover?: PptxAction | undefined;
 	/** Shape lock attributes parsed from `p:cNvSpPr/a:spLocks`. */
-	locks?: PptxShapeLocks;
+	locks?: PptxShapeLocks | undefined;
 	/**
 	 * Opaque `<a:ext>` children captured from the shape's `<a:extLst>` whose
 	 * URI is not recognised by a typed extractor (hidden fill/line, image
@@ -147,7 +149,7 @@ export interface PptxElementBase {
 	 * Mirrors the existing `effectDagXml` / `endParaRunProperties` raw-XML
 	 * preservation pattern.
 	 */
-	extLstXml?: XmlObject[];
+	extLstXml?: XmlObject[] | undefined;
 }
 
 /**
@@ -166,14 +168,16 @@ export interface PptxElementBase {
  * ```
  */
 export interface PptxTextProperties {
-	text?: string;
-	textStyle?: TextStyle;
+	text?: string | undefined;
+	textStyle?: TextStyle | undefined;
 	/** Rich text segments with individual styling. */
-	textSegments?: TextSegment[];
+	textSegments?: TextSegment[] | undefined;
 	/** Per-paragraph indentation (marginLeft, indent) for multi-level bullet support. */
-	paragraphIndents?: Array<{ marginLeft?: number; indent?: number }>;
+	paragraphIndents?:
+		| Array<{ marginLeft?: number | undefined; indent?: number | undefined }>
+		| undefined;
 	/** Placeholder prompt text inherited from layout/master (e.g. "Click to add title"). Shown as a greyed-out hint when the shape has no user-entered text. */
-	promptText?: string;
+	promptText?: string | undefined;
 	/**
 	 * The string {@link text} was INHERITED from, when this is a header / footer /
 	 * date / slide-number placeholder whose own body the file leaves empty.
@@ -186,11 +190,11 @@ export interface PptxTextProperties {
 	 * therefore leaves the authored empty body alone while `text` still equals
 	 * this value, and writes a genuine per-slide override once it does not.
 	 */
-	inheritedPlaceholderText?: string;
+	inheritedPlaceholderText?: string | undefined;
 	/** Linked text box chain ID from `a:bodyPr > a:linkedTxbx/@id` or `a:txbx > a:linkedTxbx/@id`. Text overflows from one linked frame to the next. */
-	linkedTxbxId?: number;
+	linkedTxbxId?: number | undefined;
 	/** Sequence number within a linked text box chain (0-based). */
-	linkedTxbxSeq?: number;
+	linkedTxbxSeq?: number | undefined;
 }
 
 /**
@@ -207,13 +211,13 @@ export interface PptxTextProperties {
  * ```
  */
 export interface PptxShapeProperties {
-	shapeStyle?: ShapeStyle;
+	shapeStyle?: ShapeStyle | undefined;
 	/** Preset geometry name, e.g. "rect", "ellipse", "roundRect". */
-	shapeType?: string;
+	shapeType?: string | undefined;
 	/** Geometry adjustment values, e.g. `{ adj: 16667 }`. */
-	shapeAdjustments?: Record<string, number>;
+	shapeAdjustments?: Record<string, number> | undefined;
 	/** Adjustment handles for interactive shape modification (yellow diamond handles). */
-	adjustmentHandles?: GeometryAdjustmentHandle[];
+	adjustmentHandles?: GeometryAdjustmentHandle[] | undefined;
 }
 
 // ==========================================================================
@@ -238,7 +242,7 @@ export interface PptxShapeProperties {
  * ```
  */
 export interface PlaceholderTextLevelStyle {
-	fontFamily?: string;
+	fontFamily?: string | undefined;
 	/**
 	 * The RAW `a:defRPr/a:latin/@typeface` string (verbatim: a theme alias
 	 * such as `+mj-lt`/`+mn-lt`, or a literal face name) {@link fontFamily}
@@ -249,18 +253,18 @@ export interface PlaceholderTextLevelStyle {
 	 * about the deck is rewritten, even when this level was never touched.
 	 * Absent when the level declares no `a:latin`.
 	 */
-	fontTypefaceXml?: string;
+	fontTypefaceXml?: string | undefined;
 	/**
 	 * Snapshot of {@link fontFamily} exactly as parsed, before any edit. The
 	 * save path diffs the live value against this: unchanged means re-emit
 	 * {@link fontTypefaceXml} verbatim (preserve the alias); different means
 	 * a genuine edit, so the new literal name is written instead.
 	 */
-	resolvedFontFamily?: string;
-	fontSize?: number;
-	bold?: boolean;
-	italic?: boolean;
-	color?: string;
+	resolvedFontFamily?: string | undefined;
+	fontSize?: number | undefined;
+	bold?: boolean | undefined;
+	italic?: boolean | undefined;
+	color?: string | undefined;
 	/**
 	 * The `a:defRPr/a:solidFill` node this level's {@link color} came from.
 	 *
@@ -271,13 +275,13 @@ export interface PlaceholderTextLevelStyle {
 	 * that is inheriting it; {@link color} is only the reading taken at parse
 	 * time. Absent when the level declares no colour, or declares a literal one.
 	 */
-	colorChoiceXml?: XmlObject;
-	bulletChar?: string;
-	bulletAutoNumType?: string;
-	bulletFontFamily?: string;
-	bulletSizePercent?: number;
+	colorChoiceXml?: XmlObject | undefined;
+	bulletChar?: string | undefined;
+	bulletAutoNumType?: string | undefined;
+	bulletFontFamily?: string | undefined;
+	bulletSizePercent?: number | undefined;
 	/** Bullet colour from `a:buClr` as hex string. */
-	bulletColor?: string;
+	bulletColor?: string | undefined;
 	/**
 	 * The colour-choice node inside `a:buClr` this level's {@link bulletColor}
 	 * resolved from (`a:schemeClr` / `a:sysClr` / `a:prstClr` / `a:srgbClr`,
@@ -285,35 +289,35 @@ export interface PlaceholderTextLevelStyle {
 	 * verbatim on save so a themed bullet is not downgraded to a literal
 	 * `a:srgbClr`. Absent when the level declares no bullet colour.
 	 */
-	bulletColorXml?: XmlObject;
+	bulletColorXml?: XmlObject | undefined;
 	/** Bullet size in points from `a:buSzPts`. */
-	bulletSizePts?: number;
+	bulletSizePts?: number | undefined;
 	/** True when `a:buNone` is present at this level. */
-	bulletNone?: boolean;
-	marginLeft?: number; // indent in px (from `@_marL` EMU)
+	bulletNone?: boolean | undefined;
+	marginLeft?: number | undefined; // indent in px (from `@_marL` EMU)
 	/** Paragraph right margin in px (from `@_marR` EMU). */
-	marginRight?: number;
-	indent?: number; // first-line indent in px (from `@_indent` EMU)
+	marginRight?: number | undefined;
+	indent?: number | undefined; // first-line indent in px (from `@_indent` EMU)
 	/**
 	 * Paragraph alignment as a `TextStyle['align']` token (`left`, `center`,
 	 * `right`, `justify`, `justLow`, `dist`, `thaiDist`), never the raw OOXML
 	 * `@algn` value.
 	 */
-	alignment?: string;
+	alignment?: string | undefined;
 	/** Right-to-left paragraph direction (`@rtl`). */
-	rtl?: boolean;
+	rtl?: boolean | undefined;
 	/** Tab stops from `a:tabLst/a:tab` (positions in px). */
-	tabStops?: TextStyle['tabStops'];
-	lineSpacing?: number;
-	lineSpacingExactPt?: number;
+	tabStops?: TextStyle['tabStops'] | undefined;
+	lineSpacing?: number | undefined;
+	lineSpacingExactPt?: number | undefined;
 	/**
 	 * Space before the paragraph in px, resolved from EITHER `a:spcPts`
 	 * (absolute) or `a:spcPct` (a percentage of this level's own `a:defRPr`
 	 * font size) - the OOXML source is not distinguishable from this field
 	 * alone. See {@link spaceBeforePercent} / {@link resolvedSpaceBefore}.
 	 */
-	spaceBefore?: number;
-	spaceAfter?: number;
+	spaceBefore?: number | undefined;
+	spaceAfter?: number | undefined;
 	/**
 	 * Snapshot of {@link spaceBefore} / {@link spaceAfter} exactly as parsed.
 	 * Diffed the same way as {@link resolvedFontFamily}: unchanged means the
@@ -322,26 +326,26 @@ export interface PlaceholderTextLevelStyle {
 	 * that has since moved away from the snapshot is a genuine edit and is
 	 * always written as `a:spcPts`, since an editor works in absolute units.
 	 */
-	resolvedSpaceBefore?: number;
-	resolvedSpaceAfter?: number;
+	resolvedSpaceBefore?: number | undefined;
+	resolvedSpaceAfter?: number | undefined;
 	/**
 	 * The raw `a:spcPct` fraction (e.g. `0.2` for 20%) {@link spaceBefore} /
 	 * {@link spaceAfter} was resolved from, when the source used percentage
 	 * spacing rather than `a:spcPts`. Absent when the source used `a:spcPts`
 	 * (or authored no spacing at all).
 	 */
-	spaceBeforePercent?: number;
-	spaceAfterPercent?: number;
+	spaceBeforePercent?: number | undefined;
+	spaceAfterPercent?: number | undefined;
 	/** Default tab interval in CSS pixels (`a:lvlXpPr/@defTabSz`). */
-	defaultTabSize?: number;
+	defaultTabSize?: number | undefined;
 	/** Whether East Asian line-breaking rules are enabled. */
-	eaLineBreak?: boolean;
+	eaLineBreak?: boolean | undefined;
 	/** Whether Latin line-breaking rules are enabled. */
-	latinLineBreak?: boolean;
+	latinLineBreak?: boolean | undefined;
 	/** Font vertical alignment within the text line. */
-	fontAlignment?: string;
+	fontAlignment?: string | undefined;
 	/** Whether end punctuation may hang outside the text frame. */
-	hangingPunctuation?: boolean;
+	hangingPunctuation?: boolean | undefined;
 }
 
 /**
@@ -366,22 +370,22 @@ export interface PlaceholderDefaults {
 	/** Placeholder type: 'title', 'body', 'ctrTitle', 'subTitle', 'dt', 'ftr', 'sldNum', etc. */
 	type: string;
 	/** Placeholder index (when present). */
-	idx?: number;
-	bodyInsetLeft?: number;
-	bodyInsetTop?: number;
-	bodyInsetRight?: number;
-	bodyInsetBottom?: number;
-	textAnchor?: string;
-	autoFit?: boolean;
+	idx?: number | undefined;
+	bodyInsetLeft?: number | undefined;
+	bodyInsetTop?: number | undefined;
+	bodyInsetRight?: number | undefined;
+	bodyInsetBottom?: number | undefined;
+	textAnchor?: string | undefined;
+	autoFit?: boolean | undefined;
 	/** Explicit autofit mode from OOXML body properties. See {@link TextStyle.autoFitMode}. */
-	autoFitMode?: 'shrink' | 'normal' | 'none';
+	autoFitMode?: 'shrink' | 'normal' | 'none' | undefined;
 	/** Font scale percentage for normAutofit (e.g. 0.9 = 90%). Only meaningful when autoFit is true. */
-	autoFitFontScale?: number;
+	autoFitFontScale?: number | undefined;
 	/** Line spacing reduction for normAutofit (e.g. 0.2 = reduce by 20%). Only meaningful when autoFit is true. */
-	autoFitLineSpacingReduction?: number;
-	textWrap?: string;
+	autoFitLineSpacingReduction?: number | undefined;
+	textWrap?: string | undefined;
 	/** Level-specific text styles keyed 0-8. */
-	levelStyles?: Record<number, PlaceholderTextLevelStyle>;
+	levelStyles?: Record<number, PlaceholderTextLevelStyle> | undefined;
 	/** Prompt text extracted from the layout/master placeholder (e.g. "Click to add title"). */
-	promptText?: string;
+	promptText?: string | undefined;
 }

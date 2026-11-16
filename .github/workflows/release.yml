@@ -28,6 +28,11 @@ on:
         required: false
         default: ''
         type: string
+      skip_ci_check:
+        description: 'Bypass the CI gate: release even when the latest CI run on main failed'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,12 +45,54 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Holds the release back while the newest finished CI run on main is red, so a scheduled run never
+  # tags and publishes a tree whose tests fail. Cancelled and skipped runs (a newer push superseded
+  # them) are ignored, and a release commit is `[skip ci]`, so it has no run of its own. A manual
+  # dispatch can bypass the gate with `skip_ci_check`; a re-publish (`tag` set) is never gated.
+  ci-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      blocked: ${{ steps.check.outputs.blocked }}
+    steps:
+      - name: Check the latest CI run on main
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BYPASS: ${{ inputs.skip_ci_check }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ] || [ "$BYPASS" = "true" ]; then
+            echo "CI gate bypassed (re-publish or skip_ci_check)."
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(gh run list --workflow ci.yml --branch main --status completed --limit 30             --json conclusion,event,url,headSha             --jq '[.[] | select(.event != "pull_request" and .conclusion != "cancelled" and .conclusion != "skipped")] | .[0] // empty | [.conclusion, .url, .headSha] | @tsv')
+          if [ -z "$latest" ]; then
+            echo "No finished CI run found on main; not blocking."
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=$'	' read -r conclusion url sha <<< "$latest"
+          echo "Latest CI run on main: $conclusion ($sha) $url"
+          if [ "$conclusion" = "success" ]; then
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Release skipped: the latest CI run on main ended '$conclusion' ($url). Fix main, or dispatch with skip_ci_check to bypass."
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: [ci-gate]
     # Full release on schedule, or on manual dispatch without a tag input. Dispatch WITH a tag
-    # skips straight to the publish job (re-publish mode).
+    # skips straight to the publish job (re-publish mode). Held back while CI on main is red.
     if: |
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.tag == '')
+      needs.ci-gate.outputs.blocked != 'true' && (
+        github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && inputs.tag == '')
+      )
     runs-on: ubuntu-latest
     # Commits the version bump and pushes the tags.
     permissions:
@@ -137,6 +184,7 @@ jobs:
           bun run build
           bun run test:package
           node scripts/build-released.mjs --smoke
+          node scripts/publish-released.mjs --plan release-plan.json --entry-points
 
       # Prepend the new release section to CHANGELOG.md. Prepend (rather than regeneration) means
       # shipped sections are never rewritten, so old tags can be culled by prune-releases without
@@ -166,6 +214,13 @@ jobs:
             fi
           done
 
+      # Each viewer's root changelog gets one dated section naming the viewer packages released
+      # today, built from the package sections git-cliff just wrote (a second run on the same day
+      # extends that day's section).
+      - name: Update the viewer changelogs
+        if: steps.plan.outputs.any_changed == 'true'
+        run: node scripts/viewer-changelogs.mjs --plan release-plan.json
+
       - name: Commit version bumps and changelogs
         if: steps.plan.outputs.any_changed == 'true'
         env:
@@ -181,7 +236,7 @@ jobs:
           # so package.json + bun.lock in the repo always match what is published and the tag
           # points at a commit whose manifests are truthful. The paths are split into words on purpose.
           # shellcheck disable=SC2046
-          git add $(node -p "const p=require('./release-plan.json');p.order.filter(k=>p.packages[k].release).flatMap(k=>[p.packages[k].manifest,p.packages[k].changelog]).join(' ')") bun.lock
+          git add $(node -p "const p=require('./release-plan.json');p.order.filter(k=>p.packages[k].release).flatMap(k=>[p.packages[k].manifest,p.packages[k].changelog]).join(' ')") bun.lock viewers/*/CHANGELOG.md
           if git diff --cached --quiet; then
             echo "No release changes to commit"
           else
@@ -699,7 +754,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       - name: Sign and attach the release assets
         env:

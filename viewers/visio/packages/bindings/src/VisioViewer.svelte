@@ -1,10 +1,11 @@
 <script lang="ts">
+  import type { CloudOpenedFile } from 'ooxml-core/embedding';
   import type { CreateVsdxOptions } from './common';
   import { readonly, writable } from 'svelte/store';
   import { mountFrameworkViewer, viewerHandle, viewerOptions, viewerStateSource, type ViewerState, type MountedViewer, type ViewerProps, type VsdxSource, type VisioEdit, type VisioShapeSelection, type SvgExportOptions, type CurrentPagePrintSnapshotOptions } from './common';
   type Props = ViewerProps & { class?: string; style?: string; 'aria-label'?: string };
-  let { document, pageIndex, zoom, showToolbar, canEdit, readOnly, ribbonAddIns, collaboration, customization, storage, events, class: className, style, 'aria-label': ariaLabel }: Props = $props();
-  const options = $derived({ document, pageIndex, zoom, showToolbar, canEdit, readOnly, ribbonAddIns, collaboration, customization, storage, events } satisfies Required<ViewerProps>);
+  let { document, pageIndex, zoom, showToolbar, canEdit, readOnly, ribbonAddIns, collaboration, customization, storage, fileProviders, events, class: className, style, 'aria-label': ariaLabel }: Props = $props();
+  const options = $derived({ document, pageIndex, zoom, showToolbar, canEdit, readOnly, ribbonAddIns, collaboration, customization, storage, fileProviders, events } satisfies Required<ViewerProps>);
   let binding: MountedViewer | undefined;
   const handle = viewerHandle(() => binding);
   // The component owns its state store, so subscribers made before mount still see updates.
@@ -25,6 +26,7 @@
   export function getHandle() { return handle; }
   export function load(source: VsdxSource) { return handle.load(source); }
   export function createBlankDrawing(blankOptions?: CreateVsdxOptions) { return handle.createBlankDrawing(blankOptions); }
+  export function openCloudFile(file: CloudOpenedFile) { return handle.openCloudFile(file); }
   export function applyEdits(edits: readonly VisioEdit[]) { return handle.applyEdits(edits); }
   export function selectShapes(shapes: readonly VisioShapeSelection[]) { handle.selectShapes(shapes); }
   export function selectAll() { handle.selectAll(); }

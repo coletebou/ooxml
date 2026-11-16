@@ -23,6 +23,7 @@ import {
 	MORPH_EASING,
 	MORPH_FADE_IN_EASING,
 	MORPH_FADE_IN_START_PERCENT,
+	MORPH_FADE_OUT_EASING,
 	MORPH_FADE_OUT_END_PERCENT,
 	MORPH_FADE_OUT_HOLD_PERCENT,
 } from './morph-types';
@@ -903,14 +904,14 @@ describe('generateMorphAnimations', () => {
 		expect(anims[0].keyframes).not.toContain('rotate(315deg)');
 	});
 
-	it('animates a flip change through edge-on instead of snapping it', () => {
+	it('turns a flip change over in 3D instead of snapping it', () => {
 		// A small photo is mirror-flipped and upside down; its grown counterpart
 		// on the next slide is upright. Stating one endpoint's flips on BOTH
 		// frames either flew an upright copy (losing the authored mirror) or
-		// snapped it at landing. Per-frame factors with a constant function
-		// list let CSS interpolate scaleX -1 -> 1 through 0, which is the
-		// edge-on card flip PowerPoint plays, while rotation runs its own arc
-		// alongside.
+		// snapped it at landing. PowerPoint turns the body over about its own
+		// axis under a perspective camera (see `morph-flip-turn`): the outgoing
+		// mirror on both frames, plus a half turn that ends on the incoming
+		// mirror, while rotation runs its own arc alongside.
 		const pairs: MorphPair[] = [
 			{
 				fromElement: makeElement({
@@ -929,18 +930,21 @@ describe('generateMorphAnimations', () => {
 		];
 		const anims = generateMorphAnimations(pairs, 1000);
 		const frames = anims[0].keyframes;
-		expect(frames).toContain('scaleX(-1)');
-		expect(frames).toContain('scaleX(1)');
-		// The unflipped axis stays explicit on both frames too, so the transform
-		// lists pair up and interpolate numerically rather than by matrix.
+		expect(frames.match(/scaleX\(-1\)/gu)?.length).toBe(2);
+		// The turn that brings the shape's own +x side forward: +180 from a
+		// mirrored start.
+		expect(frames).toContain('rotateY(0deg)');
+		expect(frames).toContain('rotateY(180deg)');
+		expect(frames.match(/perspective\(/gu)?.length).toBe(2);
+		// Both frames state every function, so they interpolate numerically.
 		expect(frames.match(/scaleY\(1\)/gu)?.length).toBe(2);
 		expect(frames).toContain('rotate(-176.5deg)');
 		expect(frames).toContain('rotate(0deg)');
 
 		// The ghost mirrors the same journey in reverse.
 		const ghosts = generateMorphGhostAnimations(pairs, 1000, 0);
-		expect(ghosts[0].keyframes).toContain('scaleX(-1)');
-		expect(ghosts[0].keyframes).toContain('scaleX(1)');
+		expect(ghosts[0].keyframes).toContain('rotateY(180deg)');
+		expect(ghosts[0].keyframes.match(/scaleX\(-1\)/gu)?.length).toBe(2);
 	});
 
 	it('keeps a shared flip stated on every frame', () => {
@@ -1278,7 +1282,10 @@ describe('generateMorphAnimations', () => {
 		expect(ghosts[0].keyframes).toContain('opacity: 0;');
 	});
 
-	it('should include background-color for fill color changes', () => {
+	it('tweens a fill colour change only where no ghost dissolves over it', () => {
+		// A ghost fading over the live half already blends the two fills on the
+		// morph curve; tweening the colour underneath as well ran the blend at
+		// the square of the progress (issue #141).
 		const pairs: MorphPair[] = [
 			{
 				fromElement: makeElement({
@@ -1301,11 +1308,12 @@ describe('generateMorphAnimations', () => {
 				} as Partial<PptxElement> & { id: string; type: PptxElement['type'] }),
 			},
 		];
-		const anims = generateMorphAnimations(pairs, 500);
-		expect(anims[0].keyframes).toContain('background-color:');
+		expect(generateMorphAnimations(pairs, 500)[0].keyframes).not.toContain('background-color:');
+		const unghosted = generateMorphAnimations(pairs, 500, 'object', new Set());
+		expect(unghosted[0].keyframes).toContain('background-color:');
 	});
 
-	it('should include outline for stroke changes', () => {
+	it('tweens a stroke change only where no ghost dissolves over it', () => {
 		const pairs: MorphPair[] = [
 			{
 				fromElement: makeElement({
@@ -1328,8 +1336,9 @@ describe('generateMorphAnimations', () => {
 				} as Partial<PptxElement> & { id: string; type: PptxElement['type'] }),
 			},
 		];
-		const anims = generateMorphAnimations(pairs, 500);
-		expect(anims[0].keyframes).toContain('outline:');
+		expect(generateMorphAnimations(pairs, 500)[0].keyframes).not.toContain('outline:');
+		const unghosted = generateMorphAnimations(pairs, 500, 'object', new Set());
+		expect(unghosted[0].keyframes).toContain('outline:');
 	});
 });
 
@@ -1353,10 +1362,12 @@ describe('generateUnmatchedFadeOutAnimations', () => {
 
 	it('dissolves out inside the first quarter and holds at zero (measured)', () => {
 		// PowerPoint clears an unmatched shape well before its replacement
-		// appears: alpha 0.98 at 3ms, 0.62 at 112ms, 0.13 at 210ms and gone by
-		// 238ms of a 1s morph. Fading across the whole duration instead left the
-		// midpoint a double exposure of both slides.
+		// appears: its alpha falls linearly in the morph's eased progress and is
+		// gone when that progress reaches a third, about 25% of the time
+		// (issue #141, CreateVideo at 60fps). Fading across the whole duration
+		// instead left the midpoint a double exposure of both slides.
 		const anims = generateUnmatchedFadeOutAnimations([makeElement({ id: 'a' })], 1000, 0);
+		expect(anims[0].keyframes).toContain(`animation-timing-function: ${MORPH_FADE_OUT_EASING}`);
 		expect(anims[0].keyframes).toContain(`${MORPH_FADE_OUT_HOLD_PERCENT}% {`);
 		expect(anims[0].keyframes).toContain(`${MORPH_FADE_OUT_END_PERCENT}% {`);
 		expect(MORPH_FADE_OUT_END_PERCENT).toBeLessThan(MORPH_FADE_IN_START_PERCENT);
@@ -1403,10 +1414,11 @@ describe('generateUnmatchedFadeInAnimations', () => {
 	});
 
 	it('stays invisible until the morph is nearly half done (measured)', () => {
-		// Nothing of the incoming shape is on screen before 401ms of a 1s morph;
-		// alpha is 0.18 at 464ms, 0.72 at 652ms and 0.99 at 935ms. Holding at
-		// zero for the first 42% is what leaves a clean gap between an
-		// unmatched shape leaving and its replacement arriving.
+		// Nothing of the incoming shape is on screen until the morph's eased
+		// progress reaches two thirds, about 45% of the time; from there its
+		// alpha rises linearly in that progress (issue #141, CreateVideo at
+		// 60fps). The hold is what leaves a clean gap between an unmatched shape
+		// leaving and its replacement arriving.
 		const anims = generateUnmatchedFadeInAnimations([makeElement({ id: 'a' })], 1000, 0);
 		const css = anims[0].keyframes;
 		expect(css).toContain(`${MORPH_FADE_IN_START_PERCENT}% {`);
@@ -1656,6 +1668,20 @@ describe('morphPairNeedsCrossfade', () => {
 			text: 'Tactical Edge',
 		} as Partial<PptxElement> & { id: string; type: PptxElement['type'] });
 		expect(morphPairNeedsCrossfade(from, to)).toBeTruthy();
+	});
+
+	it('crossfades a text run whose theme colour alpha changes', () => {
+		const item = (id: string, alpha: number): PptxElement =>
+			makeElement({
+				id,
+				type: 'text',
+				text: 'L',
+				textSegments: [
+					{ text: 'L', style: { color: '#FFFFFF', colorRef: { scheme: 'bg1', alpha } } },
+				],
+			} as Partial<PptxElement> & { id: string; type: PptxElement['type'] });
+		expect(morphPairNeedsCrossfade(item('a', 0.3), item('b', 0.8))).toBe(true);
+		expect(morphPairNeedsCrossfade(item('a', 0.3), item('b', 0.3))).toBe(false);
 	});
 
 	it('is true when only an adjustment handle moved', () => {

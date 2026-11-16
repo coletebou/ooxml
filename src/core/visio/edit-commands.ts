@@ -50,6 +50,9 @@ export type {
 	VisioScaleUnit,
 } from './edit-page-setup-commands';
 import { snapshotShapeDataEdit, type VisioShapeDataEdit } from './edit-shape-data-commands';
+import { isVisioControlEdit, snapshotControlEdit, type VisioControlEdit } from './edit-control';
+import { isVisioActionEdit, snapshotActionEdit, type VisioActionEdit } from './edit-action';
+export type { VisioControlEdit, VisioActionEdit };
 export type {
 	VisioShapeDataEdit,
 	VisioShapeDataFields,
@@ -95,6 +98,16 @@ export type {
 	VisioInsertContainerEdit,
 	VisioInsertCalloutEdit,
 } from './edit-diagram-parts-commands';
+export type {
+	VisioSwimlaneEdit,
+	VisioCreateSwimlanesEdit,
+	VisioInsertSwimlaneEdit,
+	VisioDeleteSwimlaneEdit,
+	VisioResizeSwimlaneEdit,
+	VisioInsertSeparatorEdit,
+	VisioSwimlaneOptionsEdit,
+	VisioSwimlaneDirection,
+} from './edit-swimlane-commands';
 import { snapshotAssignLayers, type VisioAssignLayersEdit } from './edit-layer-commands';
 export type { VisioAssignLayersEdit } from './edit-layer-commands';
 import { snapshotLayerProperties, type VisioLayerPropertiesEdit } from './edit-layer-properties';
@@ -103,7 +116,33 @@ import { snapshotMasterInstance, type VisioMasterInstanceEdit } from './edit-mas
 export type { VisioMasterInstanceEdit } from './edit-master-instance';
 import { snapshotStencilMasterDrop, type VisioStencilMasterDropEdit } from './edit-master-drop';
 export type { VisioStencilMasterDropEdit } from './edit-master-drop';
+import {
+	isVisioDataGraphicEdit,
+	snapshotDataGraphicEdit,
+	type VisioSetDataGraphicEdit,
+} from './edit-data-graphic';
+export type { VisioDataGraphicItemSpec, VisioSetDataGraphicEdit } from './edit-data-graphic';
 import { isVisioGuideEdit, snapshotGuideEdit, type VisioGuideEdit } from './edit-guide-commands';
+import {
+	isVisioContainerEdit,
+	snapshotContainerEdit,
+	type VisioContainerEdit,
+} from './edit-container-options';
+import {
+	isVisioPictureEdit,
+	snapshotPictureEdit,
+	type VisioPictureEdit,
+} from './edit-picture-adjust';
+export type {
+	VisioContainerEdit,
+	VisioContainerFitEdit,
+	VisioContainerOptionsEdit,
+} from './edit-container-options';
+export type {
+	VisioPictureEdit,
+	VisioPictureAdjustEdit,
+	VisioPictureCropEdit,
+} from './edit-picture-adjust';
 export type { VisioGuideEdit } from './edit-guide-commands';
 import {
 	snapshotTextFieldInsert,
@@ -179,6 +218,8 @@ export type VisioGeometryEdit =
 			connect?: VisioConnectorGlue;
 			/** A connector's route; omitted means straight. */
 			route?: VisioConnectorRoute;
+			/** The line's own text (a connector label); it sits at the middle and follows the line. */
+			text?: string;
 	  })
 	| (BoxCreation & { type: 'create-rectangle'; shape?: VisioOutlineShape })
 	| (BoxCreation & { type: 'create-ellipse' })
@@ -189,7 +230,14 @@ export type VisioGeometryEdit =
 	| (Target & { type: 'rotate-shape'; angle: number })
 	| (Target & { type: 'flip-shape'; axis: 'horizontal' | 'vertical' })
 	| (Target & { type: 'move-line-endpoint'; endpoint: 'begin' | 'end'; x: number; y: number })
-	| (Target & { type: 'delete-shape' })
+	| (Target & {
+			type: 'delete-shape';
+			/**
+			 * Run this deletion after the rest of the batch, in a transaction of its own (a stencil
+			 * instance can only be deleted that way), still as one edit for the caller.
+			 */
+			deferred?: boolean;
+	  })
 	| VisioConnectorEdit;
 /** Insert a blank foreground page after an existing page, copying its PageSheet settings. */
 export interface VisioPageInsert {
@@ -250,12 +298,17 @@ export type VisioEdit =
 	| VisioSubprocessEdit
 	| VisioDiagramPartEdit
 	| VisioShapeDataEdit
+	| VisioControlEdit
+	| VisioActionEdit
 	| VisioDataEdit
 	| VisioAssignLayersEdit
 	| VisioLayerPropertiesEdit
 	| VisioMasterInstanceEdit
 	| VisioStencilMasterDropEdit
-	| VisioGuideEdit;
+	| VisioSetDataGraphicEdit
+	| VisioGuideEdit
+	| VisioContainerEdit
+	| VisioPictureEdit;
 export const isVisioPageEdit = (edit: VisioEdit): edit is VisioPageEdit =>
 	edit.type === 'insert-page' ||
 	edit.type === 'reorder-page' ||
@@ -365,7 +418,10 @@ export function snapshotVisioEdits(
 		if (edit.type === 'set-layer-properties') return snapshotLayerProperties(edit);
 		if (edit.type === 'insert-master-instance') return snapshotMasterInstance(edit);
 		if (edit.type === 'drop-stencil-master') return snapshotStencilMasterDrop(edit);
+		if (isVisioDataGraphicEdit(edit)) return snapshotDataGraphicEdit(edit);
 		if (isVisioGuideEdit(edit)) return snapshotGuideEdit(edit);
+		if (isVisioContainerEdit(edit)) return snapshotContainerEdit(edit);
+		if (isVisioPictureEdit(edit)) return snapshotPictureEdit(edit);
 		if (isVisioMetadataEdit(edit)) return snapshotMetadataEdit(edit);
 		if (isVisioGroupEdit(edit)) return snapshotGroupEdit(edit);
 		if (isVisioPageSetupEdit(edit)) return snapshotPageSetupEdit(edit);
@@ -373,6 +429,8 @@ export function snapshotVisioEdits(
 		if (edit.type === 'create-subprocess') return snapshotSubprocessEdit(edit);
 		if (isVisioDiagramPartEdit(edit)) return snapshotDiagramPartEdit(edit);
 		if (edit.type === 'set-shape-data') return snapshotShapeDataEdit(edit);
+		if (isVisioControlEdit(edit)) return snapshotControlEdit(edit);
+		if (isVisioActionEdit(edit)) return snapshotActionEdit(edit);
 		if (isVisioDataEdit(edit)) return snapshotDataEdit(edit);
 		if (isVisioConnectorEdit(edit)) return snapshotConnectorEdit(edit);
 		if (edit.type === 'delete-page') return { type: edit.type, pageId: edit.pageId };
@@ -463,6 +521,7 @@ export function snapshotVisioEdits(
 					endY,
 					...(connect ? { connect } : {}),
 					...(route ? { route } : {}),
+					...(edit.text !== undefined ? { text: text(edit.text) } : {}),
 				};
 			}
 			case 'create-rectangle':
@@ -511,7 +570,7 @@ export function snapshotVisioEdits(
 				};
 			}
 			case 'delete-shape':
-				return { ...target, type: edit.type };
+				return { ...target, type: edit.type, ...(edit.deferred ? { deferred: true } : {}) };
 			default:
 				return fail('INVALID_EDIT', 'Unsupported edit command.');
 		}

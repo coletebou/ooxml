@@ -3,7 +3,9 @@ import {
 	readBackstageRecentFile,
 	resolveCollaborationConfig,
 	resolveCollaborationShellEditability,
-	resolveCollaborationShellState,
+	resolveBuildingBlockMode,
+	describeBuildingBlockShell,
+	writeBackReport,
 } from 'ooxml-ui/pptx';
 import type { CollabLoadOrigin } from 'ooxml-ui/pptx';
 /**
@@ -16,11 +18,17 @@ import type { CollabLoadOrigin } from 'ooxml-ui/pptx';
  *
  * ```tsx
  * function MyCustomViewer({ content }: { content: Uint8Array }) {
- *   const { toolbarProps, canvasProps } = useViewerBuildingBlocks({ content, canEdit: true });
+ *   const { toolbarProps, canvasProps, slidesPaneProps } = useViewerBuildingBlocks({
+ *     content,
+ *     canEdit: true,
+ *   });
  *   return (
  *     <>
  *       <Toolbar {...toolbarProps} />
- *       <SlideCanvas {...canvasProps} />
+ *       <div style={{ display: 'flex' }}>
+ *         <SlidesPane {...slidesPaneProps} />
+ *         <SlideCanvas {...canvasProps} />
+ *       </div>
  *     </>
  *   );
  * }
@@ -36,20 +44,24 @@ import type { CollabLoadOrigin } from 'ooxml-ui/pptx';
  * render `PowerPointViewer` instead.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
+import { useTranslation } from '../i18n/use-translation';
 import { buildCanvasProps } from './useViewerBuildingBlocks-canvas-props';
+import { useSlidesPaneProps } from './useViewerBuildingBlocks-slides-pane-props';
 import { buildToolbarProps } from './useViewerBuildingBlocks-toolbar-props';
 import type {
 	UseViewerBuildingBlocksInput,
 	ViewerBuildingBlocksResult,
 } from './useViewerBuildingBlocks-types';
+import { useViewerBuildingBlocksActions } from './useViewerBuildingBlocksActions';
 import { useViewerBuildingBlocksCollaboration } from './useViewerBuildingBlocksCollaboration';
 import { useViewerBuildingBlocksCore } from './useViewerBuildingBlocksCore';
 import { useViewerBuildingBlocksState } from './useViewerBuildingBlocksState';
 
 export type {
+	BuildingBlockRequest,
 	UseViewerBuildingBlocksInput,
+	ViewerBuildingBlockActions,
 	ViewerBuildingBlocksResult,
 } from './useViewerBuildingBlocks-types';
 
@@ -66,6 +78,10 @@ export function useViewerBuildingBlocks(
 		filePath,
 		fileName,
 		initialSlide,
+		googleFonts,
+		listConversionScope,
+		allowExternalContent,
+		limits,
 		autosaveEnabled = true,
 		userName,
 		hiddenActions,
@@ -80,6 +96,7 @@ export function useViewerBuildingBlocks(
 		onOpenSettings,
 		onOpenHeaderFooter,
 		onOpenShareDialog,
+		onOpenLayoutGallery,
 	} = input;
 	const collaborationConfig = resolveCollaborationConfig(input.collaboration);
 	const [collaborationReadOnly, setCollaborationReadOnly] = useState(Boolean(collaborationConfig));
@@ -134,6 +151,7 @@ export function useViewerBuildingBlocks(
 		presentation,
 		masterPseudoSlide,
 		gridSpacingPx,
+		slideSectionGroups,
 		viewerOptions,
 	} = core;
 	// Shared slides can arrive before their original PPTX resources finish loading.
@@ -148,6 +166,10 @@ export function useViewerBuildingBlocks(
 	const {
 		dialogs,
 		loadVersion,
+		canInsertElement,
+		readOnlyRecommendation,
+		hasModifyVerifier,
+		handlerRef,
 		editorOps,
 		exportHandlers,
 		printHandlers,
@@ -163,6 +185,10 @@ export function useViewerBuildingBlocks(
 		canEdit,
 		filePath,
 		initialSlide,
+		googleFonts,
+		listConversionScope,
+		allowExternalContent,
+		limits,
 		autosaveEnabled,
 		userName,
 		handle,
@@ -185,6 +211,26 @@ export function useViewerBuildingBlocks(
 		loadVersion,
 		embedFonts: dialogs.embedFontsEnabled,
 		onReadOnlyChange: setCollaborationReadOnly,
+	});
+	const blockActions = useViewerBuildingBlocksActions({
+		state,
+		canEdit,
+		canInsert: canInsertElement,
+		mode,
+		slides,
+		activeSlide,
+		activeSlideIndex,
+		dialogs,
+		editorOps,
+		history,
+		handlerRef,
+		propertyHandlers,
+		content,
+		readOnlyRecommendation,
+		hasModifyVerifier,
+		presentation,
+		onRequest: input.onRequest,
+		fileLimits: input.fileLimits,
 	});
 	const toolbarProps = buildToolbarProps({
 		mode,
@@ -217,6 +263,11 @@ export function useViewerBuildingBlocks(
 		autosaveEnabled,
 		hiddenActions,
 		viewPreferencesSync,
+		onOpenImagePicker: blockActions.requestImagePicker,
+		onOpenMediaPicker: blockActions.requestMediaPicker,
+		onApplyLayout: blockActions.applyLayout,
+		onResetSlide: blockActions.resetSlide,
+		loadLayoutPreviews: blockActions.loadLayoutPreviews,
 	});
 
 	const canvasProps = buildCanvasProps({
@@ -239,21 +290,47 @@ export function useViewerBuildingBlocks(
 		findResults: editorOps.findReplace.findResults,
 		findResultIndex: editorOps.findReplace.findResultIndex,
 		viewerOptions,
-		buildHyperlinkConfirmMessage: (url) => `${t('pptx.options.trust.confirmHyperlinks')}\n\n${url}`,
+		t,
 	});
 
 	canvasProps.collaborationOverlay = overlay;
-	// The same shell projection the other bindings hand their custom chrome.
-	const shellState = useMemo(
+	canvasProps.onElementRenderError = input.onElementRenderError;
+	const slidesPaneProps = useSlidesPaneProps({
+		state,
+		slides,
+		canEdit,
+		activeSlideIndex,
+		slideSectionGroups,
+		slideOps: editorOps.slideOps,
+		sectionOps: editorOps.sectionOps,
+		recordedTimings: presentation.recordedTimings,
+		onOpenLayoutGallery,
+	});
+	slidesPaneProps.onElementRenderError = input.onElementRenderError;
+	// The same shell (projection and shared state) every binding hands its custom chrome.
+	const { shellState, collaborationState } = useMemo(
 		() =>
-			resolveCollaborationShellState({
-				authorizedCanEdit: requestedCanEdit,
-				configured: Boolean(collaborationConfig),
-				readOnly: collaborationReadOnly,
-				sourcePending: Boolean(content) && loading,
-				sourceError: Boolean(error),
-				status: collaboration?.status ?? 'disconnected',
-				remoteUsers: collaboration?.remoteUsers ?? [],
+			describeBuildingBlockShell({
+				shell: {
+					authorizedCanEdit: requestedCanEdit,
+					configured: Boolean(collaborationConfig),
+					readOnly: collaborationReadOnly,
+					sourcePending: Boolean(content) && loading,
+					sourceError: Boolean(error),
+					status: collaboration?.status ?? 'disconnected',
+					remoteUsers: collaboration?.remoteUsers ?? [],
+				},
+				collaboration: {
+					active: Boolean(collaboration?.config),
+					roomId: collaboration?.config.roomId,
+					status: collaboration?.status ?? 'disconnected',
+					synced: collaboration?.synced ?? false,
+					clientId: collaboration?.clientId,
+					userName: collaboration?.config.userName,
+					userColor: collaboration?.config.userColor,
+					remoteUsers: collaboration?.remoteUsers ?? [],
+					writeBack: writeBackReport(collaboration?.config, collaboration?.writeBack),
+				},
 			}),
 		[
 			requestedCanEdit,
@@ -264,16 +341,25 @@ export function useViewerBuildingBlocks(
 			error,
 			collaboration?.status,
 			collaboration?.remoteUsers,
+			collaboration?.config,
+			collaboration?.synced,
+			collaboration?.clientId,
+			collaboration?.writeBack,
 		],
 	);
 	return {
 		toolbarProps,
 		canvasProps,
-		mode,
+		slidesPaneProps,
+		// The effective mode: `preview` while the blocks may not edit, as in every binding.
+		mode: resolveBuildingBlockMode(mode, canEdit),
 		loading,
 		error,
 		autosaveStatus,
 		collaboration,
 		shellState,
+		collaborationState,
+		// Read last, so action groups registered by the hooks above are included.
+		actions: blockActions.session.actions(),
 	};
 }

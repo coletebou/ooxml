@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import { fileCommand, ribbonLayoutInit } from './suite-check-init.mjs';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const require = createRequire(join(root, 'e2e/docx/package.json'));
 const { chromium, expect } = require('@playwright/test');
@@ -12,7 +13,7 @@ const JSZip = require('jszip');
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 // Skip the start chooser; these checks drive the whole suite.
-await page.addInitScript(() => (globalThis.ooxmlSkipStart = true));
+await page.addInitScript(ribbonLayoutInit);
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
 page.on('console', (message) => {
@@ -50,12 +51,12 @@ try {
 	await editor.click();
 	await page.keyboard.press('Control+End');
 	await page.keyboard.type(' Reviewed by the team.');
-	await page.locator('#save').click();
+	await fileCommand(page, 'save');
 	await page.waitForFunction(
 		() => document.querySelector('#save-state')?.textContent === 'Saved to this device',
 	);
 	console.log('Word edited and saved');
-	await page.locator('#share').click();
+	await fileCommand(page, 'share');
 	await page.locator('#dialog button').filter({ hasText: 'General' }).click();
 	await page.locator('teams-app').waitFor();
 	await page.waitForTimeout(500);
@@ -69,7 +70,7 @@ try {
 	await page.locator('#back-teams').waitFor({ state: 'visible' });
 	assert.equal(await page.locator('docx-editor').count(), 1);
 	console.log('Teams attachment reused same Word session');
-	await page.locator('#embedded').click();
+	await fileCommand(page, 'embedded');
 	await page.locator('#dialog button').filter({ hasText: 'Budget.xlsx' }).click();
 	await page.locator('xlsx-editor').waitFor();
 	await page.waitForFunction(() => document.querySelector('xlsx-editor')?.workbook);
@@ -82,13 +83,13 @@ try {
 	await page.keyboard.press('Control+A');
 	await page.keyboard.type('5800');
 	await page.keyboard.press('Enter');
-	await page.locator('#save').click();
+	await fileCommand(page, 'save');
 	await page.waitForFunction(
 		() => document.querySelector('#save-state').textContent === 'Saved to this device',
 	);
 	await page.locator('#back-parent').click();
 	const downloaded = page.waitForEvent('download');
-	await page.locator('#download').click();
+	await fileCommand(page, 'download');
 	const exportFile = await downloaded;
 	const path = await exportFile.path();
 	const parentZip = await JSZip.loadAsync(await readFile(path));
@@ -194,7 +195,7 @@ try {
 	await page.locator('#theme-picker').click();
 	await page.locator('input[name=mode][value=dark]').check({ force: true });
 	await page.locator('input[name=accent][value=purple]').check({ force: true });
-	await page.getByRole('button', { name: 'Done', exact: true }).click();
+	await page.locator('#settings-dialog').getByRole('button', { name: 'OK', exact: true }).click();
 	assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
 	assert.equal(
 		await page
@@ -268,7 +269,7 @@ try {
 	});
 	await page.waitForFunction(() => Boolean(document.querySelector('visio-viewer')?.document));
 	await page.locator('visio-viewer').evaluate((e) => e.replacePlainText('0', '1', 'Approved'));
-	await page.locator('#save').click();
+	await fileCommand(page, 'save');
 	await page.waitForFunction(
 		() => document.querySelector('#save-state').textContent === 'Saved to this device',
 	);
@@ -276,7 +277,7 @@ try {
 	console.log('Visio parsed, edited and saved through shared suite storage');
 	// A managed deployment: its ai-config.json decides the models, features and instructions.
 	const managed = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-	await managed.addInitScript(() => (globalThis.ooxmlSkipStart = true));
+	await managed.addInitScript(ribbonLayoutInit);
 	await managed.route('**/ai-config.json', (route) =>
 		route.fulfill({
 			json: {

@@ -70,13 +70,13 @@ import type { PowerPointViewerExpose } from 'pptx-vue-viewer';
 | 方法        | 签名                      | 说明                                   |
 | ----------- | ------------------------- | -------------------------------------- |
 | `getZoom`   | `() => number`            | 获取当前缩放比例，1 表示 100%。        |
-| `setZoom`   | `(level: number) => void` | 设置缩放比例，限制在 0.2 到 5.0 之间。 |
+| `setZoom`   | `(level: number) => void` | 设置缩放比例，限制在 0.1 到 5.0 之间。 |
 | `zoomIn`    | `() => void`              | 放大一步，步长为 10%。                 |
 | `zoomOut`   | `() => void`              | 缩小一步，步长为 10%。                 |
 | `zoomReset` | `() => void`              | 重置为 100%。                          |
 
-::: info 缩放范围与 React 略有不同
-Vue 和 React 查看器都会将缩放限制在 `0.2` 至 `5.0`（500%）之间。
+::: info 缩放范围
+Vue 和 React 查看器都会将缩放限制在 `0.1`（10%）至 `5.0`（500%）之间，其中 `1` 表示幻灯片适应视口。切换幻灯片时会保持缩放比例。
 :::
 
 ### 模式 {#mode}
@@ -94,6 +94,44 @@ Vue 和 React 查看器都会将缩放限制在 `0.2` 至 `5.0`（500%）之间�
 | `setActiveSlideIndex` | `(index: number) => void` | 设置当前幻灯片，等同于 `goTo`。 |
 | `getSlideCount`       | `() => number`            | 获取幻灯片总数。                |
 | `isDirty`             | `() => boolean`           | 文档是否存在未保存修改。        |
+
+### 宿主持久化保存
+
+宿主自行序列化并异步存储演示文稿时，请使用修订号，使上传过程中产生的修改保持为未保存状态。
+不会重新加载文档，撤销历史也会保留。
+
+| 方法              | 签名                                                       | 说明                                               |
+| ----------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| `getSaveRevision` | `() => number`                                             | 文档当前的修订号，每次修改后都会变化。             |
+| `getSaveSnapshot` | `() => Promise<{ revision: number; content: Uint8Array }>` | 为宿主序列化文档。文档保持未保存，不触发保存事件。 |
+| `acknowledgeSave` | `(revision: number) => PptxSaveAcknowledgement`            | 通知查看器宿主已持久化 `revision`。                |
+
+结果类型：
+
+```ts
+interface PptxSaveSnapshot {
+	readonly revision: number;
+	readonly content: Uint8Array;
+}
+
+type PptxSaveAcknowledgement =
+	| { readonly status: 'clean'; readonly revision: number }
+	| { readonly status: 'pending'; readonly revision: number; readonly currentRevision: number }
+	| { readonly status: 'stale'; readonly revision: number; readonly savedRevision: number }
+	| { readonly status: 'unknown'; readonly revision: number };
+```
+
+`acknowledgeSave` 返回以下之一：
+
+- `{ status: 'clean' }`：`revision` 仍是当前修订号。文档变为已保存，触发 `onDirtyChange(false)`，
+  并丢弃崩溃恢复副本（除非选项 > 保存 中选择保留上次自动恢复版本）。
+- `{ status: 'pending', currentRevision }`：已接受该修订号，但之后又有修改。文档保持未保存，
+  可能包含这些修改的恢复副本也会保留。
+- `{ status: 'stale' }`：早于已确认的修订号，忽略。
+- `{ status: 'unknown' }`：并非该查看器发出的修订号，忽略。
+
+保存失败时不要调用确认，文档会保持未保存。撤销到已保存内容同样算一次修改，因此在下次保存前文档仍为未保存。
+与 Svelte 和原生版的 `getContent()` 不同，`getSaveSnapshot()` 不会清除未保存标记。
 
 ### 访问幻灯片 {#slide-access}
 
@@ -243,14 +281,14 @@ import {
 } from 'pptx-vue-viewer';
 ```
 
-| 导出项                         | 类型                                                                  | 说明                                                                                                           |
-| ------------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `PPTX_OPEN_ACCEPT`             | `string`                                                              | 可直接用于 `<input type="file" accept>`：`.pptx,.ppsx,.pptm,.potx,.ppt,.json`。                                |
-| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | 未拼接的同一扩展名列表，供拖放区域自行判断。                                                                   |
-| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | 根据选择或拖入的文件名进行快速预筛选，只检查扩展名，最终格式由加载器检测。                                     |
-| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | 判断是否属于 PowerPoint 97-2003 二进制格式（`.ppt`、`.pps`、`.pot`），这些格式可读取，不属于此保存接口的输出。 |
-| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | 去除目录和可加载扩展名，得到文件主名，例如 `decks/report.ppt` 变为 `report`。                                  |
-| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | 生成保存副本时提供的文件名，例如 `report.ppt` 变为 `report.pptx`。                                             |
-| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm'`                                          | 此保存路径可生成的格式，不包含二进制 `.ppt`，输出始终为 OpenXML。                                              |
+| 导出项                         | 类型                                                                  | 说明                                                                                                               |
+| ------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `PPTX_OPEN_ACCEPT`             | `string`                                                              | 可直接用于 `<input type="file" accept>`：`.pptx,.ppsx,.pptm,.potx,.ppt,.json`。                                    |
+| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | 未拼接的同一扩展名列表，供拖放区域自行判断。                                                                       |
+| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | 根据选择或拖入的文件名进行快速预筛选，只检查扩展名，最终格式由加载器检测。                                         |
+| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | 判断是否属于 PowerPoint 97-2003 二进制格式（`.ppt`、`.pps`、`.pot`）。`.ppt` 可以保存；`.pps` 和 `.pot` 仅可读取。 |
+| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | 去除目录和可加载扩展名，得到文件主名，例如 `decks/report.ppt` 变为 `report`。                                      |
+| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | 生成保存副本时提供的文件名，例如 `report.ppt` 变为 `report.pptx`。                                                 |
+| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm' \| 'ppt'`                                 | 此保存路径可生成的格式，包括二进制 97-2003 `.ppt`。                                                                |
 
-“另存为”时应使用 `savedPresentationFileName`。此路径输出的是 OpenXML 包，如果保留旧版源扩展名，会得到扩展名为 `.ppt`、内容却是 ZIP 的文件，PowerPoint 会拒绝打开。
+“另存为”时应使用 `savedPresentationFileName`。除非选择 97-2003 `.ppt`，输出都是 OpenXML 包；因此如果保留旧版源扩展名，会得到扩展名为 `.ppt`、内容却是 ZIP 的文件，PowerPoint 会拒绝打开。

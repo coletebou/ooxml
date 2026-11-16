@@ -4,6 +4,7 @@ import {
 	createPresentationKeyBuffer,
 	createWheelStepBuffer,
 	isEditorControlTarget,
+	isEditorTextInputTarget,
 	mapPresentationKey,
 	mapPresentationWheel,
 	mapSlideShowStartKey,
@@ -236,9 +237,16 @@ export function createViewportHandlers(deps: ViewportHandlersDeps): ViewportHand
 			if (deps.viewer.isFullscreen && handleShowKey(event, deps)) {
 				return;
 			}
-			// A focused control owns Space (it toggles a checkbox in File > Options); the paging
-			// keys still reach the slide list.
-			const spaceOnControl = event.key === ' ' && isEditorControlTarget(event.target);
+			// A field owns what is typed into it: Space is a space there, and the arrows, Home, End
+			// and the Page keys move its caret (the editor keymap above leaves them alone already).
+			if (isEditorTextInputTarget(event.target)) {
+				return;
+			}
+			// A focused control owns Space (it toggles a checkbox in File > Options), and so does a
+			// zoomed slide that took it to pan (`attachViewportNavigation` prevents its default);
+			// the paging keys still reach the slide list.
+			const spaceOnControl =
+				event.key === ' ' && (event.defaultPrevented || isEditorControlTarget(event.target));
 			if (!spaceOnControl && deps.viewer.handleNavigationKey(event.key)) {
 				event.preventDefault();
 			}

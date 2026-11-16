@@ -30,15 +30,6 @@ export default defineConfig({
 	},
 	head: [
 		['meta', { name: 'theme-color', content: '#185abd' }],
-		['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
-		['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
-		[
-			'link',
-			{
-				rel: 'stylesheet',
-				href: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap',
-			},
-		],
 		['meta', { property: 'og:type', content: 'website' }],
 		['meta', { property: 'og:title', content: 'docx-viewer documentation' }],
 		[
@@ -83,6 +74,7 @@ export default defineConfig({
 				text: 'Reference',
 				items: [
 					{ text: 'Element API and events', link: '/api' },
+					{ text: 'OneDrive integration', link: '/onedrive' },
 					{ text: 'Theming', link: '/theming' },
 				],
 			},
@@ -108,7 +100,9 @@ export default defineConfig({
 				text: 'Project Status',
 				items: [
 					{ text: 'Support roadmap', link: '/parity-roadmap' },
+					{ text: 'Supported features and preservation', link: '/preservation' },
 					{ text: 'Outstanding work', link: '/outstanding-work' },
+					{ text: 'Verification corpus', link: '/verification' },
 					{ text: 'Package releases', link: '/releasing' },
 				],
 			},

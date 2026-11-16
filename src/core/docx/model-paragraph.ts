@@ -32,6 +32,9 @@ export interface Paragraph {
 	/** Word paragraph spacing and indentation values, kept in their native twip units (1/20 pt). */
 	spacingBeforeTwips?: Twips;
 	spacingAfterTwips?: Twips;
+	/** `w:beforeAutospacing` / `w:afterAutospacing`: HTML auto spacing (14 pt) replaces the twips. */
+	spacingBeforeAuto?: boolean;
+	spacingAfterAuto?: boolean;
 	lineSpacingTwips?: SignedTwips;
 	/** `auto` uses 240ths of a line; `exact` and `atLeast` use twips. */
 	lineSpacingRule?: 'auto' | 'exact' | 'atLeast';
@@ -62,6 +65,17 @@ export interface Paragraph {
 	/** `w:suppressLineNumbers`: omit this paragraph from line numbering; false overrides a style. */
 	suppressLineNumbers?: boolean;
 	/**
+	 * `w:kinsoku`: East Asian line-start and line-end prohibition (on when absent). Read-only like
+	 * `borders`: the source XML keeps it and it is not written for new paragraphs.
+	 */
+	kinsoku?: boolean;
+	/** `w:autoSpaceDE`: space between East Asian and Western letters (on when absent); read-only. */
+	autoSpaceDE?: boolean;
+	/** `w:autoSpaceDN`: space between East Asian letters and digits (on when absent); read-only. */
+	autoSpaceDN?: boolean;
+	/** `w:overflowPunct`: line-end punctuation may hang past the margin (on when absent); read-only. */
+	overflowPunct?: boolean;
+	/**
 	 * `w:outlineLvl` as a 1-9 level, or 0 for body text (`w:val="9"`, which cancels a style's
 	 * level). Read-only like `borders`: the source XML keeps it and it is not written for new paragraphs.
 	 */
@@ -81,6 +95,11 @@ export interface Paragraph {
 	 * ranges are not modeled.
 	 */
 	bookmarks?: string[];
+	/**
+	 * Editable ranges (`w:permStart`/`w:permEnd`) covering text of this paragraph. Read only: the
+	 * markers stay in the source and are carried through edits. Enforced under document protection.
+	 */
+	permissions?: import('./form-field-model').PermissionRange[];
 	/** The block-level content control (`w:sdt` around paragraphs) this paragraph belongs to. */
 	contentControl?: ContentControl;
 }
@@ -92,6 +111,8 @@ export type ParagraphFormatting = Pick<
 	| 'direction'
 	| 'spacingBeforeTwips'
 	| 'spacingAfterTwips'
+	| 'spacingBeforeAuto'
+	| 'spacingAfterAuto'
 	| 'lineSpacingTwips'
 	| 'lineSpacingRule'
 	| 'indentLeftTwips'
@@ -106,6 +127,10 @@ export type ParagraphFormatting = Pick<
 	| 'widowControl'
 	| 'contextualSpacing'
 	| 'suppressLineNumbers'
+	| 'kinsoku'
+	| 'autoSpaceDE'
+	| 'autoSpaceDN'
+	| 'overflowPunct'
 	| 'outlineLevel'
 	| 'borders'
 	| 'shadingFill'

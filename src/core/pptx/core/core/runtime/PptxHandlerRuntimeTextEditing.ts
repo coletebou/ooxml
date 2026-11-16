@@ -1,5 +1,9 @@
 import { TextSegment, TextStyle, XmlObject } from '../../types';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeTextRunStyleExtraction';
+import { paragraphContentEntries } from './paragraph-sibling-order';
+import { at } from '../../../../geometry/indexed';
+
+const REWRITE_CONTENT_TAGS: ReadonlySet<string> = new Set(['a:r', 'a:fld', 'a:br']);
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	protected extractTextSegmentsFromTxBodyForRewrite(
@@ -77,16 +81,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				});
 			};
 
-			const runs = this.ensureArray(paragraph['a:r']) as XmlObject[];
-			runs.forEach((run) => {
-				if (!run) {
-					return;
-				}
-				appendRunSegment(run['a:t'], run['a:rPr'] as XmlObject | undefined);
-			});
-
-			const fields = this.ensureArray(paragraph['a:fld']) as XmlObject[];
-			fields.forEach((field) => {
+			const appendField = (field: XmlObject | undefined): void => {
 				if (!field) {
 					return;
 				}
@@ -112,19 +107,29 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					fieldType,
 					fieldGuid,
 				});
-			});
+			};
+
+			// Replay runs, fields and breaks in authored order: grouping them by tag
+			// moved every soft break to the end of its paragraph.
+			for (const [tag, item] of paragraphContentEntries(paragraph, REWRITE_CONTENT_TAGS).entries) {
+				if (tag === 'a:br') {
+					segments.push({
+						text: '\n',
+						style: this.cloneTextStyleValue(paragraphDefaultStyle),
+					});
+				} else if (tag === 'a:fld') {
+					appendField(item as XmlObject | undefined);
+				} else {
+					const run = item as XmlObject | undefined;
+					if (run) {
+						appendRunSegment(run['a:t'], run['a:rPr'] as XmlObject | undefined);
+					}
+				}
+			}
 
 			if (paragraph['a:t'] !== undefined) {
 				appendRunSegment(paragraph['a:t'], paragraph['a:rPr'] as XmlObject | undefined);
 			}
-
-			const lineBreaks = this.ensureArray(paragraph['a:br']);
-			lineBreaks.forEach(() => {
-				segments.push({
-					text: '\n',
-					style: this.cloneTextStyleValue(paragraphDefaultStyle),
-				});
-			});
 
 			if (paragraphIndex < paragraphs.length - 1) {
 				segments.push({
@@ -202,7 +207,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const remappedChars: Array<{ char: string; style: TextStyle }> = [];
 		for (let index = 0; index < prefixLength; index++) {
 			remappedChars.push({
-				char: nextChars[index],
+				char: at(nextChars, index),
 				style: this.cloneTextStyleValue(existingChars[index]?.style),
 			});
 		}
@@ -217,7 +222,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		);
 		for (let index = prefixLength; index <= nextSuffixIndex && index < nextChars.length; index++) {
 			remappedChars.push({
-				char: nextChars[index],
+				char: at(nextChars, index),
 				style: this.cloneTextStyleValue(insertedStyle),
 			});
 		}
@@ -226,7 +231,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const nextSuffixStart = nextSuffixIndex + 1;
 		for (let index = 0; index < nextChars.length - nextSuffixStart; index++) {
 			remappedChars.push({
-				char: nextChars[nextSuffixStart + index],
+				char: at(nextChars, nextSuffixStart + index),
 				style: this.cloneTextStyleValue(
 					existingChars[existingSuffixStart + index]?.style || insertedStyle,
 				),

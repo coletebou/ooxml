@@ -11,6 +11,7 @@ import type {
 	DiagramConnection,
 	DiagramData,
 	DiagramLayoutType,
+	DiagramShapeView,
 	DiagramStyleIntensity,
 } from '../../../diagram/index';
 import type { PptxCustomPathProperties } from './geometry';
@@ -83,7 +84,9 @@ export type SmartArtStyle = DiagramStyleIntensity;
 export type PptxSmartArtConnection = DiagramConnection;
 
 /**
- * A pre-computed shape from `ppt/diagrams/drawing*.xml`.
+ * A pre-computed shape from `ppt/diagrams/drawing*.xml`: the neutral
+ * {@link DiagramShapeView} (geometry in pixels, resolved colours, text style)
+ * plus the pptx rich-text segments, 3D and custom-geometry slots.
  *
  * @example
  * ```ts
@@ -97,108 +100,9 @@ export type PptxSmartArtConnection = DiagramConnection;
  * // => satisfies PptxSmartArtDrawingShape
  * ```
  */
-export interface PptxSmartArtDrawingShape extends PptxCustomPathProperties {
-	/** Shape ID within the drawing. */
-	id: string;
-	/** Preset geometry type (e.g. "roundRect", "ellipse"). */
-	shapeType?: string;
-	/** Position and size in EMU-based pixels. */
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-	/** Rotation in degrees. */
-	rotation?: number;
-	/** Horizontal/vertical mirrors declared on the cached drawing transform. */
-	flipHorizontal?: boolean;
-	flipVertical?: boolean;
-	/** Skew along the X axis in degrees. */
-	skewX?: number;
-	/** Skew along the Y axis in degrees. */
-	skewY?: number;
-	/** Preset-geometry adjustment values from `a:prstGeom/a:avLst`. */
-	shapeAdjustments?: Record<string, number>;
-	/**
-	 * The cached shape declares `a:noFill`. Renderers must leave it unpainted
-	 * rather than substituting a palette colour, because these shapes usually sit
-	 * on top of a painted shape whose fill has to stay visible.
-	 */
-	fillNone?: boolean;
-	/** Solid fill colour (hex). */
-	fillColor?: string;
-	/**
-	 * Opacity (0..1) of the solid fill, from the colour's `a:alpha` (Basic Venn
-	 * paints its circles at 50% so overlaps blend). Absent when opaque.
-	 */
-	fillOpacity?: number;
-	/**
-	 * Gradient fill stops when the cached shape uses `a:gradFill`. Positions are
-	 * 0..100 (percent). Renderers emit an SVG/CSS gradient instead of a flat box.
-	 */
-	fillGradientStops?: Array<{ color: string; position: number; opacity?: number }>;
-	/** Gradient geometry type (`linear` for `a:lin`, `radial` for `a:path`). */
-	fillGradientType?: 'linear' | 'radial';
-	/** Linear gradient angle in degrees (0..360). */
-	fillGradientAngle?: number;
-	/** Pattern fill preset name from `a:pattFill/@prst` (e.g. "pct50", "cross"). */
-	fillPatternPreset?: string;
-	/** Pattern fill foreground colour (hex) from `a:pattFill/a:fgClr`. */
-	fillPatternForegroundColor?: string;
-	/** Pattern fill background colour (hex) from `a:pattFill/a:bgClr`. */
-	fillPatternBackgroundColor?: string;
-	/**
-	 * Relationship id of a picture (blip) fill's embedded image, from
-	 * `a:blipFill/a:blip/@r:embed`. The image bytes are resolved separately; see
-	 * {@link fillImageUrl}.
-	 */
-	fillBlipEmbedId?: string;
-	/**
-	 * Resolved data-URI/URL for a picture (blip) fill, when the embedded image
-	 * part could be resolved. Absent when only {@link fillBlipEmbedId} is known.
-	 */
-	fillImageUrl?: string;
-	/** Whether the cached shape carries an outer-shadow effect (`a:effectLst`). */
-	hasShadow?: boolean;
-	/** Resolved outer-shadow colour (hex), when present. */
-	shadowColor?: string;
-	/** Stroke colour (hex). */
-	strokeColor?: string;
-	/** Stroke width in points. */
-	strokeWidth?: number;
-	/** Text content of the shape. */
-	text?: string;
+export interface PptxSmartArtDrawingShape extends DiagramShapeView, PptxCustomPathProperties {
 	/** Standard rich-text segments projected from the associated SmartArt node. */
-	textSegments?: TextSegment[];
-	/** Font size in CSS pixels. */
-	fontSize?: number;
-	/** Font colour (hex). */
-	fontColor?: string;
-	/** Authored font family from the first styled run. */
-	fontFamily?: string;
-	/** Authored font weight (400 or 700). */
-	fontWeight?: number;
-	/** Authored font style. */
-	fontStyle?: 'normal' | 'italic';
-	/** Absolute line height in CSS pixels from `a:spcPts`. */
-	lineHeight?: number;
-	/** Relative line height from `a:spcPct`. */
-	lineHeightRatio?: number;
-	/** Absolute spacing after a paragraph in CSS pixels. */
-	lineSpacingAfter?: number;
-	/** Relative spacing after a paragraph. */
-	lineSpacingAfterRatio?: number;
-	/** Text-body insets in CSS pixels. */
-	textInsetLeft?: number;
-	textInsetTop?: number;
-	textInsetRight?: number;
-	textInsetBottom?: number;
-	/** DiagramML text vertical anchor (`t`, `ctr`, or `b`). */
-	textVerticalAnchor?: string;
-	/** Independent DiagramML text-frame geometry from `dsp:txXfrm`. */
-	textFrameX?: number;
-	textFrameY?: number;
-	textFrameWidth?: number;
-	textFrameHeight?: number;
+	textSegments?: TextSegment[] | undefined;
 	/**
 	 * 3D scene (camera/light rig/backdrop) from `dsp:spPr/a:scene3d`, when this
 	 * cached shape carries its own per-shape camera. Bevel quick styles
@@ -208,27 +112,20 @@ export interface PptxSmartArtDrawingShape extends PptxCustomPathProperties {
 	 * on the whole diagram (see `PptxSmartArtQuickStyle.scene3d`) and leave this
 	 * undefined on every shape.
 	 */
-	scene3d?: Pptx3DScene;
+	scene3d?: Pptx3DScene | undefined;
 	/**
 	 * 3D extrusion/bevel/contour/material from `dsp:spPr/a:sp3d`. PowerPoint
 	 * caches this fully resolved (from the quick style's per-label `dgm:sp3d`)
 	 * on every shape for every non-flat quick style, bevel or scene alike.
 	 */
-	shape3d?: Pptx3DShape;
+	shape3d?: Pptx3DShape | undefined;
 	/**
 	 * Text-body 3D extrusion/bevel from `dsp:txBody/a:bodyPr/a:sp3d`. Rare:
 	 * present when a quick style extrudes the label text itself off the shape
 	 * face (e.g. Bird's Eye Scene: `extrusionH="28000"`), rather than only the
 	 * shape body.
 	 */
-	text3d?: Text3DStyle;
-	/**
-	 * The presentation style label (`presStyleLbl`: `node1`, `revTx`,
-	 * `sibTrans2D1`, ...) of the layout node a REGENERATED shape was laid out
-	 * from, when the layout engine reports it. Picks the quick-style label
-	 * whose 3D the shape takes; `undefined` on cached (parsed) shapes.
-	 */
-	styleLabel?: string;
+	text3d?: Text3DStyle | undefined;
 }
 
 // Chrome types (PptxSmartArtChrome, PptxSmartArtRawBackgroundFill) live in
@@ -257,38 +154,52 @@ export type { PptxSmartArtChrome, PptxSmartArtRawBackgroundFill } from './smart-
  * ```
  */
 export interface PptxSmartArtData extends DiagramData {
+	/** Source picture identities and original definitions retained across structural edits. */
+	pictureLayoutSource?: import('../../../diagram/layout-preview').DiagramLayoutSource | undefined;
+	/** Resolved host media, keyed by stable package part path. */
+	pictureUrls?: Record<string, string> | undefined;
+	pictureScheme?: Record<string, string> | undefined;
+	pictureSizes?: Record<string, { width: number; height: number }> | undefined;
 	nodes: PptxSmartArtNode[];
 	/** Pre-computed shapes from `ppt/diagrams/drawing*.xml`. */
-	drawingShapes?: PptxSmartArtDrawingShape[];
+	drawingShapes?: PptxSmartArtDrawingShape[] | undefined;
 	/** Background and outline chrome from `dgm:bg` / `dgm:whole`. */
-	chrome?: PptxSmartArtChrome;
+	chrome?: PptxSmartArtChrome | undefined;
 	/** Quick style from `ppt/diagrams/quickStyles*.xml`. */
-	quickStyle?: PptxSmartArtQuickStyle;
+	quickStyle?: PptxSmartArtQuickStyle | undefined;
 	/** Editable metadata from the related DiagramML layout definition. */
-	layoutDefinition?: PptxSmartArtLayoutDefinition;
+	layoutDefinition?: PptxSmartArtLayoutDefinition | undefined;
 	/** Relationship ID for the diagram data part (for round-trip save). */
-	dataRelId?: string;
+	dataRelId?: string | undefined;
 	/** Relationship ID for the diagram layout part. */
-	layoutRelId?: string;
+	layoutRelId?: string | undefined;
 	/** Relationship ID for the drawing part. */
-	drawingRelId?: string;
+	drawingRelId?: string | undefined;
 	/** Relationship ID for the colours part. */
-	colorsRelId?: string;
+	colorsRelId?: string | undefined;
 	/** Relationship ID for the quick-styles part. */
-	styleRelId?: string;
+	styleRelId?: string | undefined;
 	/**
 	 * `uniqueId` of the built-in PowerPoint layout whose definition was applied by a layout swap
 	 * (`ooxml-core/pptx/smartart-layouts`). Save writes that definition as the layout part.
 	 */
-	builtinLayoutId?: string;
+	builtinLayoutId?: string | undefined;
+	/**
+	 * A built-in colour definition (`dgm:colorsDef` XML, from `ooxml-core/diagram/builtin`) picked
+	 * in Change Colors. Save writes it as the colours part, replacing the old one as PowerPoint
+	 * does, and records its `uniqueId` on the document point.
+	 */
+	builtinColorsXml?: string | undefined;
+	/** A built-in quick-style definition (`dgm:styleDef` XML) picked in SmartArt Styles; as above. */
+	builtinQuickStyleXml?: string | undefined;
 	/** Internal save hint: the layout definition changed in the editor. */
-	layoutDirty?: boolean;
+	layoutDirty?: boolean | undefined;
 	/** Internal save hint: typed layout-definition metadata changed. */
-	layoutDefinitionDirty?: boolean;
+	layoutDefinitionDirty?: boolean | undefined;
 	/** Internal save hint: quick-style definition metadata changed. */
-	quickStyleDirty?: boolean;
+	quickStyleDirty?: boolean | undefined;
 	/** Internal save hint: color-transform definition metadata changed. */
-	colorTransformDirty?: boolean;
+	colorTransformDirty?: boolean | undefined;
 	/** Internal save hint: cached drawing geometry or text changed in the editor. */
-	drawingDirty?: boolean;
+	drawingDirty?: boolean | undefined;
 }

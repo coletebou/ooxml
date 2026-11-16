@@ -18,15 +18,15 @@ export interface PptxChartTitleRun {
 	/** This run's text (`a:t`). */
 	text: string;
 	/** `a:rPr/@_b`. */
-	bold?: boolean;
+	bold?: boolean | undefined;
 	/** `a:rPr/@_i`. */
-	italic?: boolean;
+	italic?: boolean | undefined;
 	/**
 	 * Font size in POINTS (`a:rPr/@_sz`, hundredths of a point / 100), matching
 	 * `PptxChartLegendTextStyle.fontSize`'s convention rather than the pixel
 	 * convention `TextStyle.fontSize` uses for slide text.
 	 */
-	fontSize?: number;
+	fontSize?: number | undefined;
 	/** Resolved hex colour (e.g. `"#FF0000"`) from `a:rPr/a:solidFill`. */
-	color?: string;
+	color?: string | undefined;
 }

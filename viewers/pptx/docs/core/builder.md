@@ -37,7 +37,17 @@ interface PresentationOptions {
 	title?: string; // docProps/core.xml
 	creator?: string; // author
 	initialSlideCount?: number; // blank "Blank"-layout slides, default 0
+	firstSlideNumber?: number; // p:presentation/@firstSlideNum
+	appProperties?: PresentationAppPropertiesInput; // docProps/app.xml
 }
+```
+
+`appProperties` takes the `docProps/app.xml` text fields `application`, `appVersion`, `company`, `presentationFormat`, `manager` and `template`. Without it the part names `pptx-viewer-sdk`, version `1.0000`. `appVersion` must have Office's form (`16.0000`), since PowerPoint reports any other form as a corrupt file; it and any other field the option does not take throw a `RangeError`. An empty string leaves the element out. The `appProperties` save option still applies on top, field by field: a field `save(slides, { appProperties })` sets wins, and a field it omits keeps the value given at create time.
+
+```ts
+const { handler, createSlide } = await PptxHandler.create({
+	appProperties: { application: 'ReportOne', appVersion: '2.0000', company: 'Acme' },
+});
 ```
 
 Use the `SlideSizes` and `ThemePresets` constants and the unit helpers for ergonomic values:
@@ -104,6 +114,8 @@ data.slides.push(slide);
 | **Query / finish** | `getElements()`, `getLastElement()`, `elementCount`, `removeElement(id)`, `build()`                                                                                                                                                                                                                                                                                 |
 
 Positions in `add*` options are **pixels** (converted to EMU internally). `addText` options include `fontSize`, `fontFamily`, `bold`, `italic`, `underline`, `color`, `x`, `y`, `width`, `height`, and more.
+
+`setBackground({ type: 'gradient', stops })` saves a DrawingML gradient (`p:bg/p:bgPr/a:gradFill`). Stops take `#RRGGBB` colours, positions and an optional opacity from 0 to 1, and there must be at least two. `angle` is a CSS angle (default `180`, top to bottom). `path: 'circle' | 'rect' | 'shape'` with an optional `focus` makes a path gradient instead (default focus: the slide centre). Invalid input throws a `RangeError`. A picture background wins over a gradient, and a gradient wins over a solid colour; a later solid `setBackground` replaces the gradient.
 
 ### Filling layout placeholders
 

@@ -12,6 +12,8 @@ export interface InlineImage {
 	/** Package part name holding the image bytes, e.g. `word/media/image1.png`. */
 	partName: string;
 	contentType: string;
+	/** Shared source-backed crop, placement and ordered picture effects. */
+	pictureFill?: Extract<import('../drawingml/types').DrawingFill, { kind: 'picture' }>;
 	/** An SVG original (`asvg:svgBlip`) shown instead of the raster `partName`, which is its PNG fallback. */
 	svgPartName?: string;
 	/** Display size in CSS pixels (96 dpi), derived from the drawing extent in EMU (may be fractional). */
@@ -31,6 +33,8 @@ export interface InlineImage {
 	textBoxText?: string[];
 	/** The text box is the simple form this editor writes, so its text, size and outline can change. */
 	watermark?: WatermarkSpec;
+	/** A Word picture watermark (`WordPictureWatermark`); `partName` and `contentType` name its picture. */
+	pictureWatermark?: PictureWatermarkSpec;
 	textBoxEditable?: boolean;
 	/** For an editable text box: whether it draws an outline (default true). */
 	textBoxBorder?: boolean;
@@ -51,11 +55,32 @@ export interface WatermarkSpec {
 	semitransparent: boolean;
 	layout: 'diagonal' | 'horizontal';
 }
+/**
+ * A Word picture watermark: a VML picture centred on the margins behind the text of every page,
+ * carried by an inline object run in a header.
+ */
+export interface PictureWatermarkSpec {
+	kind: 'picture';
+	partName: string;
+	contentType: string;
+	/** Drawn size in points. */
+	widthPt: number;
+	heightPt: number;
+	/** The Scale chosen in the dialog: `auto` fits the text area, a number is a percentage of the
+	 *  picture's own size. Undefined when read from a file, which does not record it. */
+	scale?: 'auto' | number;
+	/** Word's Washout: the picture drawn light (`v:imagedata` gain and blacklevel). */
+	washout: boolean;
+	/** `v:imagedata/@o:title`, the picture's file name without extension. */
+	title?: string;
+}
 /** How a floating picture sits relative to text. */
 export interface PicturePlacement {
 	wrap: 'square' | 'tight' | 'through' | 'topAndBottom' | 'none';
 	/** `behindDoc`: with `wrap: 'none'`, the picture is behind rather than in front of text. */
 	behindText?: boolean;
+	/** `wrapText` of a square, tight or through wrap: which sides of the picture text may use. */
+	wrapText?: 'bothSides' | 'left' | 'right' | 'largest';
 	/** `wp:positionH/wp:align`, when the picture is aligned rather than offset. */
 	align?: 'left' | 'center' | 'right' | 'inside' | 'outside';
 	/** `wp:positionH/wp:posOffset` in CSS pixels, relative to `relativeFrom`. */

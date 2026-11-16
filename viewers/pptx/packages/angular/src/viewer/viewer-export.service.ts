@@ -16,16 +16,22 @@
 
 import { inject, Injectable, signal } from '@angular/core';
 import { TranslateService } from '@ngx-translate/core';
+import type { PdfSlideSelection } from 'ooxml-ui/pptx';
 import {
+	choosePdfExportSelection,
 	EXPORT_ASSEMBLING_PERCENT,
+	downloadBlob,
 	EXPORT_DONE_PERCENT,
 	isExportAbortError,
+	runPdfExport,
+	slideProgressPercent,
 	recordProgressPercent,
 	resolveExportCaptureDecision,
 	slideStatusLabel,
 } from 'ooxml-ui/pptx';
 
 import { slideFileName } from './export-helpers';
+import { html2canvasFallbackFor } from './export-raster-tiles';
 import { ExportService } from './export.service';
 import { LoadContentService } from './load-content.service';
 import type { PrintSettings } from './print-helpers';
@@ -34,6 +40,7 @@ import {
 	captureSlideCanvases,
 	captureSlideDataUrl,
 	captureSlideTiles,
+	flipToSlide,
 } from './viewer-export-capture';
 import type { ExportHost } from './viewer-export-capture';
 
@@ -107,17 +114,79 @@ export class ViewerExportService {
 	}
 
 	/**
-	 * Export every slide to a multi-page PDF. Each slide is made the live stage,
-	 * given a render tick to settle, captured to a canvas, then the original
-	 * slide is restored. Progress + Cancel drive the export-progress modal.
+	 * File > Export > PDF from the viewer's own UI: ask for the range (the shared options dialog,
+	 * vector export only), then export it. Cancel exports nothing.
 	 */
-	async exportPdf(): Promise<void> {
+	async exportPdfWithOptions(): Promise<void> {
+		const host = this.requireHost();
+		if (host.slideCount() === 0 || this.exporting()) {
+			return;
+		}
+		const selection = await choosePdfExportSelection(host.pdfOptionsContainer?.(), {
+			settings: host.pdfExportSettings?.() ?? { mode: 'vector', includeHiddenSlides: false },
+			slides: host.slides?.() ?? host.mergedSlides(),
+			currentSlide: host.activeSlideIndex(),
+			translate: (key, params) => this.translate.instant(key, params),
+		});
+		if (selection) {
+			await this.exportPdf(selection);
+		}
+	}
+
+	/**
+	 * Export the slides `selection` names (every slide by default) to a multi-page PDF. Each slide
+	 * is made the live stage, given a render tick to settle, captured, then the original slide is
+	 * restored. Progress + Cancel drive the export-progress modal.
+	 */
+	async exportPdf(selection: PdfSlideSelection = {}): Promise<void> {
 		const host = this.requireHost();
 		if (host.slideCount() === 0 || this.exporting()) {
 			return;
 		}
 		const controller = this.beginExport(this.translate.instant('pptx.mobileMenu.exportPdf'));
 		const { width, height } = this.loader.canvasSize();
+		const settings = host.pdfExportSettings?.() ?? { mode: 'vector', includeHiddenSlides: false };
+		if (settings.mode === 'vector') {
+			const original = host.activeSlideIndex();
+			const slides = host.slides?.() ?? host.mergedSlides();
+			try {
+				await runPdfExport({
+					settings,
+					vector: {
+						document,
+						slides,
+						canvasSize: { width, height },
+						...selection,
+						mountSlide: async (index) => {
+							const stage = await flipToSlide(host, index);
+							return stage ? { stage, html2canvasFallback: html2canvasFallbackFor(stage) } : null;
+						},
+						rasterScale: host.imageExportScale?.() ?? 2,
+						title: 'presentation',
+						signal: controller.signal,
+						onProgress: (done, total) => {
+							this.progress.set(slideProgressPercent(done, total, 90));
+							this.statusMessage.set(
+								slideStatusLabel(this.translate.instant('pptx.export.rendering'), done, total),
+							);
+						},
+					},
+					pictures: () => Promise.resolve(),
+					save: (blob) => downloadBlob(blob, 'presentation.pdf'),
+					...(host.onPdfExportReport ? { onApproximated: host.onPdfExportReport } : {}),
+					...(host.notify ? { notify: host.notify } : {}),
+				});
+				this.progress.set(EXPORT_DONE_PERCENT);
+			} catch (err) {
+				if (!isExportAbortError(err)) {
+					console.error('[PowerPointViewer] PDF export failed:', err);
+				}
+			} finally {
+				host.activeSlideIndex.set(original);
+				this.endExport();
+			}
+			return;
+		}
 		try {
 			const pages = await captureSlideTiles(
 				this.exportSvc,

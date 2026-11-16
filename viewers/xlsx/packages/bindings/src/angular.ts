@@ -10,7 +10,7 @@ import {
 	type OnDestroy,
 } from '@angular/core';
 import type { Workbook } from '@christophervr/xlsx-core';
-import type { DocumentStorage } from 'ooxml-core/embedding';
+import type { CloudFileProvider, DocumentStorage } from 'ooxml-core/embedding';
 import type {
 	EditorThemeMode,
 	FileCommandDetail,
@@ -23,14 +23,24 @@ import type {
 	XlsxThemeColors,
 	ExcelCustomization,
 } from 'xlsx-web-component';
+import { angularOutputs, installHandle } from 'ooxml-ui/bindings';
 import {
-	deferredHandle,
-	eventOptions,
+	EDITOR_CALLBACKS,
+	EDITOR_CONTRACT,
 	mountEditor,
 	pickEditorProps,
 	type EditorBinding,
+	type EditorEventOptions,
 	type EditorHandle,
 } from './index';
+
+/** The handle members, defined on the prototype from `EDITOR_CONTRACT.handle`. */
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- members come from installHandle.
+export interface SpreadsheetEditorComponent extends Omit<EditorHandle, 'element'> {
+	/** The `<xlsx-editor>` element; `undefined` before the view is initialised. */
+	readonly element: XlsxEditorElement | undefined;
+}
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- see the interface above.
 @Component({ selector: 'spreadsheet-editor', standalone: true, template: '' })
 export class SpreadsheetEditorComponent implements AfterViewInit, OnChanges, OnDestroy {
 	@Input() workbook?: Workbook;
@@ -41,6 +51,7 @@ export class SpreadsheetEditorComponent implements AfterViewInit, OnChanges, OnD
 	@Input() locale = 'en';
 	@Input() theme: EditorThemeMode = 'auto';
 	@Input() authorName = 'Author';
+	@Input() validateReplace = false;
 	@Input() showToolbar = true;
 	@Input() showFormulaBar = true;
 	@Input() hiddenActions: readonly string[] = [];
@@ -48,6 +59,7 @@ export class SpreadsheetEditorComponent implements AfterViewInit, OnChanges, OnD
 	@Input() themeColors?: XlsxThemeColors;
 	@Input() collaboration?: XlsxCollaborationOptions | null;
 	@Input() storage?: DocumentStorage | null;
+	@Input() fileProviders?: readonly CloudFileProvider[] | null;
 	@Input() customization?: ExcelCustomization | null;
 	@Output() workbookChange = new EventEmitter<Workbook>();
 	@Output() workbookError = new EventEmitter<Error>();
@@ -69,27 +81,15 @@ export class SpreadsheetEditorComponent implements AfterViewInit, OnChanges, OnD
 	@Output() ready = new EventEmitter<XlsxEditorElement>();
 	private host = inject<ElementRef<HTMLElement>>(ElementRef);
 	private binding?: EditorBinding;
-	private handle: EditorHandle = deferredHandle(() => this.binding);
+	static {
+		installHandle(this.prototype, EDITOR_CONTRACT.handle, (self) => self.binding, {
+			lenientGetters: true,
+		});
+	}
 	private options() {
 		return {
 			...pickEditorProps(this),
-			...eventOptions({
-				'workbook-change': (workbook) => this.workbookChange.emit(workbook),
-				'workbook-error': (error) => this.workbookError.emit(error),
-				'selection-change': (detail) => this.selectionChange.emit(detail),
-				'dirty-change': (dirty) => this.dirtyChange.emit(dirty),
-				'readonly-change': (_readOnly, detail) => {
-					if (detail.hostReadOnly !== this.readOnly) this.readOnlyChange.emit(detail.hostReadOnly);
-				},
-				'file-command': (event) => this.fileCommand.emit(event),
-				'workbook-warning': (warnings) => this.workbookWarning.emit(warnings),
-				'ribbon-action': (detail) => this.ribbonAction.emit(detail),
-				'ribbon-customize': (hiddenActions) => this.ribbonCustomize.emit(hiddenActions),
-				'sheet-change': (detail) => this.sheetChange.emit(detail),
-				'office-ribbon-add-in': (detail) => this.ribbonAddIn.emit(detail),
-				'collaboration-change': (state) => this.collaborationChange.emit(state),
-				ready: (element) => this.ready.emit(element),
-			}),
+			...angularOutputs<EditorEventOptions>(EDITOR_CONTRACT, this, EDITOR_CALLBACKS),
 		};
 	}
 	ngAfterViewInit() {
@@ -100,41 +100,5 @@ export class SpreadsheetEditorComponent implements AfterViewInit, OnChanges, OnD
 	}
 	ngOnDestroy() {
 		this.binding?.destroy();
-	}
-	get element() {
-		return this.binding?.element;
-	}
-	load(input: Uint8Array | ArrayBuffer, fileName?: string) {
-		return this.handle.load(input, fileName);
-	}
-	newWorkbook() {
-		this.handle.newWorkbook();
-	}
-	save() {
-		return this.handle.save();
-	}
-	saveBytes(format?: 'xlsx' | 'csv') {
-		return this.handle.saveBytes(format);
-	}
-	download(fileName?: string) {
-		return this.handle.download(fileName);
-	}
-	markClean() {
-		this.handle.markClean();
-	}
-	select(ref: string) {
-		this.handle.select(ref);
-	}
-	getSelection() {
-		return this.handle.getSelection();
-	}
-	setActiveSheet(index: number) {
-		this.handle.setActiveSheet(index);
-	}
-	share() {
-		this.handle.share();
-	}
-	get dirty() {
-		return this.handle.dirty;
 	}
 }

@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import {
-	buildWarpPath,
 	DEFAULT_FONT_FAMILY,
 	groupIntoParagraphs,
 	normalizeHexColor,
 	resolveFontItalic,
 	resolveFontWeight,
+	resolveWarpRunPaint,
 	shouldUseSvgWarp,
 	substituteFieldText,
+	warpParagraphLayouts,
 } from 'ooxml-ui/pptx';
 import type { EnvelopeGlyphPlacement, WarpParagraph } from 'ooxml-ui/pptx';
-import type { PptxElement, PptxElementWithText, TextSegment, TextStyle } from 'pptx-viewer-core';
+import type { PptxElement, PptxElementWithText, TextSegment } from 'pptx-viewer-core';
 import { getSubstituteFontFamily, hasTextProperties } from 'pptx-viewer-core';
 import { computed } from 'vue';
 
@@ -22,7 +23,7 @@ import WordArtEnvelopeGlyph from './WordArtEnvelopeGlyph.vue';
  * WordArtText - Vue port of the React `WarpedText` SVG renderer.
  *
  * Renders warped (WordArt) text. Every classified preset (`textNoShape` /
- * `textPlain` / unknown excluded) renders along an SVG `<textPath>` baseline
+ * unknown excluded) renders along an SVG `<textPath>` baseline
  * built by {@link shouldUseSvgWarp} + `buildWarpPath`: arch/wave/circle/
  * triangle/chevron/ring/curve, and (as of the WordArt envelope fidelity fix)
  * inflate/deflate/can/slant/fade/cascade too, matching React and Vanilla.
@@ -36,7 +37,7 @@ import WordArtEnvelopeGlyph from './WordArtEnvelopeGlyph.vue';
  * and Vanilla already rendered them as true SVG textPath - a cross-binding
  * parity bug this component no longer has.
  *
- * Presets that are not classified (`textNoShape`, `textPlain`, unknown values)
+ * Presets that are not classified (`textNoShape`, unknown values)
  * cause the component to render nothing; callers fall back to flat text. The
  * overlay is absolutely positioned to fill the host box and is
  * `pointer-events: none` so it overlays without intercepting interaction.
@@ -51,7 +52,6 @@ const props = defineProps<{
 // fallback font is the same string (see the shared `constants.ts` doc comment).
 const DEFAULT_TEXT_COLOR = '#111827';
 const DEFAULT_TEXT_FONT_SIZE = 24;
-const HYPERLINK_COLOR = '#0563C1';
 
 // Paragraph splitting now uses the shared pure helper
 // (pptx-viewer-shared render/text-warp `groupIntoParagraphs`), shared with the
@@ -65,7 +65,7 @@ const preset = computed(() => textEl.value?.textStyle?.textWarpPreset);
 
 /**
  * Every classified preset renders along an SVG `<textPath>` baseline; only
- * `textNoShape` / `textPlain` / unknown presets fall through to flat text
+ * `textNoShape` / unknown presets fall through to flat text
  * (handled by the caller, not this component). Matches React and Vanilla.
  */
 const usesTextPath = computed(() => Boolean(textEl.value) && shouldUseSvgWarp(preset.value));
@@ -136,48 +136,52 @@ const baseFontStyle = computed(() =>
 interface TspanProps {
 	fill: string;
 	fontSize: number;
-	fontWeight: number;
+	fontWeight: string;
 	fontStyle: 'italic' | 'normal';
 	fontFamily: string;
 	textDecoration?: string;
 }
 
-/** Resolve per-segment `<tspan>` attributes from a run's style. */
-function tspanProps(segment: TextSegment): TspanProps {
-	const s: TextStyle = segment.style ?? {};
-	const decos: string[] = [];
-	if (s.underline || s.hyperlink) {
-		decos.push('underline');
-	}
-	if (s.strikethrough) {
-		decos.push('line-through');
-	}
-	const elStyle = textEl.value?.textStyle;
-	const fill = s.hyperlink
-		? normalizeHexColor(s.color ?? elStyle?.color, HYPERLINK_COLOR)
-		: normalizeHexColor(s.color ?? elStyle?.color, DEFAULT_TEXT_COLOR);
-	const family = s.fontFamily ?? elStyle?.fontFamily;
+/** Resolve per-segment `<tspan>` attributes from the shared warped-run paint. */
+function tspanProps(segment: TextSegment, fitScale = 1): TspanProps {
+	const paint = resolveWarpRunPaint(
+		segment,
+		textEl.value?.textStyle,
+		DEFAULT_TEXT_COLOR,
+		DEFAULT_TEXT_FONT_SIZE,
+	);
 	return {
-		fill,
-		fontSize: s.fontSize ?? elStyle?.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
-		fontWeight: resolveFontWeight(family, s.bold),
-		fontStyle: resolveFontItalic(family, s.italic) ? 'italic' : 'normal',
-		fontFamily: family ? getSubstituteFontFamily(family) : DEFAULT_FONT_FAMILY,
-		textDecoration: decos.length > 0 ? decos.join(' ') : undefined,
+		fill: paint.fill,
+		fontSize: paint.fontSizePx * fitScale,
+		fontWeight: paint.fontWeight ?? 'normal',
+		fontStyle: paint.fontStyle ?? 'normal',
+		fontFamily: paint.fontFamily,
+		...(paint.textDecoration ? { textDecoration: paint.textDecoration } : {}),
 	};
 }
 
+/** Path `d` and font fit scale of every paragraph (shared with the other bindings). */
+const layouts = computed(() =>
+	preset.value
+		? warpParagraphLayouts(
+				preset.value,
+				width.value,
+				height.value,
+				paragraphs.value,
+				warpAdj.value,
+				warpAdj2.value,
+				textEl.value?.textStyle,
+			)
+		: [],
+);
+
 /** Path `d` for the baseline of paragraph `i`. */
 function pathFor(i: number): string {
-	return buildWarpPath(
-		preset.value as NonNullable<typeof preset.value>,
-		width.value,
-		height.value,
-		i,
-		paragraphs.value.length,
-		warpAdj.value,
-		warpAdj2.value,
-	);
+	return layouts.value[i]?.d ?? '';
+}
+
+function fitOf(i: number): number {
+	return layouts.value[i]?.fitScale ?? 1;
 }
 
 const { useGlyphEnvelope, glyphLines } = useTextWarpEnvelope({
@@ -265,8 +269,8 @@ function glyphClipIdPrefix(lineIndex: number, glyphIndex: number): string {
 				<tspan
 					v-for="(seg, si) in para.segments"
 					:key="`ts-${pi}-${si}`"
-					:fill="tspanProps(seg).fill"
-					:font-size="tspanProps(seg).fontSize"
+					:fill="tspanProps(seg, fitOf(pi)).fill"
+					:font-size="tspanProps(seg, fitOf(pi)).fontSize"
 					:font-weight="tspanProps(seg).fontWeight"
 					:font-style="tspanProps(seg).fontStyle"
 					:font-family="tspanProps(seg).fontFamily"

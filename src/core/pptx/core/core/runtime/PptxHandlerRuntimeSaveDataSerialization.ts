@@ -9,6 +9,7 @@ import type {
 	PptxChartSeries,
 	PptxChartView3D,
 	PptxTableData,
+	PptxTableCell,
 } from '../../types';
 import { applyChartAxisDisplayUnitsToXml } from '../../utils/chart-axis-dispunits-serializer';
 import { applyChartAxisGridlinesToXml } from '../../utils/chart-axis-gridlines-serializer';
@@ -107,6 +108,19 @@ import { applySeriesTrendlinesToXml } from '../../utils/chart-trendline-serializ
 import { applyChartUpDownBars } from '../../utils/chart-up-down-bars';
 import type { PptxChartWorkbookWrite } from '../../utils/chart-xlsx-writer';
 import { collectChartWorkbookWrite } from '../../utils/chart-xlsx-writer';
+import {
+	ChartExSaveRefusedError,
+	saveChartExPackageThroughNeutral,
+} from '../../utils/chart-ex-neutral-package-save';
+import {
+	saveChartPartThroughNeutral,
+	type NeutralChartPackageElements,
+} from '../../utils/chart-neutral-save';
+import { encodeNeutralChartElements } from '../../utils/chart-neutral-package-elements';
+import {
+	prepareNeutralChartWorkbook,
+	NeutralChartSaveRefusedError,
+} from './chart-neutral-workbook-save';
 import { xmlChild, xmlPath } from '../../utils/xml-access';
 import { applyChartExUpdate, chartExLayoutChanged } from './chart-cx-update';
 import { saveChartExternalWorkbookUpdates } from './chart-external-workbook-save';
@@ -130,7 +144,9 @@ import {
 } from './table-style-change-cell-clear';
 import { recordTableParagraphOrder } from './table-paragraph-save-order';
 import { rebuildTableXmlFromData } from './table-structural-ops';
+import { deterministicColumnId } from './table-xml-rebuild';
 import { writeTablePropertiesOwnFillAndEffects } from './table-tblpr-save';
+import { at } from '../../../../geometry/indexed';
 
 /**
  * `c:ext/@uri` for the Office 2017 (`c16r3:`) "show #N/A as an empty cell"
@@ -140,6 +156,15 @@ import { writeTablePropertiesOwnFillAndEffects } from './table-tblpr-save';
 const CHART_DATA_DISPLAY_OPTIONS_EXT_URI = '{56B9EC1D-385E-4148-901F-78D8002777C0}';
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
+	/** Forward declaration: the chart parsing mixin supplies the saved-part projection. */
+	protected refreshClassicChartFromPart(
+		_xml: string,
+		_previous: PptxChartData,
+		_slidePath?: string,
+	): Promise<PptxChartData | undefined> {
+		throw new Error('refreshClassicChartFromPart not yet initialised');
+	}
+
 	/**
 	 * Serialise modified `PptxTableData` back into the graphic frame's
 	 * raw XML so that the round-tripped file preserves edits.
@@ -149,7 +174,22 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	 * `<a:tr>` elements are rebuilt from scratch. Otherwise, the method
 	 * updates cells in place, preserving the original XML structure.
 	 */
-	protected serializeTableDataToXml(shape: XmlObject, tableData: PptxTableData): void {
+	protected serializeTableDataToXml(
+		shape: XmlObject,
+		tableData: PptxTableData,
+		writeRichCellText?: (xmlCell: XmlObject, cell: PptxTableCell) => boolean,
+	): void {
+		// A cell made in code with rich segments is written from them (see
+		// `PptxTableCell.textSegments`); any other cell from its flat text.
+		// `true` when the runs came from segments: they carry their own
+		// formatting, which the cell-level style must not stamp over.
+		const writeCellText = (xmlCell: XmlObject, cell: PptxTableCell): boolean => {
+			if (writeRichCellText?.(xmlCell, cell)) {
+				return true;
+			}
+			this.writeTableCellText(xmlCell, cell.text);
+			return false;
+		};
 		try {
 			const graphicData = xmlPath(shape, 'a:graphic', 'a:graphicData');
 			const tbl = xmlChild(graphicData, 'a:tbl');
@@ -185,12 +225,13 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					tableData,
 					PptxHandlerRuntime.EMU_PER_PX,
 					this.ensureArray.bind(this),
+					this.saveFixedDate ? deterministicColumnId : undefined,
 				);
 
 				// After rebuilding, apply text and style to all cells
 				const rebuiltRows = this.ensureArray((tbl as XmlObject)['a:tr']);
 				for (let rIdx = 0; rIdx < tableData.rows.length; rIdx++) {
-					const dataRow = tableData.rows[rIdx];
+					const dataRow = at(tableData.rows, rIdx);
 					const xmlRow = rebuiltRows[rIdx] as XmlObject | undefined;
 					if (!xmlRow) {
 						continue;
@@ -198,20 +239,18 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 					const xmlCells = this.ensureArray(xmlRow['a:tc']);
 					for (let cIdx = 0; cIdx < dataRow.cells.length; cIdx++) {
-						const cell = dataRow.cells[cIdx];
+						const cell = at(dataRow.cells, cIdx);
 						const xmlCell = xmlCells[cIdx] as XmlObject | undefined;
 						if (!xmlCell) {
 							continue;
 						}
 
-						if (cell.text !== undefined) {
-							this.writeTableCellText(xmlCell, cell.text);
-						}
+						const richText = cell.text !== undefined && writeCellText(xmlCell, cell);
 						if (styleChanged) {
 							clearCellFormattingForStyleChange(xmlCell, cell.style);
 						}
 						if (cell.style) {
-							this.writeTableCellStyle(xmlCell, cell.style, cell.paragraphs);
+							this.writeTableCellStyle(xmlCell, cell.style, cell.paragraphs, richText);
 						}
 						serializeCellExtraAttributes(xmlCell, cell.extraAttributes);
 					}
@@ -222,7 +261,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			// â”€â”€ No structural change: update cells in place â”€â”€
 			writeTableColumnWidths(tbl as XmlObject, tableData.columnWidths);
 			for (let rIdx = 0; rIdx < Math.min(tableData.rows.length, xmlRows.length); rIdx++) {
-				const dataRow = tableData.rows[rIdx];
+				const dataRow = at(tableData.rows, rIdx);
 				const xmlRow = xmlRows[rIdx] as XmlObject;
 
 				// Update row height
@@ -232,23 +271,21 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 				const xmlCells = this.ensureArray(xmlRow['a:tc']);
 				for (let cIdx = 0; cIdx < Math.min(dataRow.cells.length, xmlCells.length); cIdx++) {
-					const cell = dataRow.cells[cIdx];
+					const cell = at(dataRow.cells, cIdx);
 					const xmlCell = xmlCells[cIdx] as XmlObject;
 
 					// Serialize cell merge attributes
 					serializeCellMergeAttributes(xmlCell, cell);
 
 					// Update text
-					if (cell.text !== undefined) {
-						this.writeTableCellText(xmlCell, cell.text);
-					}
+					const richText = cell.text !== undefined && writeCellText(xmlCell, cell);
 
 					// Update cell style
 					if (styleChanged) {
 						clearCellFormattingForStyleChange(xmlCell, cell.style);
 					}
 					if (cell.style) {
-						this.writeTableCellStyle(xmlCell, cell.style, cell.paragraphs);
+						this.writeTableCellStyle(xmlCell, cell.style, cell.paragraphs, richText);
 					}
 
 					// Round-trip opaque tcPr attributes (horzOverflow,
@@ -408,7 +445,58 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 				// A 2006 `c:chartSpace` and a 2016+ `cx:chartSpace` are different
 				// part families; see `chart-part-family-switch` / `chart-cx-update`.
-				if (await this.saveChartAcrossFamilies(chartXmlData, chartSpace, chartData, slidePath)) {
+				if (
+					await this.saveChartAcrossFamilies(
+						chartXmlData,
+						chartSpace,
+						chartData,
+						slidePath,
+						chartXmlStr,
+					)
+				) {
+					continue;
+				}
+
+				// An edit the shared chart core can express is saved through it (`writeChartSpace`
+				// keeps every element the neutral model holds as written); anything else falls
+				// through to the object-tree writers below.
+				const baseline = this.chartDataBaselines.get(chartPartPath);
+				const baselineData = baseline ? (JSON.parse(baseline) as PptxChartData) : undefined;
+				// Elements PowerPoint's codecs encode and the user shapes drawing part, written once
+				// and shared by whichever path saves the part.
+				const packageElements: NeutralChartPackageElements = baselineData
+					? encodeNeutralChartElements(chartSpace, baselineData, chartData, {
+							localName: (key) => this.compatibilityService.getXmlLocalName(key),
+							build: (tree) => this.builder.build(tree),
+							parseColor: (node, placeholder) => this.parseColor(node, placeholder),
+						})
+					: {};
+				const userShapesReference = await this.reconcileChartUserShapesPart(
+					chartData,
+					chartPartPath,
+				);
+				// `undefined` (the drawing on disk already matches) keeps the authored reference.
+				if (chartData.userShapes !== undefined) packageElements.userShapes = userShapesReference;
+				const neutralSave = baselineData
+					? saveChartPartThroughNeutral(chartXmlStr, baselineData, chartData, {
+							retryWorkbook: this.chartWorkbookDataBaselines.get(chartPartPath)?.pending,
+							elements: packageElements,
+						})
+					: undefined;
+				if (neutralSave) {
+					const prepared = await prepareNeutralChartWorkbook(
+						this.zip,
+						chartData,
+						neutralSave,
+						(base, target) => this.resolveImagePath(base, target),
+					);
+					await this.commitChartPart(
+						chartPartPath,
+						slidePath,
+						chartData,
+						prepared.workbookWrites,
+						prepared.xml,
+					);
 					continue;
 				}
 
@@ -553,9 +641,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				// Update existing series that are present in both XML and data
 				const commonCount = Math.min(seriesNodes.length, chartData.series.length);
 				for (let si = 0; si < commonCount; si++) {
-					const seriesNode = seriesNodes[si];
-					const seriesData = chartData.series[si];
-					const assignedIndex = seriesIndexAssignment[si];
+					const seriesNode = at(seriesNodes, si);
+					const seriesData = at(chartData.series, si);
+					const assignedIndex = at(seriesIndexAssignment, si);
 
 					// Update series index
 					const idxNode = this.xmlLookupService.getChildByLocalName(seriesNode, 'idx');
@@ -749,9 +837,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 					const newSeriesXmlNodes: XmlObject[] = [];
 					for (let si = seriesNodes.length; si < chartData.series.length; si++) {
-						const seriesData = chartData.series[si];
+						const seriesData = at(chartData.series, si);
 						const newNode = this.buildNewSeriesXml(
-							seriesIndexAssignment[si],
+							at(seriesIndexAssignment, si),
 							seriesData,
 							chartData.categories,
 							templateSeries,
@@ -1245,48 +1333,21 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				// Drawing-overlay shapes (c:userShapes): reconciled against disk
 				// only when `chartData.userShapes` carries an actual edit signal;
 				// see `PptxHandlerRuntimeChartUserShapes` for the dirty contract.
-				await this.syncChartUserShapesToXml(chartSpace, chartData, chartPartPath);
+				this.applyChartUserShapesReference(chartSpace, userShapesReference);
 
-				// Write updated chart XML back
-				// Delay committing the chart part until workbook reconciliation succeeds.
-
-				// Mirror the same edit into the embedded workbook (`ppt/embeddings/*.xlsx`)
-				// so "Edit Data in Excel" and any Excel recalculation see the new
-				// values too, instead of silently reverting them. Degrades to a
-				// compatibility warning, never throws; see
-				// `saveChartExternalWorkbookUpdates`.
-				const serializedBaseline = this.chartDataBaselines.get(chartPartPath);
-				const signature = chartWorkbookDataSignature(chartData);
-				const workbookBaseline = this.chartWorkbookDataBaselines.get(chartPartPath);
-				const previousSignature =
-					workbookBaseline?.signature ??
-					(serializedBaseline
-						? chartWorkbookDataSignature(JSON.parse(serializedBaseline) as PptxChartData)
-						: undefined);
-				const workbookDataChanged = workbookBaseline?.pending || signature !== previousSignature;
-				if (workbookDataChanged) {
-					const complete = await saveChartExternalWorkbookUpdates(
-						{
-							zip: this.zip,
-							resolveImagePath: (basePath, target) => this.resolveImagePath(basePath, target),
-							reportWarning: (warning) => this.compatibilityService.reportWarning(warning),
-						},
-						chartPartPath,
-						slidePath,
-						chartData.externalData,
-						workbookWrites,
-						chartData.dataLabelTextOnly ?? false,
-					);
-					this.chartWorkbookDataBaselines.set(chartPartPath, {
-						signature: complete ? signature : (previousSignature ?? signature),
-						pending: !complete,
-					});
-				}
-				this.zip.file(chartPartPath, this.builder.build(chartXmlData));
-				// Subsequent saves compare against the model now stored in this mutable ZIP.
-				this.chartDataBaselines.set(chartPartPath, JSON.stringify(chartData));
+				await this.commitChartPart(
+					chartPartPath,
+					slidePath,
+					chartData,
+					workbookWrites,
+					this.builder.build(chartXmlData),
+				);
 			} catch (e) {
-				if (chartData.dataLabelTextOnly) {
+				if (
+					chartData.dataLabelTextOnly ||
+					e instanceof ChartExSaveRefusedError ||
+					e instanceof NeutralChartSaveRefusedError
+				) {
 					throw e;
 				}
 				console.warn(`[pptx-save] Failed to serialize chart data for ${chartPartPath}:`, e);
@@ -1301,6 +1362,66 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	/**
+	 * Write a chart part's new XML, after mirroring a changed series cache into
+	 * its embedded workbook, and record the saved model as the part's baseline.
+	 */
+	private async commitChartPart(
+		chartPartPath: string,
+		slidePath: string,
+		chartData: PptxChartData,
+		workbookWrites: PptxChartWorkbookWrite[],
+		xml: string,
+	): Promise<void> {
+		// Mirror the same edit into the embedded workbook (`ppt/embeddings/*.xlsx`)
+		// so "Edit Data in Excel" and any Excel recalculation see the new
+		// values too, instead of silently reverting them. Degrades to a
+		// compatibility warning, never throws; see
+		// `saveChartExternalWorkbookUpdates`.
+		const serializedBaseline = this.chartDataBaselines.get(chartPartPath);
+		const signature = chartWorkbookDataSignature(chartData);
+		const workbookBaseline = this.chartWorkbookDataBaselines.get(chartPartPath);
+		const previousSignature =
+			workbookBaseline?.signature ??
+			(serializedBaseline
+				? chartWorkbookDataSignature(JSON.parse(serializedBaseline) as PptxChartData)
+				: undefined);
+		const workbookDataChanged = workbookBaseline?.pending || signature !== previousSignature;
+		if (workbookDataChanged) {
+			const complete = await saveChartExternalWorkbookUpdates(
+				{
+					zip: this.zip,
+					resolveImagePath: (basePath, target) => this.resolveImagePath(basePath, target),
+					reportWarning: (warning) => this.compatibilityService.reportWarning(warning),
+				},
+				chartPartPath,
+				slidePath,
+				chartData.externalData,
+				workbookWrites,
+				chartData.dataLabelTextOnly ?? false,
+			);
+			this.chartWorkbookDataBaselines.set(chartPartPath, {
+				signature: complete ? signature : (previousSignature ?? signature),
+				pending: !complete,
+			});
+		}
+		this.zip.file(chartPartPath, xml);
+		if (!this.chartWorkbookDataBaselines.get(chartPartPath)?.pending) {
+			const refreshed = await this.refreshClassicChartFromPart(xml, chartData, slidePath);
+			if (refreshed) {
+				for (const key of Object.keys(chartData))
+					delete (chartData as unknown as Record<string, unknown>)[key];
+				Object.assign(chartData, refreshed);
+				this.chartWorkbookDataBaselines.set(chartPartPath, {
+					signature: chartWorkbookDataSignature(chartData),
+					pending: false,
+				});
+			}
+		}
+		// Subsequent saves compare against the model now stored in this mutable ZIP.
+		this.chartDataBaselines.set(chartPartPath, JSON.stringify(chartData));
+	}
+
+	/**
 	 * Route a chart save that the 2006 `c:*Chart` update loop cannot handle:
 	 * a part-family change (regenerated into a fresh part of the right
 	 * family), a ChartEx type change (regenerated in place), or an edited
@@ -1312,6 +1433,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		chartSpace: XmlObject,
 		chartData: PptxChartData,
 		slidePath: string,
+		chartXmlStr?: string,
 	): Promise<boolean> {
 		const getLocalName = (key: string) => this.compatibilityService.getXmlLocalName(key);
 		const deps = { zip: this.zip, parser: this.parser, builder: this.builder, getLocalName };
@@ -1323,6 +1445,38 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (existingFamily !== 'chartEx' || !chartData.chartPartPath) {
 			return false;
 		}
+		const chartPartPath = chartData.chartPartPath;
+		const embeddedFormats = await embedChartElementPictures(
+			chartData.elementFormats,
+			chartPartPath,
+			{
+				zip: this.zip,
+				parse: (xml) => this.parser.parse(xml) as XmlObject,
+				build: (tree) => this.builder.build(tree),
+				parseDataUrl: (url) => this.parseDataUrlToBytes(url),
+			},
+		);
+		if (embeddedFormats !== chartData.elementFormats)
+			chartData = { ...chartData, elementFormats: embeddedFormats };
+
+		// An edit the shared chart core can express is saved through it (`writeChartExSpace` keeps
+		// everything else as written); anything else falls through to the object-tree update.
+		const baseline = this.chartDataBaselines.get(chartPartPath);
+		const neutralXml =
+			baseline && chartXmlStr !== undefined
+				? await saveChartExPackageThroughNeutral(
+						this.zip,
+						chartPartPath,
+						chartXmlStr,
+						JSON.parse(baseline) as PptxChartData,
+						chartData,
+					)
+				: undefined;
+		if (neutralXml !== undefined) {
+			this.zip.file(chartPartPath, neutralXml);
+			this.chartDataBaselines.set(chartPartPath, JSON.stringify(chartData));
+			return true;
+		}
 		if (
 			canGenerateChartEx(chartData) &&
 			chartExLayoutChanged(chartSpace, chartData, getLocalName)
@@ -1333,9 +1487,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const regenerated = buildChartExSpaceXml(chartData);
 			const regeneratedSpace = regenerated['cx:chartSpace'] as XmlObject | undefined;
 			if (regeneratedSpace) {
-				await this.syncChartUserShapesToXml(regeneratedSpace, chartData, chartData.chartPartPath);
+				await this.syncChartUserShapesToXml(regeneratedSpace, chartData, chartPartPath);
 			}
-			this.zip.file(chartData.chartPartPath, this.builder.build(regenerated));
+			this.zip.file(chartPartPath, this.builder.build(regenerated));
 			return true;
 		}
 		if (applyChartExUpdate(chartSpace, chartData, getLocalName)) {
@@ -1343,8 +1497,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			// classic charts use, referenced the same way (`c:userShapes/@_r:id`
 			// on the chart space); this in-place update path mutates the existing
 			// `chartSpace` object, so the same sync used by classic charts works.
-			await this.syncChartUserShapesToXml(chartSpace, chartData, chartData.chartPartPath);
-			this.zip.file(chartData.chartPartPath, this.builder.build(chartXmlData));
+			await this.syncChartUserShapesToXml(chartSpace, chartData, chartPartPath);
+			this.zip.file(chartPartPath, this.builder.build(chartXmlData));
 		}
 		return true;
 	}

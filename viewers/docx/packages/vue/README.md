@@ -53,8 +53,8 @@ application: each registers the same editor custom element.
 The shared props, event handlers, `loadDocument` and `detectDocumentFormat` helpers
 are available from the package. Framework handles expose `load`, `save` and
 `download`. The vanilla package supplies `mountEditor(container, options)` for
-framework-free lifecycle management. ProseMirror, `docx-core`, `ooxml-core` and `ooxml-ui` are regular
-dependencies; document and layout algorithms live in OOXML core.
+framework-free lifecycle management. `docx-core`, `ooxml-core` and `ooxml-ui` are regular
+dependencies (`ooxml-ui` brings the ProseMirror libraries); document and layout algorithms live in OOXML core.
 
 ## Custom editor UI
 
@@ -64,14 +64,28 @@ To render only the controls you use, with your own design system, use the buildi
 
 This is an early editor. It does not establish Microsoft Word layout parity or
 lossless saving for unsupported features. Legacy DOC support is limited to
-main-body text with constrained paragraph edits. SmartArt is display-only and
-charts render as placeholders.
+main-body text with constrained paragraph edits. SmartArt nodes, text and layout can be edited
+(drawn with an approximate layout until Word lays them out again) and charts can be inserted, edited and resized (admitted ChartEx charts
+are editable; other ChartEx families show a labelled frame).
 
 ## Documentation
 
 [Framework guide](https://christophervr.github.io/ooxml/docx/frameworks/vue) |
 [Bindings](https://christophervr.github.io/ooxml/docx/bindings)
 
+## Privacy and network use
+
+By default the Word packages make no network request when opening, rendering, editing or saving a document: linked pictures are not fetched, linked data is not refreshed, and fonts come from the device only. The `googleFonts` option, or turning on Google Fonts in File > Options > Trust Center (off by default), requests a document's missing fonts from Google Fonts or the endpoint the host sets. Hyperlinks open only when the reader follows them. Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 Apache-2.0.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#word-docx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

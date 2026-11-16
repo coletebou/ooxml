@@ -20,9 +20,12 @@ describe('shouldUseSvgWarp', () => {
 		expect(shouldUseSvgWarp(undefined)).toBeFalsy();
 	});
 
-	it('returns false for textNoShape and textPlain', () => {
+	it('returns false for textNoShape', () => {
 		expect(shouldUseSvgWarp('textNoShape')).toBeFalsy();
-		expect(shouldUseSvgWarp('textPlain')).toBeFalsy();
+	});
+
+	it('returns true for textPlain', () => {
+		expect(shouldUseSvgWarp('textPlain')).toBeTruthy();
 	});
 
 	it('returns true for all SVG_WARP_PRESETS members', () => {
@@ -48,16 +51,22 @@ describe('getWarpPath', () => {
 		expect(d).toContain('L 400,');
 	});
 
-	it('textArchUp starts with M 0,<h> and contains an arc', () => {
+	it('textArchUp is the box half ellipse, ending at mid height plus the frame offset', () => {
 		const d = getWarpPath('textArchUp', W, H, 0, 1);
-		expect(d).toMatch(/^M 0,200/u);
-		expect(d).toContain('A ');
+		expect(d).toBe(`M 0,${H / 2 + 6.3} A ${W / 2},${H / 2} 0 0,1 ${W},${H / 2 + 6.3}`);
 	});
 
-	it('textArchDown starts with M 0,0 and contains an arc for t>0', () => {
-		// At lineIndex 0, lineCount 2 → t = 0 → baseDepth gives a small archH
-		const d = getWarpPath('textArchDown', W, H, 1, 2);
-		expect(d).toMatch(/^M 0,0/u);
+	it('textArchUp draws the same half as the default for 90 degrees and the lower half for 270', () => {
+		expect(getWarpPath('textArchUp', W, H, 0, 1, 5400000)).toBe(
+			getWarpPath('textArchUp', W, H, 0, 1),
+		);
+		const lower = getWarpPath('textArchUp', W, H, 0, 1, 16200000);
+		expect(lower).toBe(`M ${W},${H / 2 - 6.3} A ${W / 2},${H / 2} 0 0,1 0,${H / 2 - 6.3}`);
+	});
+
+	it('textArchDown puts the angle 90 on the upper half, turned from the default', () => {
+		const d = getWarpPath('textArchDown', W, H, 1, 2, 5400000);
+		expect(d).toMatch(/^M 400,/u);
 		expect(d).toContain('A ');
 	});
 

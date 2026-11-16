@@ -55,12 +55,26 @@ const AREAS = {
 				{ find: /^ooxml-core\/(.+)$/, replacement: `${coreSource}/$1/index.ts` },
 				// The package imports its own subpaths by name; resolve them to source, not to dist.
 				{ find: /^ooxml-ui\/pptx\/dom$/, replacement: `${uiSource}/pptx/dom/index.ts` },
+				{
+					find: /^ooxml-ui\/chart-format-locales$/,
+					replacement: `${uiSource}/chart/format-pane-locales/index.ts`,
+				},
+				// Node resolves solid-js to its server build, where effects never run; the bindings
+				// tests mount Solid components in a DOM, so they need the browser build.
+				{
+					find: /^solid-js$/,
+					replacement: fileURLToPath(
+						new URL('./node_modules/solid-js/dist/solid.js', import.meta.url),
+					),
+				},
 			],
 		},
 		test: {
 			globals: true,
 			// Editor-mounting tests build a full ProseMirror view; under a parallel run they can take 5s+.
-			testTimeout: 20_000,
+			// A <visio-viewer> mount re-renders every panel through jsdom's selector engine and costs
+			// 4-9s per test even alone, so a loaded CI runner passed 20s (fixture tests then timed out).
+			testTimeout: 60_000,
 			css,
 			setupFiles: ['./vitest.setup.ts', './vitest.dom-hygiene.setup.ts'],
 			// Vitest does not always run the setup files again for each file of a shared worker.
@@ -68,7 +82,17 @@ const AREAS = {
 		},
 	},
 	pptx: {
-		resolve: { alias: [{ find: /^ooxml-core\/(.+)$/, replacement: `${coreSource}/$1` }] },
+		resolve: {
+			alias: [
+				{ find: /^ooxml-core\/(.+)$/, replacement: `${coreSource}/$1` },
+				// The viewer's locale dictionaries import the chart format pane strings by package name;
+				// resolve them to source so the tests never depend on a build of this package.
+				{
+					find: /^ooxml-ui\/chart-format-locales$/,
+					replacement: `${uiSource}/chart/format-pane-locales/index.ts`,
+				},
+			],
+		},
 		test: { css, globals: true, testTimeout: 30_000, hookTimeout: 30_000 },
 	},
 } as const;

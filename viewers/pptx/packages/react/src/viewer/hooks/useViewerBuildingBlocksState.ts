@@ -1,3 +1,10 @@
+import type {
+	GoogleFontsOption,
+	ListConversionScope,
+	PptxLoadLimits,
+	ReadOnlyRecommendation,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 /**
  * useViewerBuildingBlocksState: The dialogs / editor-operations /
  * integration half of `useViewerBuildingBlocks`'s hook wiring, split out
@@ -10,7 +17,15 @@
  * effect, `useEditorOperations`, and `useViewerIntegration` (export/print/
  * property handlers, mode switching, and the imperative handle).
  */
-import { useEffect } from 'react';
+import {
+	FONT_DOWNLOAD_SETTING_ID,
+	hostFontDownloadLock,
+	lockExternalContentSetting,
+	resolveAllowExternalContent,
+	resolveEffectiveGoogleFonts,
+} from 'ooxml-ui/pptx';
+import type { PptxHandler } from 'pptx-viewer-core';
+import { useLayoutEffect, useRef } from 'react';
 
 import type { PowerPointViewerHandle } from '../types';
 import type { ViewerMode } from '../types-core';
@@ -22,6 +37,7 @@ import type { ExportHandlersResult } from './useExportHandlers';
 import type { PrintHandlersResult } from './usePrintHandlers';
 import type { PropertyHandlersResult } from './usePropertyHandlers';
 import { useReadOnlyRecommendationState } from './useReadOnlyRecommendationState';
+import { useClearSelectionOnSlideChange } from './useSlideChangeSelection';
 import type { ViewerBuildingBlocksCore } from './useViewerBuildingBlocksCore';
 import type { ViewerDialogsResult } from './useViewerDialogs';
 import { useViewerDialogs } from './useViewerDialogs';
@@ -41,6 +57,14 @@ export interface UseViewerBuildingBlocksStateInput {
 	filePath?: string;
 	/** Host `initialSlide`: the slide shown after each load; forwarded to `useViewerIntegration`. */
 	initialSlide?: number;
+	/** Host `googleFonts`: the Google Fonts fallback policy; forwarded to `useViewerIntegration`. */
+	googleFonts?: GoogleFontsOption;
+	/** Host `listConversionScope`: bare-caret Bullets / Numbering reach; forwarded to `useEditorOperations`. */
+	listConversionScope?: ListConversionScope;
+	/** Host `allowExternalContent`: overrides the Trust Center setting for every load when set. */
+	allowExternalContent?: boolean;
+	/** Host `limits`: the load limits; forwarded to `useViewerIntegration`. */
+	limits?: PptxLoadLimits;
 	autosaveEnabled: boolean;
 	userName?: string;
 	handle?: React.ForwardedRef<PowerPointViewerHandle>;
@@ -52,10 +76,20 @@ export interface UseViewerBuildingBlocksStateInput {
 	onZoomChange?: (zoom: number) => void;
 	onSelectionChange?: (ids: string[]) => void;
 	onSlideCountChange?: (count: number) => void;
+	/** What a vector PDF export approximated (as the viewer's `onPdfExportReport`). */
+	onPdfExportReport?: (result: VectorPdfExportResult) => void;
 }
 
 export interface ViewerBuildingBlocksState {
 	loadVersion: number;
+	/** False while read-only recommended or in Protected View, which blocks inserting. */
+	canInsertElement: boolean;
+	/** Whether the loaded deck recommends read-only (modify verifier or Mark as Final). */
+	readOnlyRecommendation: ReadOnlyRecommendation;
+	/** The loaded deck carries a modify verifier. */
+	hasModifyVerifier: boolean;
+	/** The loaded deck's handler (null before a deck loads). */
+	handlerRef: { readonly current: PptxHandler | null };
 	dialogs: ViewerDialogsResult;
 	editorOps: EditorOperationsResult;
 	exportHandlers: ExportHandlersResult;
@@ -82,7 +116,30 @@ export function useViewerBuildingBlocksState(
 	input: UseViewerBuildingBlocksStateInput,
 ): ViewerBuildingBlocksState {
 	const { core, content, canEdit, filePath, autosaveEnabled, userName, handle, setContent } = input;
-	const { initialSlide } = input;
+	const { initialSlide, googleFonts, listConversionScope, allowExternalContent, limits } = input;
+
+	// The headless API has no customization controller, so the host switches
+	// (`allowExternalContent`, `googleFonts`) lock the options store directly,
+	// as `useViewerCustomization` does for `PowerPointViewer`. Skipped until the
+	// host first sets one, so unset switches never touch the store. Keyed by
+	// the lock `googleFonts` implies, so an inline `{ baseUrl }` is a no-op.
+	const hostLockedRef = useRef(false);
+	const { optionsStore } = core;
+	const fontDownloadLock = hostFontDownloadLock(googleFonts);
+	useLayoutEffect(() => {
+		const anyLock = allowExternalContent !== undefined || fontDownloadLock !== undefined;
+		if (!anyLock && !hostLockedRef.current) {
+			return;
+		}
+		hostLockedRef.current = anyLock;
+		const locked = lockExternalContentSetting({}, allowExternalContent);
+		optionsStore.setConstraints({
+			locked:
+				fontDownloadLock === undefined
+					? locked
+					: { ...locked, [FONT_DOWNLOAD_SETTING_ID]: fontDownloadLock },
+		});
+	}, [optionsStore, allowExternalContent, fontDownloadLock]);
 	const {
 		onContentChange,
 		onDirtyChange,
@@ -91,6 +148,7 @@ export function useViewerBuildingBlocksState(
 		onZoomChange,
 		onSelectionChange,
 		onSlideCountChange,
+		onPdfExportReport,
 	} = input;
 	const {
 		state,
@@ -109,6 +167,7 @@ export function useViewerBuildingBlocksState(
 		gridSpacingPx,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
 		setExitModeHandler,
 		viewerOptions,
 	} = core;
@@ -124,6 +183,7 @@ export function useViewerBuildingBlocksState(
 		activeCustomShowId: state.activeCustomShowId,
 		setCustomShows: state.setCustomShows,
 		setActiveCustomShowId: state.setActiveCustomShowId,
+		setSlides: state.setSlides,
 		setGuides: state.setGuides,
 		setPresentationProperties: state.setPresentationProperties,
 		setAccessibilityIssues: state.setAccessibilityIssues as unknown as React.Dispatch<
@@ -157,13 +217,8 @@ export function useViewerBuildingBlocksState(
 	const readOnlyRec = useReadOnlyRecommendationState(content);
 	const compatToastsState = useCompatibilityToastsState();
 
-	// ── Clear selection on slide change (same effect PowerPointViewer runs) ──
-	useEffect(() => {
-		state.setSelectedElementId(null);
-		state.setSelectedElementIds([]);
-		state.setInlineEditingElementId(null);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [activeSlideIndex]);
+	// ── Clear selection on slide change (same hook PowerPointViewer runs) ──
+	useClearSelectionOnSlideChange(state, activeSlideIndex);
 
 	const editorOps = useEditorOperations({
 		state,
@@ -182,8 +237,10 @@ export function useViewerBuildingBlocksState(
 		presentation,
 		userName,
 		handlerRef: actionSoundHandlerRef,
+		listConversionScope,
 	});
 
+	const canInsertElement = !readOnlyRec.locked && !viewerOptions.trust.openInProtectedView;
 	const {
 		exportHandlers,
 		printHandlers,
@@ -193,6 +250,7 @@ export function useViewerBuildingBlocksState(
 		handleEnterRehearsalMode,
 		autosaveStatus,
 		loadVersion,
+		handlerRef: integrationHandlerRef,
 	} = useViewerIntegration({
 		state,
 		zoom,
@@ -207,18 +265,22 @@ export function useViewerBuildingBlocksState(
 		filePath,
 		autosaveEnabled,
 		initialSlide,
+		// Host `googleFonts` first, else Trust Center > "Download fonts", as in `PowerPointViewer`.
+		googleFonts: resolveEffectiveGoogleFonts(googleFonts, viewerOptions),
+		limits,
 		// Trust Center > "Allow external content": same gate `PowerPointViewer`
 		// applies, so the headless building-blocks API loads http(s) images
 		// under the same default-off, core-side SSRF/privacy guard.
-		allowExternalImages: viewerOptions.trust.allowExternalContent,
+		allowExternalImages: resolveAllowExternalContent(allowExternalContent, viewerOptions),
 		setReadOnlyRecommendation: readOnlyRec.setRecommendation,
 		setModifyVerifier: readOnlyRec.setModifyVerifier,
-		canInsertElement: !readOnlyRec.locked && !viewerOptions.trust.openInProtectedView,
+		canInsertElement,
 		setCompatToasts: compatToastsState.setToasts,
 		canEdit,
 		promptKeepInkAnnotations: viewerOptions.advanced.slideShowPromptKeepInkAnnotations,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
 		mode,
 		slides,
 		activeSlide,
@@ -235,6 +297,7 @@ export function useViewerBuildingBlocksState(
 		onZoomChange,
 		onSelectionChange,
 		onSlideCountChange,
+		onPdfExportReport,
 	});
 
 	// Route keyboard/end-of-show exits through the same keep/discard-ink dialog
@@ -255,6 +318,10 @@ export function useViewerBuildingBlocksState(
 
 	return {
 		loadVersion,
+		canInsertElement,
+		readOnlyRecommendation: readOnlyRec.recommendation,
+		hasModifyVerifier: readOnlyRec.modifyVerifier !== undefined,
+		handlerRef: integrationHandlerRef,
 		dialogs,
 		editorOps,
 		exportHandlers,

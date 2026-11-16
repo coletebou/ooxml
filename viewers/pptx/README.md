@@ -34,16 +34,22 @@ Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https:/
 
 ## Feature tour
 
-|                   |                                                                                                                                                                                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rendering**     | 187 preset shapes, custom geometry, gradients, pattern and picture fills, shadows, glow, reflections, soft edges, 3-D bevels and camera scenes, WordArt warps, tables with built-in styles, SVG charts, SmartArt, EMF/WMF metafiles, embedded fonts, digital ink, audio, video and GLB/GLTF 3-D models. |
-| **Editing**       | WYSIWYG text editing, rich formatting, style galleries, Edit Points, Merge Shapes, picture cropping, connectors that follow their shapes, chart data and formatting, SmartArt node editing and layouts, tables, master and layout editing, animation authoring, and full undo/redo.                     |
-| **Presenting**    | Fullscreen slideshow with transitions (including Morph), entrance, emphasis, exit and motion-path animations, triggers, presenter view with notes and timer, laser pointer and ink annotations.                                                                                                         |
-| **Exporting**     | PNG, JPEG, SVG, PDF, animated GIF and video, plus Markdown conversion with media extraction.                                                                                                                                                                                                            |
-| **Collaboration** | Real-time co-editing over Yjs with presence and cursors, bring-your-own transport, and threaded comments.                                                                                                                                                                                               |
-| **File formats**  | `.pptx`, `.pptm`, `.ppsx`, `.potx`, OOXML Strict, and legacy binary `.ppt` (PowerPoint 97-2003) for both import and export.                                                                                                                                                                             |
-| **Security**      | Open and save password-protected decks (AES-128/256), read and preserve digital signatures, and keep VBA macros intact.                                                                                                                                                                                 |
-| **Localization**  | English, German, Spanish, French and Simplified Chinese UI out of the box, with pluggable dictionaries.                                                                                                                                                                                                 |
+For **OneDrive sharing links**, use the optional host adapter with any binding:
+[integration guide](docs/guide/onedrive.md) and
+[testing and real-account acceptance](docs/guide/onedrive-testing.md). Microsoft sign-in remains
+host-owned. The shared Office connection retains conflicting versions and supports separate
+cloud copies; no simulation UI or service is shipped.
+
+|                   |                                                                                                                                                                                                                                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rendering**     | 187 preset shapes, custom geometry, gradients, pattern and picture fills, shadows, glow, reflections, soft edges, 3-D bevels and camera scenes, WordArt warps, tables with built-in styles, SVG charts, SmartArt, EMF/WMF metafiles, embedded fonts, digital ink, audio, video and GLB/GLTF 3-D models.           |
+| **Editing**       | WYSIWYG text editing, rich formatting, style galleries, Edit Points, Merge Shapes, picture cropping, connectors that follow their shapes, chart data, formatting and Design galleries, SmartArt node editing (text pane) and layouts, tables, master and layout editing, animation authoring, and full undo/redo. |
+| **Presenting**    | Fullscreen slideshow with transitions (including Morph), entrance, emphasis, exit and motion-path animations, triggers, presenter view with notes and timer, laser pointer and ink annotations.                                                                                                                   |
+| **Exporting**     | PNG, JPEG, SVG, PDF, animated GIF and video, plus Markdown conversion with media extraction.                                                                                                                                                                                                                      |
+| **Collaboration** | Real-time co-editing over Yjs with presence and cursors, bring-your-own transport, and threaded comments.                                                                                                                                                                                                         |
+| **File formats**  | `.pptx`, `.pptm`, `.ppsx`, `.potx`, OOXML Strict, and legacy binary `.ppt` (PowerPoint 97-2003) for both import and export.                                                                                                                                                                                       |
+| **Security**      | Open and save password-protected decks (AES-128/256), read and preserve digital signatures, and keep VBA macros intact.                                                                                                                                                                                           |
+| **Localization**  | English, German, Spanish, French and Simplified Chinese UI out of the box, with pluggable dictionaries.                                                                                                                                                                                                           |
 
 ## Quick start
 
@@ -121,7 +127,7 @@ export class AppComponent {
 }
 ```
 
-Add `pptx-angular-viewer/styles` to your global styles.
+Add `pptx-angular-viewer/styles.css` to the `styles` array in `angular.json` (or `@import` it in `src/styles.css`). Do not import it from TypeScript: the Angular CLI's application builder never links CSS imported that way.
 
 </details>
 
@@ -295,8 +301,12 @@ cd viewers/pptx
 bun run build:packages   # core -> shared -> locales -> tools -> cli -> the five bindings
 bun run test
 bun run demo             # React demo on :4173 (also demo:vue, demo:angular, demo:svelte, demo:vanilla)
-bun run e2e              # Playwright across all five demos
+bun run e2e:fast         # cached production demos, React tests and cross-binding comparisons
+bun run e2e:all          # ordinary product tests in every binding
 ```
+
+See [fast browser testing](../../docs/browser-performance.md) for selected specs, warm servers,
+worker budgets, CI sharding and measured results.
 
 You will need [Bun](https://bun.sh/) and Node.js 22+. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR: it explains the **parity rule** (a UI change lands in all five bindings), Conventional Commits (they drive each package's version), and how the demos resolve packages. This project follows a [Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately via [SECURITY.md](SECURITY.md).
 

@@ -12,6 +12,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect, vi } from 'vitest';
 
+import { PresentationTransitionMount } from './PresentationTransitionMount';
 import { PresentationTransitionOverlay } from './PresentationTransitionOverlay';
 
 function makeSlide(): PptxSlide {
@@ -305,6 +306,79 @@ describe('presentationTransitionOverlay', () => {
 		expect(html).toMatch(/animation:\s*pptx-morph-fadein-/u);
 	});
 
+	// Regression (issue #141): every lifted arrival used to be painted above
+	// every ghost, so a full-slide picture fading in veiled the title travelling
+	// ABOVE it on the incoming slide, which then snapped bright at the end.
+	it('stacks a travelling title ghost above a lifted picture arriving under it', () => {
+		const picture = (id: string, name: string, imagePath: string): PptxElement =>
+			({
+				id,
+				name,
+				type: 'picture',
+				x: 0,
+				y: 0,
+				width: 960,
+				height: 540,
+				imagePath,
+				imageData: PIXEL,
+			}) as unknown as PptxElement;
+		const title = (id: string, x: number): PptxElement =>
+			({
+				id,
+				name: 'Title',
+				type: 'text',
+				x,
+				y: 160,
+				width: 400,
+				height: 100,
+				text: 'Our Services',
+			}) as unknown as PptxElement;
+		const outgoing = {
+			id: 'out',
+			elements: [
+				picture('out-gone', 'Leaving', 'ppt/media/leaving.png'),
+				picture('out-backdrop', 'Backdrop', 'ppt/media/backdrop.png'),
+				title('out-title', 520),
+			],
+		} as PptxSlide;
+		const incoming = {
+			id: 'in',
+			elements: [
+				picture('in-backdrop', 'Backdrop', 'ppt/media/backdrop.png'),
+				picture('in-veil', 'Veil', 'ppt/media/veil.png'),
+				title('in-title', 80),
+			],
+		} as PptxSlide;
+		const plan = buildMorphTransitionPlan(outgoing, incoming, 800)!;
+
+		const html = renderToStaticMarkup(
+			<PresentationTransitionOverlay
+				outgoingSlide={outgoing}
+				templateElements={[]}
+				canvasSize={{ width: 960, height: 540 }}
+				transition={{ type: 'morph', durationMs: 800 }}
+				durationMs={800}
+				morphPlan={plan}
+				incomingSlide={incoming}
+				onComplete={vi.fn()}
+			/>,
+		);
+
+		// Each wrapper's first z-index is its element's own; the overlay numbers
+		// them in the plan's single order, back to front.
+		const zOf = (attribute: string, id: string): number => {
+			const start = html.indexOf(`${attribute}="${id}"`);
+			expect(start, `${id} must be painted`).toBeGreaterThan(-1);
+			return Number(/z-index:(\d+)/u.exec(html.slice(start))?.[1]);
+		};
+		expect(zOf('data-pptx-morph-outgoing', 'out-backdrop')).toBeLessThan(
+			zOf('data-pptx-morph-lifted', 'in-veil'),
+		);
+		expect(zOf('data-pptx-morph-lifted', 'in-veil')).toBeLessThan(
+			zOf('data-pptx-morph-outgoing', 'out-title'),
+		);
+	});
+
 	// Regression (issue #161): the two halves of a dissolve stacked as ordinary
 	// layers composite source-over, which leaves the ink they SHARE at 0.75 of
 	// full strength halfway through - measured 34.6/255 too dark on the wheel
@@ -390,6 +464,150 @@ describe('presentationTransitionOverlay', () => {
 		expect(html.match(/Tactical Edge/gu)).toHaveLength(1);
 	});
 
+	// Regression (issue #141, slides 6 -> 7): a column of "L"s changes font, so it
+	// dissolves as a group, while it slides under the top band the incoming slide
+	// stacks ABOVE it. Painted above every overlay layer, the column showed across
+	// the band for the whole morph and vanished from it in one frame at the end.
+	it('stacks a dissolving column under the band above it and over the strip below it', () => {
+		const picture = (id: string, name: string, y: number, height: number): PptxElement =>
+			({
+				id,
+				name,
+				type: 'picture',
+				x: 0,
+				y,
+				width: 1280,
+				height,
+				imagePath: `ppt/media/${name}.png`,
+				imageData: PIXEL,
+			}) as unknown as PptxElement;
+		const column = (id: string, y: number, fontFamily: string): PptxElement =>
+			({
+				id,
+				name: 'Object 14',
+				type: 'text',
+				x: 284,
+				y,
+				width: 51,
+				height: 1066,
+				text: 'L\nL\nL',
+				textStyle: { color: '#FFFFFF', fontFamily },
+				textSegments: [{ text: 'L\nL\nL', style: { fontFamily, color: '#FFFFFF' } }],
+			}) as unknown as PptxElement;
+		const outgoing = {
+			id: '6',
+			elements: [
+				picture('bg6', 'backdrop', 0, 720),
+				column('col6', -916, 'Calibri Light'),
+				picture('strip6', 'strip', -1, 720),
+				picture('band6', 'band', -1, 196),
+			],
+		} as PptxSlide;
+		const incoming = {
+			id: '7',
+			elements: [
+				picture('bg7', 'backdrop', 0, 720),
+				picture('strip7', 'strip', -3, 720),
+				column('col7', -158, 'Calibri'),
+				picture('band7', 'band', -2, 196),
+			],
+		} as PptxSlide;
+		const plan = buildMorphTransitionPlan(outgoing, incoming, 2000)!;
+		expect(plan.crossfadeGroups.map((group) => group.incoming.id)).toStrictEqual(['col7']);
+
+		const html = renderToStaticMarkup(
+			<PresentationTransitionOverlay
+				outgoingSlide={outgoing}
+				templateElements={[]}
+				canvasSize={{ width: 1280, height: 720 }}
+				transition={{ type: 'morph', durationMs: 2000 }}
+				durationMs={2000}
+				morphPlan={plan}
+				incomingSlide={incoming}
+				onComplete={vi.fn()}
+			/>,
+		);
+
+		// The first z-index after each marker is the one it is stacked by: the
+		// ghost's element container, or the group wrapper itself.
+		const zOf = (attribute: string, id: string): number => {
+			const start = html.indexOf(`${attribute}="${id}"`);
+			expect(start, `${id} must be painted`).toBeGreaterThan(-1);
+			return Number(/z-index:(\d+)/u.exec(html.slice(start))?.[1]);
+		};
+		const group = zOf('data-pptx-morph-crossfade', 'col7');
+		expect(zOf('data-pptx-morph-outgoing', 'band6')).toBeGreaterThan(group);
+		expect(zOf('data-pptx-morph-outgoing', 'strip6')).toBeLessThan(group);
+	});
+
+	// Regression (issue #141, slide 1 -> 2): the overlay painted the leaving
+	// slide over the ACTIVE slide's layout, which is already the incoming one,
+	// so a layout background picture vanished the moment a cover began.
+	it("paints each slide over its own layout's background picture", () => {
+		const layoutPicture = (id: string, imagePath: string): PptxElement =>
+			({
+				id,
+				type: 'picture',
+				name: 'Layout background',
+				x: 0,
+				y: 0,
+				width: 960,
+				height: 540,
+				imagePath,
+				imageData: `${PIXEL}#${id}`,
+			}) as unknown as PptxElement;
+		const leaving = { ...makeSlide(), id: 'slide-1' } as PptxSlide;
+		const arriving = {
+			id: 'slide-2',
+			elements: [
+				{
+					id: 'el-2',
+					type: 'text',
+					x: 20,
+					y: 20,
+					width: 400,
+					height: 80,
+					text: 'Incoming Slide',
+				} as unknown as PptxElement,
+			],
+		} as PptxSlide;
+
+		// Mounted the way the show mounts it (`ViewerCanvasArea` renders this
+		// component): the mount picks each layer's template from the slide map.
+		const html = renderToStaticMarkup(
+			<PresentationTransitionMount
+				presentation={{
+					transitionOverlay: {
+						outgoingSlideIndex: 0,
+						incomingSlideIndex: 1,
+						transition: { type: 'cover', durationMs: 700, direction: 'l' },
+						durationMs: 700,
+					},
+					morphPlan: undefined,
+					handleTransitionOverlayComplete: vi.fn(),
+				}}
+				slides={[leaving, arriving]}
+				templateElementsBySlideId={{
+					'slide-1': [layoutPicture('title-layout-bg', 'ppt/media/title.png')],
+					'slide-2': [layoutPicture('content-layout-bg', 'ppt/media/content.png')],
+				}}
+				canvasSize={{ width: 960, height: 540 }}
+				scale={1}
+			/>,
+		);
+
+		const layer = (name: 'outgoing' | 'incoming'): string => {
+			const start = html.indexOf(`data-pptx-transition-layer="${name}"`);
+			expect(start, `the ${name} layer must be painted`).toBeGreaterThan(-1);
+			const next = html.indexOf('data-pptx-transition-layer=', start + 1);
+			return html.slice(start, next === -1 ? undefined : next);
+		};
+		expect(layer('outgoing')).toContain('#title-layout-bg');
+		expect(layer('outgoing')).not.toContain('#content-layout-bg');
+		expect(layer('incoming')).toContain('#content-layout-bg');
+		expect(layer('incoming')).not.toContain('#title-layout-bg');
+	});
+
 	it('ignores a non-positive stage scale and falls back to measuring', () => {
 		const html = renderToStaticMarkup(
 			<PresentationTransitionOverlay
@@ -451,5 +669,75 @@ describe('presentationTransitionOverlay', () => {
 			);
 			expect(html).not.toContain('data-pptx-transition-fragment=');
 		});
+	});
+});
+
+// PowerPoint 16 morphs a filled, outlined shape whose box moves while its text
+// changes face and size as two things: the body on the box, and the text glyph
+// over glyph on its own mapping. The plan paints them as two groups of copies.
+describe('shape text carried apart from its body', () => {
+	it('paints the body copies without text and the text copies without a fill', () => {
+		const card = (id: string, font: string, size: number, box: object): PptxElement =>
+			({
+				id,
+				type: 'shape',
+				name: '!!Card',
+				shapeType: 'rect',
+				x: 80,
+				y: 100,
+				width: 300,
+				height: 120,
+				text: 'Lorem ipsum',
+				textSegments: [
+					{ text: 'Lorem ipsum', style: { fontFamily: font, fontSize: size, color: '#FFFFFF' } },
+				],
+				textStyle: { fontFamily: font, fontSize: size, align: 'center', vAlign: 'middle' },
+				shapeStyle: {
+					fillMode: 'solid',
+					fillColor: '#2070C0',
+					strokeColor: '#FFFFFF',
+					strokeWidth: 3,
+				},
+				...box,
+			}) as unknown as PptxElement;
+		const outgoing = { id: 'out', elements: [card('out-card', 'Calibri', 28, {})] } as PptxSlide;
+		const incoming = {
+			id: 'in',
+			elements: [card('in-card', 'Arial', 40, { x: 460, y: 300, width: 420, height: 180 })],
+		} as PptxSlide;
+		const plan = buildMorphTransitionPlan(outgoing, incoming, 500, 'object', {
+			measureText: (text, font) => text.length * (/Arial/u.test(font) ? 0.52 : 0.47) * 40,
+		})!;
+		expect(plan.crossfadeGroups.map((group) => group.incoming.id)).toStrictEqual([
+			'in-card-morph-body',
+			'in-card-morph-text',
+		]);
+		const html = renderToStaticMarkup(
+			<PresentationTransitionOverlay
+				outgoingSlide={outgoing}
+				templateElements={[]}
+				canvasSize={{ width: 960, height: 540 }}
+				transition={{ type: 'morph', durationMs: 500 }}
+				durationMs={500}
+				morphPlan={plan}
+				incomingSlide={incoming}
+				onComplete={vi.fn()}
+			/>,
+		);
+		const group = (id: string) =>
+			new RegExp(
+				`<div data-pptx-morph-crossfade="${id}"[^>]*>(.*?)(?=<div data-pptx-morph-crossfade=|$)`,
+				'su',
+			).exec(html)?.[1] ?? '';
+		const body = group('in-card-morph-body');
+		const text = group('in-card-morph-text');
+		expect(body).toContain('data-pptx-morph-lifted="in-card-morph-body"');
+		expect(body).not.toContain('Lorem ipsum');
+		expect(text.match(/Lorem ipsum/gu)).toHaveLength(2);
+		const fill = /background-color:\s*(#2070C0|rgb\(32, ?112, ?192\))/iu;
+		expect(body).toMatch(fill);
+		expect(text).not.toMatch(fill);
+		// The pair itself is not painted besides its copies.
+		expect(html.match(/Lorem ipsum/gu)).toHaveLength(2);
 	});
 });

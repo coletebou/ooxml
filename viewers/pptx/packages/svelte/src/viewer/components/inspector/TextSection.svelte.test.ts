@@ -75,17 +75,34 @@ function mountSection(editor: EditorState, el: PptxElement): { target: HTMLEleme
 }
 
 describe('textSection', () => {
+	it('draws the shared spacing fields in points and writes model units', () => {
+		const editor = makeEditor(textEl({ textStyle: { paragraphSpacingBefore: 16 } }));
+		const { target } = mountSection(editor, currentEl(editor));
+		const before = target.querySelector<HTMLInputElement>('[data-testid="paragraph-spaceBefore"]')!;
+		expect(before.value).toBe('12');
+		const spacing = target.querySelector<HTMLInputElement>(
+			'[data-testid="font-characterSpacing"]',
+		)!;
+		spacing.value = '1.5';
+		spacing.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		expect(
+			(currentEl(editor) as { textStyle?: { characterSpacing?: number } }).textStyle
+				?.characterSpacing,
+		).toBe(150);
+	});
+
 	it('defaults vertical align to top', () => {
 		const editor = makeEditor(textEl());
 		const { target } = mountSection(editor, currentEl(editor));
-		const select = target.querySelectorAll<HTMLSelectElement>('pptx-ui-select')[0];
+		const select = target.querySelector<HTMLSelectElement>('[data-testid="text-box-valign"]');
 		expect(select?.value).toBe('top');
 	});
 
 	it('sets vertical align', () => {
 		const editor = makeEditor(textEl());
 		const { target } = mountSection(editor, currentEl(editor));
-		const select = target.querySelectorAll<HTMLSelectElement>('pptx-ui-select')[0];
+		const select = target.querySelector<HTMLSelectElement>('[data-testid="text-box-valign"]');
 		if (!select) {
 			throw new Error('vAlign select not found');
 		}
@@ -99,7 +116,7 @@ describe('textSection', () => {
 	it('toggles wrap-in-shape', () => {
 		const editor = makeEditor(textEl({ textStyle: { textWrap: 'none' } }));
 		const { target } = mountSection(editor, currentEl(editor));
-		const checkbox = target.querySelector<HTMLInputElement>('pptx-ui-checkbox');
+		const checkbox = target.querySelector<HTMLInputElement>('[data-testid="text-box-wrap"]');
 		if (!checkbox) {
 			throw new Error('wrap checkbox not found');
 		}
@@ -113,7 +130,9 @@ describe('textSection', () => {
 	it('labels the autofit options by what they DO, not by the enum name', () => {
 		const editor = makeEditor(textEl());
 		const { target } = mountSection(editor, currentEl(editor));
-		const autoFitSelect = target.querySelectorAll<HTMLSelectElement>('pptx-ui-select')[1];
+		const autoFitSelect = target.querySelector<HTMLSelectElement>(
+			'[data-testid="text-box-autofit"]',
+		);
 		const options = Array.from(autoFitSelect?.querySelectorAll('option') ?? []);
 		const shrinkOption = options.find((o) => o.value === 'shrink');
 		const normalOption = options.find((o) => o.value === 'normal');
@@ -125,7 +144,9 @@ describe('textSection', () => {
 	it('sets the autofit mode', () => {
 		const editor = makeEditor(textEl());
 		const { target } = mountSection(editor, currentEl(editor));
-		const autoFitSelect = target.querySelectorAll<HTMLSelectElement>('pptx-ui-select')[1];
+		const autoFitSelect = target.querySelector<HTMLSelectElement>(
+			'[data-testid="text-box-autofit"]',
+		);
 		if (!autoFitSelect) {
 			throw new Error('autofit select not found');
 		}
@@ -163,13 +184,15 @@ describe('textSection', () => {
 
 		const row = target.querySelector('[data-testid="pptx-color-recent"]');
 		expect(row).not.toBeNull();
-		const swatch = row!.querySelector<HTMLButtonElement>('.pptx-svelte-recent-colors-swatch');
+		const swatch = row!.shadowRoot?.querySelector<HTMLButtonElement>(
+			'button[data-source="recent"]',
+		);
 		swatch?.click();
 		flushSync();
 
-		// The shared MRU list normalises hex to upper-case, and the swatch applies
-		// exactly the value it displays.
-		expect((currentEl(editor) as TextStyleShape).textStyle?.color).toBe('#AABBCC');
+		// The shared MRU list normalises hex to upper-case; the shared grid reports a
+		// pick in lower case, as it does for its theme swatches and as the native input does.
+		expect((currentEl(editor) as TextStyleShape).textStyle?.color).toBe('#aabbcc');
 	});
 
 	it('enables editable text shadow effects', () => {

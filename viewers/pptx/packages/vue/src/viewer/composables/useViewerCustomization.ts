@@ -23,6 +23,7 @@ import {
 	resolveEffectiveHiddenActions,
 } from 'ooxml-ui/pptx';
 import type {
+	GoogleFontsOption,
 	ResolvedCustomization,
 	ToolbarActionId,
 	ViewerCustomization,
@@ -34,8 +35,11 @@ import type {
 	ViewerPanelId,
 } from 'ooxml-ui/pptx';
 import type { PptxAiConfig } from 'ooxml-ui/pptx/ai';
+import type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 import { computed, inject, onScopeDispose, provide, shallowRef, watch } from 'vue';
-import type { ComputedRef, InjectionKey, ShallowRef } from 'vue';
+import type { Component, ComputedRef, InjectionKey, ShallowRef } from 'vue';
+
+import { aiAssistants } from '../ai-assistant-registry';
 
 /** Reactive resolved customisation, provided by `PowerPointViewer`. */
 export const ViewerCustomizationKey: InjectionKey<ShallowRef<ResolvedCustomization>> =
@@ -50,7 +54,11 @@ export interface UseViewerCustomizationInput {
 	props: {
 		readonly customization?: ViewerCustomization;
 		readonly hiddenActions?: readonly ToolbarActionId[];
-		readonly ai?: PptxAiConfig;
+		readonly ai?: PptxAiConfig | PptxAiAssistant;
+		/** Host switch that locks the Trust Center "Allow external content" setting. */
+		readonly allowExternalContent?: boolean;
+		/** Host policy that locks the Trust Center "Download fonts" setting. */
+		readonly googleFonts?: GoogleFontsOption;
 	};
 	/** The viewer's File > Options store; receives the locks and host defaults. */
 	optionsStore: ViewerOptionsStore;
@@ -66,8 +74,13 @@ export interface UseViewerCustomizationResult {
 	effectiveHiddenActions: ComputedRef<ToolbarActionId[] | undefined>;
 	/** The one AI gate: the host passed `ai` AND did not switch the feature off. */
 	aiEnabled: ComputedRef<boolean>;
-	/** The host's `ai` config while {@link aiEnabled}, else `undefined`. */
+	/**
+	 * The host's `ai` config while {@link aiEnabled}, else `undefined`: the config of a
+	 * `createAiAssistant` handle, or the plain config itself.
+	 */
 	aiConfig: ComputedRef<PptxAiConfig | undefined>;
+	/** The chat panel of a `createAiAssistant` handle; `undefined` uses the viewer's own. */
+	aiChatPanel: ComputedRef<Component | undefined>;
 	panelVisible: (panel: ViewerPanelId) => boolean;
 	featureEnabled: (feature: ViewerFeatureId) => boolean;
 	dialogAvailable: (dialog: ViewerDialogId) => boolean;
@@ -82,6 +95,9 @@ export function useViewerCustomization(
 ): UseViewerCustomizationResult {
 	const { props } = input;
 	const controller = createCustomizationController(props.customization);
+	// Seeded before the first constraints are applied, so the first load already sees the lock.
+	controller.setAllowExternalContent(props.allowExternalContent);
+	controller.setGoogleFonts(props.googleFonts);
 	const resolved = shallowRef(controller.getResolved());
 	applyConstraints(input.optionsStore, resolved.value);
 
@@ -100,10 +116,23 @@ export function useViewerCustomization(
 		() => props.customization,
 		(next) => controller.api.setCustomization(next ?? {}),
 	);
+	watch(
+		() => props.allowExternalContent,
+		(next) => controller.setAllowExternalContent(next),
+	);
+	watch(
+		() => props.googleFonts,
+		(next) => controller.setGoogleFonts(next),
+	);
 
 	provide(ViewerCustomizationKey, resolved);
 
 	const aiEnabled = computed(() => Boolean(props.ai) && isFeatureEnabled(resolved.value, 'ai'));
+	// A handle from `pptx-vue-viewer/ai` brings its config and panel; any other value is a
+	// plain config for the viewer's own lazy panel, as before.
+	const aiAssistant = computed(() =>
+		aiEnabled.value ? aiAssistants.resolve(props.ai) : undefined,
+	);
 	return {
 		controller,
 		api: controller.api,
@@ -112,7 +141,8 @@ export function useViewerCustomization(
 			resolveEffectiveHiddenActions(resolved.value, props.hiddenActions),
 		),
 		aiEnabled,
-		aiConfig: computed(() => (aiEnabled.value ? props.ai : undefined)),
+		aiConfig: computed(() => aiAssistant.value?.config),
+		aiChatPanel: computed(() => aiAssistant.value?.panel),
 		panelVisible: (panel) => isPanelVisible(resolved.value, panel),
 		featureEnabled: (feature) => isFeatureEnabled(resolved.value, feature),
 		dialogAvailable: (dialog) => isDialogAvailable(resolved.value, dialog),

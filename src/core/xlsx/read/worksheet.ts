@@ -1,12 +1,23 @@
+import { WORKSHEET_CHILD_ORDER } from './worksheet-children';
 import { RELATIONSHIP_TYPES } from '../../opc/index';
-import { elements, relAttr, type XmlElement } from '../../xml/index';
+import { LiteDeclinedError, elements, relAttr, type XmlElement } from '../../xml/index';
 import { parseRange } from '../address';
 import type { DifferentialStyle, Hyperlink, Worksheet } from '../model';
 import { createWorksheet } from '../workbook';
-import { mergeComments, parseLegacyComments, parseThreadedComments } from './comments';
-import { readConditionalFormats, readDataValidations } from './conditional';
+import {
+	mergeComments,
+	parseLegacyComments,
+	parseThreadedComments,
+	threadedCommentEnvelope,
+} from './comments';
+import { readConditionalFormats } from './conditional';
+import { readDataValidations } from './data-validations';
+import { readValidationExtensions } from '../validation-extensions';
 import { readConditionalExtensions } from '../conditional-extensions';
 import { parseDrawing } from './drawing';
+import { attachFormControls } from './form-control';
+import { readCustomSheetViews } from './custom-views';
+import { readHeaderFooterImages } from './header-footer-images';
 import { parseDataXml } from './limits';
 import type { SourceIndex } from './package';
 import { readSheetData, type CellContext } from './sheet-data';
@@ -21,7 +32,9 @@ import {
 	readSheetView,
 	readTabColor,
 } from './sheet-props';
+import { readIgnoredErrors } from './ignored-errors';
 import { readScenarios } from './scenarios';
+import { readSortState } from './sort-state';
 import { readPrintOptions } from './print-options';
 import { parseTable } from './tables';
 import { att, outerXml, selfContainedXml, xChildren } from './xml-util';
@@ -65,7 +78,16 @@ const MODELLED = new Set([
 	'legacyDrawing',
 	'tableParts',
 	'scenarios',
+	'customSheetViews',
+	'ignoredErrors',
 ]);
+
+/** An element outside the worksheet schema cannot be written back in place, so it is reported. */
+function reportUnplaceable(ctx: SheetContext, sheet: string, element: string): void {
+	ctx.warn(
+		`Sheet "${sheet}": the element "${element}" is not part of the worksheet schema and is dropped on save.`,
+	);
+}
 
 function keep(sheet: Worksheet, key: string, xml: string): void {
 	const list = sheet.preserved.get(key);
@@ -116,7 +138,7 @@ function readTables(
 		const rel = rels.get(relAttr(part, 'id') ?? '');
 		const target = rel ? ctx.source.target(partName, rel) : undefined;
 		const xml = target ? ctx.source.text(target) : undefined;
-		const table = target && xml ? parseTable(xml, target) : undefined;
+		const table = target && xml ? parseTable(xml, target, ctx.dxfs) : undefined;
 		if (table) sheet.tables.push(table);
 		else ctx.warn('A table part could not be read and was dropped.');
 	}
@@ -125,12 +147,21 @@ function readTables(
 function readComments(ctx: SheetContext, partName: string, sheet: Worksheet): void {
 	const legacyPart = ctx.source.targetOfType(partName, RELATIONSHIP_TYPES.comments);
 	const threadedPart = ctx.source.targetOfType(partName, RELATIONSHIP_TYPES.threadedComment);
+	const personsPart = ctx.source.targetOfType(
+		ctx.source.workbookPart() ?? '',
+		RELATIONSHIP_TYPES.person,
+	);
 	const legacy = parseLegacyComments(legacyPart ? ctx.source.text(legacyPart) : undefined);
 	const threaded = parseThreadedComments(
 		threadedPart ? ctx.source.text(threadedPart) : undefined,
 		ctx.persons,
+		personsPart ? ctx.source.text(personsPart) : undefined,
 	);
 	sheet.comments = mergeComments(legacy, threaded);
+	const envelope = threadedCommentEnvelope(
+		threadedPart ? ctx.source.text(threadedPart) : undefined,
+	);
+	if (envelope) sheet.threadedCommentsXml = envelope;
 }
 
 /** Reads one worksheet part. */
@@ -140,19 +171,38 @@ export function parseWorksheet(
 	name: string,
 	sheetId: number,
 ): Worksheet {
-	const sheet = createWorksheet(name, sheetId);
-	sheet.partName = partName;
 	const xml = ctx.source.text(partName);
 	if (!xml) {
+		const sheet = createWorksheet(name, sheetId);
+		sheet.partName = partName;
 		ctx.warn(`Sheet "${name}" has no part ${partName}; it was loaded empty.`);
 		return sheet;
 	}
 	const split = splitSheetData(xml);
-	const root = parseDataXml(
-		split?.xml ?? xml,
-		'XLSX worksheet',
-		ctx.maxXmlElements,
-	).documentElement;
+	if (split) {
+		try {
+			return readWorksheet(ctx, partName, name, sheetId, split.xml, split.rows);
+		} catch (error) {
+			// The light reader met markup it leaves to the XML parser part way through the rows: the
+			// part is read again whole (warnings are kept once, so none is repeated).
+			if (!(error instanceof LiteDeclinedError)) throw error;
+		}
+	}
+	return readWorksheet(ctx, partName, name, sheetId, xml);
+}
+
+/** Reads a worksheet part, its cell data from `rows` when the part was split. */
+function readWorksheet(
+	ctx: SheetContext,
+	partName: string,
+	name: string,
+	sheetId: number,
+	xml: string,
+	rows?: Iterable<XmlElement>,
+): Worksheet {
+	const sheet = createWorksheet(name, sheetId);
+	sheet.partName = partName;
+	const root = parseDataXml(xml, 'XLSX worksheet', ctx.maxXmlElements).documentElement;
 	const byName = new Map<string, XmlElement>();
 	const cfBlocks: XmlElement[] = [];
 	for (const node of elements(root)) {
@@ -161,9 +211,15 @@ export function parseWorksheet(
 		else if (!byName.has(local)) byName.set(local, node);
 		if ((SNAPSHOT_ELEMENTS as readonly string[]).includes(local))
 			keep(sheet, snapshotKey(local), outerXml(node));
-		else if (local === 'AlternateContent')
-			keep(sheet, alternateContentName(node) ?? local, selfContainedXml(node));
-		else if (!MODELLED.has(local)) keep(sheet, local, selfContainedXml(node));
+		else if (local === 'AlternateContent') {
+			const inner = alternateContentName(node);
+			if (!WORKSHEET_CHILD_ORDER.includes(inner ?? local))
+				reportUnplaceable(ctx, name, inner ?? local);
+			keep(sheet, inner ?? local, selfContainedXml(node));
+		} else if (!MODELLED.has(local)) {
+			if (!WORKSHEET_CHILD_ORDER.includes(local)) reportUnplaceable(ctx, name, local);
+			keep(sheet, local, selfContainedXml(node));
+		}
 	}
 	const sheetPr = byName.get('sheetPr');
 	const tabColor = readTabColor(sheetPr, ctx.palette);
@@ -175,20 +231,25 @@ export function parseWorksheet(
 	if (format.format) sheet.format = format.format;
 	sheet.columns = readColumns(byName.get('cols'), ctx.xfMap);
 	const data = byName.get('sheetData');
-	if (data) readSheetData(ctx, split?.sheetData ?? data, sheet);
+	if (data) readSheetData(ctx, rows ?? elements(data), sheet);
 	const protection = readProtection(byName.get('sheetProtection'));
 	if (protection) sheet.protection = protection;
-	const autoFilter = readAutoFilter(byName.get('autoFilter'));
+	const autoFilter = readAutoFilter(byName.get('autoFilter'), ctx.dxfs);
 	if (autoFilter) sheet.autoFilter = autoFilter;
+	const sortState = readSortState(byName.get('sortState'), ctx.dxfs);
+	if (sortState) sheet.sortState = sortState;
 	sheet.merges = xChildren(byName.get('mergeCells') ?? root, 'mergeCell')
 		.map((node) => parseRange(att(node, 'ref') ?? ''))
 		.filter((range) => range !== undefined);
 	sheet.conditionalFormats = readConditionalFormats(cfBlocks, ctx.dxfs, ctx.palette, (m) =>
 		ctx.warn(m),
 	);
+	const ignored = readIgnoredErrors(byName.get('ignoredErrors'));
+	if (ignored.length) sheet.ignoredErrors = ignored;
 	const scenarios = readScenarios(byName.get('scenarios'));
 	if (scenarios) sheet.scenarios = scenarios;
 	sheet.dataValidations = readDataValidations(byName.get('dataValidations'));
+	readValidationExtensions(sheet);
 	readConditionalExtensions(sheet);
 	sheet.hyperlinks = readHyperlinks(ctx, partName, byName.get('hyperlinks'));
 	const page = readPageSetup(
@@ -198,6 +259,10 @@ export function parseWorksheet(
 		readFitToPage(sheetPr),
 	);
 	if (page) sheet.pageSetup = page;
+	const customViews = byName.get('customSheetViews');
+	if (customViews) sheet.customViews = readCustomSheetViews(customViews);
+	const hfImages = readHeaderFooterImages(ctx.source, partName, byName.get('legacyDrawingHF'));
+	if (hfImages) sheet.headerFooterImages = hfImages;
 	const printOptions = readPrintOptions(byName.get('printOptions'));
 	if (printOptions) sheet.printOptions = printOptions;
 	const drawing = byName.get('drawing');
@@ -205,6 +270,7 @@ export function parseWorksheet(
 		const rel = ctx.source.rels(partName).get(relAttr(drawing, 'id') ?? '');
 		const target = rel ? ctx.source.target(partName, rel) : undefined;
 		if (target) sheet.drawings = parseDrawing(ctx.source, target, (m) => ctx.warn(m));
+		attachFormControls(ctx.source, partName, root, sheet, byName.get('legacyDrawing'));
 	}
 	readTables(ctx, partName, byName.get('tableParts'), sheet);
 	readComments(ctx, partName, sheet);

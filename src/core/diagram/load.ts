@@ -7,7 +7,14 @@ import {
 } from './definitions';
 import { parseDiagramDataModel } from './data-model';
 import { parseDiagramDrawing } from './drawing';
-import { resolveDiagramDrawingPart, type DiagramPartHost } from './relationships';
+import {
+	resolveDiagramDrawingPart,
+	diagramRelationshipsPart,
+	type DiagramPartHost,
+} from './relationships';
+import type { DiagramLayoutSource } from './layout-preview';
+import { captureDiagramPictures } from './picture-layout';
+import { generatedDrawingDigest } from './cache-metadata';
 import type {
 	DiagramColorsDefinition,
 	DiagramDataModel,
@@ -17,6 +24,7 @@ import type {
 	DiagramQuickStyleDefinition,
 	DiagramRelationshipIds,
 } from './types';
+import { diagramQuickStyle3d } from './scene-3d';
 
 /** A part host that can also read part text. */
 export interface DiagramPackageHost extends DiagramPartHost {
@@ -35,10 +43,15 @@ export interface DiagramPartPaths {
 
 /** Every part of a diagram, parsed, with the problems met on the way. */
 export interface LoadedDiagram {
+	/** Verified against the exact drawing bytes; a native application's rewrite clears this status. */
+	generatedCache?: true;
+	/** Original definitions and source metadata for an uncached preview. */
+	layoutSource?: DiagramLayoutSource;
 	relationshipIds: DiagramRelationshipIds;
 	paths: DiagramPartPaths;
 	/** Relationship id (in the host part) of the cached drawing, when one was found. */
 	drawingRelId?: string;
+	drawingOwnerPart?: string;
 	data?: DiagramDataModel;
 	layout?: DiagramLayoutSummary;
 	colors?: DiagramColorsDefinition;
@@ -86,6 +99,7 @@ export async function loadDiagram(
 		else paths[name] = host.resolvePath(hostPart, target);
 	}
 
+	const layoutSource: DiagramLayoutSource = {};
 	const read = async <T>(
 		name: keyof DiagramPartPaths,
 		parse: (xml: string, part: string) => T,
@@ -102,6 +116,10 @@ export async function loadDiagram(
 				});
 				return undefined;
 			}
+			if (name === 'layout') layoutSource.layoutXml = xml;
+			if (name === 'data') layoutSource.dataXml = xml;
+			if (name === 'colors') layoutSource.colorsXml = xml;
+			if (name === 'quickStyle') layoutSource.quickStyleXml = xml;
 			return parse(xml, part);
 		} catch (error) {
 			issues.push({
@@ -119,7 +137,7 @@ export async function loadDiagram(
 	const colors = await read('colors', (xml) => parseDiagramColors(xml));
 	const quickStyle = await read('quickStyle', (xml) => parseDiagramQuickStyle(xml));
 
-	let drawingResolution: { relId: string; path: string } | undefined;
+	let drawingResolution: { relId: string; path: string; ownerPart?: string } | undefined;
 	try {
 		drawingResolution = await resolveDiagramDrawingPart(
 			hostPart,
@@ -134,10 +152,45 @@ export async function loadDiagram(
 		});
 	}
 	let drawing: DiagramDrawing | undefined;
+	let generatedCache = false;
 	if (drawingResolution) {
 		paths.drawing = drawingResolution.path;
-		drawing = await read('drawing', (xml, part) => parseDiagramDrawing(xml, part));
-		if (drawing) issues.push(...drawing.issues);
+		drawing = await read('drawing', (xml, part) => {
+			generatedCache = Boolean(
+				data?.generatedCacheDigest && data.generatedCacheDigest === generatedDrawingDigest(xml),
+			);
+			return parseDiagramDrawing(xml, part);
+		});
+		if (drawing) {
+			try {
+				const entries = await host.readRelationshipEntries(
+					diagramRelationshipsPart(drawingResolution.path),
+				);
+				const pictures = (entries ?? []).filter(
+					(entry) =>
+						entry.type.endsWith('/image') &&
+						entry.mode !== 'External' &&
+						!/^[a-z][a-z0-9+.-]*:/i.test(entry.target),
+				);
+				if (pictures.length)
+					drawing.pictureParts = Object.fromEntries(
+						pictures.map((entry) => [
+							entry.id,
+							host.resolvePath(drawingResolution.path, entry.target),
+						]),
+					);
+			} catch {
+				issues.push({
+					code: 'DIAGRAM_PICTURE_RELATIONSHIPS_UNREADABLE',
+					message: 'Picture relationships in the cached drawing could not be read.',
+				});
+			}
+			issues.push(...drawing.issues);
+			const scene = layoutSource.quickStyleXml
+				? diagramQuickStyle3d(layoutSource.quickStyleXml).scene
+				: undefined;
+			if (scene) drawing.scene3d = scene;
+		}
 	} else if (data)
 		issues.push({
 			code: 'DIAGRAM_DRAWING_ABSENT',
@@ -145,10 +198,41 @@ export async function loadDiagram(
 				'The package has no cached drawing for this diagram; its layout can only be recomputed from the layout definition.',
 		});
 
+	if (data && layoutSource.dataXml) {
+		let pictureParts: Record<string, string> = {};
+		if (paths.data) {
+			const owner = paths.data;
+			try {
+				const entries = await host.readRelationshipEntries(diagramRelationshipsPart(owner));
+				pictureParts = Object.fromEntries(
+					(entries ?? [])
+						.filter(
+							(entry) =>
+								entry.type.endsWith('/image') &&
+								entry.mode !== 'External' &&
+								!/^[a-z][a-z0-9+.-]*:/i.test(entry.target),
+						)
+						.map((entry) => [entry.id, host.resolvePath(owner, entry.target)]),
+				);
+			} catch {
+				issues.push({
+					code: 'DIAGRAM_PICTURE_RELATIONSHIPS_UNREADABLE',
+					message: 'Picture relationships in the diagram data could not be read.',
+				});
+			}
+		}
+		Object.assign(
+			layoutSource,
+			captureDiagramPictures(data, layoutSource.dataXml, pictureParts, drawing),
+		);
+	}
 	return {
+		layoutSource,
+		...(generatedCache ? { generatedCache: true as const } : {}),
 		relationshipIds,
 		paths,
 		...(drawingResolution ? { drawingRelId: drawingResolution.relId } : {}),
+		...(drawingResolution?.ownerPart ? { drawingOwnerPart: drawingResolution.ownerPart } : {}),
 		...(data ? { data } : {}),
 		...(layout ? { layout } : {}),
 		...(colors ? { colors } : {}),

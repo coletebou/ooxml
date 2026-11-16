@@ -93,10 +93,8 @@ describe('fillStrokeSection', () => {
 		expect(stroke?.value).toBe('#0000ff');
 	});
 
-	it('sets the fill colour and forces fillMode back to solid, undoably', () => {
-		const editor = makeEditor(
-			shapeEl({ shapeStyle: { fillMode: 'gradient', fillColor: '#ff0000' } }),
-		);
+	it('sets the solid fill colour, undoably', () => {
+		const editor = makeEditor(shapeEl({ shapeStyle: { fillColor: '#ff0000' } }));
 		const { target } = mountSection(editor, currentEl(editor));
 		const [fill] = colorInputs(target);
 		if (!fill) {
@@ -139,7 +137,9 @@ describe('fillStrokeSection', () => {
 
 		const row = target.querySelector('[data-testid="pptx-color-recent"]');
 		expect(row).not.toBeNull();
-		const swatch = row!.querySelector<HTMLButtonElement>('.pptx-svelte-recent-colors-swatch');
+		const swatch = row!.shadowRoot?.querySelector<HTMLButtonElement>(
+			'button[data-source="recent"]',
+		);
 		swatch?.click();
 		flushSync();
 
@@ -186,7 +186,7 @@ describe('fillStrokeSection', () => {
 		if (!fillOpacity || !strokeOpacity) {
 			throw new Error('opacity sliders not found');
 		}
-		fillOpacity.value = '0.4';
+		fillOpacity.value = '40';
 		fillOpacity.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		// Re-sync the `el` prop with the just-committed slides so the second
@@ -194,7 +194,8 @@ describe('fillStrokeSection', () => {
 		// how the live `editor.selectedElement` derivation refreshes it in the
 		// real InspectorPanel tree.
 		setProps({ el: currentEl(editor) });
-		strokeOpacity.value = '0.7';
+		// The stroke slider is the shared Line descriptor's 0-100 transparency.
+		strokeOpacity.value = '70';
 		strokeOpacity.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 
@@ -205,37 +206,53 @@ describe('fillStrokeSection', () => {
 		expect(el.shapeStyle?.strokeOpacity).toBe(0.7);
 	});
 
-	it('shows the gradient sub-panel only while the gradient toggle is on', () => {
+	it('draws the shared Line options and writes a dash choice', () => {
+		const editor = makeEditor(shapeEl());
+		const { target } = mountSection(editor, currentEl(editor));
+		const dash = target.querySelector<HTMLSelectElement>('[data-testid="line-dash"]');
+		expect(target.querySelector('[data-testid="line-width"]')).not.toBeNull();
+		expect(target.querySelector('[data-testid="line-cap"]')).not.toBeNull();
+		if (!dash) {
+			throw new Error('dash picker not found');
+		}
+		dash.value = 'dash';
+		dash.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+
+		const el = currentEl(editor) as { shapeStyle?: { strokeDash?: string } };
+		expect(el.shapeStyle?.strokeDash).toBe('dash');
+	});
+
+	function chooseMode(target: HTMLElement, mode: string): void {
+		const select = target.querySelector<HTMLSelectElement>('[data-testid="fill-mode"]');
+		if (!select) {
+			throw new Error('fill kind select not found');
+		}
+		select.value = mode;
+		select.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+	}
+
+	it('shows the gradient stops only for a gradient fill', () => {
 		const editor = makeEditor(shapeEl());
 		const { target, setProps } = mountSection(editor, currentEl(editor));
 		expect(target.querySelector('.pptx-svelte-gradient')).toBeNull();
 
-		const toggle = target.querySelector<HTMLInputElement>(
-			'.pptx-svelte-field-checkbox pptx-ui-checkbox',
-		);
-		toggle?.click();
-		flushSync();
+		chooseMode(target, 'gradient');
 		setProps({ el: currentEl(editor) });
 
 		const el = currentEl(editor) as { shapeStyle?: { fillMode?: string } };
 		expect(el.shapeStyle?.fillMode).toBe('gradient');
-		expect(target.querySelector('.pptx-svelte-gradient')).not.toBeNull();
+		expect(target.querySelectorAll('[data-testid="fill-gradient-stop"]')).toHaveLength(2);
+		expect(target.querySelector('[data-testid="fill-gradient-angle"]')).not.toBeNull();
 	});
 
-	it('shows the pattern sub-panel only while the pattern toggle is on, defaulting a preset', () => {
+	it('shows the pattern swatches only for a pattern fill, defaulting a preset', () => {
 		const editor = makeEditor(shapeEl());
 		const { target, setProps } = mountSection(editor, currentEl(editor));
 		expect(target.querySelector('.pptx-svelte-pattern')).toBeNull();
 
-		const checkboxes = target.querySelectorAll<HTMLInputElement>(
-			'.pptx-svelte-field-checkbox pptx-ui-checkbox',
-		);
-		const patternToggle = checkboxes[1];
-		if (!patternToggle) {
-			throw new Error('pattern toggle not found');
-		}
-		patternToggle.click();
-		flushSync();
+		chooseMode(target, 'pattern');
 		setProps({ el: currentEl(editor) });
 
 		const el = currentEl(editor) as {
@@ -243,33 +260,41 @@ describe('fillStrokeSection', () => {
 		};
 		expect(el.shapeStyle?.fillMode).toBe('pattern');
 		expect(el.shapeStyle?.fillPatternPreset).toBe('pct20');
-		expect(target.querySelector('.pptx-svelte-pattern')).not.toBeNull();
 		// 56 preset swatches from the shared PATTERN_PRESET_OPTIONS catalogue.
-		expect(target.querySelectorAll('.pptx-svelte-pattern-swatch')).toHaveLength(56);
+		expect(target.querySelectorAll('[data-testid="fill-pattern-swatch"]')).toHaveLength(56);
+		target.querySelectorAll<HTMLButtonElement>('[data-testid="fill-pattern-swatch"]')[3]!.click();
+		flushSync();
+		expect(
+			(currentEl(editor) as { shapeStyle?: { fillPatternPreset?: string } }).shapeStyle
+				?.fillPatternPreset,
+		).toBe('pct25');
 	});
 
-	it('turns pattern fill back to solid when the toggle is switched off', () => {
+	it('turns a pattern fill back to solid through the fill kind', () => {
 		const editor = makeEditor(
 			shapeEl({
 				shapeStyle: { fillMode: 'pattern', fillColor: '#ff0000', fillPatternPreset: 'cross' },
 			}),
 		);
 		const { target, setProps } = mountSection(editor, currentEl(editor));
-		const checkboxes = target.querySelectorAll<HTMLInputElement>(
-			'.pptx-svelte-field-checkbox pptx-ui-checkbox',
-		);
-		const patternToggle = checkboxes[1];
-		if (!patternToggle) {
-			throw new Error('pattern toggle not found');
-		}
-		expect(patternToggle.checked).toBeTruthy();
+		expect(target.querySelector('.pptx-svelte-pattern')).not.toBeNull();
 
-		patternToggle.click();
-		flushSync();
+		chooseMode(target, 'solid');
 		setProps({ el: currentEl(editor) });
 
 		const el = currentEl(editor) as { shapeStyle?: { fillMode?: string } };
 		expect(el.shapeStyle?.fillMode).toBe('solid');
 		expect(target.querySelector('.pptx-svelte-pattern')).toBeNull();
+	});
+
+	it('shows the picture source for a picture fill', () => {
+		const editor = makeEditor(
+			shapeEl({ shapeStyle: { fillMode: 'image', fillImageUrl: 'data:x' } }),
+		);
+		const { target } = mountSection(editor, currentEl(editor));
+		expect(target.querySelector<HTMLInputElement>('[data-testid="fill-image-url"]')!.value).toBe(
+			'data:x',
+		);
+		expect(target.querySelector('[data-testid="fill-image-mode"]')).not.toBeNull();
 	});
 });

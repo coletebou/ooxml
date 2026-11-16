@@ -7,6 +7,8 @@
  */
 export * from './viewer';
 export * from './theme';
+// Building blocks: the canvas, toolbar and slides pane a host composes into its own shell.
+export * from './building-blocks';
 export { cn, type ClassValue } from './utils';
 export { keyToLabel, translationsEn, LOCALE_CATALOG } from 'ooxml-ui/pptx/i18n';
 export type { TranslationKey, LocaleCatalogEntry } from 'ooxml-ui/pptx/i18n';
@@ -25,6 +27,8 @@ export type {
 	ProposalView,
 	StagedProposal,
 } from 'ooxml-ui/pptx/ai';
+// `createAiAssistant` is exported from `pptx-angular-viewer/ai`.
+export type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 
 // ── Internal building blocks. Not covered by semver; prefer the stable root exports. ──
 // Every internal service, component, and helper that composes
@@ -56,6 +60,7 @@ export {
 } from 'ooxml-ui/pptx';
 export type { SavedPresentationFormat } from 'ooxml-ui/pptx';
 export type { ViewportFitOptions, ViewportFitPadding } from 'ooxml-ui/pptx';
+export type { ListConversionScope } from 'ooxml-ui/pptx';
 export { createImageElementFromFile } from 'ooxml-ui/pptx';
 
 // ── UI customisation (the `customization` input + imperative helpers) ──

@@ -264,6 +264,17 @@ describe('cellTdStyle', () => {
 		const cell: PptxTableCell = { text: '42', style: { marginRight: 6, borderRightWidth: 2 } };
 		expect(cellTdStyle(cell)['padding-right']).toBe('5px');
 	});
+
+	it('takes half of the border width out of the default cell margins too', () => {
+		const el = tableElement(
+			[{ cells: [{ text: '42', style: { borderTopWidth: 2, borderLeftWidth: 2 } }] }],
+			[1],
+		);
+		const style = buildTableViewModel(el)[0].cells[0].tdStyle;
+		expect(style['padding-top']).toBe('3.8px');
+		expect(style['padding-left']).toBe('8.6px');
+		expect(style['padding-bottom']).toBe('4.8px');
+	});
 });
 
 // ==========================================================================

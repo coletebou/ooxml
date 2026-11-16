@@ -1,9 +1,11 @@
 import type { TableCommand } from './table-commands';
 import type { MultilingualAction } from './multilingual-ribbon';
 import type { ReviewDisplayMode } from './review-display';
+import type { DiagramFormatChange } from 'ooxml-core/diagram';
 
 /** Every command the ribbon can raise, dispatched as a `ribbon-action` event. */
 export type RibbonAction =
+	| { type: 'smartArtFormat'; change: DiagramFormatChange }
 	| { type: 'help' }
 	| {
 			type: 'format';
@@ -128,24 +130,49 @@ export type RibbonAction =
 	| { type: 'reviewDisplay'; value: ReviewDisplayMode }
 	| { type: 'comments'; key: 'toggle' | 'add' | 'delete' | 'previous' | 'next' }
 	| { type: 'insertPicture' }
+	/** Bullets > Picture bullet...: choose an image file and start a list that draws it. */
+	| { type: 'pictureBullet' }
 	| { type: 'shapePicker' }
+	| { type: 'insertSmartArt' }
+	| {
+			type: 'smartArt';
+			key:
+				| 'addAfter'
+				| 'addBefore'
+				| 'addAbove'
+				| 'addBelow'
+				| 'promote'
+				| 'demote'
+				| 'moveUp'
+				| 'moveDown'
+				| 'textPane'
+				| 'changeLayout';
+	  }
 	| { type: 'drawShape'; preset: string }
 	| {
 			type: 'shape';
 			key: 'fill' | 'outline' | 'weight' | 'width' | 'height' | 'wrap';
 			value: string | number;
 	  }
+	| { type: 'chart'; key: 'legend'; value: string }
+	/** Format Selection: the docked chart Format pane, on `target` (`chartArea` by default). */
+	| { type: 'chart'; key: 'format'; target?: string }
 	| { type: 'insertEquation'; id: 'area' | 'quadratic' | 'pythagorean' | 'binomial' }
 	| {
 			type: 'insertContentControl';
 			value: 'richText' | 'text' | 'checkbox' | 'dropDownList' | 'comboBox' | 'date';
 	  }
 	| { type: 'formatPicture' }
+	/** Picture Format: Wrap Text (a `DrawingWrap`) or Crop (the Format Picture crop fields). */
+	| { type: 'picture'; key: 'wrap'; value: string }
+	| { type: 'picture'; key: 'crop' }
 	| { type: 'link' }
 	| { type: 'characterStyle'; value: string }
 	| { type: 'showHidden' }
 	| { type: 'thumbnails' }
 	| { type: 'insertNote'; kind: 'footnote' | 'endnote' }
+	/** Convert Notes, or Convert to Endnote/Footnote on one note. */
+	| { type: 'convertNotes'; selection: import('ooxml-core/docx').NoteSelection }
 	| {
 			type: 'toc';
 			key: 'insert' | 'update' | 'remove' | 'fields' | 'figures' | 'updateFigures';

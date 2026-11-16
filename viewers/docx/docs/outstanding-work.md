@@ -4,7 +4,8 @@ Status reviewed on 2026-10-03. Reviewed 2026-10-15 for footnote continuation, ne
 Update Fields, chart painting and editable Print Layout pages. This page is the per-feature detail: what each area supports and where its limits are
 (the original six workstreams below are historical foundations). The live list of next
 priorities, the baseline and the evidence required for Word equivalence is kept only in the
-[parity roadmap](/parity-roadmap). No full Word parity is claimed; model
+[parity roadmap](/parity-roadmap), and the cross-product gap list in the
+[Office parity checklist](https://github.com/ChristopherVR/ooxml/blob/main/docs/parity-checklist.md). No full Word parity is claimed; model
 warnings identify unsupported imported content.
 
 ## Merged workstreams
@@ -12,7 +13,7 @@ warnings identify unsupported imported content.
 | Workstream                               | What landed                                                                                                                                                                                                                                                                                |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Numbering and lists                      | `numbering.xml` catalog, style-inherited `numPr`, computed labels (decimal, Roman, letter, ordinal, cardinal/ordinal text, bullet, legal, multilevel `lvlText`), list commands, Enter-on-empty exits a list, Tab/Shift+Tab levels, numbering part surgery on save.                         |
-| Sections, breaks, headers/footers, notes | `DocumentModel.sections`; editable page/column breaks and `pageBreakBefore` (Ctrl+Enter); headers/footers and footnotes/endnotes edited in place on the continuous surface (double-click; off in Viewing mode and during collaboration), read-only on Print Layout pages.                  |
+| Sections, breaks, headers/footers, notes | `DocumentModel.sections`; editable page/column breaks and `pageBreakBefore` (Ctrl+Enter); headers/footers and footnotes/endnotes edited in place on the continuous surface (double-click; off in Viewing mode and during collaboration), and edited in place on Print Layout pages too.    |
 | Pagination / Print Layout                | `ooxml-core/docx/layout` engine (line breaking, spacing, indents, widow/orphan, keep rules, table row splitting, columns) and an editable paginated Print Layout view (typing, selection and IME on the pages, with the limits under Fidelity) with printing, driven by the section model. |
 | Tracked changes and comments             | Revisions on runs and paragraph marks, markup display modes, accept/reject (one/all), next/previous, Track Changes mode, comments pane with replies and resolve, `comments.xml` writing.                                                                                                   |
 | Theme, character styles, tables          | Theme colors/fonts, character styles with toggle-property inheritance, extra run properties (caps, small caps, double strike, underline style/color, spacing, shading, hidden text), table grid/widths/merges/borders/shading/table styles.                                                |
@@ -23,6 +24,9 @@ warnings identify unsupported imported content.
 - Track Changes mode applied each edit twice; the tracked replacement now replaces the original step.
 - New hyperlink/image relationships could reuse an id declared only in `document.xml.rels` (for example the styles relationship).
 - Comment reference runs were parsed as text and duplicated on every save.
+- Comment plain text retains spaces, tabs, soft breaks and special hyphens, including through
+  core text edits and a native Word reopen/save. The pane displays that whitespace and supports
+  replies, but does not yet edit existing comment text or render/author rich comment bodies.
 - Editing text dropped character styles, caps and theme colors (and then stripped them on save); editing a simple table dropped its grid, borders and style.
 - Pictures had no image source in the editor; imported `javascript:` link targets were rendered as live `href`s.
 
@@ -56,9 +60,10 @@ date pickers, replaces a placeholder when typing and restores it when the text i
 deleted, and enforces `contentLocked` and `sdtLocked`. Insert > Content control adds
 rich text, plain text, check box, drop-down list, combo box and date picker controls
 and a properties dialog edits title, tag, locks, list entries and the date format.
-Row and cell controls are read and preserved but not drawn or edited. A data-bound
-control is edited in the document only: its custom XML part is not updated, so Word
-shows the bound value again on open. Repeating sections, picture, citation,
+Row and cell controls are read and preserved but not drawn or edited. Editing a data-bound
+control also writes its text to the bound custom XML part for simple absolute XPaths
+(child steps with indexes, a final attribute); an XPath outside those forms makes the save
+fail with a diagnostic. Repeating sections, picture, citation,
 bibliography and building-block controls are preserved without special editing, and a
 control whose content is deleted entirely through code (rather than Delete) is not
 re-created.
@@ -78,8 +83,9 @@ floating shape in front of text anchored to the paragraph under the pointer (a c
 gives Word's 1 by 0.67 inch box). The Shape Format tab sets fill, outline colour and
 weight, text, wrapping (in line, square, tight, through, top and bottom, behind and in front
 of text) and size; a corner handle resizes. Editing a shape rewrites its drawing from the
-model while keeping its identity, style and body properties, and drops a VML fallback
-(`mc:AlternateContent`), so Word 2007 would not show the edited shape. Moving a floating
+model while keeping its identity, style and body properties; a shape wrapped in
+`mc:AlternateContent` keeps the wrapper and its VML fallback, which follows a resize but
+not other edits, so Word 2007 may show a stale shape. Moving a floating
 shape by dragging, rotating, adjusting the yellow handles, gradient and picture fills, shape
 effects, grouping, aligning and text formatting inside a shape are not supported, and
 Print Layout selection and moving belong to the Print Layout editing work.
@@ -136,7 +142,7 @@ Still missing:
 - Pictures and links in headers, footers and notes are resolved, shown and saved with each part's own
   relationships; while a header, footer or note is being edited, the ribbon (formatting, Insert
   Picture, Link) targets it.
-- Tables: default cell margins (`tblCellMar`) and row properties (height with its rule, keep-together, repeat-as-header) are modeled and render in both views; Print Layout clips exact-height rows and repeats header rows. Table > Properties now edits these settings for rectangular tables, with mixed selected rows, validation and one-step undo. Row properties follow surviving rows during structural edits. Opened DOCX packages save changes to these fields while preserving unrelated table XML. Merged/nested/complex tables remain protected. Table > Properties also edits selected-cell
+- Tables: default cell margins (`tblCellMar`) and row properties (height with its rule, keep-together, repeat-as-header) are modeled and render in both views; Print Layout clips exact-height rows and repeats header rows. Table > Properties now edits these settings for rectangular tables, with mixed selected rows, validation and one-step undo. Row properties follow surviving rows during structural edits. Opened DOCX packages save changes to these fields while preserving unrelated table XML. Merged and nested tables take Insert/Delete row and column, Merge cells and Split cells (Word's results recorded in `src/core/docx/__fixtures__/word-table-structure.json`); edits Word turns into non-grid tables (column insert left of or through a merged cell, partial column delete through a merge) are refused. Tables with row offsets, tracked row/cell changes or inline markup in cells remain protected. Table > Properties also edits selected-cell
   margin overrides, with mixed values left blank and only changed sides applied. Use table
   defaults removes the selected cells’ direct overrides. Row settings, table defaults and
   cell overrides apply together as one undoable edit; imported widths, borders, shading
@@ -216,7 +222,8 @@ What each tab offers that Word also has:
   available width, targets the current section and supports undo), page-number format and start,
   different first page, odd and even, section breaks, Page Color (the colour picker; written as
   `w:background` with `displayBackgroundShape`, drawn on the editing surface and in Print Layout, not
-  printed, and undoable; theme and gradient page fills are not modeled), Indent Left/Right (inches) and paragraph
+  printed, and undoable; solid theme colours resolve without flattening their source references,
+  while gradient, pattern and picture page fills are not painted), Indent Left/Right (inches) and paragraph
   Before/After spacing.
 - **References:** Table of Contents (levels 1-3, 1-2 or 1-5, or Remove), Add Text (heading levels
   1-3), Update Table, Insert Caption (a `SEQ` field; every caption of a label is renumbered when
@@ -392,7 +399,7 @@ second heading's numbering when that redundant style level is omitted; the viewe
 OOXML association rule for those imports. Each level has a Link level to style
 select (a style belongs to one level). Applying the list writes `w:numPr` into those existing
 paragraph styles in `styles.xml` (schema-ordered, the rest of the style XML untouched) and a
-`w:pStyle` on the new level; any other style-catalog edit is still refused on save. The style link
+`w:pStyle` on the new level; changed paragraph formatting of existing styles (alignment, direction, spacing, indents, pagination, borders, shading) is written into their `w:pPr` with unknown children kept; any other style-catalog edit (names, inheritance, outline level, new styles) is still refused on save. The style link
 is not part of editor history: Undo removes the list from the selection, but styles stay linked to
 the (retained) definition. Creating new styles from the dialog is not supported.
 
@@ -403,17 +410,23 @@ Still not at parity:
   its apply-to/list-style options. (Add tab stop at: a level's `w:tab w:val="num"` is read, written and
   honoured by the marker's tab suffix in the editor and Print Layout.) Text Highlight keeps the 17-colour list (Word's is a short
   list too). Line Spacing offers presets; the Paragraph dialog has the rest.
-- **Insert:** Cover Page galleries (one plain design exists), Icons, 3D Models, inserting or editing SmartArt (existing SmartArt is shown read-only from its saved drawing, not recomputed),
-  inserting or editing Charts (existing charts are drawn read-only from the values cached in the part for bar, column, line,
-  area, pie, doughnut, scatter and radar charts, bar/line combinations, waterfalls and histograms; bubble, stock, surface and other chartex charts show a labelled frame naming the
-  family, and floating charts are not placed in Print Layout), Screenshot, floating or formatted Text Boxes, WordArt, equation styles and the Equation Tools tab,
-  Signature Line, Object.
+- **Insert:** Cover Page galleries (one plain design exists), Icons, 3D Models, SmartArt pictures,
+  dedicated per-shape formatting and SmartArt in headers/footers/notes. Body SmartArt already has
+  node/text/layout editing, shared Styles/Change Colors, interpreted previews and admitted generated
+  2D caches. Wider native styles, complex text/3D and pixel fidelity remain limited. Classic charts
+  and admitted ChartEx charts already support shared editing, history and save/reopen; the Format
+  pane includes supported effects, shape 3D, text, pattern, analysis, markers and axis titles.
+  Remaining chart work includes host picture media allocation, richer source selection, wider
+  combo/family admission, native style-part authoring and exact native typography/layout. Surface
+  and unsupported families retain labelled frames; floating charts are not placed in Print Layout.
+  Screenshot, floating/formatted Text Boxes, WordArt, equation styles and Equation Tools,
+  Signature Line and Object remain incomplete. The shared capability update is dated 2026-10-26.
 - **Layout and References:** Manual Hyphenation and its options, Position
   and Wrap Text, Citations, Bibliography, Index and Table of Authorities, and
   automatic updating of `REF`, `PAGEREF` and `SEQ` results (Update Fields refreshes them on request; inserting a caption
   also renumbers the label's captions and refreshes `REF` results that quote a caption, in the same undo step; `PAGEREF`, table of contents and
   other results change only through Update Fields).
-- **Review and View:** Editor pane, Thesaurus, Translate, Accessibility, Compare, Protect, Ink;
+- **Review and View:** Editor pane, Thesaurus, Translate, Accessibility, Compare (the core `compareDocuments` exists, with no UI), Protect, Ink;
   Read Mode, Web and Outline views, New Window,
   Split and Macros.
 - **Dropdown galleries:** Margins, Size, Orientation, Vertical alignment, Columns, Page Number, Borders and Line
@@ -489,7 +502,7 @@ Still not at parity:
   Word as edited. The editing surface and Print Layout apply the same spacing and line heights.
 - Print Layout tables use the document's grid widths, cell margins, borders (table style, table
   and cell), shading, vertical alignment and table indent or alignment. Vertically merged cells are
-  drawn as one cell, but their text stays in the merge's first row.
+  drawn as one cell; centre- and bottom-aligned text aligns across the whole merge when it sits on one page (a merge broken by a page boundary aligns within its first row).
 
 ### Engineering follow-ups
 

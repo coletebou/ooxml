@@ -1,10 +1,13 @@
 import {
 	EMPTY_RESOLVED_CUSTOMIZATION,
 	attachViewerHyperlinks,
+	attachViewportNavigation,
 	INSPECTOR_PANEL_DEFAULT_WIDTH,
 	isEditingAllowed,
 	isFeatureEnabled,
+	measureViewportClientSize,
 	readRibbonTransitionDraft,
+	resetViewportScroll,
 	resolveViewerRootOptions,
 	safeOpenUrl,
 	toggleBlackboard,
@@ -47,8 +50,10 @@ import {
 	createPresentationController,
 	mountPresentationContextMenu,
 } from './ui';
+import { formatPaneFor } from './ui/inspector/format-pane';
 import type { RegionSet, RegionSupport } from './ui/region-set';
 import { createRegionSet } from './ui/region-set';
+import type { BackstageCloudFiles } from './ui/ribbon/ribbon-types';
 
 /** The mutable pieces `PptxViewer` owns for one chrome mount lifecycle. */
 export interface ChromeLifecycle {
@@ -56,9 +61,17 @@ export interface ChromeLifecycle {
 	presentation: PresentationController;
 	detachKeyboard: () => void;
 	detachTouchGestures: () => void;
+	/**
+	 * Remove Ctrl+wheel / pinch zoom at the pointer and drag-to-pan from the
+	 * viewport, and stop scrolling it to the top-left when another slide shows.
+	 */
+	detachViewportNavigation: () => void;
 	/** Remove the presenting click-to-advance listener. */
 	detachPresentationClick: () => void;
+	/** Refits the slide when the viewport's content box changes size. */
 	resizeObserver: ResizeObserver | null;
+	/** Stop refitting the slide on viewport client-size changes (both observers). */
+	stopObservingViewport: () => void;
 	appliedThemeVars: string[];
 }
 
@@ -76,6 +89,11 @@ export interface MountChromeDeps extends ChromeCallbackDeps {
 	 * tests) working without this field.
 	 */
 	initialTheme?: ViewerTheme;
+	/**
+	 * The open document's name for the title bar: a file opened from a cloud place brings its own.
+	 * Omitted (direct construction in tests) falls back to the `fileName` option.
+	 */
+	getFileName?(): string | undefined;
 	/**
 	 * The title-bar AutoSave switch state: the user's preference inside the
 	 * host's `autosave` ceiling. Omitted (direct construction in tests) falls
@@ -147,7 +165,7 @@ export interface MountChromeDeps extends ChromeCallbackDeps {
 	 * unconditionally, matching the pre-existing behavior for a binding that
 	 * has not wired the gate.
 	 */
-	confirmExternalHyperlink?(url: string): boolean;
+	confirmExternalHyperlink?(url: string): boolean | Promise<boolean>;
 	/** What the region hosts need from the viewer (omitted: no region is replaced). */
 	getRegionSupport?(): RegionSupport;
 	/** The chrome's region set, kept across rebuilds (default: one per mount). */
@@ -200,7 +218,7 @@ export function mountChrome(deps: MountChromeDeps): ChromeLifecycle {
 		editable: (options.editable ?? false) && !options.readOnly && isEditingAllowed(customization()),
 		hiddenActions: options.hiddenActions,
 		titleBar: {
-			fileName: options.fileName,
+			fileName: deps.getFileName ? deps.getFileName() : options.fileName,
 			// The host option is a policy CEILING, not the preference: it only
 			// forces the switch off (and inert) when it is explicitly `false`.
 			autosaveEnabled: deps.isAutosaveSwitchOn?.() ?? options.autosave !== false,
@@ -259,7 +277,11 @@ export function mountChrome(deps: MountChromeDeps): ChromeLifecycle {
 			deleteSlides: (indexes) => deps.deleteSlides(indexes),
 			toggleHideSlides: (indexes) => deps.toggleHideSlides(indexes),
 		},
-		...buildChromeCallbacks({ ...deps, getRegionSet: () => regions }),
+		...buildChromeCallbacks({
+			...deps,
+			getRegionSet: () => regions,
+			formatPane: formatPaneFor(store),
+		}),
 	});
 	// Hosts parked by the previous chrome and not adopted by this one are done.
 	regions.sweep();
@@ -323,13 +345,55 @@ export function mountChrome(deps: MountChromeDeps): ChromeLifecycle {
 		startFromCurrent: () => deps.startPresentationFromCurrent(),
 		isSlideShowStartEnabled: () => isFeatureEnabled(customization(), 'presentMode'),
 	});
+	// Ctrl+wheel and pinch zoom at the pointer, and drag to pan, shared with the
+	// other bindings. The controller works in the fit-relative factor (as the
+	// zoom buttons do), and the store holds an absolute scale, so convert here;
+	// `setZoom` divides the same fit back out. A plain drag pans only in a
+	// read-only view (`getMode()` 'preview'), where it has nothing to select.
+	const fitRelativeZoom = (): number => {
+		const { zoom } = store.get();
+		const fit = renderer.fitScale();
+		if (zoom === 'fit') {
+			return 1;
+		}
+		return fit > Number.EPSILON ? zoom / fit : zoom;
+	};
+	const detachNavigationController = attachViewportNavigation(chrome.viewport, {
+		getZoom: fitRelativeZoom,
+		setZoom: (zoom) => deps.setZoom(zoom * renderer.fitScale()),
+		dragPans: () => {
+			const state = store.get();
+			return !state.editable && !state.presenting && !state.masterViewTarget;
+		},
+		isActive: () => !store.get().presenting,
+	});
+	// The zoom is kept across slides; the scroll position belongs to the slide it
+	// was chosen on (shared policy). Keyed on the slide shown, not the index, which
+	// many places write (paging, Find, inserting or deleting a slide, collaboration).
+	const detachSlideScroll = store.subscribe((state, previous) => {
+		if (state.slides[state.currentSlide]?.id !== previous.slides[previous.currentSlide]?.id) {
+			resetViewportScroll(chrome.viewport);
+		}
+	});
+	const detachViewportNavigation = (): void => {
+		detachNavigationController();
+		detachSlideScroll();
+	};
 	const detachTouchGestures = attachTouchGestures(chrome.root, {
-		getScale: () => renderer.effectiveScale(),
+		// Fit-relative, like the controller above, so the pinch clamps to the
+		// shared bounds the buttons and `setZoom` use.
+		getScale: fitRelativeZoom,
 		// Routed through the controls, not written to the store directly: the
 		// zoom model (and its bounds) lives in the shared zoom store now, and a
 		// raw store write would bypass it - which is how the pinch gesture ended
 		// up as the one zoom entry point with no clamping at all.
-		onPinchZoom: (zoom) => deps.setZoom(zoom),
+		// Inert during a show, as in the other bindings: the show always fits the
+		// screen, so a pinch there would only change the editing zoom unseen.
+		onPinchZoom: (zoom) => {
+			if (!store.get().presenting) {
+				deps.setZoom(zoom * renderer.fitScale());
+			}
+		},
 		isSwipeEnabled: () => {
 			const state = store.get();
 			return state.presenting || !state.editable;
@@ -478,8 +542,15 @@ export function mountChrome(deps: MountChromeDeps): ChromeLifecycle {
 			return;
 		}
 		event.preventDefault();
-		if (deps.confirmExternalHyperlink?.(href) ?? true) {
+		const answer = deps.confirmExternalHyperlink?.(href) ?? true;
+		if (answer === true) {
 			safeOpenUrl(href);
+		} else if (answer !== false) {
+			void answer.then((confirmed) => {
+				if (confirmed) {
+					safeOpenUrl(href);
+				}
+			});
 		}
 	};
 	chrome.root.addEventListener('click', onHyperlinkClick);
@@ -577,23 +648,43 @@ export function mountChrome(deps: MountChromeDeps): ChromeLifecycle {
 	});
 	presentationRef.current = presentation;
 
+	// Every client-size change, padding-only ones included: the content box misses a padding
+	// change, so the border box is observed too, and a size both report re-renders once. The
+	// stage renders on its own after mount, so only later changes re-render it.
+	let lastSize = measureViewportClientSize(chrome.viewport);
+	const refit = () => {
+		const size = measureViewportClientSize(chrome.viewport);
+		if (size.width === lastSize.width && size.height === lastSize.height) {
+			return;
+		}
+		lastSize = size;
+		renderer.invalidateViewportSize();
+		if (store.get().zoom === 'fit') {
+			renderer.renderStage();
+		}
+	};
 	let resizeObserver: ResizeObserver | null = null;
+	let borderBoxObserver: ResizeObserver | null = null;
 	if (typeof ResizeObserver !== 'undefined') {
-		resizeObserver = new ResizeObserver(() => {
-			if (store.get().zoom === 'fit') {
-				renderer.renderStage();
-			}
-		});
+		resizeObserver = new ResizeObserver(refit);
 		resizeObserver.observe(chrome.viewport);
+		borderBoxObserver = new ResizeObserver(refit);
+		borderBoxObserver.observe(chrome.viewport, { box: 'border-box' });
 	}
+	const stopObservingViewport = () => {
+		resizeObserver?.disconnect();
+		borderBoxObserver?.disconnect();
+	};
 
 	return {
 		chrome,
 		presentation,
 		detachKeyboard,
 		detachTouchGestures,
+		detachViewportNavigation,
 		detachPresentationClick,
 		resizeObserver,
+		stopObservingViewport,
 		appliedThemeVars,
 	};
 }
@@ -608,7 +699,8 @@ export function unmountChrome(
 	lifecycle.detachKeyboard();
 	lifecycle.detachPresentationClick();
 	lifecycle.detachTouchGestures();
-	lifecycle.resizeObserver?.disconnect();
+	lifecycle.detachViewportNavigation();
+	lifecycle.stopObservingViewport();
 	lifecycle.presentation.dispose();
 	// The ribbon registered window/document listeners (group overflow): without this a destroyed
 	// viewer stays reachable from them, pinning the whole ribbon for the life of the page.
@@ -686,7 +778,7 @@ export interface ChromeHost {
 	/** One run-program notice's own dismiss button. */
 	dismissRunProgramNotice(id: string): void;
 	/** Trust Center > "Confirm before opening external hyperlinks" gate + prompt. */
-	confirmExternalHyperlink(url: string): boolean;
+	confirmExternalHyperlink(url: string): boolean | Promise<boolean>;
 	toggleAutosave(): boolean;
 	/** The AutoSave switch's state (the user preference within the host ceiling). */
 	isAutosaveSwitchOn(): boolean;
@@ -777,10 +869,13 @@ export interface ChromeHost {
 	getThemeColorMap(): Record<string, string> | undefined;
 	toggleTemplateEditing(): void;
 	toggleMasterNavigation(): void;
+	/** Ribbon Display Options state; it survives a chrome rebuild. */
+	readonly ribbonDisplay: import('ooxml-ui/pptx').RibbonDisplayController;
 	selectElements(ids: string[]): void;
 	exportSlidePng(): Promise<void>;
 	copySlideAsImage(): Promise<void>;
-	exportPdf(): Promise<void>;
+	/** File > Export > PDF from the UI: the PDF options step, then the export. */
+	exportPdfFromUi(): Promise<void>;
 	exportGif(): Promise<void>;
 	exportVideo(): Promise<void>;
 	exportJson(): void;
@@ -789,6 +884,10 @@ export interface ChromeHost {
 	openFile(): void;
 	openRecentFile(key: string): void;
 	createPresentation(templateId: string): void;
+	/** The host's `fileProviders` as File > Open places. */
+	getCloudFiles?(): BackstageCloudFiles;
+	/** The open document's name (a cloud file's, or the `fileName` option). */
+	getFileName?(): string | undefined;
 	setTheme(theme: ViewerTheme | undefined): void;
 	applyPresentationTheme(presetId: string): void;
 }
@@ -870,6 +969,7 @@ export function buildMountChromeDeps(host: ChromeHost): MountChromeDeps {
 		toggleTemplateEditing: () => host.toggleTemplateEditing(),
 		toggleMasterNavigation: () => host.toggleMasterNavigation(),
 		toggleInspector: () => host.store.set({ inspectorOpen: !host.store.get().inspectorOpen }),
+		getRibbonDisplay: () => host.ribbonDisplay,
 		selectElement: (id) => host.selectElements([id]),
 		clearSelection: () => host.selectElements([]),
 		// Plain store reads: the ribbon builds (and first reads) before the editor
@@ -947,7 +1047,7 @@ export function buildMountChromeDeps(host: ChromeHost): MountChromeDeps {
 		commitNotes: (notes, notesSegments) => host.editor.commitNotes(notes, notesSegments),
 		exportSlidePng: () => host.exportSlidePng(),
 		copySlideAsImage: () => host.copySlideAsImage(),
-		exportPdf: () => host.exportPdf(),
+		exportPdf: () => host.exportPdfFromUi(),
 		exportGif: () => host.exportGif(),
 		exportVideo: () => host.exportVideo(),
 		exportJson: () => host.exportJson(),
@@ -955,6 +1055,8 @@ export function buildMountChromeDeps(host: ChromeHost): MountChromeDeps {
 		openFile: () => host.openFile(),
 		openRecentFile: (key) => host.openRecentFile(key),
 		createPresentation: (templateId) => host.createPresentation(templateId),
+		getCloudFiles: () => host.getCloudFiles?.(),
+		getFileName: () => (host.getFileName ? host.getFileName() : host.options.fileName),
 		getEditActions: () => host.editor.getEditActions(),
 		getFindReplaceActions: () => host.editor.getFindReplaceActions(),
 		applyPresentationTheme: (presetId) => host.applyPresentationTheme(presetId),

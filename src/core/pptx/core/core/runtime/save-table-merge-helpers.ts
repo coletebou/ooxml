@@ -5,11 +5,11 @@ import type { XmlObject } from '../../types';
  * Mirrors the relevant fields of `PptxTableCell`.
  */
 interface CellMergeInfo {
-	gridSpan?: number;
-	rowSpan?: number;
-	hMerge?: boolean;
-	vMerge?: boolean;
-	extraAttributes?: Record<string, string>;
+	gridSpan?: number | undefined;
+	rowSpan?: number | undefined;
+	hMerge?: boolean | undefined;
+	vMerge?: boolean | undefined;
+	extraAttributes?: Record<string, string> | undefined;
 }
 
 /**
@@ -100,16 +100,16 @@ export { DEFAULT_POWERPOINT_TABLE_STYLE_ID } from './table-style-defaults';
 export function serializeTablePropertyFlags(
 	tbl: XmlObject,
 	tableData: {
-		bandedRows?: boolean;
-		bandedColumns?: boolean;
-		firstRowHeader?: boolean;
-		lastRow?: boolean;
-		firstCol?: boolean;
-		lastCol?: boolean;
-		tableStyleId?: string;
-		bandRowCycle?: number;
-		bandColCycle?: number;
-		rtl?: boolean;
+		bandedRows?: boolean | undefined;
+		bandedColumns?: boolean | undefined;
+		firstRowHeader?: boolean | undefined;
+		lastRow?: boolean | undefined;
+		firstCol?: boolean | undefined;
+		lastCol?: boolean | undefined;
+		tableStyleId?: string | undefined;
+		bandRowCycle?: number | undefined;
+		bandColCycle?: number | undefined;
+		rtl?: boolean | undefined;
 	},
 ): void {
 	// An empty `<a:tblPr/>` (no attributes, no children: e.g. a "No Style,

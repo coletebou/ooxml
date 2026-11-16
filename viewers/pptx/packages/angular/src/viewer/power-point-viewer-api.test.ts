@@ -51,6 +51,9 @@ const API_MEMBERS = [
 	'setActiveSlideIndex',
 	'getSlideCount',
 	'isDirty',
+	'getSaveRevision',
+	'getSaveSnapshot',
+	'acknowledgeSave',
 	'getSlides',
 	'getSlide',
 	'getActiveSlide',
@@ -88,6 +91,12 @@ describe('powerPointViewerComponent API conformance', () => {
 		expect(fileIO).toMatch(
 			/canEdit: \(\) => this\.hasEditPermission\(\) \|\| this\.collab\.active\(\)/u,
 		);
+	});
+
+	it('delegates the save revision methods to the file IO service', () => {
+		expect(source).toContain('return this.fileIO.acknowledgeSave(revision);');
+		expect(source).toContain('return this.fileIO.getSaveSnapshot();');
+		expect(source).toContain('return this.fileIO.getSaveRevision();');
 	});
 
 	it('selects the collaborative live model even when the host disables editing', () => {

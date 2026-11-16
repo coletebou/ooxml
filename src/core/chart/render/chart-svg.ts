@@ -1,3 +1,6 @@
+import { chart3DApplies, chart3DSvg } from './chart-3d-svg';
+import { regionMapSvg } from './chart-svg-region-map';
+import { funnelSvg } from './chart-svg-funnel';
 import { cartesianSvg } from './chart-svg-plots';
 import { pieSvg, radarSvg } from './chart-svg-radial';
 import { sunburstSvg, treemapSvg } from './chart-svg-hierarchy';
@@ -26,7 +29,7 @@ export function renderChartSvg(
 	options: ChartSvgOptions = {},
 ): string {
 	const paint = chartGradientPaint(model, Math.max(1, width), Math.max(1, height));
-	model = paint.model;
+	model = { ...paint.model, frameSize: { width: Math.max(1, width), height: Math.max(1, height) } };
 	const w = Math.max(1, width);
 	const h = Math.max(1, height);
 	const out: string[] = [];
@@ -77,15 +80,23 @@ export function renderChartSvg(
 		out.push('</svg>');
 		return out.join('');
 	}
-	const legend = chartLegendSvg(model, area, { width: w, height: h }, options);
+	// Region maps own a continuous value legend rather than one categorical series key.
+	const legend =
+		model.type === 'regionMap'
+			? { plot: area, foreground: false, markup: '' }
+			: chartLegendSvg(model, area, { width: w, height: h }, options);
 	area = legend.plot;
 	if (!legend.foreground) out.push(legend.markup);
 	if (area.w > 4 && area.h > 4) {
-		if (model.type === 'pie' || model.type === 'doughnut') out.push(pieSvg(model, area));
+		if (chart3DApplies(model)) out.push(chart3DSvg(model, area));
+		else if (model.type === 'regionMap')
+			out.push(regionMapSvg(model, area, options.mapApproximationLabel));
+		else if (model.type === 'pie' || model.type === 'doughnut') out.push(pieSvg(model, area));
+		else if (model.type === 'funnel') out.push(funnelSvg(model, area));
 		else if (model.type === 'radar') out.push(radarSvg(model, area));
 		else if (model.type === 'treemap') out.push(treemapSvg(model, area));
 		else if (model.type === 'sunburst') out.push(sunburstSvg(model, area));
-		else out.push(cartesianSvg(model, area));
+		else out.push(cartesianSvg(model, area, { width: w, height: h }));
 	}
 	if (legend.foreground) out.push(legend.markup);
 	if (foregroundTitle) out.push(foregroundTitle);

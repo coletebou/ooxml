@@ -1,54 +1,18 @@
-import { OFFICE_COLOR_SWATCHES, officeColorSwatchLabel } from 'ooxml-ui/pptx';
-import type { PptxThemeColorRef } from 'pptx-viewer-core';
+import { OFFICE_COLOR_SWATCHES, officeColorSwatchLabel, shapeQuickStylePatch } from 'ooxml-ui/pptx';
+import type { ShapeFillAction, ShapeFillStopView } from 'ooxml-ui/pptx';
+import type { PptxElement, PptxThemeColorRef, ShapeStyle } from 'pptx-viewer-core';
+import { hasShapeProperties } from 'pptx-viewer-core';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { LuPipette } from 'react-icons/lu';
 
-import { normalizeHexColor, openNativeEyeDropper } from '../../utils';
-import { WebSelect } from '../WebControls';
-import { SEL, RNG, SWATCH, DIS, LBL, COL2 } from './FillStrokeHelpers';
-import type { GradientStop } from './FillStrokeHelpers';
+import { useTranslation } from '../../i18n/use-translation';
+import { openNativeEyeDropper } from '../../utils';
+import { SEL, RNG, SWATCH, DIS, LBL } from './FillStrokeHelpers';
+import { LiveColorInput } from './LiveColorInput';
 import { useRecentColors } from './RecentColorsContext';
 import { RecentColorsRow } from './RecentColorsRow';
 import { ThemeColorSwatchGrid } from './ThemeColorSwatchGrid';
-
-// ---------------------------------------------------------------------------
-// SelectRow
-// ---------------------------------------------------------------------------
-
-/** Render a simple <select> row. */
-export function SelectRow({
-	label,
-	value,
-	span2,
-	options,
-	onChange,
-}: {
-	label: string;
-	value: string;
-	span2?: boolean;
-	options: readonly { value: string; label: string; i18nKey?: string }[];
-	onChange: (v: string) => void;
-}): React.ReactElement {
-	const { t } = useTranslation();
-	return (
-		<label className={`flex flex-col gap-1 ${span2 ? COL2 : ''}`}>
-			<span className={LBL}>{label}</span>
-			<WebSelect
-				aria-label={label}
-				value={value}
-				onChange={(e) => onChange(e.target.value)}
-				className={SEL}
-			>
-				{options.map((o) => (
-					<option key={o.value} value={o.value}>
-						{o.i18nKey ? t(o.i18nKey) : o.label}
-					</option>
-				))}
-			</WebSelect>
-		</label>
-	);
-}
+import { useRecentColorCommit } from './useRecentColorCommit';
 
 // ---------------------------------------------------------------------------
 // ColorPickerRow
@@ -61,9 +25,10 @@ export function SelectRow({
  * not a prop: every caller used to have to thread its own `recentColors`
  * array down from the loaded deck, and one of the two calls (the fill
  * colour's own row) simply never did, so its row silently rendered nothing.
- * Every commit here (typed colour, theme swatch, standard swatch, recent
- * swatch, eyedropper) also pushes the resolved hex back into that same
- * shared list.
+ * Every commit here (native picker, theme swatch, standard swatch, recent
+ * swatch, eyedropper) also pushes the resolved hex back into that same shared
+ * list; a drag through the native picker shows every shade live but is one
+ * undo step and adds only the colour it settles on ({@link LiveColorInput}).
  *
  * Clicking a {@link ThemeColorSwatchGrid} swatch commits BOTH the resolved
  * hex and its `PptxThemeColorRef`, so the colour keeps following the theme
@@ -78,6 +43,7 @@ export function ColorPickerRow({
 	disabled,
 	prefix,
 	onChange,
+	styleChange,
 }: {
 	label: string;
 	value: string;
@@ -86,6 +52,12 @@ export function ColorPickerRow({
 	disabled?: boolean;
 	prefix: string;
 	onChange: (c: string, ref?: PptxThemeColorRef) => void;
+	/**
+	 * The shape-style change a native pick of `hex` makes (what `onChange` commits
+	 * for it), so a drag through the picker previews and is put back leaf by leaf
+	 * ({@link LiveColorInput}). Without it the native picker applies every shade.
+	 */
+	styleChange?: (hex: string, style: ShapeStyle) => Partial<ShapeStyle>;
 }): React.ReactElement {
 	const { t } = useTranslation();
 	const { pushColor } = useRecentColors();
@@ -104,11 +76,11 @@ export function ColorPickerRow({
 		<label className='flex flex-col gap-1'>
 			<span className={LBL}>{label}</span>
 			<div className='flex items-center gap-1'>
-				<input
-					type='color'
+				<LiveColorInput
 					value={value}
 					disabled={disabled}
-					onChange={(e) => commit(e.target.value)}
+					onApply={onChange}
+					patch={styleChange && ((el, hex) => shapeStyleChangePatch(el, hex, styleChange))}
 					className={`h-8 flex-1 ${SEL} px-1 ${DIS}`}
 				/>
 				<button
@@ -155,9 +127,20 @@ export function ColorPickerRow({
 					))}
 				</div>
 			</div>
-			<RecentColorsRow prefix={prefix} disabled={disabled} onCommit={commit} />
+			<RecentColorsRow disabled={disabled} onCommit={commit} />
 		</label>
 	);
+}
+
+/** The element patch a {@link ColorPickerRow} style change makes for `hex`. */
+function shapeStyleChangePatch(
+	el: PptxElement,
+	hex: string,
+	change: (hex: string, style: ShapeStyle) => Partial<ShapeStyle>,
+): Partial<PptxElement> | undefined {
+	return hasShapeProperties(el)
+		? shapeQuickStylePatch(el, change(hex, el.shapeStyle ?? {}))
+		: undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,56 +148,52 @@ export function ColorPickerRow({
 // ---------------------------------------------------------------------------
 
 /**
- * A single gradient stop row. The theme colour grid sits below the native
- * colour input, same "swatch commits hex + ref, native input clears it"
- * contract as {@link ColorPickerRow}: picking a theme swatch keeps this stop
- * following the deck's theme after a later theme change.
+ * One row of the Fill section's gradient stop list, drawn from the shared
+ * `ShapeFillStopView`; every control reports a shared `ShapeFillAction`. The
+ * theme colour grid sits below the native colour input, same "swatch commits
+ * hex + ref, native input clears it" contract as {@link ColorPickerRow}:
+ * picking a theme swatch keeps this stop following the deck's theme after a
+ * later theme change.
  */
 export function GradientStopRow({
 	stop,
-	index,
-	total,
-	onUpdate,
-	allStops,
+	onAction,
 }: {
-	stop: GradientStop;
-	index: number;
-	total: number;
-	onUpdate: (stops: GradientStop[]) => void;
-	allStops: GradientStop[];
+	stop: ShapeFillStopView;
+	onAction: (action: ShapeFillAction) => void;
 }): React.ReactElement {
 	const { t } = useTranslation();
 	const { pushColor } = useRecentColors();
-	const patchStop = (patch: Partial<GradientStop>): void => {
-		const next = allStops.map((s, i) => (i === index ? { ...s, ...patch } : s));
-		onUpdate(next);
-	};
+	const commitRecentColor = useRecentColorCommit();
+	const { index } = stop;
 	return (
-		<div className='space-y-1'>
+		<div className='space-y-1' data-testid='fill-gradient-stop'>
 			<div className='grid grid-cols-[auto,1fr,auto] items-center gap-2'>
 				<input
 					type='color'
-					value={normalizeHexColor(stop.color, '#3b82f6')}
-					onChange={(e) => {
-						const hex = normalizeHexColor(e.target.value, '#3b82f6');
-						patchStop({ color: hex, colorRef: undefined });
-						pushColor(hex);
-					}}
+					aria-label={t('pptx.gradient.stops')}
+					value={stop.color}
+					ref={commitRecentColor}
+					onChange={(e) => onAction({ type: 'stopColor', index, hex: e.target.value })}
 					className='h-7 w-10 rounded border border-border bg-muted'
 				/>
 				<input
 					type='range'
+					aria-label={t('pptx.gradient.position')}
 					min={0}
 					max={100}
-					value={Math.round(stop.position)}
-					onChange={(e) => patchStop({ position: Number(e.target.value) })}
+					value={stop.position}
+					onChange={(e) =>
+						onAction({ type: 'stopPosition', index, position: Number(e.target.value) })
+					}
 					className={RNG}
 				/>
 				<button
 					type='button'
-					disabled={total <= 2}
+					disabled={!stop.removable}
+					title={t('pptx.gradient.removeStop')}
 					className='rounded bg-muted px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed'
-					onClick={() => onUpdate(allStops.filter((_, i) => i !== index))}
+					onClick={() => onAction({ type: 'removeStop', index })}
 				>
 					{t('pptx.comments.remove')}
 				</button>
@@ -223,28 +202,29 @@ export function GradientStopRow({
 				selectedRef={stop.colorRef}
 				selectedHex={stop.color}
 				onPick={(c) => {
-					patchStop({ color: c.hex, colorRef: c.ref });
+					onAction({ type: 'stopColor', index, hex: c.hex, ref: c.ref });
 					pushColor(c.hex);
 				}}
 			/>
 			<div className='grid grid-cols-[auto,1fr,auto] items-center gap-2 pl-1'>
-				<span className='text-[10px] text-muted-foreground w-10 text-center'>Opacity</span>
+				<span className='text-[10px] text-muted-foreground w-10 text-center'>
+					{t('pptx.strokeEffects.fillOpacity')}
+				</span>
 				<input
 					type='range'
+					aria-label={t('pptx.strokeEffects.fillOpacity')}
 					min={0}
 					max={100}
-					value={Math.round((stop.opacity ?? 1) * 100)}
-					onChange={(e) => patchStop({ opacity: Number(e.target.value) / 100 })}
+					value={stop.opacity}
+					onChange={(e) =>
+						onAction({ type: 'stopOpacity', index, opacity: Number(e.target.value) })
+					}
 					className={RNG}
 				/>
 				<span className='text-[10px] text-muted-foreground w-[52px] text-right'>
-					{Math.round((stop.opacity ?? 1) * 100)}%
+					{stop.opacity}%
 				</span>
 			</div>
 		</div>
 	);
 }
-
-// EffectField was extracted to `./EffectField` to keep this file inside the
-// per-file line budget; re-exported here so existing imports keep working.
-export { EffectField } from './EffectField';

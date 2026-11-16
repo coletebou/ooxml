@@ -33,9 +33,9 @@ export type FileCommand =
 /** The File commands `<docx-editor>` announces. */
 export type WordFileCommand = Exclude<FileCommand, 'exportCsv'>;
 /** The File commands `<xlsx-editor>` announces. */
-export type ExcelFileCommand = Exclude<FileCommand, 'exportText' | 'share'>;
+export type ExcelFileCommand = Exclude<FileCommand, 'exportText'>;
 /** The File commands `<visio-viewer>` announces. */
-export type VisioFileCommand = Extract<FileCommand, 'new' | 'open' | 'save'>;
+export type VisioFileCommand = Extract<FileCommand, 'new' | 'open' | 'save' | 'share'>;
 
 /** The detail of a `file-command` event. */
 export interface FileCommandDetail<C extends string = FileCommand> {
@@ -65,7 +65,23 @@ export interface DocumentSaveMeta {
 	/** The MIME type of the bytes. */
 	mimeType: string;
 	reason: DocumentSaveReason;
+	/**
+	 * Set by an editor that shows save progress: a storage that uploads reports each step here, so
+	 * a long upload is never silent. Optional on both sides.
+	 */
+	onProgress?: (progress: DocumentSaveProgress) => void;
 }
+
+/**
+ * One step of a save in progress. `uploading` and `downloading` carry bytes (`total` when known);
+ * `checking` means the save met a newer version and is looking at what changed; `merging` that it
+ * is combining both sets of edits.
+ */
+export type DocumentSaveProgress =
+	| { phase: 'uploading'; loaded: number; total: number }
+	| { phase: 'checking' }
+	| { phase: 'downloading'; loaded: number; total?: number }
+	| { phase: 'merging' };
 
 /** What {@link DocumentStorage.save} may report back. */
 export interface DocumentSaveResult {

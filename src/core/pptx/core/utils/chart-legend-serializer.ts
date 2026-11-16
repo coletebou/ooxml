@@ -25,10 +25,10 @@ type GetLocalName = (key: string) => string;
 /** The legend-relevant subset of `PptxChartStyle`. */
 export interface ChartLegendStyle {
 	/** Whether the chart has a visible legend. */
-	hasLegend?: boolean;
+	hasLegend?: boolean | undefined;
 	/** Legend position (`b`, `tr`, `l`, `r`, `t`). */
-	legendPosition?: string;
-	legendEntries?: PptxChartLegendEntry[];
+	legendPosition?: string | undefined;
+	legendEntries?: PptxChartLegendEntry[] | undefined;
 	/** `c:overlay`: the legend floats over the plot. A missing element reads as `true`. */
 	legendOverlay?: boolean;
 }

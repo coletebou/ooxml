@@ -55,6 +55,7 @@ export { GradientPickerComponent } from './gradient-picker.component';
 export { EffectsPanelComponent } from './effects-panel.component';
 export { TextAdvancedPanelComponent } from './text-advanced-panel.component';
 export { Text3DPanelComponent } from './text-3d-panel.component';
+export { TextEffectsPanelComponent } from './text-effects-panel.component';
 export {
 	TEXT_3D_BOTTOM_BEVEL_KEYS,
 	TEXT_3D_TOP_BEVEL_KEYS,
@@ -95,8 +96,15 @@ export {
 	copyFormatFromElement,
 	hasCopyableFormat,
 	type CopiedFormat,
-} from './format-painter';
+} from 'ooxml-ui/pptx/render/format-painter';
+// The slide thumbnail rail: a building block a custom shell places beside its canvas.
 export { SlidesPanelComponent } from './slides-panel.component';
+export type { SlidesPanelMoveSlide, SlidesPanelRenameSection } from './slides-panel.component';
+export { createSlidesPanelEditorCommands } from './slides-panel-commands';
+export type { SlidesPanelEditorCommands } from './slides-panel-commands';
+export type { SlidesPaneLayoutGalleryRequest } from 'ooxml-ui/pptx';
+// One slide drawn the way the rail draws it, for a host that keeps its own thumbnail strip.
+export { SlideThumbnailComponent } from './slide-thumbnail.component';
 export { EditorToolbarComponent } from './editor-toolbar.component';
 export { StatusBarComponent } from './status-bar.component';
 export { EditorContextMenuComponent } from './editor-context-menu.component';

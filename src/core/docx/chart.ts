@@ -1,12 +1,16 @@
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
 // Charts in a Word document: the `w:drawing` whose `a:graphicData` holds `c:chart r:id`. This
 // module models the host side (placement, relationship, part name) and reads the chart part
-// through the format-neutral `chart` area. The chart part, its relationships and its embedded
-// workbook are never rewritten: they stay in the package untouched. The drawing is painted from
-// the cached values by the shared chart painter (`chart-paint.ts`).
+// through the format-neutral `chart` area. A chart that is not edited keeps its part,
+// relationships and embedded workbook untouched; an edited one (`chart-edit.ts`) is written back
+// with the shared chart writer and its workbook updated (`chart-save.ts`). The drawing is painted
+// from the cached values by the shared chart painter (`chart-paint.ts`).
 import {
 	chartColorStyleId,
 	chartExSummary,
+	chartSpacePictureSources,
+	parseChartExSpace,
+	type ChartExSpace,
 	parseChartSpace,
 	readChartFormatting,
 	type ChartParseIssue,
@@ -16,7 +20,7 @@ import {
 } from '../chart/index';
 import { parseXml } from '../xml/index';
 import { parseRelationships, relationshipsPartFor, resolvePartPath } from '../opc/index';
-import type { Block } from './model';
+import type { Block, DocumentModel } from './model';
 import type { Relationship } from './package-parts';
 import { forEachParagraph } from './parse-warnings';
 import { getR, isElement, type XmlElement } from './xml';
@@ -31,7 +35,7 @@ const CHARTEX_RELATIONSHIP_TYPE = 'http://schemas.microsoft.com/office/2014/rela
 const PACKAGE_RELATIONSHIP_TYPE =
 	'http://schemas.openxmlformats.org/officeDocument/2006/relationships/package';
 
-/** A chart (`c:chart` in a `w:drawing`). The chart part is read-only and preserved on save. */
+/** A chart (`c:chart` in a `w:drawing`). An unedited chart part is preserved byte for byte. */
 export interface DocxChart {
 	/** `inline` (`wp:inline`) or `anchor` (`wp:anchor`, floating). */
 	placement: 'inline' | 'anchor';
@@ -44,6 +48,10 @@ export interface DocxChart {
 	partName?: string;
 	/** The parsed chart part (`c:chartSpace`); absent when the part could not be read. */
 	chartSpace?: ChartSpace;
+	/** Editable neutral model of an Office 2016 extended chart part. */
+	chartExSpace?: ChartExSpace;
+	/** Structural data edits are allocated to a fresh embedded worksheet on save. */
+	chartExRebaseData?: boolean;
 	/**
 	 * An extended chart (`cx:chartSpace`): `layoutId` names its family and `chartEx` is the summary
 	 * of the families the painter draws (waterfall, histogram, treemap, sunburst). `chartSpace` is absent for these.
@@ -66,7 +74,7 @@ export interface DocxChart {
 
 /** The honest status shown with every chart. */
 export const CHART_NOTICE =
-	'The chart is drawn from the values cached in its part (bar, column, line, area, pie, doughnut, scatter, bubble, stock and radar charts, bar and line combinations with a secondary axis, waterfalls, histograms, treemaps and sunbursts; other kinds show a labelled frame). It is not editable, and the chart part and its workbook are preserved unchanged on save.';
+	'The chart is drawn from the values cached in its part (bar, column, line, area, pie, doughnut, scatter, bubble, stock and radar charts, bar and line combinations with a secondary axis, waterfalls, histograms, treemaps and sunbursts; other kinds show a labelled frame). Classic charts can be edited (type, title, legend and data); the edited part and its embedded workbook are saved, and charts that are not edited are preserved unchanged. Extended charts (waterfall, histogram, treemap, sunburst and other chartex families) are read-only.';
 
 /** Reads the host side of a chart graphic. Synchronous: resolves the relationship, reads no part. */
 export function parseChartGraphic(
@@ -113,10 +121,15 @@ export function parseChartGraphic(
 	};
 }
 
-/** Reads the chart part (and its relationships) into the model. Never throws; problems go to `issues`. */
+/**
+ * Reads the chart part (and its relationships) into the model. Never throws; problems go to
+ * `issues`. With `readBytes`, the pictures of its picture fills are read into
+ * `chartSpace.pictureSources` so the painter draws them.
+ */
 export async function resolveChartPart(
 	chart: DocxChart,
 	readText: (partName: string) => Promise<string | undefined>,
+	readBytes?: (partName: string) => Promise<Uint8Array | undefined>,
 ): Promise<void> {
 	if (!chart.partName) return;
 	try {
@@ -131,6 +144,14 @@ export async function resolveChartPart(
 		const root = parseXml(xml, { label: 'Chart part' }).documentElement;
 		const extended = chartExSummary(root);
 		if (extended) {
+			const parsed = parseChartExSpace(root);
+			chart.chartExSpace = parsed.chartExSpace;
+			chart.issues.push(...parsed.issues);
+			const rels = parseRelationships(await readText(relationshipsPartFor(chart.partName)));
+			const id = parsed.chartExSpace.chartData.externalData?.relId;
+			const rel = id ? rels.get(id) : undefined;
+			if (rel && rel.mode !== 'External' && rel.type === PACKAGE_RELATIONSHIP_TYPE)
+				chart.workbookPartName = resolvePartPath(chart.partName, rel.target);
 			chart.layoutId = extended.layoutId;
 			if (extended.summary) {
 				chart.chartEx = extended.summary;
@@ -163,12 +184,30 @@ export async function resolveChartPart(
 			colorsRel && (await readText(resolvePartPath(chart.partName, colorsRel.target)));
 		const palette = colorsXml ? chartColorStyleId(colorsXml) : undefined;
 		if (palette !== undefined) chart.colorPalette = palette;
+		if (readBytes) {
+			const pictures = await chartSpacePictureSources(chartSpace, chart.partName, rels, readBytes);
+			if (Object.keys(pictures).length) chartSpace.pictureSources = pictures;
+		}
 	} catch (error) {
 		chart.issues.push({
 			code: 'CHART_PART_UNREADABLE',
 			message: `The chart part ${chart.partName} could not be read: ${error instanceof Error ? error.message : String(error)}`,
 		});
 	}
+}
+
+/** Every block that can hold a drawing: body, headers, footers, footnotes and endnotes. */
+export function documentDrawingBlocks(model: DocumentModel): Block[] {
+	return [
+		...model.blocks,
+		...(model.sections ?? []).flatMap((section) =>
+			[section.headers, section.footers].flatMap((slots) =>
+				Object.values(slots ?? {}).flatMap((content) => content?.blocks ?? []),
+			),
+		),
+		...Object.values(model.footnoteSeparators ?? {}).flatMap((note) => note.blocks),
+		...[...(model.footnotes ?? []), ...(model.endnotes ?? [])].flatMap((note) => note.blocks),
+	];
 }
 
 /** Every chart in the given blocks, in document order. */
@@ -184,6 +223,7 @@ export function chartsIn(blocks: Block[]): DocxChart[] {
 export async function resolveDocumentCharts(
 	blocks: Block[],
 	readText: (partName: string) => Promise<string | undefined>,
+	readBytes?: (partName: string) => Promise<Uint8Array | undefined>,
 ): Promise<void> {
-	for (const chart of chartsIn(blocks)) await resolveChartPart(chart, readText);
+	for (const chart of chartsIn(blocks)) await resolveChartPart(chart, readText, readBytes);
 }

@@ -5,6 +5,7 @@
  * @module render/morph-text-slot
  */
 import type { PptxElement } from 'ooxml-core/pptx';
+import { hasTextProperties } from 'ooxml-core/pptx';
 
 import { boxOverlapRatio } from './morph-flatten';
 
@@ -26,6 +27,79 @@ const SAME_SLOT_OVERLAP = 0.4;
 /** An element's own words, whitespace-normalised. */
 function ownText(element: PptxElement): string {
 	return ((element as { text?: string }).text ?? '').replace(/\s+/gu, ' ').trim();
+}
+
+/** An unrotated box entirely outside the slide's top or left edge. */
+function offstageTopLeft(element: PptxElement): boolean {
+	return (
+		(element.rotation ?? 0) === 0 &&
+		(element.x + element.width <= 0 || element.y + element.height <= 0)
+	);
+}
+
+/**
+ * A size-only text change that can fly as ONE copy, because one end of the
+ * flight is entirely outside the top or left edge where the switch between
+ * the two layouts cannot be seen. This avoids superimposing two layouts of the
+ * same text during its flight. Restrict this to size-only run changes: a
+ * change in wording, font, colour or emphasis still needs a cross-dissolve.
+ *
+ * Either end qualifies. Issue #141's slides 17 -> 18 bring a parked paragraph
+ * IN from off the left edge; played backwards (18 -> 17) the same paragraph
+ * flies OUT to that parking spot, and checking only the source left the
+ * reverse cross-dissolving two layouts across the slide.
+ *
+ * @see morphOffstageTextAdoptsTarget for which layout the single copy paints.
+ */
+export function morphOffstageTextSizeChange(from: PptxElement, to: PptxElement): boolean {
+	return (offstageTopLeft(from) || offstageTopLeft(to)) && sizeOnlyTextChange(from, to);
+}
+
+/**
+ * Whether the single travelling copy of {@link morphOffstageTextSizeChange}
+ * paints the DESTINATION layout: only when the source is the off-stage end,
+ * so the switch happens before the text enters. When the destination is the
+ * off-stage end the copy keeps its own layout until it has left the slide.
+ */
+export function morphOffstageTextAdoptsTarget(from: PptxElement, to: PptxElement): boolean {
+	return offstageTopLeft(from) && sizeOnlyTextChange(from, to);
+}
+
+/** The same words in the same runs, differing only in some run's font size. */
+function sizeOnlyTextChange(from: PptxElement, to: PptxElement): boolean {
+	if (
+		from.type !== 'text' ||
+		to.type !== 'text' ||
+		!hasTextProperties(from) ||
+		!hasTextProperties(to) ||
+		JSON.stringify(from.shapeStyle ?? {}) !== JSON.stringify(to.shapeStyle ?? {}) ||
+		!from.text ||
+		from.text !== to.text
+	) {
+		return false;
+	}
+	const a = from.textSegments ?? [];
+	const b = to.textSegments ?? [];
+	if (a.length === 0 || a.length !== b.length) return false;
+	let sizeChanged = false;
+	for (let i = 0; i < a.length; i++) {
+		const old = a[i];
+		const next = b[i];
+		if (!old || !next || old.text !== next.text) return false;
+		const x = old.style;
+		const y = next.style;
+		if (x?.fontSize !== y?.fontSize) sizeChanged = true;
+		if (
+			x?.fontFamily !== y?.fontFamily ||
+			x?.color !== y?.color ||
+			(x?.colorRef?.alpha ?? 1) !== (y?.colorRef?.alpha ?? 1) ||
+			Boolean(x?.bold) !== Boolean(y?.bold) ||
+			Boolean(x?.italic) !== Boolean(y?.italic) ||
+			Boolean(x?.underline) !== Boolean(y?.underline)
+		)
+			return false;
+	}
+	return sizeChanged;
 }
 
 /**

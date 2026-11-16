@@ -3,6 +3,7 @@ import { hasShapeProperties, hasTextProperties } from '../../types';
 import type {
 	XmlObject,
 	PptxElement,
+	PptxChartData,
 	ChartPptxElement,
 	GroupPptxElement,
 	InkPptxElement,
@@ -14,13 +15,25 @@ import type {
 	TablePptxElement,
 	ZoomPptxElement,
 } from '../../types';
+import { CHART_WORKBOOK_CONTENT_TYPE, stageChartPartWithWorkbook } from '../../../../chart/index';
+import type { RelationshipInput } from '../../../../opc/relationships';
 import { buildChartColorStyleXml } from '../../utils/chart-color-style-writer';
+import { requireEmbeddedWorkbookChart } from '../../utils/chart-new-part-workbook';
 import { buildChartExSpaceXml, canGenerateChartEx } from '../../utils/chart-cx-generator';
+import {
+	CHART_STYLE_CONTENT_TYPE,
+	CHART_STYLE_REL,
+	chartExColorStyleXml,
+	chartExStyleXml,
+} from '../../../../chart/ex/style-part';
+import { writeNewChartPart } from '../../utils/chart-new-part';
 import { buildChartSpaceXml } from '../../utils/chart-xml-generator';
 import { findOleObjNode } from '../../utils/ole-alternate-content';
 import { ensureXmlChild } from '../../utils/xml-access';
 import { BLIP_FILL_ORDER, SP_PR_ORDER, reorderObjectKeys } from '../../utils/xml-reorder';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeSaveContentPartInk';
+import { writeBackgroundFillFlag } from './save-background-fill-flag';
+import { writeNewShapePictureFill } from './save-picture-fill';
 import type { SaveSlideContext } from './PptxHandlerRuntimeSaveElementEmbedding';
 import { CHART_CONTENT_TYPE, CHART_RELATIONSHIP_TYPE } from './PptxHandlerRuntimeSaveShapeXml';
 import { collapseOrderedXmlChildren, replaceXmlNodeContents } from './template-group-node';
@@ -77,9 +90,12 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	/** Part paths of SDK-created charts written this save (need content-type overrides). */
-	protected pendingChartPartPaths?: string[];
-	protected pendingExtendedChartPartPaths?: string[];
-	protected pendingChartColorPartPaths?: string[];
+	protected pendingChartPartPaths?: string[] | undefined;
+	protected pendingExtendedChartPartPaths?: string[] | undefined;
+	protected pendingChartColorPartPaths?: string[] | undefined;
+	protected pendingChartStylePartPaths?: string[] | undefined;
+	/** Embedded workbooks of SDK-created charts written this save (`embedWorkbook`). */
+	protected pendingChartWorkbookPartPaths?: string[] | undefined;
 
 	/** Pick the next free `ppt/charts/chartN.xml` path (reads the zip + pending writes). */
 	protected nextChartPartPath(): string {
@@ -118,41 +134,103 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	 * Generate a self-contained chart part for an SDK-created chart, register a
 	 * slide relationship to it, and return the `p:graphicFrame` envelope. The
 	 * content-type override is added later from {@link pendingChartPartPaths}.
+	 * A classic chart is written through the shared chart core
+	 * (`writeNewChartPart`), else by the legacy generator; model fields the part
+	 * leaves out are reported as a save warning. A chart asking for an embedded
+	 * workbook (`embedWorkbook`) gets that part with cell references and the
+	 * workbook (`stageChartPartWithWorkbook`), its relationships file also naming
+	 * the colour-style part, or the save throws when it cannot.
 	 */
 	protected createChartElementXml(el: ChartPptxElement, ctx: SaveSlideContext): XmlObject {
-		const extended = canGenerateChartEx(el.chartData!);
+		const chartData = el.chartData!;
+		const extended = canGenerateChartEx(chartData);
+		if (chartData.embedWorkbook && extended) {
+			throw new Error(
+				`Chart "${el.id}" asks for an embedded workbook (embedWorkbook), but "${chartData.chartType}" is an extended chart.`,
+			);
+		}
+		const embedded = chartData.embedWorkbook
+			? requireEmbeddedWorkbookChart(chartData, el.id)
+			: undefined;
 		const partPath = extended ? this.nextExtendedChartPartPath() : this.nextChartPartPath();
-		const chartXml = extended
-			? buildChartExSpaceXml(el.chartData!)
-			: buildChartSpaceXml(el.chartData!);
-		this.zip.file(partPath, this.builder.build(chartXml));
+		const part = extended || embedded ? undefined : writeNewChartPart(chartData);
+		const unwritten = embedded?.unwritten ?? part?.unwritten ?? [];
+		if (unwritten.length > 0) {
+			const legacy = part !== undefined && part.xml === undefined;
+			this.compatibilityService.reportWarning({
+				code: legacy ? 'CHART_WRITTEN_BY_LEGACY_GENERATOR' : 'CHART_FIELDS_NOT_WRITTEN',
+				message: legacy
+					? `Chart '${el.id}' was written by the legacy chart generator, which may drop: ${unwritten.join(', ')}.`
+					: `Chart '${el.id}' was saved without: ${unwritten.join(', ')}.`,
+				scope: 'save',
+				slideId: ctx.slide.id,
+				elementId: el.id,
+			});
+		}
+		if (part?.xml !== undefined) {
+			// The shared core's part is already serialized, as on the loaded-chart save path.
+			this.zip.file(partPath, part.xml);
+		} else if (!embedded) {
+			const chartXml = extended
+				? buildChartExSpaceXml(chartData)
+				: buildChartSpaceXml(part?.legacyModel ?? chartData);
+			this.zip.file(partPath, this.builder.build(chartXml));
+		}
 		if (extended) {
 			(this.pendingExtendedChartPartPaths ??= []).push(partPath);
 		} else {
 			(this.pendingChartPartPaths ??= []).push(partPath);
 		}
-		if (el.chartData?.colorPalette?.length) {
-			const fileName = partPath.slice(partPath.lastIndexOf('/') + 1);
-			const index = /\d+/u.exec(fileName)?.[0] ?? '1';
-			const directory = partPath.slice(0, partPath.lastIndexOf('/'));
-			const colorPath = `${directory}/colors${index}.xml`;
-			this.zip.file(
-				colorPath,
-				this.builder.build(
-					buildChartColorStyleXml(el.chartData.colorPalette, el.chartData.colorMethod ?? 'cycle'),
-				),
+		const colorTarget = chartData.colorPalette?.length
+			? this.writeChartColorPart(partPath, chartData.colorPalette, chartData.colorMethod)
+			: extended
+				? this.writeChartExStyleParts(partPath, 'colors')
+				: undefined;
+		// PowerPoint refuses an extended chart part without a chart style part (`style-part.ts`).
+		const styleTarget = extended ? this.writeChartExStyleParts(partPath, 'style') : undefined;
+		if (embedded) {
+			// The workbook takes rId1 (`c:externalData`); the colour-style part follows it.
+			const colorRels = new Map<string, RelationshipInput>(
+				colorTarget
+					? [
+							[
+								'rId2',
+								{
+									type: PptxHandlerRuntime.CHART_COLOR_REL_TYPE,
+									target: colorTarget,
+									mode: 'Internal',
+								},
+							],
+						]
+					: [],
 			);
-			(this.pendingChartColorPartPaths ??= []).push(colorPath);
+			const parts = stageChartPartWithWorkbook(this.zip, embedded.space, {
+				chartFolder: 'ppt/charts/',
+				embeddingsFolder: 'ppt/embeddings/',
+				partName: partPath,
+				relationships: colorRels,
+				rows: embedded.rows,
+			});
+			(this.pendingChartWorkbookPartPaths ??= []).push(parts.workbookPartName);
+		} else if (colorTarget) {
+			const fileName = partPath.slice(partPath.lastIndexOf('/') + 1);
+			const directory = partPath.slice(0, partPath.lastIndexOf('/'));
+			const relationships = [
+				{
+					'@_Id': 'rId1',
+					'@_Type': PptxHandlerRuntime.CHART_COLOR_REL_TYPE,
+					'@_Target': colorTarget,
+				},
+				...(styleTarget
+					? [{ '@_Id': 'rId2', '@_Type': CHART_STYLE_REL, '@_Target': styleTarget }]
+					: []),
+			];
 			this.zip.file(
 				`${directory}/_rels/${fileName}.rels`,
 				this.builder.build({
 					Relationships: {
 						'@_xmlns': 'http://schemas.openxmlformats.org/package/2006/relationships',
-						Relationship: {
-							'@_Id': 'rId1',
-							'@_Type': PptxHandlerRuntime.CHART_COLOR_REL_TYPE,
-							'@_Target': `colors${index}.xml`,
-						},
+						Relationship: relationships.length === 1 ? relationships[0] : relationships,
 					},
 				}),
 			);
@@ -168,6 +246,39 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	/**
+	 * Writes the default chart style (`styleN.xml`) or colour style (`colorsN.xml`) part of a new
+	 * extended chart next to it; returns its target relative to the chart part.
+	 */
+	private writeChartExStyleParts(partPath: string, kind: 'style' | 'colors'): string {
+		const fileName = partPath.slice(partPath.lastIndexOf('/') + 1);
+		const index = /\d+/u.exec(fileName)?.[0] ?? '1';
+		const directory = partPath.slice(0, partPath.lastIndexOf('/'));
+		const path = `${directory}/${kind}${index}.xml`;
+		this.zip.file(path, kind === 'style' ? chartExStyleXml() : chartExColorStyleXml());
+		if (kind === 'style') (this.pendingChartStylePartPaths ??= []).push(path);
+		else (this.pendingChartColorPartPaths ??= []).push(path);
+		return `${kind}${index}.xml`;
+	}
+
+	/** Writes `colorsN.xml` next to the chart part; returns its target relative to the chart. */
+	private writeChartColorPart(
+		partPath: string,
+		palette: string[],
+		method: PptxChartData['colorMethod'],
+	): string {
+		const fileName = partPath.slice(partPath.lastIndexOf('/') + 1);
+		const index = /\d+/u.exec(fileName)?.[0] ?? '1';
+		const directory = partPath.slice(0, partPath.lastIndexOf('/'));
+		const colorPath = `${directory}/colors${index}.xml`;
+		this.zip.file(
+			colorPath,
+			this.builder.build(buildChartColorStyleXml(palette, method ?? 'cycle')),
+		);
+		(this.pendingChartColorPartPaths ??= []).push(colorPath);
+		return `colors${index}.xml`;
+	}
+
+	/**
 	 * Add `[Content_Types].xml` Override entries for any chart parts generated
 	 * for SDK-created charts this save. Called from the save pipeline after
 	 * element writing; a no-op when no charts were generated.
@@ -176,13 +287,19 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const paths = this.pendingChartPartPaths;
 		const extendedPaths = this.pendingExtendedChartPartPaths;
 		const colorPaths = this.pendingChartColorPartPaths;
+		const workbookPaths = this.pendingChartWorkbookPartPaths;
+		const stylePaths = this.pendingChartStylePartPaths;
+		this.pendingChartStylePartPaths = undefined;
 		this.pendingChartPartPaths = undefined;
 		this.pendingExtendedChartPartPaths = undefined;
 		this.pendingChartColorPartPaths = undefined;
+		this.pendingChartWorkbookPartPaths = undefined;
 		if (
 			(!paths || paths.length === 0) &&
 			(!extendedPaths || extendedPaths.length === 0) &&
-			(!colorPaths || colorPaths.length === 0)
+			(!colorPaths || colorPaths.length === 0) &&
+			(!stylePaths || stylePaths.length === 0) &&
+			(!workbookPaths || workbookPaths.length === 0)
 		) {
 			return;
 		}
@@ -206,6 +323,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			...(colorPaths ?? []).map(
 				(path) => [path, PptxHandlerRuntime.CHART_COLOR_CONTENT_TYPE] as const,
 			),
+			...(workbookPaths ?? []).map((path) => [path, CHART_WORKBOOK_CONTENT_TYPE] as const),
+			...(stylePaths ?? []).map((path) => [path, CHART_STYLE_CONTENT_TYPE] as const),
 		]) {
 			const partName = `/${p}`;
 			if (!have.has(partName)) {
@@ -539,6 +658,12 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// Create new XML if missing
 		if (!shape && (el.type === 'text' || el.type === 'shape')) {
 			shape = this.createElementXml(el);
+			// A new shape filled with a picture: embed it and write its
+			// `a:blipFill`, which the fill writer below keeps as it is.
+			const spPr = ensureXmlChild(shape, 'p:spPr');
+			if (spPr && el.shapeStyle?.fillMode === 'image') {
+				writeNewShapePictureFill(spPr, el.shapeStyle, this.pictureFillSaveContext(el, ctx));
+			}
 		}
 		if (!shape && el.type === 'connector') {
 			shape = this.createConnectorXml(el);
@@ -703,6 +828,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const spPr = ensureXmlChild(shape, 'p:spPr');
 			if (spPr) {
 				this.applyFillAndStroke(spPr, el.shapeStyle, ctx.inheritedGroupFill);
+				writeBackgroundFillFlag(shape, spPr, el.shapeStyle);
 				this.applyEffectsAndThreeD(spPr, el.shapeStyle);
 				this.finalizeSpPrSchemaOrder(shape);
 				// Re-emit `<p:style>` (lnRef/fillRef/effectRef/fontRef) — Phase 2 Stream B / C-H2.
@@ -717,17 +843,18 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				el,
 				ctx.resolveHyperlinkRelationshipId,
 				ctx.getSlideRelationshipMap,
+				ctx.slideTargetAt,
 			);
 		}
 
 		// Table / Chart / SmartArt
-		this.applyDataSerialization(shape, el, ctx.slide.id);
+		this.applyDataSerialization(shape, el, ctx.slide.id, ctx);
 
 		// Actions and locks
 		if (ctx.connectorShapeIds) {
 			applyConnectorShapeIds(shape, el, ctx.connectorShapeIds);
 		}
-		this.serializeElementActions(shape, el, ctx.resolveHyperlinkRelationshipId);
+		this.serializeElementActions(shape, el, ctx);
 		this.serializeShapeLocks(shape, el);
 
 		// Selection Pane visibility and name. Applied before the template branch

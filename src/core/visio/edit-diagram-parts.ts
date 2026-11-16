@@ -9,6 +9,7 @@ import {
 import { appendEllipseGeometry } from './edit-ellipse-geometry';
 import { applyGeometryEdit } from './edit-geometry';
 import { visioShapeBounds } from './edit-group';
+import { writeContainerMembers } from './edit-container-members';
 import { encodeVisioPlainText } from './plain-text';
 import type { VisioOutlinePoint } from './basic-shapes';
 import {
@@ -16,7 +17,9 @@ import {
 	VISIO_CALLOUT_TARGET_ROW,
 	VISIO_CONTAINER_HEADING,
 	VISIO_CONTAINER_MARGIN,
-	VISIO_CONTAINER_MEMBERS_ROW,
+	VISIO_CONTAINER_HEADING_ROW,
+	VISIO_CONTAINER_MARGIN_ROW,
+	VISIO_CONTAINER_RESIZE_ROW,
 	type VisioCalloutStyle,
 	type VisioContainerStyle,
 	type VisioInsertCalloutEdit,
@@ -34,11 +37,11 @@ const CONTAINER_LOOK: Record<
 	dashed: { line: '#7F7F7F', dashed: true },
 };
 
-function node(shape: Element, name: string): Element {
+export function node(shape: Element, name: string): Element {
 	return shape.ownerDocument!.createElementNS(shape.namespaceURI, name);
 }
 /** A string- or unit-typed cell, written after the shape's existing cells. */
-function valueCell(parent: Element, name: string, value: string, unit?: string): void {
+export function valueCell(parent: Element, name: string, value: string, unit?: string): void {
 	const cell = node(parent, 'Cell');
 	cell.setAttribute('N', name);
 	cell.setAttribute('V', value);
@@ -49,7 +52,7 @@ function valueCell(parent: Element, name: string, value: string, unit?: string):
 	parent.insertBefore(cell, before ?? null);
 }
 /** A User section with string rows (Visio's msvStructureType and the editor's own rows). */
-function userSection(shape: Element, rows: readonly [string, string, string?][]): Element {
+export function userSection(shape: Element, rows: readonly [string, string, string?][]): Element {
 	const section = node(shape, 'Section');
 	section.setAttribute('N', 'User');
 	for (const [name, value, unit] of rows) {
@@ -61,13 +64,13 @@ function userSection(shape: Element, rows: readonly [string, string, string?][])
 	}
 	return section;
 }
-function textNode(shape: Element, value: string): Element {
+export function textNode(shape: Element, value: string): Element {
 	const element = node(shape, 'Text');
 	element.appendChild(shape.ownerDocument!.createTextNode(encodeVisioPlainText(value)));
 	return element;
 }
 /** Pin, size and the default local pin of a new unrotated 2D box. */
-function placeBox(shape: Element, box: VisioPartBox): void {
+export function placeBox(shape: Element, box: VisioPartBox): void {
 	for (const [name, value, formula] of [
 		['PinX', box.x],
 		['PinY', box.y],
@@ -95,8 +98,9 @@ const box: VisioOutlinePoint[] = [
 /**
  * Insert > Container: a local 2D sheet with User.msvStructureType = "Container" framing the
  * members' alignment boxes, placed directly behind the lowest member. Members are untouched and
- * stay on the page (no group). Membership is recorded in a User row; Visio's own Relationships
- * (DEPENDSON) formulas are not written, so Visio opens it as a plain shape. Returns its box.
+ * stay on the page (no group). Membership is written in Visio's form: the container's
+ * Relationships cell (DEPENDSON 4) lists the members, each member points back, and the
+ * msvSDContainer* User rows carry margin and resize behaviour. Returns its box.
  */
 export function insertVisioContainer(
 	root: Element,
@@ -165,14 +169,16 @@ export function insertVisioContainer(
 	shape.appendChild(
 		userSection(shape, [
 			['msvStructureType', 'Container'],
-			['msvSDContainerMargin', String(VISIO_CONTAINER_MARGIN), 'IN'],
-			[VISIO_CONTAINER_MEMBERS_ROW, edit.memberIds.join(',')],
+			[VISIO_CONTAINER_MARGIN_ROW, String(VISIO_CONTAINER_MARGIN), 'IN'],
+			[VISIO_CONTAINER_RESIZE_ROW, '1', 'STR'],
+			[VISIO_CONTAINER_HEADING_ROW, String(VISIO_CONTAINER_HEADING), 'IN'],
 		]),
 	);
 	shape.appendChild(textNode(shape, edit.heading));
 	// Behind every member, as Visio places a container under the shapes it frames.
 	const lowest = members[0];
 	if (lowest) lowest.parentNode!.insertBefore(shape, lowest);
+	writeContainerMembers(root, shape, edit.memberIds);
 	return frame;
 }
 

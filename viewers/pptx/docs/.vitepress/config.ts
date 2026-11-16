@@ -60,6 +60,30 @@ export default defineConfig({
 								{ text: 'Limitations', link: '/fr/guide/limitations' },
 							],
 						},
+						{
+							text: 'Concepts',
+							items: [
+								{ text: 'Thèmes', link: '/fr/guide/theming' },
+								{ text: "Ajustement à la fenêtre d'affichage", link: '/fr/guide/viewport-fit' },
+								{ text: 'Liens vers les diapositives', link: '/fr/guide/slide-links' },
+								{
+									text: "Mises à jour d'éléments par lot",
+									link: '/fr/guide/element-update-batches',
+								},
+								{
+									text: "Collaboration gérée par l'hôte",
+									link: '/fr/guide/host-owned-collaboration',
+								},
+								{ text: "Stockage géré par l'hôte", link: '/fr/guide/host-owned-storage' },
+								{ text: 'Intégration OneDrive', link: '/fr/guide/onedrive' },
+								{ text: "Tester l'intégration OneDrive", link: '/fr/guide/onedrive-testing' },
+								{ text: 'Révision dans votre application', link: '/fr/guide/review-workflow' },
+								{ text: 'Assistant IA', link: '/fr/guide/ai-assistant' },
+								{ text: 'Compte et connexion', link: '/fr/guide/account' },
+								{ text: 'Fidélité des effets visuels', link: '/fr/guide/visual-effects' },
+								{ text: "Environnements d'exécution", link: '/fr/guide/runtime-environments' },
+							],
+						},
 					],
 					'/fr/user/': [
 						{
@@ -106,6 +130,36 @@ export default defineConfig({
 								{ text: 'El modelo PptxData', link: '/es/guide/data-model' },
 								{ text: 'Localización (i18n)', link: '/es/guide/localization' },
 								{ text: 'Limitaciones', link: '/es/guide/limitations' },
+							],
+						},
+						{
+							text: 'Conceptos',
+							items: [
+								{ text: 'Temas', link: '/es/guide/theming' },
+								{ text: 'Ajuste al área de visualización', link: '/es/guide/viewport-fit' },
+								{ text: 'Vínculos a diapositivas', link: '/es/guide/slide-links' },
+								{
+									text: 'Actualizaciones de elementos por lotes',
+									link: '/es/guide/element-update-batches',
+								},
+								{
+									text: 'Colaboración gestionada por el host',
+									link: '/es/guide/host-owned-collaboration',
+								},
+								{
+									text: 'Almacenamiento gestionado por el host',
+									link: '/es/guide/host-owned-storage',
+								},
+								{ text: 'Integración con OneDrive', link: '/es/guide/onedrive' },
+								{
+									text: 'Pruebas de la integración con OneDrive',
+									link: '/es/guide/onedrive-testing',
+								},
+								{ text: 'Revisión dentro de su aplicación', link: '/es/guide/review-workflow' },
+								{ text: 'Asistente de IA', link: '/es/guide/ai-assistant' },
+								{ text: 'Cuenta e inicio de sesión', link: '/es/guide/account' },
+								{ text: 'Fidelidad de efectos visuales', link: '/es/guide/visual-effects' },
+								{ text: 'Entornos de ejecución', link: '/es/guide/runtime-environments' },
 							],
 						},
 					],
@@ -156,6 +210,30 @@ export default defineConfig({
 								{ text: 'Einschränkungen', link: '/de/guide/limitations' },
 							],
 						},
+						{
+							text: 'Konzepte',
+							items: [
+								{ text: 'Design und Farben', link: '/de/guide/theming' },
+								{ text: 'Viewport-Anpassung', link: '/de/guide/viewport-fit' },
+								{ text: 'Folienlinks', link: '/de/guide/slide-links' },
+								{
+									text: 'Stapelweise Elementaktualisierungen',
+									link: '/de/guide/element-update-batches',
+								},
+								{
+									text: 'Vom Host verwaltete Zusammenarbeit',
+									link: '/de/guide/host-owned-collaboration',
+								},
+								{ text: 'Vom Host verwalteter Speicher', link: '/de/guide/host-owned-storage' },
+								{ text: 'OneDrive-Integration', link: '/de/guide/onedrive' },
+								{ text: 'OneDrive-Integration testen', link: '/de/guide/onedrive-testing' },
+								{ text: 'Prüfung in Ihrer Anwendung', link: '/de/guide/review-workflow' },
+								{ text: 'KI-Assistent', link: '/de/guide/ai-assistant' },
+								{ text: 'Konto und Anmeldung', link: '/de/guide/account' },
+								{ text: 'Visuelle Effekttreue', link: '/de/guide/visual-effects' },
+								{ text: 'Laufzeitumgebungen', link: '/de/guide/runtime-environments' },
+							],
+						},
 					],
 					'/de/user/': [
 						{
@@ -179,15 +257,6 @@ export default defineConfig({
 
 	head: [
 		['meta', { name: 'theme-color', content: '#c43e1c' }],
-		['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
-		['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
-		[
-			'link',
-			{
-				rel: 'stylesheet',
-				href: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap',
-			},
-		],
 		['meta', { property: 'og:type', content: 'website' }],
 		['meta', { property: 'og:title', content: 'pptx-viewer documentation' }],
 		[
@@ -241,6 +310,8 @@ export default defineConfig({
 						{ text: 'Shared UI migration log', link: '/guide/ui-migration' },
 						{ text: 'Host-owned Collaboration', link: '/guide/host-owned-collaboration' },
 						{ text: 'Host-owned Storage', link: '/guide/host-owned-storage' },
+						{ text: 'OneDrive Integration', link: '/guide/onedrive' },
+						{ text: 'Testing OneDrive', link: '/guide/onedrive-testing' },
 						{ text: 'Review Inside Your Application', link: '/guide/review-workflow' },
 						{ text: 'Localization (i18n)', link: '/guide/localization' },
 						{ text: 'AI Assistant', link: '/guide/ai-assistant' },
@@ -338,6 +409,7 @@ export default defineConfig({
 						{ text: 'Getting Started', link: '/vue/getting-started' },
 						{ text: 'Component Props', link: '/vue/props' },
 						{ text: 'Imperative Handle', link: '/vue/handle' },
+						{ text: 'Building Blocks', link: '/vue/building-blocks' },
 					],
 				},
 				{
@@ -361,6 +433,7 @@ export default defineConfig({
 						{ text: 'Getting Started', link: '/angular/getting-started' },
 						{ text: 'Component Inputs & Outputs', link: '/angular/props' },
 						{ text: 'Public API', link: '/angular/api' },
+						{ text: 'Building Blocks', link: '/angular/building-blocks' },
 					],
 				},
 				{
@@ -384,6 +457,7 @@ export default defineConfig({
 						{ text: 'Getting Started', link: '/vanilla/getting-started' },
 						{ text: 'Options & Callbacks', link: '/vanilla/options' },
 						{ text: 'Instance API', link: '/vanilla/api' },
+						{ text: 'Building Blocks', link: '/vanilla/building-blocks' },
 					],
 				},
 				{
@@ -404,6 +478,7 @@ export default defineConfig({
 						{ text: 'Getting Started', link: '/svelte/getting-started' },
 						{ text: 'Component Props', link: '/svelte/props' },
 						{ text: 'Instance API', link: '/svelte/api' },
+						{ text: 'Building Blocks', link: '/svelte/building-blocks' },
 					],
 				},
 				{

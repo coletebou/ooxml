@@ -1,0 +1,119 @@
+import {
+	ChangeDetectionStrategy,
+	Component,
+	computed,
+	effect,
+	ElementRef,
+	HostListener,
+	inject,
+	input,
+	viewChild,
+	ViewEncapsulation,
+} from '@angular/core';
+import { findTextHighlightsByElement } from 'ooxml-ui/pptx';
+
+import { CollaborationCursorsComponent } from '../viewer/collaboration-cursors.component';
+import { ElementRenderErrors } from '../viewer/element-boundary.directive';
+import { RemoteSelectionOverlayComponent } from '../viewer/remote-selection-overlay.component';
+import { SlideCanvasComponent } from '../viewer/slide-canvas.component';
+import type { ViewerBuildingBlocks } from './viewer-building-blocks';
+
+/**
+ * The slide canvas block: the editable canvas over the blocks' deck, with no chrome around it.
+ * The public `SlideCanvasComponent` owns `pptx-slide-canvas` and Angular refuses two components on
+ * one tag, so this block is `pptx-building-blocks-canvas`.
+ */
+@Component({
+	selector: 'pptx-building-blocks-canvas',
+	standalone: true,
+	changeDetection: ChangeDetectionStrategy.OnPush,
+	encapsulation: ViewEncapsulation.None,
+	imports: [SlideCanvasComponent, CollaborationCursorsComponent, RemoteSelectionOverlayComponent],
+	host: { 'data-pptx-block': 'canvas' },
+	providers: [ElementRenderErrors],
+	styles: `
+		[data-pptx-block='canvas'] {
+			display: block;
+			position: relative;
+			min-width: 0;
+			min-height: 0;
+		}
+	`,
+	template: `
+		@let shell = blocks().shell;
+		<pptx-slide-canvas
+			style="display: block; width: 100%; height: 100%"
+			[slide]="shell.activeSlide()"
+			[canvasSize]="shell.loader.canvasSize()"
+			[mediaDataUrls]="shell.loader.mediaDataUrls()"
+			[editable]="shell.canEdit()"
+			[zoom]="blocks().zoom.zoom()"
+			[selectedIds]="shell.editor.selectedIds()"
+			[findHighlights]="findHighlights()"
+			[editingId]="shell.canvasEditing.editingId()"
+			[templateElements]="shell.activeTemplateElements()"
+			(pointermove)="shell.cursor.onPointerMove($event)"
+			(elementSelect)="shell.canvasEditing.onElementSelect($event)"
+			(backgroundClick)="shell.canvasEditing.onBackgroundClick()"
+			(transformStart)="shell.canEdit() && shell.editor.beginTransform($event.label)"
+			(transformUpdate)="
+				shell.canEdit() &&
+					shell.editor.applyTransform(shell.activeSlideIndex(), $event.id, $event.box)
+			"
+			(transformEnd)="
+				shell.canEdit() && shell.editor.rerouteConnectors(shell.activeSlideIndex(), $event.ids)
+			"
+			(rotateUpdate)="
+				shell.canEdit() &&
+					shell.editor.applyTransform(shell.activeSlideIndex(), $event.id, {
+						rotation: $event.rotation,
+					})
+			"
+			(textEditStart)="shell.canvasEditing.onTextEditStart($event.id)"
+			(textInput)="shell.canvasEditing.onTextInput($event)"
+			(textCommit)="shell.canvasEditing.onTextCommit($event)"
+			(textCancel)="shell.canvasEditing.editingId.set(null)"
+			(listSession)="shell.canvasEditing.onListSession($event)"
+		>
+			<pptx-collaboration-cursors [cursors]="shell.cursor.cursors()" />
+			<pptx-remote-selection-overlay
+				[presences]="shell.collaboration.presence()"
+				[elements]="shell.activeSlide()?.elements ?? []"
+				[activeSlideIndex]="shell.activeSlideIndex()"
+			/>
+		</pptx-slide-canvas>
+	`,
+})
+export class BuildingBlocksCanvasComponent {
+	readonly blocks = input.required<ViewerBuildingBlocks>();
+	private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+	private readonly canvas = viewChild(SlideCanvasComponent);
+	/** The host find bar's matches, marked in the text by the canvas's renderers. */
+	protected readonly findHighlights = computed(() => {
+		const blocks = this.blocks();
+		const { session, open } = blocks.findBarState();
+		return findTextHighlightsByElement(
+			open ? session.matches : [],
+			session.current,
+			blocks.shell.activeSlideIndex(),
+		);
+	});
+
+	constructor() {
+		inject(ElementRenderErrors, { self: true }).reporter = () =>
+			this.blocks().options().onElementRenderError;
+		effect((onCleanup) => {
+			const canvas = this.canvas();
+			if (canvas) {
+				onCleanup(
+					this.blocks().attachCanvas(this.host.nativeElement, () => canvas.getStageElement()),
+				);
+			}
+		});
+	}
+
+	@HostListener('document:keydown', ['$event'])
+	protected onKeyDown(event: KeyboardEvent): void {
+		this.blocks().handleKeyDown(event);
+	}
+}

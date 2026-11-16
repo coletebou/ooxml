@@ -837,6 +837,144 @@
 		},
 		{
 			"kind": "javascript-module",
+			"path": "chart/data-sheet.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiChartDataSheet",
+					"tagName": "office-ui-chart-data-sheet",
+					"customElement": true,
+					"description": "`<office-ui-chart-data-sheet>`: the categories x series table of a chart's \"Edit Data\" view, shared by every product. Series names run across the header row, category labels down the first column, values in between; the toolbar adds a category or a series and each header has a remove button while more than one is left. Arrow keys, Enter, Tab, F2 and Escape behave as in the spreadsheet PowerPoint opens; pasting a tab-separated block (from Excel, Word or this sheet) fills cells from the focused one, adding the series and categories it needs. Values are read and shown in `locale`'s number convention (the browser's when unset, as Office follows the system's); a value that is not a number is refused and the cell restored. The host sets `data` (`{ categories, series: [{ name, values }] }`), `labels` (translated), `highlight` and `disabled`, and maps `office-chart-data-change` `{ edits, data }` onto its own chart model; the sheet shows the edited data at once and takes whatever `data` the host sets next.",
+					"attributes": [
+						{
+							"name": "disabled"
+						},
+						{
+							"name": "locale"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "data"
+						},
+						{
+							"kind": "field",
+							"name": "disabled",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "highlight"
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "locale",
+							"type": {
+								"text": "string"
+							}
+						}
+					],
+					"events": [
+						{
+							"name": "office-chart-data-change"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-chart-data-sheet",
+					"declaration": {
+						"name": "OfficeUiChartDataSheet"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
+			"path": "chart/format-pane.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiChartFormatPane",
+					"tagName": "office-ui-chart-format-pane",
+					"customElement": true,
+					"description": "`<office-ui-chart-format-pane>`: the chart Format task pane every product shares (Format Chart Area, Format Data Series, Format Axis, ...): the element picker, Chart Options and Text Options, the icon tabs and their collapsible sections. Give it a `source` (what the chart reads as, see `ChartFormatSource`) or a `chartSpace` (read through `chartSpaceFormatSource`) and a `target` key; it applies nothing itself. Each committed field fires `office-chart-format-edit` with the field, its value and the typed `ChartEditIntent` (`applyChartEditIntent` runs it over a `ChartSpace`; other products map it onto their own edits), then repaints from the source the host sets back. The picker fires `office-chart-format-target`, Close and Escape `office-chart-format-close`. A source with a `slots.fill` name leaves that section to the host's light-DOM child with the same `slot`. Captions (`chartFormat.*` keys) come from the pane's own dictionary for `locale`; `translateLabel(key, params, fallback)` overrides the ones a product words differently. `disabled` makes every control read-only. It lays out in flow; a product docks it.",
+					"attributes": [
+						{
+							"name": "disabled"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "chartSpace"
+						},
+						{
+							"kind": "field",
+							"name": "disabled",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "locale"
+						},
+						{
+							"kind": "field",
+							"name": "pictures"
+						},
+						{
+							"kind": "field",
+							"name": "source"
+						},
+						{
+							"kind": "field",
+							"name": "target"
+						},
+						{
+							"kind": "field",
+							"name": "theme"
+						},
+						{
+							"kind": "field",
+							"name": "translateLabel"
+						}
+					],
+					"events": [
+						{
+							"name": "office-chart-format-close"
+						},
+						{
+							"name": "office-chart-format-edit"
+						},
+						{
+							"name": "office-chart-format-target"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-chart-format-pane",
+					"declaration": {
+						"name": "OfficeUiChartFormatPane"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
 			"path": "dialog/chart-picker.ts",
 			"declarations": [
 				{
@@ -1041,6 +1179,9 @@
 							"name": "locale"
 						},
 						{
+							"name": "moderator"
+						},
+						{
 							"name": "self-id"
 						}
 					],
@@ -1067,6 +1208,13 @@
 						{
 							"kind": "field",
 							"name": "messages"
+						},
+						{
+							"kind": "field",
+							"name": "moderator",
+							"type": {
+								"text": "boolean"
+							}
 						},
 						{
 							"kind": "field",
@@ -1241,6 +1389,110 @@
 		},
 		{
 			"kind": "javascript-module",
+			"path": "files/cloud-files.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiCloudFiles",
+					"tagName": "office-ui-cloud-files",
+					"customElement": true,
+					"description": "`<office-ui-cloud-files>`: browse and open files from one or more `CloudFileProvider`s (OneDrive, or a host's own). Properties: `providers`, `accept` (default all four Office kinds; a file of another kind is listed but `aria-disabled`, folders are always enterable), `labels` (partial, English defaults), `searchDelay` (ms, default 300) and `locale` (dates). Opening a file emits the bubbling, composed `office-cloud-file-open` event with `{ providerId, file }`; a failure shows inline and emits nothing. In-flight listings are aborted when the user navigates away.",
+					"attributes": [
+						{
+							"name": "locale"
+						},
+						{
+							"name": "search-delay"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "accept"
+						},
+						{
+							"kind": "field",
+							"name": "active"
+						},
+						{
+							"kind": "field",
+							"name": "entries"
+						},
+						{
+							"kind": "field",
+							"name": "error"
+						},
+						{
+							"kind": "field",
+							"name": "focusIndex"
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "loading"
+						},
+						{
+							"kind": "field",
+							"name": "locale",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "next"
+						},
+						{
+							"kind": "field",
+							"name": "opening"
+						},
+						{
+							"kind": "field",
+							"name": "path"
+						},
+						{
+							"kind": "field",
+							"name": "progress"
+						},
+						{
+							"kind": "field",
+							"name": "providers"
+						},
+						{
+							"kind": "field",
+							"name": "query"
+						},
+						{
+							"kind": "field",
+							"name": "searchDelay",
+							"type": {
+								"text": "number"
+							},
+							"attribute": "search-delay"
+						},
+						{
+							"kind": "field",
+							"name": "view"
+						}
+					],
+					"events": []
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-cloud-files",
+					"declaration": {
+						"name": "OfficeUiCloudFiles"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
 			"path": "form/color-custom.ts",
 			"declarations": [
 				{
@@ -1331,7 +1583,7 @@
 					"name": "OfficeUiColorGrid",
 					"tagName": "office-ui-color-grid",
 					"customElement": true,
-					"description": "`<office-ui-color-grid>`: Office's colour picker body. From the top: an optional `automatic-label` command (Automatic) and `none-label` command (No Fill, No Line), \"Theme Colors\" (ten columns, a base colour over its five lighter and darker variants, built from `themeColors`), \"Standard Colors\" (preceded by the `extraColors` row when a product has one, such as Visio's variant colours), \"Recent Colors\" when `recentColors` has any, and an optional `more-label` command (More Colors...). `value` (`#rrggbb`, `'none'` or `'automatic'`) marks the current choice. `themeNames` renames the ten columns and `variantLabel` names their variants (for a translated product). A product that computes its own swatches sets `palette` instead (one column per colour it can resolve, each with up to five variants; a missing one leaves its cell empty), and one that stores theme references marks the current swatch with `selectedTheme`. An empty `standardColors` leaves out Standard Colors. Choosing emits `office-color-pick` `{ color, source, label, theme?, index? }` (a theme swatch reports its column and variant, so a product can save a theme reference instead of the colour); the More Colors command emits `office-color-more`. Arrow keys move through the swatches and commands, Home and End jump to the ends; ArrowUp on the first row and ArrowDown on the last are left for a host menu. The element is only the grid: a product puts it in its own menu, popup or pane.",
+					"description": "`<office-ui-color-grid>`: Office's colour picker body. From the top: an optional `automatic-label` command (Automatic) and `none-label` command (No Fill, No Line), \"Theme Colors\" (ten columns, a base colour over its five lighter and darker variants, built from `themeColors`), \"Standard Colors\" (preceded by the `extraColors` row when a product has one, such as Visio's variant colours), \"Recent Colors\" when `recentColors` has any, and an optional `more-label` command (More Colors...). `value` (`#rrggbb`, `'none'` or `'automatic'`) marks the current choice. `themeNames` renames the ten columns and `variantLabel` names their variants (for a translated product). A product that computes its own swatches sets `palette` instead (one column per colour it can resolve, each with up to five variants; a missing one leaves its cell empty), and one that stores theme references marks the current swatch with `selectedTheme`. An empty `palette` leaves out Theme Colors and an empty `standardColors` leaves out Standard Colors, so a product can show Recent Colors on their own. `recentLabel` names the Recent Colors swatches (their hex by default). Choosing emits `office-color-pick` `{ color, source, label, theme?, index? }` (a theme swatch reports its column and variant, so a product can save a theme reference instead of the colour); the More Colors command emits `office-color-more`. Arrow keys move through the swatches and commands, Home and End jump to the ends; ArrowUp on the first row and ArrowDown on the last are left for a host menu. The element is only the grid: a product puts it in its own menu, popup or pane.",
 					"attributes": [
 						{
 							"name": "automatic-label"
@@ -1419,6 +1671,10 @@
 								"text": "string"
 							},
 							"attribute": "recent-heading"
+						},
+						{
+							"kind": "field",
+							"name": "recentLabel"
 						},
 						{
 							"kind": "field",
@@ -1696,6 +1952,64 @@
 					"name": "office-ui-comments-pane",
 					"declaration": {
 						"name": "OfficeUiCommentsPane"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
+			"path": "files/connected-services.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiConnectedServices",
+					"tagName": "office-ui-connected-services",
+					"customElement": true,
+					"description": "`<office-ui-connected-services>`: the Account page's list of linked storage, the same in every product and the Office app. One row per `CloudFileProvider` with its account (name and email) and Connect or Disconnect, which call the provider's own `signIn` and `signOut`: the host's sign-in, never one of the element's. A provider without `signOut` shows that its session is managed by the host. It follows `subscribe`, so signing in from File > Open updates it too. Properties: `providers`, `labels` (see `DEFAULT_CONNECTED_SERVICES_LABELS`), `heading-level`. Event: `office-connected-service-change` `{ providerId, connected }` after a change made here. Without providers it renders nothing.",
+					"attributes": [
+						{
+							"name": "heading-level"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "busy"
+						},
+						{
+							"kind": "field",
+							"name": "failed"
+						},
+						{
+							"kind": "field",
+							"name": "headingLevel",
+							"type": {
+								"text": "number"
+							},
+							"attribute": "heading-level"
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "providers"
+						}
+					],
+					"events": [
+						{
+							"name": "office-connected-service-change"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-connected-services",
+					"declaration": {
+						"name": "OfficeUiConnectedServices"
 					}
 				}
 			]
@@ -2109,6 +2423,78 @@
 		},
 		{
 			"kind": "javascript-module",
+			"path": "chrome/format-section.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiFormatSection",
+					"tagName": "office-ui-format-section",
+					"customElement": true,
+					"description": "`<office-ui-format-section label open mixed>`: one collapsible section of a Format pane (Fill, Outline, Size and position, ...). A native disclosure (`<details>`/`<summary>`) in the shadow root, so Enter and Space toggle it and assistive technology announces it as expanded or collapsed; the slotted body stays mounted while closed. `open` is owned by the host: a click on the heading flips it and emits `office-section-toggle` with `{ open }` (cancelable; a cancelled event leaves the section as it was). `mixed` shows a small badge (`mixed-label`, default \"Mixed\") for a multi-selection whose values differ. `focus()` focuses the heading. Parts: `heading`, `label`, `badge` and `body`.",
+					"attributes": [
+						{
+							"name": "label"
+						},
+						{
+							"name": "mixed"
+						},
+						{
+							"name": "mixed-label"
+						},
+						{
+							"name": "open"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "label",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "mixed",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "mixedLabel",
+							"type": {
+								"text": "string"
+							},
+							"attribute": "mixed-label"
+						},
+						{
+							"kind": "field",
+							"name": "open",
+							"type": {
+								"text": "boolean"
+							}
+						}
+					],
+					"events": [
+						{
+							"name": "office-section-toggle"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-format-section",
+					"declaration": {
+						"name": "OfficeUiFormatSection"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
 			"path": "ribbon/gallery.ts",
 			"declarations": [
 				{
@@ -2116,7 +2502,7 @@
 					"name": "OfficeUiGallery",
 					"tagName": "office-ui-gallery",
 					"customElement": true,
-					"description": "`<office-ui-gallery>`: Office's ribbon gallery (Shape Styles, Themes, Table Styles). Set `state` (`OfficeGalleryState`, translated). `mode=\"inline\"` shows a strip of tiles beside a More button; otherwise the trigger is a labelled dropdown (`chevron-only` keeps just the chevron, `icon` names its glyph). The popup opens below the trigger, keeps inside the window and closes on Escape, an outside press or a pick. `mode=\"panel\"` shows labelled sections directly for modal pickers, with arrow/Home/End selection and no dropdown trigger; `compact` keeps its tiles at their preview size without visible labels and lets arrow keys only move focus, for a pane whose pick applies at once. ArrowDown on the trigger opens it and focuses the first tile. Dropdown arrows/Home/End move focus across sections without applying a choice. A pick emits `office-gallery-pick` `{ gallery, itemId }`. Tiles render in the light DOM beside the host's children (Lit renders the template into the host itself) so products can query them (`data-gallery-item`); the rules join the host's root once. Static `pickEvent`, `triggerAttribute`, `popupAttribute`, `itemAttribute` and `compactAttribute` keep a product's published names; override `triggerIcon()` to draw a product glyph.",
+					"description": "`<office-ui-gallery>`: Office's ribbon gallery (Shape Styles, Themes, Table Styles). Set `state` (`OfficeGalleryState`, translated). `mode=\"inline\"` shows a strip of tiles beside a More button; otherwise the trigger is a labelled dropdown (`chevron-only` keeps just the chevron, `icon` names its glyph). The popup opens below the trigger, keeps inside the window and closes on Escape, an outside press or a pick. `mode=\"panel\"` shows labelled sections directly for modal pickers, with arrow/Home/End selection and no dropdown trigger; `compact` shows its tiles without visible labels, sharing the panel's width around previews at their size, and lets arrow keys only move focus, for a pane whose pick applies at once. ArrowDown on the trigger opens it and focuses the first tile. Dropdown arrows/Home/End move focus across sections without applying a choice. A pick emits `office-gallery-pick` `{ gallery, itemId }`. Tiles render in the light DOM beside the host's children (Lit renders the template into the host itself) so products can query them (`data-gallery-item`); the rules join the host's root once. Static `pickEvent`, `triggerAttribute`, `popupAttribute`, `itemAttribute` and `compactAttribute` keep a product's published names; override `triggerIcon()` to draw a product glyph.",
 					"attributes": [
 						{
 							"name": "chevron-only"
@@ -2440,6 +2826,193 @@
 					"name": "office-ui-menu-separator",
 					"declaration": {
 						"name": "OfficeUiMenuSeparator"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
+			"path": "dialog/message-dialog.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiMessageDialog",
+					"tagName": "office-ui-message-dialog",
+					"customElement": true,
+					"description": "`<office-ui-message-dialog>`: the in-app replacement for `alert`, `confirm` and `prompt`. Use the promise API (`confirmDialog`, `promptDialog`, `alertDialog`) instead of creating it by hand. It is modal and always open while connected: `role=\"alertdialog\"`, `aria-modal`, labelled by the heading and described by the message. Focus moves in (to the input of a prompt, the confirm button, or Cancel for the `danger` tone), is trapped with Tab and returns to the invoker when the element is removed. Escape and the backdrop cancel, Enter confirms (a focused button keeps its own meaning). It emits `office-message-dialog-result` once; removing it while open reports a cancel. All text arrives translated from the caller.",
+					"attributes": [
+						{
+							"name": "cancel-label"
+						},
+						{
+							"name": "confirm-label"
+						},
+						{
+							"name": "heading"
+						},
+						{
+							"name": "input-label"
+						},
+						{
+							"name": "kind"
+						},
+						{
+							"name": "message"
+						},
+						{
+							"name": "placeholder"
+						},
+						{
+							"name": "tone"
+						},
+						{
+							"name": "value"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "cancelLabel",
+							"type": {
+								"text": "string"
+							},
+							"attribute": "cancel-label"
+						},
+						{
+							"kind": "field",
+							"name": "confirmLabel",
+							"type": {
+								"text": "string"
+							},
+							"attribute": "confirm-label"
+						},
+						{
+							"kind": "field",
+							"name": "heading",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "inputLabel",
+							"type": {
+								"text": "string"
+							},
+							"attribute": "input-label"
+						},
+						{
+							"kind": "field",
+							"name": "kind",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "message",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "placeholder",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "tone",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "value",
+							"type": {
+								"text": "string"
+							}
+						}
+					],
+					"events": [
+						{
+							"name": "office-message-dialog-result"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-message-dialog",
+					"declaration": {
+						"name": "OfficeUiMessageDialog"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
+			"path": "files/open-places.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiOpenPlaces",
+					"tagName": "office-ui-open-places",
+					"customElement": true,
+					"description": "`<office-ui-open-places>`: the places of File > Open, the same in every product. A tab per place: \"This device\" shows the element's light-DOM children (the product's Browse button and recent list, unchanged), and each `CloudFileProvider` shows `<office-ui-cloud-files>` for it. Without providers it shows only its children, with no tabs. Properties: `providers`, `accept`, `labels` (`thisDevice`, `places` and every cloud browser label), `locale`, `selected` (a place id: `device` or a provider id). Choosing a tab emits `office-open-place-change` `{ place }`; opening a file bubbles the browser's `office-cloud-file-open` `{ providerId, file }` unchanged.",
+					"attributes": [
+						{
+							"name": "locale"
+						},
+						{
+							"name": "selected"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "accept"
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "locale",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "providers"
+						},
+						{
+							"kind": "field",
+							"name": "selected",
+							"type": {
+								"text": "string"
+							}
+						}
+					],
+					"events": [
+						{
+							"name": "office-open-place-change"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-open-places",
+					"declaration": {
+						"name": "OfficeUiOpenPlaces"
 					}
 				}
 			]
@@ -2874,6 +3447,40 @@
 		},
 		{
 			"kind": "javascript-module",
+			"path": "dialog/progress-dialog.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiProgressDialog",
+					"tagName": "office-ui-progress-dialog",
+					"customElement": true,
+					"description": "`<office-ui-progress-dialog>`: the modal a long job (an export, a package, a save) shows while it runs: a heading, a determinate `role=\"progressbar\"`, a status line and Cancel. Set `state` (text arrives translated). It is deliberately not dismissable: Escape and the backdrop do nothing, so the job ends by finishing, failing or Cancel, which emits `office-progress-cancel` for the host to abort and close it. Focus moves to Cancel when it opens, stays inside while it is open and returns to where it was when it closes. The event name and test id prefix are static fields a product subclass may override.",
+					"attributes": [],
+					"members": [
+						{
+							"kind": "field",
+							"name": "state"
+						}
+					],
+					"events": [
+						{
+							"name": "office-progress-cancel"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-progress-dialog",
+					"declaration": {
+						"name": "OfficeUiProgressDialog"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
 			"path": "form/radio.ts",
 			"declarations": [
 				{
@@ -2982,7 +3589,7 @@
 					"name": "OfficeUiRibbon",
 					"tagName": "office-ui-ribbon",
 					"customElement": true,
-					"description": "`<office-ui-ribbon>`: the Office tab row (Quick Access Toolbar, File, tabs, search) over the tab panels. Panels are light-DOM children carrying `data-ribbon-tab` (id), `data-label` and optionally `data-tab-keytip`; the element builds the tabs from them, keeps exactly one panel visible and moves between tabs with the arrow keys, Home and End. Slots: `quick-access`, `search`, `end` (after the tabs) and `actions` (pushed to the right end of the tab row, before the collapse button: Office's editing mode, Comments and Share). Attributes: `selected`, `label` (tab list name), `file-label` (default \"File\"), `no-file`, `file-expanded`, `file-keytip`. A panel with `data-tab-hidden` keeps its content but has no tab (a contextual tab, or one a customisation removed); if it was selected, the first remaining tab takes over. `data-contextual` on a panel tints its tab (`--office-ribbon-contextual`), for tools that apply to the selection, such as a table's. Events: `office-ribbon-select` `{ tab }` (cancelable) and `office-ribbon-file` when File is activated. `collapsible` adds Office's collapse button: `collapsed` hides the panels, a click on a tab then shows its panel over the content (`peek`) until Escape, a command or a click elsewhere. Ctrl+F1 and a double click on a tab toggle it. `collapse-label` names the button. Event: `office-ribbon-collapse` `{ collapsed }`.",
+					"description": "`<office-ui-ribbon>`: the Office tab row (Quick Access Toolbar, File, tabs, search) over the tab panels. Panels are light-DOM children carrying `data-ribbon-tab` (id), `data-label` and optionally `data-tab-keytip`; the element builds the tabs from them, keeps exactly one panel visible and moves between tabs with the arrow keys, Home and End. Slots: `quick-access`, `search`, `end` (after the tabs) and `actions` (pushed to the right end of the tab row, before the collapse button: Office's editing mode, Comments and Share). Attributes: `selected`, `label` (tab list name), `file-label` (default \"File\"), `no-file`, `file-expanded`, `file-keytip`. A panel with `data-tab-hidden` keeps its content but has no tab (a contextual tab, or one a customisation removed); if it was selected, the first remaining tab takes over. `data-contextual` on a panel tints its tab (`--office-ribbon-contextual`), for tools that apply to the selection, such as a table's. Events: `office-ribbon-select` `{ tab }` (cancelable) and `office-ribbon-file` when File is activated. `collapsible` adds Office's collapse button: `collapsed` hides the panels, a click on a tab then shows its panel over the content (`peek`) until Escape, a command or a click elsewhere. Ctrl+F1 and a double click on a tab toggle it. `collapse-label` names the button. Event: `office-ribbon-collapse` `{ collapsed }`. `items` (a property) switches the element to a tab row only: the tabs come from the list, in its order, and the element leaves its children alone (it neither hides panels nor reads tabs off them). `selected` is then the selected item's id, or empty when it names none, and a click on the selected tab fires `office-ribbon-select` too.",
 					"attributes": [
 						{
 							"name": "collapse-label"
@@ -3061,6 +3668,10 @@
 								"text": "string"
 							},
 							"attribute": "file-label"
+						},
+						{
+							"kind": "field",
+							"name": "items"
 						},
 						{
 							"kind": "field",
@@ -3756,6 +4367,137 @@
 		},
 		{
 			"kind": "javascript-module",
+			"path": "dialog/share-dialog.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiShareDialog",
+					"tagName": "office-ui-share-dialog",
+					"customElement": true,
+					"description": "`<office-ui-share-dialog>`: the Share dialog of every product. Not sharing, it offers two tabs: start a session (session name, your name, an optional server) or join one (an invitation link or a session name). Sharing, it shows the connection, the invitation link with Copy, the session's server and the people in it, and Stop sharing. The form logic is `ooxml-core/collab`'s share helpers; the session belongs to the host editor, which sets `state` from its `collaborationState` after every `collaboration-change`. Properties: `open`, `state`, `defaults` (`{ roomId, userName, serverUrl }`; a missing room gets a fresh `room-prefix` name), `invitation` (opens on the join tab with it filled in), `location` (the page invitation links point at; `window.location` by default), `labels` (translated, see `shareDialogLabels`), `error` (shown under the form, e.g. a failed start), `note` (what the product shares) and `no-server` (hides the server field: the host decides it). Events: `office-share-start` `{ options }`, `office-share-stop` and `office-share-close`.",
+					"attributes": [
+						{
+							"name": "error"
+						},
+						{
+							"name": "invitation"
+						},
+						{
+							"name": "no-server"
+						},
+						{
+							"name": "note"
+						},
+						{
+							"name": "open"
+						},
+						{
+							"name": "room-prefix"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "copied"
+						},
+						{
+							"kind": "field",
+							"name": "defaults"
+						},
+						{
+							"kind": "field",
+							"name": "error",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "fields"
+						},
+						{
+							"kind": "field",
+							"name": "invitation",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "joinText"
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "location"
+						},
+						{
+							"kind": "field",
+							"name": "noServer",
+							"type": {
+								"text": "boolean"
+							},
+							"attribute": "no-server"
+						},
+						{
+							"kind": "field",
+							"name": "note",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "open",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "roomPrefix",
+							"type": {
+								"text": "string"
+							},
+							"attribute": "room-prefix"
+						},
+						{
+							"kind": "field",
+							"name": "state"
+						},
+						{
+							"kind": "field",
+							"name": "view"
+						}
+					],
+					"events": [
+						{
+							"name": "office-share-close"
+						},
+						{
+							"name": "office-share-start"
+						},
+						{
+							"name": "office-share-stop"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-share-dialog",
+					"declaration": {
+						"name": "OfficeUiShareDialog"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
 			"path": "smartart/smartart.ts",
 			"declarations": [
 				{
@@ -3783,6 +4525,10 @@
 						},
 						{
 							"kind": "field",
+							"name": "pictureResolver"
+						},
+						{
+							"kind": "field",
 							"name": "schemeColors"
 						},
 						{
@@ -3803,6 +4549,188 @@
 					"name": "office-ui-smartart",
 					"declaration": {
 						"name": "OfficeUiSmartArt"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
+			"path": "smartart/smartart-picker.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiSmartArtPicker",
+					"tagName": "office-ui-smartart-picker",
+					"customElement": true,
+					"description": "`<office-ui-smartart-picker>`: the body of every product's Insert SmartArt dialog: a category list, a gallery of layout tiles (`role=\"listbox\"`), and a pane with the chosen layout's large preview, name and its category's description. The product owns the dialog around it, the OK and Cancel buttons and the diagram model. The host sets `categories`, `layouts` and `labels` (translated), and optionally `drawPreview` (a live render; without it each tile draws its layout family in `accent`). `items-editor` adds a text box of node texts, one per line, seeded from the chosen layout's `defaultItems`. Read and write the choice with `value` and the shown category with `category`; choosing a category selects its first layout. Emits `office-smartart-change` with the value on every choice or edit, and `office-smartart-activate` with the value when a tile is double-clicked or Enter is pressed on it (the host inserts, as OK would).",
+					"attributes": [
+						{
+							"name": "accent"
+						},
+						{
+							"name": "items-editor"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "accent",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "categories"
+						},
+						{
+							"kind": "field",
+							"name": "category"
+						},
+						{
+							"kind": "field",
+							"name": "drawPreview"
+						},
+						{
+							"kind": "field",
+							"name": "itemsEditor",
+							"type": {
+								"text": "boolean"
+							},
+							"attribute": "items-editor"
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "layouts"
+						},
+						{
+							"kind": "field",
+							"name": "value"
+						}
+					],
+					"events": [
+						{
+							"name": "office-smartart-activate"
+						},
+						{
+							"name": "office-smartart-change"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-smartart-picker",
+					"declaration": {
+						"name": "OfficeUiSmartArtPicker"
+					}
+				}
+			]
+		},
+		{
+			"kind": "javascript-module",
+			"path": "smartart/smartart-text-pane.ts",
+			"declarations": [
+				{
+					"kind": "class",
+					"name": "OfficeUiSmartArtTextPane",
+					"tagName": "office-ui-smartart-text-pane",
+					"customElement": true,
+					"description": "`<office-ui-smartart-text-pane>`: the SmartArt text pane every product shares. It shows the diagram's nodes as an outline of text lines indented by level and turns keys into requests the host applies to its diagram model (the pane never edits the model itself): - typing fires `office-smartart-text-change` (`{ id, text }`); - Enter fires `office-smartart-node-add` (add a node after this one, same level); - Tab and Shift+Tab fire `office-smartart-node-demote` and `office-smartart-node-promote`; - Backspace or Delete in an empty line fires `office-smartart-node-remove` (unless the line's `canRemove` is false); - focusing a line fires `office-smartart-node-select`; Up and Down move between lines. The node events carry `{ id }`. The host sets `nodes` again after applying a request and `selected` to the node to focus (the new node after Enter, the previous one after Backspace). `closable` adds a close button that fires `office-smartart-text-pane-close`. Strings come translated through `labels`. `tools` adds PowerPoint's inspector tools: a header button that fires `office-smartart-node-append`, and per line move up and down (`office-smartart-node-move`, `{ id, direction }`), add sub-item (`office-smartart-node-add-child`), remove (`office-smartart-node-remove`) and a style row (fill and text colour, bold, italic) that fires `office-smartart-node-style` (`{ id, style }`). `disabled` makes the pane read-only, `notes` adds hint lines under the outline and `appendDisabled` disables the header button.",
+					"attributes": [
+						{
+							"name": "append-disabled"
+						},
+						{
+							"name": "closable"
+						},
+						{
+							"name": "disabled"
+						},
+						{
+							"name": "selected"
+						},
+						{
+							"name": "tools"
+						}
+					],
+					"members": [
+						{
+							"kind": "field",
+							"name": "appendDisabled",
+							"type": {
+								"text": "boolean"
+							},
+							"attribute": "append-disabled"
+						},
+						{
+							"kind": "field",
+							"name": "closable",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "disabled",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "labels"
+						},
+						{
+							"kind": "field",
+							"name": "nodes"
+						},
+						{
+							"kind": "field",
+							"name": "notes"
+						},
+						{
+							"kind": "field",
+							"name": "selected",
+							"type": {
+								"text": "string"
+							}
+						},
+						{
+							"kind": "field",
+							"name": "tools",
+							"type": {
+								"text": "boolean"
+							}
+						}
+					],
+					"events": [
+						{
+							"name": "office-smartart-node-append"
+						},
+						{
+							"name": "office-smartart-node-select"
+						},
+						{
+							"name": "office-smartart-text-change"
+						},
+						{
+							"name": "office-smartart-text-pane-close"
+						}
+					]
+				}
+			],
+			"exports": [
+				{
+					"kind": "custom-element-definition",
+					"name": "office-ui-smartart-text-pane",
+					"declaration": {
+						"name": "OfficeUiSmartArtTextPane"
 					}
 				}
 			]
@@ -4042,7 +4970,7 @@
 					"name": "OfficeUiTabStrip",
 					"tagName": "office-ui-tab-strip",
 					"customElement": true,
-					"description": "Bottom document tabs (Visio pages, Excel sheets). Set `tabs` (`OfficeTab[]`) and `selected` (a tab id). Labels are inserted as text. The previous/next buttons and arrow, Home and End keys move the selection; the tab list uses a roving tabindex. User selection emits `office-tab-select` `{ id }` (cancelable); setting properties never emits. Attributes: `label` (tab list name, default \"Tabs\"), `previous-label` and `next-label` (step button names, default \"Previous\" and \"Next\"), `disabled`, and `add-label` to show an add button after the tabs (Insert Page, New Sheet) that emits `office-command` `{ command: 'tab-add' }`; `add-disabled` and `add-title` disable and explain it. The `after-tabs` slot sits between the tabs and the add button (Visio's All pages list), and the `plain` attribute draws the selected tab as bold accent text without a box, as Visio does.",
+					"description": "Bottom document tabs (Visio pages, Excel sheets). Set `tabs` (`OfficeTab[]`) and `selected` (a tab id). Labels are inserted as text. The previous/next buttons and arrow, Home and End keys move the selection; the tab list uses a roving tabindex. User selection emits `office-tab-select` `{ id }` (cancelable); setting properties never emits. Attributes: `label` (tab list name, default \"Tabs\"), `previous-label` and `next-label` (step button names, default \"Previous\" and \"Next\"), `disabled`, and `add-label` to show an add button after the tabs (Insert Page, New Sheet) that emits `office-command` `{ command: 'tab-add' }`; `add-disabled` and `add-title` disable and explain it. The `after-tabs` slot sits between the tabs and the add button (Visio's All pages list), and the `reorderable` attribute lets a pointer (mouse, pen or touch) drag a tab along the strip: past a small threshold an insertion marker shows the gap, Escape cancels, and releasing emits `office-tab-reorder` `{ id, index }` (the tab's new index) without moving anything itself; the host reorders its model and sets `tabs` again. A tab with a `group` only drops within that group. The `plain` attribute draws the selected tab as bold accent text without a box, as Visio does.",
 					"attributes": [
 						{
 							"name": "add-disabled"
@@ -4064,6 +4992,9 @@
 						},
 						{
 							"name": "previous-label"
+						},
+						{
+							"name": "reorderable"
 						},
 						{
 							"name": "selected"
@@ -4126,6 +5057,13 @@
 						},
 						{
 							"kind": "field",
+							"name": "reorderable",
+							"type": {
+								"text": "boolean"
+							}
+						},
+						{
+							"kind": "field",
 							"name": "selected",
 							"type": {
 								"text": "string"
@@ -4139,6 +5077,9 @@
 					"events": [
 						{
 							"name": "office-command"
+						},
+						{
+							"name": "office-tab-reorder"
 						},
 						{
 							"name": "office-tab-select"

@@ -1,16 +1,19 @@
 import {
+	abuttingEdgeBleedStyle,
 	buildParagraphs,
 	elementHitTargetStyle,
 	getContainerStyle,
 	getOverflowSegments,
 	getBackgroundAnimationState,
 	getBackgroundAnimationLayers,
+	highlightFindMatches,
 	placeholderPromptDescriptor,
 } from '../../index';
 
 import { composeTransforms, createEl } from '../dom';
 import { getShapeFillStrokeStyle, getTextBlockStyle } from '../element-styles';
 import type { ElementRenderer } from '../types';
+import { markAbuttingEdgeBleed } from './edge-bleed-restore';
 import { renderEquations } from './equation';
 import { renderExtrusionOverlay } from './extrusion-overlay';
 import {
@@ -19,6 +22,7 @@ import {
 	renderShapeFillOverlay,
 	renderShapeFilterDefs,
 	renderReflectionOverlay,
+	renderShapeFillLayer,
 	renderShapeSubpathFillOverlay,
 } from './shape-filter-defs';
 import { renderTextBlock } from './text-block';
@@ -47,6 +51,11 @@ export const renderTextShapeElement: ElementRenderer = (element, zIndex, context
 	// The shape style may carry a 3D transform; compose it with the container's
 	// rotation/flip transform instead of letting the merge clobber it.
 	const merged = { ...container, ...shape };
+	// Close the seam with an abutting opaque box above (issue #141): empty for
+	// nearly every element, so the box style is untouched.
+	const bleedPatch = abuttingEdgeBleedStyle(element, context.edgeBleeds?.get(element.id), merged);
+	const beforeBleed = { ...merged };
+	Object.assign(merged, bleedPatch);
 	const transform = composeTransforms(container['transform'], shape['transform']);
 	if (transform !== undefined) {
 		merged['transform'] = transform;
@@ -55,6 +64,7 @@ export const renderTextShapeElement: ElementRenderer = (element, zIndex, context
 	const layers = getBackgroundAnimationLayers(element, merged, background);
 	const el = createEl(context.document, 'div', 'pptxv-element pptxv-shape', layers.box);
 	el.dataset.elementId = element.id;
+	markAbuttingEdgeBleed(el, bleedPatch, beforeBleed);
 	const paint = layers.paint ? createEl(context.document, 'div', undefined, layers.paint) : el;
 	if (paint !== el) {
 		paint.dataset.animId = layers.targetId;
@@ -80,6 +90,10 @@ export const renderTextShapeElement: ElementRenderer = (element, zIndex, context
 	// Per-sub-path fill overlay: a multi-sub-path preset or custom geometry whose
 	// sub-paths cannot share one CSS background-color. Painted first (bottom-most)
 	// since it substitutes for the container's own (now suppressed) fill.
+	const fillLayer = renderShapeFillLayer(context.document, element);
+	if (fillLayer) {
+		paint.appendChild(fillLayer);
+	}
 	const subpathFill = renderShapeSubpathFillOverlay(context.document, element);
 	if (subpathFill) {
 		paint.appendChild(subpathFill);
@@ -128,7 +142,10 @@ export const renderTextShapeElement: ElementRenderer = (element, zIndex, context
 		// siblings on the slide being rendered. Returns undefined (and costs one
 		// field check) for the overwhelmingly common non-chain element.
 		const linkedSegments = getOverflowSegments(element, context.slide?.elements);
-		const paragraphs = buildParagraphs(element, context.fieldContext, linkedSegments);
+		const paragraphs = highlightFindMatches(
+			buildParagraphs(element, context.fieldContext, linkedSegments),
+			context.findHighlights?.get(element.id),
+		);
 		const hasText = paragraphs.some((p) => p.runs.length > 0 || p.bulletMarker !== undefined);
 		if (hasText) {
 			el.appendChild(

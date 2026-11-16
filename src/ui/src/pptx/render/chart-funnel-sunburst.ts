@@ -1,3 +1,4 @@
+import { computeFunnelGeometry } from 'ooxml-core/chart';
 /**
  * View-model builder for the funnel chart kind, plus the barrel that
  * re-exports its sunburst sibling (`chart-sunburst-view.ts`) so every
@@ -27,7 +28,11 @@
 import type { PptxChartData, PptxElement } from 'ooxml-core/pptx';
 
 import { resolveChartTitleText } from './chart-auto-title';
-import { dataLabelFontOverride, resolveDataLabelTextStyle } from './chart-data-label-text';
+import {
+	buildDataLabelText,
+	dataLabelFontOverride,
+	resolveDataLabelTextStyle,
+} from './chart-data-label-text';
 import { DEFAULT_CHART_TEXT_PX } from './chart-font';
 import type { ChartViewModel, SvgPath, SvgPrimitive, SvgText } from './chart-view-model';
 import {
@@ -106,23 +111,33 @@ export function computeFunnelSegments(
 	categories: ReadonlyArray<string>,
 	colorPalette: readonly string[] | undefined,
 	seriesColorOverride?: string,
+	gapWidth?: number,
 ): FunnelSegment[] {
 	const count = values.length;
 	if (count === 0) {
 		return [];
 	}
-	const maxVal = Math.max(...values.map((v) => Math.abs(v)), 1);
-	const segH = plotHeight / Math.max(count, 1);
-	const centerX = plotLeft + plotWidth / 2;
 	// An explicit series colour (c:ser/cx:series spPr solidFill) wins over the
 	// palette default; either way every bar takes the SAME single colour.
 	const fill = seriesColorOverride ?? paletteColor(0, colorPalette);
 	const out: FunnelSegment[] = [];
 
-	for (let i = 0; i < count; i++) {
+	for (const bar of computeFunnelGeometry(
+		values,
+		{
+			x: plotLeft,
+			y: plotTop,
+			width: plotWidth,
+			height: plotHeight,
+		},
+		gapWidth,
+	)) {
+		const i = bar.index;
 		const val = values[i];
-		const w = (Math.abs(val) / maxVal) * plotWidth;
-		const y = plotTop + i * segH;
+		const w = bar.width,
+			y = bar.y,
+			segH = bar.height,
+			centerX = bar.center;
 		const labelY = y + segH / 2 + 4;
 
 		const d = [
@@ -152,7 +167,7 @@ export function computeFunnelSegments(
 
 /**
  * Build the view-model for a funnel chart: descending centred bars from
- * series[0], each labelled with its value; the category names form a
+ * series[0], with value labels only when requested; category names form a
  * left-side axis instead of the inline label (COM-verified: charts-com.pptx
  * slide 27). Mirrors `renderFunnelChart` (React) / `FunnelChart.vue`.
  */
@@ -172,6 +187,7 @@ export function buildFunnelViewModel(
 		categoryLabels,
 		chartData.colorPalette,
 		chartData.series[0]?.color,
+		chartData.funnelGapWidth,
 	);
 
 	const primitives: SvgPrimitive[] = [];
@@ -188,11 +204,25 @@ export function buildFunnelViewModel(
 	}
 	const funnelSeries = chartData.series[0];
 	segments.forEach((seg, i) => {
+		if (
+			!funnelSeries ||
+			(!funnelSeries.dataLabelOptions &&
+				!chartData.style?.dataLabels &&
+				!funnelSeries.dataLabels?.some((label) => label.idx === i))
+		)
+			return;
+		const label = buildDataLabelText({
+			chartData,
+			series: funnelSeries,
+			pointIndex: i,
+			value: values[i],
+		});
+		if (!label) return;
 		dataLabels.push({
 			kind: 'text',
 			x: seg.labelX,
 			y: seg.labelY,
-			text: seg.labelText,
+			text: label.text,
 			fontSize: seg.fontSize,
 			fill: '#ffffff',
 			textAnchor: 'middle',
@@ -224,7 +254,7 @@ export function buildFunnelViewModel(
 		categoryLabels: categoryAxisLabels,
 		primitives,
 		dataLabels,
-		// Funnel does not draw a separate legend swatch list (labels are inline).
+		// The PPTX host keeps its existing funnel legend policy.
 		legend: [],
 		legendX: layout.svgWidth / 2,
 		legendY: layout.svgHeight - 8,

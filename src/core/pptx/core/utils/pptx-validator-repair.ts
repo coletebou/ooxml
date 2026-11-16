@@ -48,11 +48,13 @@ function rebuildContentTypes(zip: JSZip): string {
 	const overrides: Array<{ partName: string; contentType: string }> = [];
 
 	// Always include rels and xml defaults
-	defaults.set('rels', EXTENSION_CONTENT_TYPES.rels);
-	defaults.set('xml', EXTENSION_CONTENT_TYPES.xml);
+	for (const ext of ['rels', 'xml']) {
+		const contentType = EXTENSION_CONTENT_TYPES[ext];
+		if (contentType) defaults.set(ext, contentType);
+	}
 
 	const zipPaths = Object.keys(zip.files).filter(
-		(p) => !zip.files[p].dir && p !== '[Content_Types].xml',
+		(p) => !zip.files[p]?.dir && p !== '[Content_Types].xml',
 	);
 
 	for (const zipPath of zipPaths) {
@@ -358,7 +360,7 @@ export async function repairPptx(buffer: ArrayBuffer): Promise<RepairResult> {
 	await addMissingRelationships(zip, parser, repairs);
 
 	// 4. Fix malformed XML in slides
-	const xmlPaths = Object.keys(zip.files).filter((p) => p.endsWith('.xml') && !zip.files[p].dir);
+	const xmlPaths = Object.keys(zip.files).filter((p) => p.endsWith('.xml') && !zip.files[p]?.dir);
 	for (const xmlPath of xmlPaths) {
 		const xml = await readZipText(zip, xmlPath);
 		if (!xml) {

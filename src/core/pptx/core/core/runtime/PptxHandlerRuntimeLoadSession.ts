@@ -6,8 +6,15 @@ import type { PptxElement, PptxSection, PptxCustomXmlPart } from '../../types';
 import { oleBytesToDataUrl, unwrapOleEmbedding } from '../../utils/ole-embedded-extract';
 import { mimeTypeForOleFile } from '../../utils/ole-utils';
 import { detectDigitalSignatures } from '../../utils/signature-detection';
+import {
+	assertPptxSlideCountWithinLimits,
+	countPptxShapesWithinLimits,
+	createPptxZipBombError,
+	DEFAULT_PPTX_LOAD_LIMITS,
+	resolvePptxLoadLimits,
+} from '../load-limits';
+import type { PptxLoadLimits } from '../load-limits';
 import type { PptxHandlerLoadOptions } from '../types';
-import { DEFAULT_MAX_UNCOMPRESSED_BYTES, MAX_ZIP_ENTRY_COUNT, ZipBombError } from '../types';
 import { rememberSlideBackgroundOrigin } from './authored-slide-background';
 import { enrichBulletPictureImages } from './bullet-picture-image-enrichment';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeEmbeddedFonts';
@@ -21,6 +28,12 @@ import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRunti
 const MAX_OLE_EMBEDDING_BYTES = 25 * 1024 * 1024;
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
+	/** The limits of the load in progress (see `PptxHandlerLoadOptions.limits`). */
+	protected loadLimits: Required<PptxLoadLimits> = { ...DEFAULT_PPTX_LOAD_LIMITS };
+
+	/** Slide elements parsed so far by the load in progress, for `maxShapes`. */
+	protected loadedShapeCount = 0;
+
 	protected isZipContainer(data: ArrayBuffer): boolean {
 		const bytes = new Uint8Array(data);
 		if (bytes.byteLength < 4) {
@@ -40,7 +53,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		data: ArrayBuffer,
 		options: PptxHandlerLoadOptions,
 	): Promise<void> {
+		// Resolved first: an invalid limit throws before this handler changes.
+		const limits = resolvePptxLoadLimits(options);
 		this.eagerDecodeImages = options.eagerDecodeImages ?? false;
+		this.eagerDecodeEmbeddedFonts = options.eagerDecodeEmbeddedFonts === true;
 		this.allowExternalImages = options.allowExternalImages === true;
 		if (data.byteLength < 4) {
 			throw new Error('Invalid PPTX binary: file is empty or truncated.');
@@ -63,10 +79,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			);
 		}
 
-		const maxBytes =
-			typeof options.maxUncompressedBytes === 'number' && options.maxUncompressedBytes > 0
-				? options.maxUncompressedBytes
-				: DEFAULT_MAX_UNCOMPRESSED_BYTES;
+		const maxBytes = limits.maxUncompressedBytes;
 		let loaded: JSZip;
 		try {
 			loaded = await JSZip.loadAsync(data);
@@ -78,11 +91,13 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// is streamed and capped by the bytes it actually inflates to (opc/zip-limits).
 		this.zip = guardZip(loaded, {
 			label: 'PPTX',
-			maxEntries: MAX_ZIP_ENTRY_COUNT,
+			maxEntries: limits.maxEntries,
 			maxEntryBytes: maxBytes,
 			maxTotalBytes: maxBytes,
-			createError: (message, details) => new ZipBombError(message, details),
+			createError: createPptxZipBombError,
 		});
+		this.loadLimits = limits;
+		this.loadedShapeCount = 0;
 		try {
 			this.documentPropertiesUpdater = this.dependencyFactory.createDocumentPropertiesUpdater(
 				this.zip,
@@ -215,13 +230,14 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				continue;
 			}
 
-			const itemId = match[1];
+			// The item-number group is required, so it is a string once the pattern matched.
+			const itemId = match[1] ?? '';
 			const file = this.zip.file(entry);
 			if (!file) {
 				continue;
 			}
 
-			const data = await file.async('string');
+			const data = (await this.readPartText(entry)) ?? '';
 
 			// Try to read associated itemProps file
 			const propsPath = `customXml/itemProps${itemId}.xml`;
@@ -230,7 +246,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			let schemaUri: string | undefined;
 
 			if (propsFile) {
-				properties = await propsFile.async('string');
+				properties = (await this.readPartText(propsPath)) ?? '';
 				// Extract schema URI from ds:schemaRef if present
 				try {
 					const propsData = this.parser.parse(properties) as XmlObject;
@@ -258,10 +274,16 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const relsFile = this.zip.file(relsPath);
 			let rels: string | undefined;
 			if (relsFile) {
-				rels = await relsFile.async('string');
+				rels = await this.readPartText(relsPath);
 			}
 
-			parts.push({ id: itemId, data, schemaUri, properties, rels });
+			parts.push({
+				id: itemId,
+				data,
+				...(schemaUri !== undefined && { schemaUri }),
+				...(properties !== undefined && { properties }),
+				...(rels !== undefined && { rels }),
+			});
 		}
 
 		this.customXmlParts = parts;
@@ -275,7 +297,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		sectionBySlideId: Map<string, { sectionId: string; sectionName: string }>;
 		orderedSections: PptxSection[];
 	}> {
-		const presentationXml = await this.zip.file('ppt/presentation.xml')?.async('string');
+		const presentationXml = await this.readPartText('ppt/presentation.xml');
 		if (!presentationXml) {
 			throw new Error('Invalid PPTX: presentation.xml not found');
 		}
@@ -288,6 +310,17 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// this.parser.parse() calls auto-normalize Strict namespace URIs to
 		// their Transitional equivalents (covering all 50+ call sites).
 		this.detectAndSetStrictConformance(this.presentationData!);
+
+		// `maxSlides`: counted from p:sldIdLst before themes, masters or any slide are parsed.
+		const slideIds = (
+			(this.presentationData?.['p:presentation'] as XmlObject | undefined)?.['p:sldIdLst'] as
+				| XmlObject
+				| undefined
+		)?.['p:sldId'];
+		assertPptxSlideCountWithinLimits(
+			Array.isArray(slideIds) ? slideIds.length : slideIds ? 1 : 0,
+			this.loadLimits,
+		);
 
 		await this.loadThemeData();
 		this.parsePresentationDefaultTextStyle();
@@ -412,6 +445,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	): Promise<void> {
 		await enrichBulletPictureImages(elements, slidePath, {
 			slideRelsMap: this.slideRelsMap,
+			allowExternalImages: this.allowExternalImages === true,
 			resolveImagePath: (path, target) => this.resolveImagePath(path, target),
 			getImageData: (imagePath) => this.getImageData(imagePath),
 		});
@@ -445,7 +479,17 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			loadThemeOverride: (partBasePath) => this.loadThemeOverride(partBasePath),
 			applyThemeOverrideState: (override) => this.applyThemeOverrideState(override),
 			getLayoutElements: (slidePath) => this.getLayoutElements(slidePath),
-			parseSlide: (slideXml, slidePath) => this.parseSlide(slideXml, slidePath),
+			// `maxShapes`: each slide's own elements are counted as soon as they are
+			// parsed, before that slide's media is resolved and before the next slide.
+			parseSlide: async (slideXml, slidePath) => {
+				const elements = await this.parseSlide(slideXml, slidePath);
+				this.loadedShapeCount = countPptxShapesWithinLimits(
+					this.loadedShapeCount,
+					elements,
+					this.loadLimits,
+				);
+				return elements;
+			},
 			extractMediaTimingMap: (slideXml, slidePath) =>
 				this.extractMediaTimingMap(slideXml, slidePath),
 			enrichMediaElementsWithTiming: (elements, timingMap) =>

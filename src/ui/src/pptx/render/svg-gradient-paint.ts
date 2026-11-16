@@ -18,8 +18,10 @@
  * Reference: ECMA-376 Part 1, §20.1.8.35 (gradFill) and §20.1.8.49 (path).
  */
 import type { ShapeStyle } from 'ooxml-core/pptx';
+import { officeTwoStopGradientStops } from 'ooxml-core/color';
 
 import { computeGradientCenter, sanitizeGradientStops } from './fill-style';
+import { buildFocalCircleGradientSvg, buildTrueAngleLinearGradientSvg } from './gradient-svg-image';
 import type { SvgRectPathGradientDef } from './svg-gradient-rect-path';
 import { buildRectPathGradientDef, rectPathGradientMarkup } from './svg-gradient-rect-path';
 import type { SvgPatternDef } from './svg-stroke-pattern-paint';
@@ -85,7 +87,11 @@ export function svgGradientId(elementId: string, suffix = 'grad'): string {
 
 /** Convert sanitized 0-100 gradient stops into SVG 0-1 offsets. */
 function toSvgStops(stops: ShapeStyle['fillGradientStops']): SvgGradientStopDef[] {
-	return sanitizeGradientStops(stops).map((stop) => ({
+	const sanitized = sanitizeGradientStops(stops);
+	// Office paints a two-stop 0/100 pair on its sigma curve in gamma 2.2 light.
+	// SVG interpolates straight (not premultiplied), so only that re-sampling is
+	// needed here, not the straight-alpha one.
+	return (officeTwoStopGradientStops(sanitized) ?? sanitized).map((stop) => ({
 		offset: round4(stop.position / 100),
 		color: stop.color,
 		...(typeof stop.opacity === 'number' ? { opacity: round4(stop.opacity) } : {}),
@@ -131,6 +137,15 @@ interface GradientSource {
 	angle: number | undefined;
 	fillToRect?: ShapeStyle['fillGradientFillToRect'];
 	focalPoint?: ShapeStyle['fillGradientFocalPoint'];
+	/** `a:lin/@scaled`: `false` makes the angle a true angle on a non-square box. */
+	scaled?: boolean | undefined;
+	/** The shape's size in px; with it a freeform gets true circles and true angles. */
+	bounds?: { width: number; height: number } | undefined;
+}
+
+/** A stretched image paint server for a field no native SVG gradient draws. */
+function imageDef(id: string, svg: string): SvgRectPathGradientDef {
+	return { kind: 'rectPath', id, href: `data:image/svg+xml,${encodeURIComponent(svg)}` };
 }
 
 /** Shared builder behind the fill and stroke entry points. */
@@ -152,6 +167,19 @@ function buildFromSource(source: GradientSource, id: string): SvgGradientDef | u
 		const { cx, cy } = computeGradientCenter(source.fillToRect, source.focalPoint);
 		const fx = cx / 100;
 		const fy = cy / 100;
+		// PowerPoint paints `circle` (and, on a freeform, `shape`) as a true
+		// circle to the farthest corner, not the ellipse a bounding-box radial
+		// gradient makes of a non-square box. With the size known, draw it as an
+		// image in the box's own pixels (an off-centre focus included).
+		if (source.bounds) {
+			const { width, height } = source.bounds;
+			const imageStops = stops.map((stop) => ({
+				color: stop.color,
+				position: stop.offset * 100,
+				...(typeof stop.opacity === 'number' ? { opacity: stop.opacity } : {}),
+			}));
+			return imageDef(id, buildFocalCircleGradientSvg(imageStops, fx, fy, width, height));
+		}
 		// Reach the farthest corner of the box, mirroring CSS's default
 		// `farthest-corner` sizing, so the last stop is not cropped mid-shape.
 		const r = Math.hypot(Math.max(fx, 1 - fx), Math.max(fy, 1 - fy));
@@ -160,6 +188,23 @@ function buildFromSource(source: GradientSource, id: string): SvgGradientDef | u
 
 	const angle =
 		typeof source.angle === 'number' && Number.isFinite(source.angle) ? source.angle : 90;
+	const { bounds } = source;
+	if (
+		bounds &&
+		source.scaled === false &&
+		Math.abs(bounds.width - bounds.height) >= 0.5 &&
+		Math.abs(angle % 90) > 0.01
+	) {
+		const imageStops = stops.map((stop) => ({
+			color: stop.color,
+			position: stop.offset * 100,
+			...(typeof stop.opacity === 'number' ? { opacity: stop.opacity } : {}),
+		}));
+		return imageDef(
+			id,
+			buildTrueAngleLinearGradientSvg(imageStops, angle, bounds.width, bounds.height),
+		);
+	}
 	return { kind: 'linear', id, ...linearEndpoints(angle), stops };
 }
 
@@ -175,10 +220,13 @@ function buildFromSource(source: GradientSource, id: string): SvgGradientDef | u
  *
  * @param style     - The resolved shape style carrying the gradient.
  * @param elementId - The owning element id, used to namespace the gradient id.
+ * @param bounds    - The shape's size in px: with it a freeform's circle path is a
+ *                    true circle and a `scaled="0"` angle a true angle.
  */
 export function buildSvgGradientDef(
 	style: ShapeStyle | undefined,
 	elementId: string,
+	bounds?: { width: number; height: number },
 ): SvgGradientDef | undefined {
 	if (!style || style.fillMode !== 'gradient') {
 		return undefined;
@@ -191,6 +239,8 @@ export function buildSvgGradientDef(
 			angle: style.fillGradientAngle,
 			fillToRect: style.fillGradientFillToRect,
 			focalPoint: style.fillGradientFocalPoint,
+			scaled: style.fillGradientScaled,
+			bounds: bounds && bounds.width > 0 && bounds.height > 0 ? bounds : undefined,
 		},
 		svgGradientId(elementId),
 	);

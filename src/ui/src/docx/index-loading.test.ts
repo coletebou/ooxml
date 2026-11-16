@@ -34,7 +34,24 @@ describe('DocxEditorElement loading', () => {
 		await first;
 		expect(editor.documentModel?.blocks[0]).toMatchObject({ runs: [{ text: 'current' }] });
 		await expect(editor.saveBytes()).resolves.toBe(bytes);
-		expect(save).toHaveBeenCalledWith(current);
+		expect(save).toHaveBeenCalledWith(current, undefined, { modified: {} });
+	});
+
+	it('stamps the host review author as the last modifier on save', async () => {
+		const editor = document.createElement('docx-editor') as DocxEditorElement;
+		document.body.append(editor);
+		const current = createDocument();
+		const save = vi.fn().mockResolvedValue(new Uint8Array([1]));
+		loadMock.mockResolvedValueOnce({ model: current, save });
+		await editor.load(new Uint8Array([2]));
+		editor.reviewAuthor = 'Ada Lovelace';
+		await editor.saveBytes();
+		expect(save).toHaveBeenLastCalledWith(current, undefined, {
+			modified: { author: 'Ada Lovelace' },
+		});
+		editor.reviewAuthor = '';
+		await editor.saveBytes();
+		expect(save).toHaveBeenLastCalledWith(current, undefined, { modified: {} });
 	});
 
 	it('exposes import errors as events while rejecting the load promise', async () => {

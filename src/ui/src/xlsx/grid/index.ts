@@ -18,8 +18,11 @@ import { GridView } from './grid-view';
 import { followLink, wireTooltips } from './indicators';
 import { selectCell } from 'ooxml-core/xlsx/ui';
 import { GRID_CSS } from './styles';
+import { installSplitBars } from './split-bars';
+import { FilterButtons } from './filter-buttons';
 import { ValidationList } from './validation-list';
 import { installRemoteSelections } from './remote-layer';
+import { AUDIT_CSS, installAuditArrows } from './audit-layer';
 import { installPageBreakPreview, PAGE_BREAK_CSS } from './page-break-layer';
 
 export { editBridge, type EditBridge, type EditMode, type EditState } from 'ooxml-core/xlsx/ui';
@@ -35,6 +38,7 @@ const structuralKinds = new Set(['structure', 'sheets', 'view', 'undo', 'redo', 
 export function mountGrid(ctx: EditorContext, container: HTMLElement): () => void {
 	ensureStyle(ctx.root, 'xg', GRID_CSS);
 	ensureStyle(ctx.root, 'xgpb', PAGE_BREAK_CSS);
+	ensureStyle(ctx.root, 'xga', AUDIT_CSS);
 	const view = new GridView(ctx, container);
 	const selection = new GridSelection(view);
 	const editor = new CellEditor(view, (move) => {
@@ -43,9 +47,12 @@ export function mountGrid(ctx: EditorContext, container: HTMLElement): () => voi
 	const sink = editor.field.input;
 	const drawings = new DrawingLayer(view);
 	const list = new ValidationList(view, () => editor.focus());
+	const filters = new FilterButtons(view, () => editor.focus());
 	const a11y = new GridA11y(view, sink);
 	const removeRemote = installRemoteSelections(view);
 	const removePageBreaks = installPageBreakPreview(view);
+	const removeSplitBars = installSplitBars(view);
+	const removeAuditArrows = installAuditArrows(view);
 	let marqueeSheet = -1;
 	const clipboard = createGridClipboard({
 		ctx,
@@ -65,12 +72,25 @@ export function mountGrid(ctx: EditorContext, container: HTMLElement): () => voi
 			});
 		},
 	});
+	const openFilterAtActive = (): boolean => {
+		const filter = view.sheet()?.autoFilter;
+		const { row, col } = ctx.selection.get().active;
+		if (
+			!filter ||
+			row !== filter.range.start.row ||
+			col < filter.range.start.col ||
+			col > filter.range.end.col
+		)
+			return false;
+		filters.open(col);
+		return true;
+	};
 	const keyHost: KeyHost = {
 		view,
 		selection,
 		editor,
 		openCellMenu: () => openMenuAtActive(view, () => editor.focus()),
-		openValidationList: () => list.open(true),
+		openValidationList: () => openFilterAtActive() || list.open(true),
 		clearMarquee: () => clipboard.clearMarquee(),
 		prepareCopy: (cut) => clipboard.prepareNativeCopy(cut),
 	};
@@ -112,7 +132,7 @@ export function mountGrid(ctx: EditorContext, container: HTMLElement): () => voi
 			cancelEdit: () => editor.cancel(),
 			isEditing: () => editor.editing,
 			selectAll: () => selection.all(),
-			openValidationList: () => list.open(true),
+			openValidationList: () => openFilterAtActive() || list.open(true),
 		}),
 	);
 
@@ -154,7 +174,7 @@ export function mountGrid(ctx: EditorContext, container: HTMLElement): () => voi
 			view.rebuild();
 			if (ctx.selection.get().sheet !== view.sheetIndex() || !workbook) restoreSelection();
 			const top = sheet?.view.topLeft;
-			if (top) view.reveal(top.row, top.col);
+			if (top) view.showTopLeft(top);
 			return;
 		}
 		const kind =
@@ -186,8 +206,14 @@ export function mountGrid(ctx: EditorContext, container: HTMLElement): () => voi
 		cancelEdit: () => editor.cancel(),
 		isEditing: () => editor.editing,
 		measureText: (text, font) => view.measurer.measure(text, font),
+		remeasure: () => {
+			view.measurer.clear();
+			drawings.redraw();
+			view.invalidate();
+		},
 		zoom: () => view.zoom(),
 		setZoom: (percent) => view.setZoom(percent),
+		splitAt: (active) => view.splitAt(active),
 		mode: () => editor.bridge.state().mode,
 	};
 	ctx.attachGrid(controller);
@@ -202,11 +228,14 @@ export function mountGrid(ctx: EditorContext, container: HTMLElement): () => voi
 		for (const dispose of disposers) dispose();
 		clipboard.destroy();
 		list.close();
+		filters.destroy();
 		drawings.destroy();
 		editor.destroy();
 		a11y.destroy();
 		removeRemote();
 		removePageBreaks();
+		removeSplitBars();
+		removeAuditArrows();
 		view.destroy();
 	};
 }

@@ -95,9 +95,9 @@ Use the local URL printed by Vite. This starts a development server; it does not
 
 Load a local source package, select a supported shape, and use its text controls. `replacePlainText(pageId, shapeId, text)`, `undo()` and `redo()` expose the same operations through each handle. A model assigned with `document` has no package bytes and stays read-only.
 
-Editing rejects master-linked text, rich text, fields, signed packages and macro content. History is bounded and can discard old undo states. Saved formula caches are not recalculated. General drawing and style editing are not implemented.
+Editing rejects master-linked text, rich text, fields, signed packages and macro content. History is bounded and can discard old undo states. Saved formula caches are not recalculated. Shape formatting, geometry and drawing commands have their own limits, listed in the [viewer API](api.md).
 
-`exportVsdx()` returns original or edited package bytes and diagnostics for an explicit copy download. It never overwrites the input file. Native Visio reopening and lossless round-trip fidelity remain unverified.
+`exportVsdx()` returns original or edited package bytes and diagnostics for an explicit copy download. It never overwrites the input file. Native Visio reopening is verified only for the recorded cases in the [verification record](verification.md), and lossless round-trip fidelity remains unverified.
 
 ## Export a static SVG {#export}
 
@@ -111,11 +111,11 @@ Supported background content and validated raster images are embedded. Fonts are
 
 ## Properties and events
 
-| Surface    | Current contract                                                                                                                                                       |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Properties | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `ribbonAddIns`, `collaboration`                                                                             |
-| Events     | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change` |
-| Lifecycle  | `update`, `load`, `fit`, `exportSvg`, `createPrintSnapshot`, `replacePlainText`, `undo`, `redo`, `cancelEdit`, `exportVsdx`, `destroy`                                 |
+| Surface    | Current contract                                                                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Properties | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `readOnly`, `ribbonAddIns`, `collaboration`, `storage`, `fileProviders`, `customization`                                    |
+| Events     | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change`, `file-command` |
+| Lifecycle  | `update`, `load`, `fit`, `exportSvg`, `createPrintSnapshot`, `replacePlainText`, `undo`, `redo`, `cancelEdit`, `exportVsdx`, `destroy`                                                 |
 
 `canEdit` is the editing permission (editable by default in the viewer; `false` is read-only), `collaboration` shares the open drawing in a room, and `document-change` reports `kind` `edit`, `undo`, `redo`, `remote` or `save`. After the host has persisted the bytes from `exportVsdx()`, `controller.markClean()` clears the dirty flag. To compose your own UI from the viewer's parts see the [building blocks](/building-blocks), and to share a drawing see [collaboration](/collaboration).
 

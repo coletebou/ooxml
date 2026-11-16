@@ -17,8 +17,10 @@ import { PptxHandler } from '../../PptxHandler';
 import type { PptxData } from '../../types/presentation';
 import { SlideBuilder } from './SlideBuilder';
 import { generateLayoutXml } from './layout-operations';
+import { newPresentationAppXml } from './presentation-app-properties';
 import { standardLayoutPlaceholders } from './standard-layout-placeholders';
 import type { PresentationOptions } from './types';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Default values
@@ -420,20 +422,6 @@ function corePropsXml(title?: string, creator?: string): string {
 </cp:coreProperties>`;
 }
 
-function appPropsXml(slideCount: number): string {
-	return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
-  xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>pptx-viewer-sdk</Application>
-  <Slides>${slideCount}</Slides>
-  <ScaleCrop>false</ScaleCrop>
-  <LinksUpToDate>false</LinksUpToDate>
-  <SharedDoc>false</SharedDoc>
-  <HyperlinksChanged>false</HyperlinksChanged>
-  <AppVersion>1.0000</AppVersion>
-</Properties>`;
-}
-
 // ---------------------------------------------------------------------------
 // Blank package generation
 // ---------------------------------------------------------------------------
@@ -476,7 +464,7 @@ export async function buildBlankPresentationArchive(
 	zip.file('ppt/slideMasters/_rels/slideMaster1.xml.rels', slideMasterRelsXml(layoutCount));
 
 	for (let i = 0; i < layoutCount; i++) {
-		const layout = STANDARD_LAYOUTS[i];
+		const layout = at(STANDARD_LAYOUTS, i);
 		zip.file(
 			`ppt/slideLayouts/slideLayout${i + 1}.xml`,
 			generateLayoutXml({
@@ -499,7 +487,7 @@ export async function buildBlankPresentationArchive(
 	zip.file('ppt/viewProps.xml', viewPropsXml());
 	zip.file('ppt/tableStyles.xml', tableStylesXml());
 	zip.file('docProps/core.xml', corePropsXml(options?.title, options?.creator));
-	zip.file('docProps/app.xml', appPropsXml(initialSlideCount));
+	zip.file('docProps/app.xml', newPresentationAppXml(initialSlideCount, options?.appProperties));
 
 	return zip.generateAsync({ type: 'arraybuffer' });
 }
@@ -559,7 +547,7 @@ export class PresentationBuilder {
 			const layoutIdx = STANDARD_LAYOUTS.findIndex((l) => l.name === layoutName) + 1 || 7; // default: Blank
 			const layoutPath = `ppt/slideLayouts/slideLayout${layoutIdx}.xml`;
 			const resolvedName = layoutName ?? STANDARD_LAYOUTS[layoutIdx - 1]?.name ?? 'Blank';
-			return new SlideBuilder(slideNum, layoutPath, resolvedName, handler);
+			return new SlideBuilder(slideNum, layoutPath, resolvedName, handler, options?.shapeDefaults);
 		};
 
 		return { handler, data, createSlide };

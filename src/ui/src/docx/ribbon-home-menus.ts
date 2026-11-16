@@ -24,8 +24,12 @@ export function pasteSplit(): HTMLElement {
 		[
 			['paste', 'Paste'],
 			['text', 'Keep text only'],
+			['special', 'Paste Special...'],
 		],
-		(value) => ({ type: 'clipboard', key: 'paste', plainText: value === 'text' }),
+		(value) =>
+			value === 'special'
+				? { type: 'formatDialog', kind: 'pasteSpecial' }
+				: { type: 'clipboard', key: 'paste', plainText: value === 'text' },
 		true,
 	);
 }
@@ -54,8 +58,12 @@ export function listSplit(key: 'bullet' | 'number'): HTMLElement {
 		key === 'bullet' ? 'Bullets options' : 'Numbering options',
 		[
 			[key, label],
+			...(key === 'bullet' ? [['picture', 'Picture bullet...'] as [string, string]] : []),
 			['remove', 'Remove list'],
 		],
-		(value) => ({ type: 'list', key: value as 'bullet' | 'number' | 'remove' }),
+		(value) =>
+			value === 'picture'
+				? { type: 'pictureBullet' }
+				: { type: 'list', key: value as 'bullet' | 'number' | 'remove' },
 	);
 }

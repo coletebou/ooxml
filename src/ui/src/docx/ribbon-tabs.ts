@@ -73,6 +73,18 @@ export function buildOtherPanels(panels: Map<string, HTMLElement>): void {
 			),
 			tool('Shapes', 'shapes', { type: 'shapePicker' }, { large: true }),
 			tool(
+				'Insert chart',
+				'chart',
+				{ type: 'formatDialog', kind: 'insertChart' },
+				{ large: true, caption: 'Chart' },
+			),
+			tool(
+				'Insert SmartArt',
+				'smartArt',
+				{ type: 'insertSmartArt' },
+				{ large: true, caption: 'SmartArt' },
+			),
+			tool(
 				'Format picture',
 				'formatPicture',
 				{ type: 'formatPicture' },
@@ -298,6 +310,12 @@ export function buildOtherPanels(panels: Map<string, HTMLElement>): void {
 				'endnote',
 				{ type: 'insertNote', kind: 'endnote' },
 				{ large: true, caption: 'Endnote' },
+			),
+			tool(
+				'Convert notes',
+				'convertNotes',
+				{ type: 'formatDialog', kind: 'convertNotes' },
+				{ inline: true, caption: 'Convert Notes…' },
 			),
 		),
 	);

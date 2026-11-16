@@ -121,11 +121,8 @@ export const translationsFr: Partial<Record<TranslationKey, string>> = {
 	'pptx.shortcuts.action.zoomCanvas': 'Zoomer sur le plan de travail',
 	'pptx.shortcuts.action.commitTextEdit': "Valider l'édition de texte en ligne",
 	'pptx.shortcuts.action.cancelTextEdit': "Annuler l'édition de texte en ligne / fermer les menus",
-	'pptx.shortcuts.action.clearSelection':
-		"Effacer la sélection / fermer les menus / annuler l'édition",
 	'pptx.shortcuts.action.nextSlide': 'Diapositive suivante (sans sélection)',
 	'pptx.shortcuts.action.prevSlide': 'Diapositive précédente (sans sélection)',
-	'pptx.shortcuts.action.redoAlternate': 'Rétablir (alternative)',
 	'pptx.shortcuts.action.selectAll': 'Sélectionner tous les éléments',
 	'pptx.shortcuts.group.editing': 'Édition',
 	'pptx.shortcuts.group.navigation': 'Navigation',
@@ -205,9 +202,7 @@ export const translationsFr: Partial<Record<TranslationKey, string>> = {
 	// Comments
 	'pptx.comments.addComment': 'Ajouter un commentaire',
 	'pptx.comments.noComments': 'Aucun commentaire',
-	'pptx.comments.author': 'Auteur',
 	'pptx.comments.resolved': 'Résolu',
-	'pptx.comments.clickToSelect': "Cliquer pour sélectionner l'élément",
 	'pptx.comments.deletedElement': 'Élément supprimé',
 	'pptx.comments.save': 'Enregistrer',
 	'pptx.comments.cancel': 'Annuler',
@@ -217,7 +212,6 @@ export const translationsFr: Partial<Record<TranslationKey, string>> = {
 	'pptx.comments.unresolve': 'Rouvrir',
 	'pptx.comments.delete': 'Supprimer',
 	'pptx.comments.commentingOn': 'Commentaire sur :',
-	'pptx.comments.commentOnElement': 'Commenter {{element}}...',
 	'pptx.comments.addCommentPlaceholder': 'Ajouter un commentaire...',
 
 	// Header & Footer

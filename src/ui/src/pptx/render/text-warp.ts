@@ -15,6 +15,7 @@ import type { PptxElement, PptxTextWarpPreset, TextSegment } from 'ooxml-core/pp
 import { hasTextProperties } from 'ooxml-core/pptx';
 
 import { isParagraphSeparatorSegment } from './text-segment-paragraph-break';
+import { archEllipsePath, circleEllipsePath, warpLineOutward } from './text-warp-arch';
 
 // ── Classifier ──────────────────────────────────────────────────────────
 
@@ -22,12 +23,13 @@ import { isParagraphSeparatorSegment } from './text-segment-paragraph-break';
  * Rendering-strategy category for a warp preset.
  *  - `path`:     renders along an SVG `<textPath>` (arcs, waves, circles,
  *                slant/fade/cascade, …)
- *  - `envelope`: non-uniform vertical stretch (inflate/deflate/can). Also
+ *  - `envelope`: the text block stretched between a top and a bottom curve
+ *                (plain/inflate/deflate/can). Also
  *                renders along an SVG `<textPath>`; kept as its own category
  *                for documentation/grouping only (see {@link ENVELOPE_PRESETS}).
  *  - `simple`:   unused (kept for API stability; no preset classifies here
  *                any more, see {@link SIMPLE_PRESETS}).
- *  - `none`:     no warp (`textNoShape`, `textPlain`, unknown)
+ *  - `none`:     no warp (`textNoShape`, unknown)
  *
  * Every classified preset (`path` and `envelope` alike) should be routed to
  * SVG `<textPath>` rendering via {@link shouldUseSvgWarp}; a binding that
@@ -37,7 +39,7 @@ import { isParagraphSeparatorSegment } from './text-segment-paragraph-break';
  */
 export type WarpCategory = 'path' | 'envelope' | 'simple' | 'none';
 
-const NONE_PRESETS: ReadonlySet<string> = new Set(['textNoShape', 'textPlain']);
+const NONE_PRESETS: ReadonlySet<string> = new Set(['textNoShape']);
 
 /** Presets that render best with SVG textPath along curved/circular paths. */
 const PATH_PRESETS: ReadonlySet<string> = new Set([
@@ -76,7 +78,9 @@ const PATH_PRESETS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Presets that stretch text non-uniformly per line (inflate/deflate/can).
+ * Presets that stretch the text block between a top and a bottom curve
+ * (plain/inflate/deflate/can). `textPlain`'s curves are the box's straight
+ * top and bottom edges, so it stretches the block to fill the shape.
  *
  * Historically these were CSS-transform-approximated (see
  * {@link getEnvelopeCssTransform}), but every one of them already has a
@@ -87,6 +91,7 @@ const PATH_PRESETS: ReadonlySet<string> = new Set([
  * {@link shouldUseSvgWarp}, which is `true` for all of them.
  */
 const ENVELOPE_PRESETS: ReadonlySet<string> = new Set([
+	'textPlain',
 	'textInflate',
 	'textDeflate',
 	'textInflateBottom',
@@ -271,6 +276,7 @@ export const SVG_WARP_PRESETS: ReadonlySet<string> = new Set([
 	'textButtonPour',
 	'textDeflateInflate',
 	'textDeflateInflateDeflate',
+	'textPlain',
 ]);
 
 const clamp4 = (n: number): number => Math.max(0, Math.min(n, 4));
@@ -278,41 +284,18 @@ const clamp4 = (n: number): number => Math.max(0, Math.min(n, 4));
 // ── Priority 1 ──────────────────────────────────────────────────────────
 
 /** Concentric upward arcs. t=0 is the tallest arch. */
-function archUpPath(w: number, h: number, t: number, adj?: number): string {
-	const adjNorm = adj !== undefined ? Math.max(0, Math.min(adj / 21600000, 1)) : 0.5;
-	const maxArch = (0.85 * adjNorm) / 0.5;
-	const archH = h * Math.max(0, maxArch - t * 0.7);
-	if (archH < 1) {
-		return `M 0,${h} L ${w},${h}`;
-	}
-	return `M 0,${h} A ${w / 2},${archH} 0 0,1 ${w},${h}`;
+function archUpPath(w: number, h: number, _t: number, adj?: number): string {
+	return archEllipsePath(w, h, 0, adj, 'up');
 }
 
 /** Concentric downward arcs. t=1 is the deepest. */
-function archDownPath(w: number, h: number, t: number, adj?: number): string {
-	const adjNorm = adj !== undefined ? Math.max(0, Math.min(adj / 21600000, 1)) : 0.5;
-	const baseDepth = (0.15 * adjNorm) / 0.5;
-	const archH = h * (baseDepth + t * 0.7);
-	if (archH < 1) {
-		return `M 0,0 L ${w},0`;
-	}
-	return `M 0,0 A ${w / 2},${archH} 0 0,0 ${w},0`;
+function archDownPath(w: number, h: number, _t: number, adj?: number): string {
+	return archEllipsePath(w, h, 0, adj, 'down');
 }
 
-/** Full ellipse: concentric ellipses shrink towards centre. */
-function circlePath(w: number, h: number, t: number, adj?: number): string {
-	const cx = w / 2;
-	const cy = h / 2;
-	const adjNorm = adj !== undefined ? Math.max(0, Math.min(adj / 21600000, 1)) : 0.5;
-	const baseScale = 0.45 + adjNorm * 1.1;
-	const scale = Math.min(1, baseScale) - t * 0.55;
-	const rx = Math.max(1, (w / 2) * scale);
-	const ry = Math.max(1, (h / 2) * scale);
-	return (
-		`M ${cx},${cy - ry} ` +
-		`A ${rx},${ry} 0 1,1 ${cx},${cy + ry} ` +
-		`A ${rx},${ry} 0 1,1 ${cx},${cy - ry}`
-	);
+/** Full ellipse once around clockwise, from the tip the start angle picks (see `circleEllipsePath`). */
+function circlePath(w: number, h: number, _t: number, adj?: number): string {
+	return circleEllipsePath(w, h, 0, adj);
 }
 
 /** Single sine-wave via cubic Bézier. */
@@ -437,16 +420,9 @@ function canDownPath(w: number, h: number, t: number, adj?: number): string {
 	return `M 0,0 A ${w / 2},${archH} 0 0,0 ${w},0`;
 }
 
-/**
- * Button: convex top / concave bottom. Base+extra amplitude (see
- * {@link inflatePath}) so a single-line button still bows instead of going
- * flat at `t=0.5`.
- */
-function buttonPath(w: number, h: number, t: number, adj?: number): string {
-	const yBase = h * (0.1 + t * 0.8);
-	const intensity = adj !== undefined ? clamp4(adj / 18750) : 1;
-	const bulge = h * 0.11 * intensity + h * 0.08 * intensity * (0.5 - t);
-	return `M 0,${yBase} Q ${w / 2},${yBase - bulge} ${w},${yBase}`;
+/** Button: a single line lies on the same arc as Arch Up (and turns with the start angle alike). */
+function buttonPath(w: number, h: number, _t: number, adj?: number): string {
+	return archEllipsePath(w, h, 0, adj, 'up');
 }
 
 /** Ring inside: concentric ellipses scaled inward. */
@@ -726,6 +702,15 @@ function deflateInflateDeflatePath(w: number, h: number, t: number, adj?: number
 	);
 }
 
+/**
+ * Plain: a straight baseline. Only a fallback; every binding renders
+ * `textPlain` through the glyph envelope, which stretches the block to the box.
+ */
+function plainPath(w: number, h: number, t: number): string {
+	const y = h * (0.2 + t * 0.6);
+	return `M 0,${y} L ${w},${y}`;
+}
+
 // ── Generator look-up table ─────────────────────────────────────────────
 
 export const WARP_PATH_GENERATORS: Readonly<Record<string, WarpPathGenerator>> = {
@@ -768,13 +753,14 @@ export const WARP_PATH_GENERATORS: Readonly<Record<string, WarpPathGenerator>> =
 	textButtonPour: buttonPourPath,
 	textDeflateInflate: deflateInflatePath,
 	textDeflateInflateDeflate: deflateInflateDeflatePath,
+	textPlain: plainPath,
 };
 
 // ── Public API ──────────────────────────────────────────────────────────
 
 /** Returns `true` when the preset should use SVG `<textPath>` rendering. */
 export function shouldUseSvgWarp(preset: PptxTextWarpPreset | undefined): boolean {
-	if (!preset || preset === 'textNoShape' || preset === 'textPlain') {
+	if (!preset || preset === 'textNoShape') {
 		return false;
 	}
 	return SVG_WARP_PRESETS.has(preset);
@@ -802,6 +788,8 @@ export function hasTextWarp(element: PptxElement): boolean {
  * @param lineCount Total number of lines/paragraphs.
  * @param adj       Optional primary adjustment (raw OOXML 1/60000th units).
  * @param adj2      Optional secondary adjustment (raw OOXML 1/60000th units).
+ * @param lineGap   Arch Up, Arch Down, Button and Circle: px between the paths of two lines
+ *                  (see `warpLineOutward`); 0 puts every line on the base path.
  */
 export function buildWarpPath(
 	preset: PptxTextWarpPreset,
@@ -811,8 +799,19 @@ export function buildWarpPath(
 	lineCount: number,
 	adj?: number,
 	adj2?: number,
+	lineGap = 0,
 ): string {
 	const t = lineCount <= 1 ? 0.5 : lineIndex / (lineCount - 1);
+	const outward = warpLineOutward(preset, lineIndex, lineCount, lineGap);
+	if (preset === 'textArchUp' || preset === 'textButton') {
+		return archEllipsePath(width, height, outward, adj, 'up');
+	}
+	if (preset === 'textArchDown') {
+		return archEllipsePath(width, height, outward, adj, 'down');
+	}
+	if (preset === 'textCircle') {
+		return circleEllipsePath(width, height, outward, adj);
+	}
 	const generator = WARP_PATH_GENERATORS[preset];
 	if (generator) {
 		return generator(width, height, t, adj, adj2);

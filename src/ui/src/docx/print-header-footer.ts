@@ -1,6 +1,8 @@
+import { pictureNeedsSvg, pictureSvg } from '../picture-view';
 import {
 	fieldName,
 	isRunHiddenForReview,
+	refreshComputedFields,
 	type Block,
 	type DocumentModel,
 	type HeaderFooterContent,
@@ -9,6 +11,7 @@ import {
 	type ReviewDisplayMode,
 } from 'ooxml-core/docx';
 import {
+	cssFontStack,
 	floatPosition,
 	paragraphFloats,
 	pageNumbers,
@@ -22,6 +25,7 @@ import {
 	type LayoutPageBox,
 } from 'ooxml-core/docx/layout';
 import type { PictureUrl } from './print-layout';
+import { pictureWatermarkElement, type WatermarkPage } from './print-picture-watermark';
 
 /** Page facts a header or footer field can show. */
 export interface PageFieldValues extends PageFieldContext {
@@ -35,8 +39,13 @@ export { pageNumbers, headerFooterForPage, fieldDisplayText } from 'ooxml-core/d
 /** An inline header/footer picture, or a placeholder box when its bytes are unavailable. */
 function inlinePicture(image: NonNullable<TextRun['image']>, values: PageFieldValues): HTMLElement {
 	const url = image.partName ? values.pictureUrl?.(image.partName, image.contentType) : undefined;
-	const element = document.createElement(url ? 'img' : 'span');
-	if (url) {
+	const element = document.createElement(
+		url && !pictureNeedsSvg(image.pictureFill) ? 'img' : 'span',
+	);
+	if (url && image.pictureFill && pictureNeedsSvg(image.pictureFill)) {
+		element.append(pictureSvg(document, image.pictureFill, url, image.widthPx, image.heightPx));
+		element.setAttribute('aria-label', image.altText ?? '');
+	} else if (url) {
 		(element as HTMLImageElement).src = url;
 		(element as HTMLImageElement).alt = image.altText ?? '';
 	} else element.className = 'dve-print-picture-missing';
@@ -56,7 +65,7 @@ function runElement(run: TextRun, values: PageFieldValues): HTMLElement {
 	if (run.italic) span.style.fontStyle = 'italic';
 	if (run.underline) span.style.textDecoration = 'underline';
 	if (run.fontSize) span.style.fontSize = `${run.fontSize}pt`;
-	if (run.fontFamily) span.style.fontFamily = `"${run.fontFamily.replace(/["\\]/g, '')}"`;
+	if (run.fontFamily) span.style.fontFamily = cssFontStack(run.fontFamily);
 	if (run.color && /^#[0-9a-f]{6}$/i.test(run.color)) span.style.color = run.color;
 	return span;
 }
@@ -71,7 +80,8 @@ function paragraphElement(paragraph: Paragraph, values: PageFieldValues): HTMLEl
 			!isRunHiddenForReview(run, values.reviewDisplayMode ?? 'all') &&
 			!run.break &&
 			!run.image?.anchored &&
-			!run.image?.watermark
+			!run.image?.watermark &&
+			!run.image?.pictureWatermark
 		)
 			element.append(runElement(run, values));
 	return element;
@@ -129,8 +139,12 @@ function floatingPictures(
 		}).map((float) => {
 			const { xPx, yPx } = floatPosition(float, page, column, { topPx: anchorTopPx, heightPx: 0 });
 			const url = values.pictureUrl?.(float.partName, float.contentType);
-			const element = document.createElement(url ? 'img' : 'div');
-			if (url) (element as HTMLImageElement).src = url;
+			const element = document.createElement(
+				url && !pictureNeedsSvg(float.pictureFill) ? 'img' : 'div',
+			);
+			if (url && float.pictureFill && pictureNeedsSvg(float.pictureFill))
+				element.append(pictureSvg(document, float.pictureFill, url, float.widthPx, float.heightPx));
+			else if (url) (element as HTMLImageElement).src = url;
 			else element.classList.add('dve-print-picture-missing');
 			element.classList.add('dve-print-picture', 'dve-print-float');
 			if (float.behindText) element.classList.add('dve-print-float-behind');
@@ -146,16 +160,31 @@ function floatingPictures(
 	);
 }
 
-/** The header's text watermark as a centered, rotated layer behind the page text, or null. */
+/**
+ * The header's watermark as a layer behind the page text, or null: text centred and rotated as
+ * Word sets it, or a picture centred on the margins.
+ */
 export function watermarkElement(
 	content: HeaderFooterContent,
-	page: Pick<LayoutPageBox, 'widthPx' | 'heightPx'>,
+	page: WatermarkPage,
 	reviewDisplayMode: ReviewDisplayMode = 'all',
+	pictureUrl?: PictureUrl,
 ): HTMLElement | null {
-	const spec = content.blocks
+	const image = content.blocks
 		.flatMap((block) => (block.type === 'paragraph' ? block.runs : []))
-		.find((run) => !isRunHiddenForReview(run, reviewDisplayMode) && run.image?.watermark)
-		?.image?.watermark;
+		.find(
+			(run) =>
+				!isRunHiddenForReview(run, reviewDisplayMode) &&
+				(run.image?.watermark || run.image?.pictureWatermark),
+		)?.image;
+	const picture = image?.pictureWatermark;
+	if (picture)
+		return pictureWatermarkElement(
+			picture,
+			page,
+			pictureUrl?.(picture.partName, picture.contentType),
+		);
+	const spec = image?.watermark;
 	if (!spec?.text) return null;
 	const chars = Math.max(1, [...spec.text].length);
 	const span = Math.min(page.widthPx * (spec.layout === 'diagonal' ? 0.78 : 0.7), 560);
@@ -182,9 +211,7 @@ export function watermarkElement(
 		opacity: spec.semitransparent ? '0.5' : '1',
 		transform: spec.layout === 'diagonal' ? 'rotate(-45deg)' : 'none',
 		zIndex: '0',
-		...(spec.fontFamily
-			? { fontFamily: `"${spec.fontFamily.replace(/["\\]/g, '')}", sans-serif` }
-			: {}),
+		...(spec.fontFamily ? { fontFamily: cssFontStack(spec.fontFamily) } : {}),
 	});
 	return layer;
 }
@@ -197,6 +224,8 @@ export function decoratePages(
 	pictureUrl?: PictureUrl,
 	reviewDisplayMode: ReviewDisplayMode = 'all',
 ) {
+	// Header and footer DOCPROPERTY results follow the document's properties.
+	model = refreshComputedFields(model);
 	const numbers = pageNumbers(model, pages);
 	const numericValues = pageNumberValues(model, pages);
 	const counts = sectionPageCounts(pages);
@@ -242,7 +271,7 @@ export function decoratePages(
 			const anchorTop = kind === 'header' ? distancePx : page.heightPx - distancePx - 20;
 			sheet.append(...floatingPictures(content, page, anchorTop, values));
 			if (kind === 'header') {
-				const mark = watermarkElement(content, page, reviewDisplayMode);
+				const mark = watermarkElement(content, page, reviewDisplayMode, values.pictureUrl);
 				// First in the sheet so the page text paints over it, as a Word watermark sits behind text.
 				if (mark) sheet.prepend(mark);
 			}

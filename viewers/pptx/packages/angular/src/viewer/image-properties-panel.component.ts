@@ -2,20 +2,27 @@ import {
 	ChangeDetectionStrategy,
 	Component,
 	computed,
-	inject,
 	input,
 	output,
 	CUSTOM_ELEMENTS_SCHEMA,
 } from '@angular/core';
 import { TranslatePipe } from '@ngx-translate/core';
-import { ARTISTIC_EFFECTS, imageResetPatch, imageResetState } from 'ooxml-ui/pptx';
+import {
+	DUOTONE_PRESETS,
+	ELEMENT_ALT_TEXT_SECTIONS,
+	imageResetPatch,
+	imageResetState,
+	PICTURE_ADJUSTMENT_SECTIONS,
+	PICTURE_ARTISTIC_SECTIONS,
+	PICTURE_EFFECT_SECTIONS,
+	pictureDuotonePresetPatch,
+} from 'ooxml-ui/pptx';
+import type { DuotonePreset } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxImageEffects } from 'pptx-viewer-core';
 import { isImageLikeElement } from 'pptx-viewer-core';
 
 import { ImageCropWashPanelComponent } from './image-crop-wash-panel.component';
-import { RecentColorsService } from './recent-colors.service';
-
-type ImageElement = PptxElement & { altText?: string; imageEffects?: PptxImageEffects };
+import { InspectorFieldsComponent } from './inspector-fields.component';
 
 export function mergeImageEffects(
 	effects: PptxImageEffects | undefined,
@@ -28,66 +35,50 @@ export function mergeImageEffects(
 	schemas: [CUSTOM_ELEMENTS_SCHEMA],
 	selector: 'pptx-image-properties-panel',
 	standalone: true,
-	imports: [TranslatePipe, ImageCropWashPanelComponent],
+	imports: [TranslatePipe, ImageCropWashPanelComponent, InspectorFieldsComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="pptx-ng-image-properties">
-			<label class="field field--stacked">
-				<span>{{ 'pptx.image.altText' | translate }}</span>
-				<input type="text" [value]="image().altText ?? ''" (input)="onAltText($event)" />
-			</label>
-			@for (slider of sliders; track slider.key) {
-				<label class="field">
-					<span>{{ slider.label | translate }}</span>
-					<input
-						type="range"
-						[min]="slider.min"
-						[max]="slider.max"
-						[value]="effectValue(slider.key)"
-						(input)="onEffectNumber(slider.key, $event)"
-					/>
-					<output>{{ effectValue(slider.key) }}</output>
-				</label>
-			}
-			<label class="field">
-				<span>{{ 'pptx.image.grayscale' | translate }}</span>
-				<pptx-ui-checkbox
-					[checked]="!!effects().grayscale"
-					(change)="onGrayscale($event)"
-				></pptx-ui-checkbox>
-			</label>
-			<label class="field field--stacked">
-				<span>{{ 'pptx.image.artisticEffects' | translate }}</span>
-				<pptx-ui-select
-					[attr.aria-label]="'pptx.image.artisticEffects' | translate"
-					[value]="effects().artisticEffect ?? 'none'"
-					(change)="onArtistic($event)"
-				>
-					@for (effect of artisticEffects; track effect[0]) {
-						<option
-							[value]="effect[0]"
-							[selected]="effect[0] === (effects().artisticEffect ?? 'none')"
-						>
-							{{ effect[1] | translate }}
-						</option>
-					}
-				</pptx-ui-select>
-			</label>
-			<div class="duotone">
-				<span>{{ 'pptx.image.duotone' | translate }}</span>
-				<input
-					type="color"
-					[value]="effects().duotone?.color1 ?? '#000000'"
-					(change)="onDuotone($event, 'color1')"
-				/>
-				<input
-					type="color"
-					[value]="effects().duotone?.color2 ?? '#ffffff'"
-					(change)="onDuotone($event, 'color2')"
-				/>
-				<button type="button" (click)="clearDuotone()">
-					{{ 'pptx.common.clear' | translate }}
-				</button>
+			<pptx-inspector-fields
+				[sections]="altTextSections"
+				[target]="element()"
+				[disabled]="!canEdit()"
+				(patch)="patch.emit($event)"
+			/>
+			<pptx-inspector-fields
+				[sections]="adjustmentSections"
+				[target]="element()"
+				[disabled]="!canEdit()"
+				(patch)="patch.emit($event)"
+			/>
+			<pptx-inspector-fields
+				[sections]="artisticSections"
+				[target]="element()"
+				[disabled]="!canEdit()"
+				(patch)="patch.emit($event)"
+			/>
+			<pptx-inspector-fields
+				[sections]="effectSections"
+				[target]="element()"
+				[disabled]="!canEdit()"
+				(patch)="patch.emit($event)"
+			/>
+			<div class="duotone-presets">
+				<span>{{ 'pptx.image.duotonePresets' | translate }}</span>
+				@for (preset of duotonePresets; track preset.labelKey) {
+					<button
+						type="button"
+						class="duotone-preset"
+						data-testid="picture-duotone-preset"
+						[disabled]="!canEdit()"
+						[title]="preset.labelKey | translate"
+						[attr.aria-label]="preset.labelKey | translate"
+						[style.background]="
+							'linear-gradient(135deg, ' + preset.shadow + ' 50%, ' + preset.highlight + ' 50%)'
+						"
+						(click)="patch.emit(duotonePreset(preset))"
+					></button>
+				}
 			</div>
 			<pptx-image-crop-wash-panel
 				[element]="element()"
@@ -105,16 +96,6 @@ export function mergeImageEffects(
 			gap: 9px;
 			font-size: 11px;
 		}
-		.field {
-			display: grid;
-			grid-template-columns: 78px 1fr 30px;
-			align-items: center;
-			gap: 6px;
-			color: var(--pptx-inspector-muted, #aaa);
-		}
-		.field--stacked {
-			grid-template-columns: 1fr;
-		}
 		input[type='text'],
 		select {
 			box-sizing: border-box;
@@ -129,16 +110,21 @@ export function mergeImageEffects(
 			min-width: 0;
 			accent-color: var(--pptx-primary, #2563eb);
 		}
-		output {
-			text-align: right;
-			font-variant-numeric: tabular-nums;
-		}
-		.duotone {
-			display: grid;
-			grid-template-columns: 1fr 30px 30px auto;
+		.duotone-presets {
+			display: flex;
+			flex-wrap: wrap;
 			align-items: center;
-			gap: 6px;
+			gap: 4px;
 			color: var(--pptx-inspector-muted, #aaa);
+		}
+		.duotone-presets > span {
+			width: 100%;
+		}
+		.duotone-preset {
+			width: 24px;
+			height: 24px;
+			padding: 0;
+			border-radius: 50%;
 		}
 		button {
 			padding: 4px 7px;
@@ -161,63 +147,18 @@ export class ImagePropertiesPanelComponent {
 		() => imageResetState(this.element(), this.canEdit(), true).enabled,
 	);
 
-	/** Optional: absent in a standalone unit test with no viewer-level DI tree. */
-	private readonly recentColors = inject(RecentColorsService, { optional: true });
-
-	protected readonly image = computed(() => this.element() as ImageElement);
-	protected readonly effects = computed(() => this.image().imageEffects ?? {});
-	protected readonly artisticEffects = ARTISTIC_EFFECTS;
-	protected readonly sliders = [
-		{ key: 'brightness', label: 'pptx.imageAdjustments.brightness', min: -100, max: 100 },
-		{ key: 'contrast', label: 'pptx.imageAdjustments.contrast', min: -100, max: 100 },
-		{ key: 'saturation', label: 'pptx.image.saturation', min: -100, max: 100 },
-		{ key: 'alphaModFix', label: 'pptx.imageAdjustments.transparency', min: 0, max: 100 },
-		{ key: 'biLevel', label: 'pptx.imageAdjustments.biLevelThreshold', min: 0, max: 100 },
-	] as const;
+	protected readonly artisticSections = PICTURE_ARTISTIC_SECTIONS;
+	protected readonly altTextSections = ELEMENT_ALT_TEXT_SECTIONS;
+	protected readonly adjustmentSections = PICTURE_ADJUSTMENT_SECTIONS;
+	protected readonly effectSections = PICTURE_EFFECT_SECTIONS;
+	protected readonly duotonePresets = DUOTONE_PRESETS;
 
 	static supports(element: PptxElement): boolean {
 		return isImageLikeElement(element);
 	}
 
-	protected effectValue(key: keyof PptxImageEffects): number {
-		const value = this.effects()[key];
-		return typeof value === 'number' ? value : key === 'alphaModFix' ? 100 : 0;
-	}
-
-	private updateEffects(update: Partial<PptxImageEffects>): void {
-		this.patch.emit({
-			imageEffects: mergeImageEffects(this.effects(), update),
-		} as Partial<PptxElement>);
-	}
-
-	protected onAltText(event: Event): void {
-		this.patch.emit({ altText: (event.target as HTMLInputElement).value } as Partial<PptxElement>);
-	}
-
-	protected onEffectNumber(key: keyof PptxImageEffects, event: Event): void {
-		this.updateEffects({ [key]: Number((event.target as HTMLInputElement).value) });
-	}
-
-	protected onGrayscale(event: Event): void {
-		this.updateEffects({ grayscale: (event.target as HTMLInputElement).checked || undefined });
-	}
-
-	protected onArtistic(event: Event): void {
-		const value = (event.target as HTMLSelectElement).value;
-		this.updateEffects({ artisticEffect: value === 'none' ? undefined : value });
-	}
-
-	protected onDuotone(event: Event, key: 'color1' | 'color2'): void {
-		const current = this.effects().duotone ?? { color1: '#000000', color2: '#ffffff' };
-		const value = (event.target as HTMLInputElement).value;
-		this.updateEffects({
-			duotone: { ...current, [key]: value },
-		});
-		this.recentColors?.push(value);
-	}
-
-	protected clearDuotone(): void {
-		this.updateEffects({ duotone: undefined });
+	protected duotonePreset(preset: DuotonePreset): Partial<PptxElement> {
+		return pictureDuotonePresetPatch(this.element(), preset);
 	}
 
 	protected reset(): void {

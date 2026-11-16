@@ -1,12 +1,16 @@
+import type { ChartExSpace } from '../../chart/ex/model';
 import type { DocumentPropertiesPatch } from './doc-properties';
 import type { DataTableRequest } from './data-table';
 import type { GoalSeekRequest, GoalSeekResult } from './goal-seek';
 import type { ScenarioDraft } from './scenarios';
+import type { CustomViewDraft } from './custom-views';
 import type { ExternalChange } from './external';
 import type { CellAddress, CellRange } from '../address';
 import type {
+	FilterCriteria,
 	BorderEdge,
 	CellStyle,
+	UnsupportedDrawingObject,
 	CellValue,
 	ChartObject,
 	Color,
@@ -18,12 +22,14 @@ import type {
 	DefinedName,
 	DrawingAnchor,
 	FreezePane,
+	SplitPane,
 	Hyperlink,
 	PageSetup,
 	PrintOptions,
 	SheetProtection,
 	SheetState,
 	SheetView,
+	IgnoredError,
 	Table,
 	Workbook,
 } from '../model';
@@ -31,6 +37,10 @@ import type { FontView } from '../layout/types';
 import type { StylePatch } from '../styles';
 import type { CalcEngine } from './deps';
 import type { ChartPatch } from './charts';
+import type { SmartArtEditResult, SmartArtInsertion, SmartArtLayoutChange } from './smart-art';
+import type { DiagramNodeEdit } from '../../diagram/edit/node-edit';
+import type { DiagramFormatChange } from '../../diagram/edit/format';
+import type { ChartEditIntent } from '../../chart/edit/intent';
 import type { TablePatch, TableRef } from './table-edits';
 import type { SparklineGroupPatch } from './sparklines';
 
@@ -174,11 +184,18 @@ export interface EditSession {
 	sort(
 		sheet: number,
 		range: CellRange,
-		keys: { col: number; descending?: boolean }[],
+		keys: import('./sort-keys').SortKey[],
 		hasHeader: boolean,
+		options?: Pick<import('./sort-keys').SortOptions, 'leftToRight' | 'caseSensitive'>,
 	): void;
 	fill(sheet: number, source: CellRange, target: CellRange, mode?: FillMode): void;
 	copy(sheet: number, range: CellRange): ClipboardPayload;
+	/**
+	 * Copies several areas as one block (Excel's rule: the areas share their rows or their
+	 * columns; they are placed next to each other, gaps dropped). Any other shape throws
+	 * "This action won't work on multiple selections."
+	 */
+	copyAreas(sheet: number, ranges: CellRange[]): ClipboardPayload;
 	cut(sheet: number, range: CellRange): ClipboardPayload;
 	paste(
 		sheet: number,
@@ -198,7 +215,12 @@ export interface EditSession {
 	setSheetState(index: number, state: SheetState): void;
 	setTabColor(index: number, color?: Color): void;
 	setFreeze(sheet: number, freeze: FreezePane | undefined): void;
+	/** Splits the window (twentieths of a point); removes any frozen pane. Undefined removes the split. */
+	setSplit(sheet: number, split: SplitPane | undefined, topLeft?: CellAddress): void;
 	setComment(sheet: number, at: CellAddress, text: string | undefined, author: string): void;
+	/** Edits the zero-based reply, preserving its author and timestamp. */
+	setCommentReply(sheet: number, at: CellAddress, replyIndex: number, text: string): void;
+	setCommentResolved(sheet: number, at: CellAddress, resolved: boolean): void;
 	setHyperlink(sheet: number, range: CellRange, link: Omit<Hyperlink, 'range'> | undefined): void;
 	addConditionalFormat(sheet: number, format: ConditionalFormat): void;
 	clearConditionalFormats(sheet: number, range?: CellRange): void;
@@ -206,16 +228,41 @@ export interface EditSession {
 	setAutoFilter(sheet: number, range: CellRange | undefined): void;
 	/** Filters an auto-filter column to display texts in `values` (`''` keeps blanks); undefined clears. */
 	filterColumn(sheet: number, col: number, values: string[] | undefined): void;
+	/** Sets any criteria (checklist, custom, top 10, dynamic, colour, icon) of an auto-filter column; undefined clears. */
+	setFilterCriteria(sheet: number, col: number, criteria: FilterCriteria | undefined): void;
+	/** Re-evaluates the auto-filter against the current cell values. */
+	reapplyFilter(sheet: number, at?: CellAddress): void;
 	/** Sorts the auto-filter (or table) containing `col` by that column, keeping the header. */
 	sortByColumn(sheet: number, col: number, descending?: boolean): void;
 	createTable(sheet: number, range: CellRange, hasHeader: boolean, styleName?: string): Table;
 	setSheetView(sheet: number, patch: Partial<SheetView>): void;
+	/** Replaces the sheet's ignored Error Checking rules (Ignore Error). */
+	setIgnoredErrors(sheet: number, list: IgnoredError[]): void;
 	setDefinedName(name: DefinedName): void;
 	deleteDefinedName(name: string, localSheet?: number): void;
 	/** Moves or resizes the picture, chart or shape at `index` of the sheet's drawings. */
+	/** Sets source crop insets on an image, with history. */
+	/** Applies admitted picture effects while retaining opaque operations. */
+	editPictureEffects(
+		sheet: number,
+		index: number,
+		patch: import('../../drawingml/picture-effects').PictureEffectPatch,
+	): void;
+	setPictureCrop(
+		sheet: number,
+		index: number,
+		crop: import('../../drawingml/picture-crop').DrawingPictureCrop,
+	): void;
 	setDrawingAnchor(sheet: number, index: number, anchor: DrawingAnchor): void;
 	/** Deletes the picture, chart or shape at `index` of the sheet's drawings. */
 	deleteDrawing(sheet: number, index: number): void;
+	/** Applies a SmartArt Design or text pane command to the SmartArt at `index` (one undo step). */
+	editSmartArt(sheet: number, index: number, edit: DiagramNodeEdit): SmartArtEditResult;
+	formatSmartArt(sheet: number, index: number, change: DiagramFormatChange): boolean;
+	/** SmartArt Design > Change Layout; false when the diagram already uses the layout. */
+	changeSmartArtLayout(sheet: number, index: number, change: SmartArtLayoutChange): boolean;
+	/** Insert > SmartArt; returns the new drawing's index. */
+	insertSmartArt(sheet: number, insertion: SmartArtInsertion): number;
 	/** Creates a worksheet-range PivotTable and its cached output. */
 	createPivotTable(sheet: number, destination: CellAddress, options: PivotTableOptions): string;
 	/** Refreshes cached records and output; an optional patch reconfigures fields. */
@@ -251,10 +298,23 @@ export interface EditSession {
 	setSparklineDateRange(sheet: number, ranges: CellRange[], source?: string): void;
 	/** Clears selected hosts, or their whole groups. Cell contents remain. */
 	deleteSparklines(sheet: number, ranges: CellRange[], wholeGroups?: boolean): void;
+	/** Merges the sparkline groups the ranges touch into the first one; returns the groups merged. */
+	groupSparklines(sheet: number, ranges: CellRange[]): number;
+	/** Gives every sparkline of the touched groups a group of its own; returns the groups made. */
+	ungroupSparklines(sheet: number, ranges: CellRange[]): number;
 	/** Adds a chart drawn from the model; returns its index in the sheet's drawings. */
 	addChart(sheet: number, chart: Omit<ChartObject, 'kind'>): number;
-	/** Edits the chart at `index` of the sheet's drawings (a loaded chart part is patched on save). */
+	/** Edits the chart at `index` of the sheet's drawings through its summary fields. */
 	updateChart(sheet: number, index: number, patch: ChartPatch): void;
+	/** Applies a `chart/edit` intent (a Format pane edit) to the chart at `index`. */
+	editChart(sheet: number, index: number, intent: ChartEditIntent): void;
+	/** Extended chart operation with atomic source-cell synchronization and history. */
+	editChartEx(sheet: number, index: number, operation: (space: ChartExSpace) => ChartExSpace): void;
+	/** Inserts an extended chart (`buildChartEx`); returns its drawing index. */
+	addChartEx(
+		sheet: number,
+		chart: UnsupportedDrawingObject & { chartExSpace: ChartExSpace },
+	): number;
 	/** Inserts a picture (bytes stored as a new media part) and returns it. */
 	addImage(
 		sheet: number,
@@ -345,6 +405,16 @@ export interface EditSession {
 	deleteScenario(sheet: number, index: number): void;
 	/** Writes a scenario's values into its changing cells. */
 	showScenario(sheet: number, index: number): void;
+	/**
+	 * View > Custom Views: saves the current look of every sheet under a name (replacing a view of
+	 * that name) and returns its guid. Refused when the workbook has tables, as in Excel.
+	 */
+	addCustomView(draft: CustomViewDraft): string;
+	/** Applies a saved view to every sheet that recorded it. */
+	showCustomView(guid: string): void;
+	deleteCustomView(guid: string): void;
+	/** Appends the scenarios of another sheet (renaming taken names); returns how many were added. */
+	mergeScenarios(sheet: number, from: number): number;
 	/** Automatic or manual calculation (saved with the workbook). */
 	setCalcMode(mode: 'auto' | 'manual'): void;
 	/**

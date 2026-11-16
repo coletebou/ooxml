@@ -15,14 +15,18 @@
 	import {
 		buildUserFontFaceStyles,
 		attachViewerHyperlinks,
+	createCloudDocumentController,
+	createSaveProgressController,
 		INSPECTOR_PANEL_DEFAULT_WIDTH,
 		resolveCollaborationConfig,
 		resolveViewerRootOptions,
 		themeToCssVars,
 	} from 'ooxml-ui/pptx';
 	import type { PowerPointViewerAPI, ViewerCustomizationApi, ViewerMode } from 'ooxml-ui/pptx';
+	import { installSvgIdScope } from 'ooxml-ui/pptx';
 
 	import { createTranslator } from '../i18n/translator';
+	import { aiAssistants } from './ai-assistant-registry';
 	import { provideNotesBarHeight } from './state/notes-bar-height.svelte';
 	import AiDock from './components/ai/AiDock.svelte';
 	import CollaborationChrome from './collab/components/CollaborationChrome.svelte';
@@ -40,7 +44,10 @@
 	import { presentationSwipe } from './presentation-swipe';
 	import { createViewerState } from './state/create-viewer-state.svelte';
 	import { ThemeLocaleState } from './state/theme-locale.svelte';
-	import { toViewerStateOptions } from './state/viewer-state-options';
+	import { controllerState } from './state/controller-state';
+	import { createRibbonDisplayController, RIBBON_AUTO_COLLAPSE_MEDIA } from 'ooxml-ui/pptx';
+	import { resolveViewerDocument, toViewerStateOptions } from './state/viewer-state-options';
+	import { provideElementRenderErrorReporter } from './state/element-render-errors';
 	import { provideRibbonAddIns } from './state/ribbon-add-ins';
 	import { provideRegionBase } from './state/viewer-regions';
 	import { effectiveHiddenActions, nextRibbonScopeToken, useCustomizationConstraints, useViewerCustomizationRoot } from './state/viewer-customization.svelte';
@@ -100,9 +107,21 @@
 	let viewportHeight = $state(0);
 
 	// Host UI customisation (`customization` prop + the imperative API below).
-	const customization = useViewerCustomizationRoot(() => props.customization);
+	const customization = useViewerCustomizationRoot(
+		() => props.customization,
+		() => props.allowExternalContent,
+		() => props.googleFonts,
+	);
 	provideRibbonAddIns(() => props.ribbonAddIns);
+	// The host's element render error reporter, read by every `ElementBoundary` on every surface.
+	provideElementRenderErrorReporter(() => props.onElementRenderError);
 	const ribbonScope = nextRibbonScopeToken();
+	// A file opened from a File > Open cloud place brings its own storage, name and edit right
+	// until another document is loaded (shared `render/cloud-open`).
+	const cloudDocument = createCloudDocumentController();
+	const saveProgress = createSaveProgressController();
+	const cloudFile = controllerState(cloudDocument);
+	const documentView = $derived(resolveViewerDocument(props, cloudFile.current.file));
 	const vm = createViewerState(
 		toViewerStateOptions(() => props, {
 			t,
@@ -112,9 +131,11 @@
 			getViewportHeight: () => viewportHeight,
 			getMasterScale: () => masterScale,
 			getCustomization: () => customization.resolved,
-		}),
+		}, cloudDocument, saveProgress),
 	);
 	onDestroy(() => vm.destroy());
+	// One id scheme for every painted copy of a slide: see `installSvgIdScope`.
+	$effect(() => installSvgIdScope());
 	$effect(() => {
 		const editable = vm.editingActive;
 		if (!rootEl) {
@@ -131,11 +152,71 @@
 			goToSlide: (index) => vm.viewer.goTo(index),
 			onHyperlinkClick: (link) => props.onhyperlinkclick?.(link),
 			confirmExternalHyperlink: (url) =>
-				vm.optionsState.confirmHyperlink(url, t('pptx.options.trust.confirmHyperlinks')),
+				vm.optionsState.confirmHyperlink(url, t, rootEl),
 		});
 	});
 	useCustomizationConstraints(customization, vm.optionsState);
+
+	// Ribbon Display Options: one controller per viewer, created here and never per render.
+	// The host's `ribbonDisplay` prop and File > Options > "Collapse the ribbon automatically"
+	// are pushed into it; the user's own picks come back through `onribbondisplaychange`.
+	const ribbonDisplayController = createRibbonDisplayController({
+		initial: props.ribbonDisplay,
+		onChange: (mode) => props.onribbondisplaychange?.(mode),
+	});
+	$effect(() => {
+		ribbonDisplayController.setMode(props.ribbonDisplay);
+	});
+	$effect(() => {
+		ribbonDisplayController.setAutoCollapse(Boolean(vm.optionsState.options.general.collapseRibbonAutomatically));
+	});
+	$effect(() => {
+		if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+			return;
+		}
+		const short = window.matchMedia(RIBBON_AUTO_COLLAPSE_MEDIA);
+		const onShort = (): void => ribbonDisplayController.setShortViewport(short.matches);
+		onShort();
+		short.addEventListener('change', onShort);
+		return () => short.removeEventListener('change', onShort);
+	});
+	$effect(() => {
+		if (typeof document === 'undefined') {
+			return;
+		}
+		// A press outside the ribbon and its reveal strip puts the peeked commands away; a press
+		// inside it, but outside the menu and its button, closes the menu.
+		const onPointerDown = (event: PointerEvent): void => {
+			const path = event.composedPath();
+			const inside = (selector: string): boolean =>
+				path.some((node) => node instanceof Element && node.matches(selector));
+			if (!inside('[data-pptx-chrome="ribbon"]') && !inside('[data-pptx-chrome="ribbon-reveal"]')) {
+				ribbonDisplayController.dismiss();
+			} else if (
+				!inside('[data-pptx-chrome="ribbon-display-menu"]') &&
+				!inside('[data-pptx-chrome="ribbon-display-options"]')
+			) {
+				ribbonDisplayController.setMenuOpen(false);
+			}
+		};
+		// Only this viewer's shortcuts: the focus is inside its root, or nowhere in particular.
+		const onKeydown = (event: KeyboardEvent): void => {
+			const target = event.target as Node | null;
+			if (rootEl && (target === document.body || (target !== null && rootEl.contains(target)))) {
+				ribbonDisplayController.handleKeydown(event);
+			}
+		};
+		document.addEventListener('pointerdown', onPointerDown);
+		document.addEventListener('keydown', onKeydown);
+		return () => {
+			document.removeEventListener('pointerdown', onPointerDown);
+			document.removeEventListener('keydown', onKeydown);
+		};
+	});
 	const aiEnabled = $derived(Boolean(props.ai) && customization.isFeatureEnabled('ai'));
+	// A handle from `pptx-svelte-viewer/ai` brings its config and panel loader; any other
+	// value is a plain config for the viewer's own lazy panel, as before.
+	const aiAssistant = $derived(aiEnabled ? aiAssistants.resolve(props.ai) : undefined);
 	const hiddenActions = $derived(effectiveHiddenActions(customization.resolved, props.hiddenActions, vm.optionsState.hiddenRibbonTabIds));
 
 	// Stable controller references (the bag is built once and never reassigned).
@@ -181,6 +262,9 @@
 	export const downloadAs = vm.editingApi.downloadAs;
 	export const downloadPptx = vm.editingApi.downloadPptx;
 	export const getContent = vm.editingApi.save;
+	export const getSaveRevision = vm.editingApi.getSaveRevision;
+	export const getSaveSnapshot = vm.editingApi.getSaveSnapshot;
+	export const acknowledgeSave = vm.editingApi.acknowledgeSave;
 	export const exportSlidePng = vm.exportingApi.exportSlidePng;
 	export const copySlideAsImage = vm.exportingApi.copySlideAsImage;
 	export const exportPdf = vm.exportingApi.exportPdf;
@@ -235,6 +319,9 @@
 		downloadAs,
 		downloadPptx,
 		getContent,
+		getSaveRevision,
+		getSaveSnapshot,
+		acknowledgeSave,
 		exportSlidePng,
 		copySlideAsImage,
 		exportPdf,
@@ -371,7 +458,8 @@
 	{#if showToolbar && vm.chromeVisible}
 		<ViewerChrome
 			{vm}
-			fileName={props.fileName}
+			ribbonDisplay={ribbonDisplayController}
+			fileName={documentView.fileName}
 			{showNotes}
 			{hiddenActions}
 			accountAuth={props.accountAuth}
@@ -399,15 +487,15 @@
 			ondismissall={() => compatToasts.dismissAll()}
 		/>
 	{/if}
-	{#if vm.versionHistoryOpen}<VersionHistoryPanel filePath={props.filePath} storage={props.storage} onclose={() => (vm.versionHistoryOpen = false)} onrestore={(bytes) => loader.load(bytes)} />{/if}
+	{#if vm.versionHistoryOpen}<VersionHistoryPanel filePath={documentView.filePath} storage={documentView.storage} onclose={() => (vm.versionHistoryOpen = false)} onrestore={(bytes) => loader.load(bytes)} />{/if}
 	{#if vm.signatureWarningOpen}<SignatureStrippedDialog signatureCount={loader.digitalSignatureCount} onclose={vm.closeSignatureWarning} />{/if}
-	<ViewerParityOverlays ui={parityUi} {editor} {exportUi} slides={vm.displaySlides} canvasSize={loader.canvasSize} mediaDataUrls={loader.mediaDataUrls} current={viewer.current} fullscreen={viewer.isFullscreen} locale={themeLocale.effectiveLocale} themeKey={themeLocale.themeKey} themeCatalog={themeLocale.catalog} onsetthemekey={(key) => themeLocale.setThemeKey(key)} availableLocales={props.availableLocales} onsetlocale={(code) => themeLocale.setLocale(code)} onselectslide={(index) => viewer.goTo(index)} onmoveslide={vm.deck.moveSlide} optionsState={vm.optionsState} autosaveRecovery={vm.autosaveRecovery} {aiEnabled} collabActive={vm.collab.active} />
+	<ViewerParityOverlays ui={parityUi} {editor} {exportUi} slides={vm.displaySlides} canvasSize={loader.canvasSize} mediaDataUrls={loader.mediaDataUrls} current={viewer.current} fullscreen={viewer.isFullscreen} locale={themeLocale.effectiveLocale} themeKey={themeLocale.themeKey} themeCatalog={themeLocale.catalog} onsetthemekey={(key) => themeLocale.setThemeKey(key)} availableLocales={props.availableLocales} onsetlocale={(code) => themeLocale.setLocale(code)} onselectslide={(index) => viewer.goTo(index)} onmoveslide={vm.deck.moveSlide} onrunshow={() => { vm.presentation.firstSlide(); vm.onFullscreenToggle(); }} optionsState={vm.optionsState} autosaveRecovery={vm.autosaveRecovery} {aiEnabled} collabActive={vm.collab.active} />
 	<ViewerMain
 		{vm}
 		{t}
 		{showThumbnails}
 		{showNotes}
-		ai={aiEnabled ? props.ai : undefined}
+		ai={aiAssistant?.config}
 		onnotesupdate={props.onnotesupdate}
 		onstageholder={(el) => {
 			stageHolderEl = el ?? undefined;
@@ -447,10 +535,11 @@
 		shareDefaults={props.shareDefaults}
 		showOverlay={collab.active && vm.chromeVisible}
 	/>
-	{#if props.ai && aiEnabled && vm.ai.panelOpen && vm.chromeVisible}
+	{#if aiAssistant && vm.ai.panelOpen && vm.chromeVisible}
 		<AiDock
 			bridge={vm.ai.bridge}
-			config={props.ai}
+			config={aiAssistant.config}
+			loadPanel={aiAssistant.panel}
 			aiPanel={vm.ai.panel}
 			onclose={() => (vm.ai.panelOpen = false)}
 		/>

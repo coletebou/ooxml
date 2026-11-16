@@ -1,5 +1,7 @@
 /** Visio ribbon strings for the en locale (text), keyed by the English text. Not reviewed by a native speaker. */
 export const enText: Readonly<Record<string, string>> = {
+	'This chart contains unsupported content and is read-only. Its original workbook is preserved.':
+		'This chart contains unsupported content and is read-only. Its original workbook is preserved.',
 	'Diagram controls': 'Diagram controls',
 	'Home commands': 'Home commands',
 	'Insert commands': 'Insert commands',
@@ -43,21 +45,14 @@ export const enText: Readonly<Record<string, string>> = {
 	'Open a .vsdx file to add backgrounds.': 'Open a .vsdx file to add backgrounds.',
 	'Open a .vsdx file to lay out its shapes.': 'Open a .vsdx file to lay out its shapes.',
 	'open a .vsdx file to lay out its shapes.': 'open a .vsdx file to lay out its shapes.',
-	'3-D rotation needs a 3-D renderer.': '3-D rotation needs a 3-D renderer.',
-	'Bevel needs 3-D lighting the SVG renderer does not draw.':
-		'Bevel needs 3-D lighting the SVG renderer does not draw.',
 	'Custom theme colour sets are not written yet; pick a theme or variant.':
 		'Custom theme colour sets are not written yet; pick a theme or variant.',
 	'DWG and DXF import is not supported.': 'DWG and DXF import is not supported.',
-	'Data graphics are chosen in the Data Graphics menu; there is no fields pane.':
-		'Data graphics are chosen in the Data Graphics menu; there is no fields pane.',
 	'Data graphics are placed at their default position; this option is not built yet.':
 		'Data graphics are placed at their default position; this option is not built yet.',
 	'Embedded Excel charts are not supported.': 'Embedded Excel charts are not supported.',
 	'Embedded OLE objects are not supported; only pictures can be inserted.':
 		'Embedded OLE objects are not supported; only pictures can be inserted.',
-	'Embellishment needs theme-driven shape geometry.':
-		'Embellishment needs theme-driven shape geometry.',
 	'Feedback is not collected by this viewer.': 'Feedback is not collected by this viewer.',
 	'Ink strokes are not supported.': 'Ink strokes are not supported.',
 	'Macros and add-ons never run in this viewer.': 'Macros and add-ons never run in this viewer.',
@@ -68,11 +63,6 @@ export const enText: Readonly<Record<string, string>> = {
 	'Rows are linked by dragging them from the External Data window; the linking wizard is not built yet.':
 		'Rows are linked by dragging them from the External Data window; the linking wizard is not built yet.',
 	'The viewer shows one drawing window.': 'The viewer shows one drawing window.',
-	'Theme connector styles cannot be chosen separately yet.':
-		'Theme connector styles cannot be chosen separately yet.',
-	'Theme effect styles are not rendered yet.': 'Theme effect styles are not rendered yet.',
-	'Theme fonts are written to the theme part, but text does not follow theme fonts yet.':
-		'Theme fonts are written to the theme part, but text does not follow theme fonts yet.',
 	'Visio rule sets (formula-based RuleFilter and RuleTest) are not evaluated; only the built-in generic rules run.':
 		'Visio rule sets (formula-based RuleFilter and RuleTest) are not evaluated; only the built-in generic rules run.',
 	'Bottom Right': 'Bottom Right',
@@ -110,4 +100,5 @@ export const enText: Readonly<Record<string, string>> = {
 	Open: 'Open',
 	Options: 'Options',
 	Share: 'Share',
+	'Style {n}': 'Style {n}',
 };

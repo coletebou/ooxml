@@ -4,7 +4,9 @@ import {
 	groupIntoParagraphs as sharedGroupIntoParagraphs,
 	hasGlyphEnvelope,
 	resolveFontItalic,
+	resolveWarpRunPaint,
 	resolveFontWeight,
+	warpParagraphLayouts,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxElementWithText, TextSegment, TextStyle } from 'pptx-viewer-core';
 import { hasTextProperties, getSubstituteFontFamily } from 'pptx-viewer-core';
@@ -18,15 +20,15 @@ import { hasTextProperties, getSubstituteFontFamily } from 'pptx-viewer-core';
  * preset's top and bottom curves the way PowerPoint's own text warp does;
  * `<textPath>` can only bend a shared baseline, never per-glyph height.
  */
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 
-import { DEFAULT_TEXT_FONT_SIZE, DEFAULT_FONT_FAMILY, HYPERLINK_COLOR } from '../constants';
+import { DEFAULT_TEXT_FONT_SIZE, DEFAULT_FONT_FAMILY } from '../constants';
 import { normalizeHexColor } from './color';
-import { getGlyphOutline } from './glyph-outline-cache';
+import { getGlyphOutline, glyphOutlineFontCache } from './glyph-outline-cache';
 import type { FieldSubstitutionContext } from './text-field-substitution';
 import { substituteFieldText } from './text-field-substitution';
 import type { ElementFindHighlights } from './text-segment-helpers';
-import { shouldUseSvgWarp, getWarpPath } from './warp-path-generators';
+import { shouldUseSvgWarp } from './warp-path-generators';
 
 // Paragraph grouping helper. The pure splitter now lives in pptx-viewer-shared
 // (render/text-warp `groupIntoParagraphs`); React keeps its field-substitution
@@ -85,34 +87,22 @@ function getSegmentTspanProps(
 	segment: TextSegment,
 	element: PptxElementWithText,
 	fallbackColor: string,
+	fitScale = 1,
 ): React.SVGProps<SVGTSpanElement> {
-	const s = segment.style || ({} as TextStyle);
-	const decos: string[] = [];
-	if (s.underline || s.hyperlink) {
-		decos.push('underline');
-	}
-	if (s.strikethrough) {
-		decos.push('line-through');
-	}
-
-	const fill = s.hyperlink
-		? normalizeHexColor(s.color || element.textStyle?.color, HYPERLINK_COLOR)
-		: normalizeHexColor(s.color || element.textStyle?.color, fallbackColor);
-
+	// The run paint is the shared descriptor every binding maps onto its template.
+	const paint = resolveWarpRunPaint(
+		segment,
+		element.textStyle,
+		fallbackColor,
+		DEFAULT_TEXT_FONT_SIZE,
+	);
 	return {
-		fill,
-		fontSize: (s.fontSize ?? element.textStyle?.fontSize ?? DEFAULT_TEXT_FONT_SIZE) as
-			| number
-			| undefined,
-		fontWeight: resolveFontWeight(s.fontFamily || element.textStyle?.fontFamily, s.bold),
-		fontStyle: resolveFontItalic(s.fontFamily || element.textStyle?.fontFamily, s.italic)
-			? 'italic'
-			: undefined,
-		fontFamily:
-			s.fontFamily || element.textStyle?.fontFamily
-				? getSubstituteFontFamily(s.fontFamily || element.textStyle?.fontFamily || '')
-				: DEFAULT_FONT_FAMILY,
-		textDecoration: decos.length > 0 ? decos.join(' ') : undefined,
+		fill: paint.fill,
+		fontSize: paint.fontSizePx * fitScale,
+		fontWeight: paint.fontWeight ?? 'normal',
+		fontStyle: paint.fontStyle ?? 'normal',
+		fontFamily: paint.fontFamily,
+		textDecoration: paint.textDecoration,
 	};
 }
 
@@ -251,6 +241,12 @@ export function WarpedText({
 	fallbackColor,
 	fieldContext,
 }: WarpedTextProps): React.ReactElement | null {
+	// Repaint envelope glyphs when the outline cache fills in an outline they missed.
+	useSyncExternalStore(
+		glyphOutlineFontCache.subscribe,
+		glyphOutlineFontCache.getSnapshot,
+		glyphOutlineFontCache.getSnapshot,
+	);
 	if (!hasTextProperties(element)) {
 		return null;
 	}
@@ -265,7 +261,6 @@ export function WarpedText({
 		return null;
 	}
 
-	const lineCount = paragraphs.length;
 	const pathIdPrefix = `warp-${element.id}`;
 
 	// Warp adjustment values
@@ -304,6 +299,7 @@ export function WarpedText({
 			warpAdj,
 			warpAdj2,
 			getGlyphOutline,
+			textEl.textStyle,
 		);
 		return (
 			<svg
@@ -331,6 +327,15 @@ export function WarpedText({
 		);
 	}
 
+	const layouts = warpParagraphLayouts(
+		preset,
+		width,
+		height,
+		paragraphs,
+		warpAdj,
+		warpAdj2,
+		textEl.textStyle,
+	);
 	return (
 		<svg
 			width={width}
@@ -350,7 +355,7 @@ export function WarpedText({
 					<path
 						key={`${pathIdPrefix}-def-${i}`}
 						id={`${pathIdPrefix}-${i}`}
-						d={getWarpPath(preset, width, height, i, lineCount, warpAdj, warpAdj2)}
+						d={layouts[i]?.d}
 						fill='none'
 					/>
 				))}
@@ -376,7 +381,12 @@ export function WarpedText({
 						{para.segments.map((seg, segIdx) => (
 							<tspan
 								key={`${pathIdPrefix}-ts-${paraIdx}-${segIdx}`}
-								{...getSegmentTspanProps(seg, textEl, fallbackColor)}
+								{...getSegmentTspanProps(
+									seg,
+									textEl,
+									fallbackColor,
+									layouts[paraIdx]?.fitScale ?? 1,
+								)}
 							>
 								{seg.text}
 							</tspan>

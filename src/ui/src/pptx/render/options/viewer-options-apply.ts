@@ -1,5 +1,6 @@
 import type { PrintSettings } from '../../export/print-document';
 import { AUTOSAVE_MIN_INTERVAL_SECONDS } from '../autosave-store';
+import { DEFAULT_EDITOR_HISTORY_DEPTH } from '../editor-history';
 import type { ToolbarTabDefinition } from '../toolbar-actions';
 import { TOOLBAR_TABS } from '../toolbar-actions';
 import type { ImageResolutionPreset, ViewerOptions } from './viewer-options';
@@ -13,7 +14,7 @@ import type { ImageResolutionPreset, ViewerOptions } from './viewer-options';
 /** Maximum undo steps for `EditorHistory({ maxDepth })`. */
 export function resolveHistoryDepth(options: ViewerOptions): number {
 	const steps = Math.round(options.advanced.maximumUndoSteps);
-	return Math.min(150, Math.max(3, Number.isFinite(steps) ? steps : 100));
+	return Math.min(150, Math.max(3, Number.isFinite(steps) ? steps : DEFAULT_EDITOR_HISTORY_DEPTH));
 }
 
 /** AutoRecover cadence in seconds, honoring the shared minimum. */
@@ -99,6 +100,21 @@ export function resolveImageResolutionScale(options: ViewerOptions): number {
 	}
 	const ppi = resolveImageResolutionPpi(options.advanced.imageDefaultResolution);
 	return ppi === undefined ? 1 : Math.max(0.25, Math.min(4, ppi / 96));
+}
+
+/** How File > Save as PDF writes the file (Options > Advanced > Save as PDF). */
+export interface PdfExportSettings {
+	/** `vector` is paths and real text with embedded fonts; `pictures` is one image per slide. */
+	mode: 'vector' | 'pictures';
+	includeHiddenSlides: boolean;
+}
+
+/** The PDF export settings every binding's PDF command reads. */
+export function resolvePdfExportSettings(options: ViewerOptions): PdfExportSettings {
+	return {
+		mode: options.advanced.pdfSlidesAsPictures ? 'pictures' : 'vector',
+		includeHiddenSlides: options.advanced.pdfIncludeHiddenSlides,
+	};
 }
 
 /** Whether the viewer should open documents read-only until editing is enabled. */

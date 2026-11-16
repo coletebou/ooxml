@@ -11,19 +11,75 @@ export {
 	stringAttribute,
 } from './dom';
 export * from './drawing-color';
+export * from './color-transforms';
+export * from './preset-colors';
 export * from './drawing-color-css';
 export * from './drawing-color-brightness';
 export * from './ordered-color-transforms';
 export * from './drawing-fill';
+export * from './node-view';
+export * from './gradient-read';
+export * from './line-read';
 export * from './drawing-text';
 export * from './drawing-geometry';
 export * from './drawing-shadow';
+export * from './effect-model';
+export * from './drawing-effects';
+export * from './effect-read';
+export * from './effect-dag';
+export * from './write-line';
 export * from './write-color';
+export * from './patch-color';
 export * from './write-fill';
 export * from './write-theme';
 export * from './gradient-presets';
 export * from './gradient-geometry';
 export * from './rect-path-gradient';
+export * from './shape-path-gradient';
 export * from './theme-model';
 export * from './theme';
+export * from './format-scheme';
 export * from './theme-color';
+export * from './text-model';
+export * from './text-element-view';
+export * from './text-paragraph-codec';
+export * from './text-run-codec';
+export * from './text-body-codec';
+export {
+	parseDrawingFont,
+	parseDrawingHyperlink,
+	parseDrawingRunProperties,
+} from './read-run-properties';
+export * from './read-paragraph-properties';
+export * from './read-text-body';
+export * from './write-run-properties';
+export * from './write-paragraph-properties';
+export * from './write-text-body';
+
+export * from './path-data';
+export * from './custom-geometry';
+export * from './picture-crop';
+export * from './picture-effects';
+export * from './picture-fill';
+export * from './image-content-type';
+export * from './text-3d-model';
+export * from './read-text-3d';
+export * from './write-text-3d';
+export * from './camera-presets';
+export * from './picture-layout';
+export * from './picture-standard-effects';
+export * from './picture-transfer';
+export * from './picture-artistic';
+
+export { inspectRasterImage, RasterImageError, RASTER_IMAGE_LIMITS } from './raster-image';
+export type { RasterImageInfo, RasterImageOptions, RasterImageErrorCode } from './raster-image';
+export * from './picture-hsl-pixels';
+
+export {
+	capCompensatedDashArray,
+	dashPatternUnits,
+	dashPenWidth,
+	isDashedStroke,
+} from './dash-pattern';
+export type { DashSegmentInput } from './dash-pattern';
+export * from './html-text-paste';

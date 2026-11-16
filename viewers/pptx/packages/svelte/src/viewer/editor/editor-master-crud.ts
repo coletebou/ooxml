@@ -1,5 +1,6 @@
 import {
 	applyMasterViewCrudAction,
+	forgetStepsUsingRemovedParts,
 	masterViewCrudActions,
 	masterViewCrudFailureKey,
 } from 'ooxml-ui/pptx';
@@ -22,7 +23,7 @@ import type { EditorState } from './editor-state.svelte';
 
 export interface MasterViewCrudPrompts {
 	/** Ask for the new layout/master name; null/empty cancels the rename. */
-	promptName(currentName: string): string | null;
+	promptName(currentName: string): string | null | Promise<string | null>;
 	/** Surface a rejection (`notFound` / `inUse` / `lastMaster`) as translated copy. */
 	notify(message: string): void;
 	translate(key: string): string;
@@ -79,7 +80,7 @@ export class EditorMasterCrudController {
 
 		let name: string | undefined;
 		if (id === 'renameLayout' || id === 'renameMaster') {
-			const entered = prompts.promptName(currentName(this.editor))?.trim();
+			const entered = (await prompts.promptName(currentName(this.editor)))?.trim();
 			if (!entered) {
 				return false;
 			}
@@ -93,7 +94,9 @@ export class EditorMasterCrudController {
 		}
 
 		this.editor.pushHistory();
-		this.editor.adoptHandler(result.handler);
+		// Keep the previous handler alive: the slides on screen and the undo stack still show its
+		// pictures, and disposing it revokes their Blob URLs.
+		this.editor.adoptHandler(result.handler, true);
 		this.editor.slideMasters = result.data.slideMasters ?? [];
 		this.editor.masterViewTarget = {
 			tab: 'slides',
@@ -101,6 +104,12 @@ export class EditorMasterCrudController {
 			layoutIndex: result.target.layoutIndex,
 		};
 		this.editor.selection.clear();
+		// A step restores the masters too, so a delete leaves no undo step here.
+		forgetStepsUsingRemovedParts(
+			(reaches) => this.editor.history.forget(reaches),
+			data,
+			result.data,
+		);
 		this.editor.commitChange();
 		return true;
 	}

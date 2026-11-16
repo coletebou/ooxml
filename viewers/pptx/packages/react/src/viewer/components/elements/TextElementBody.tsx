@@ -1,6 +1,7 @@
 import {
 	getOverflowSegments,
 	getTextBodyRotationTransform,
+	getTextCompensationStyle,
 	isLinkedTextBox as isLinkedTextBoxElement,
 	placeholderPromptDescriptor,
 } from 'ooxml-ui/pptx';
@@ -8,17 +9,11 @@ import { hasTextProperties } from 'pptx-viewer-core';
 import React from 'react';
 
 import { DEFAULT_TEXT_COLOR } from '../../constants';
-import {
-	cn,
-	getTextCompensationTransform,
-	getTextLayoutStyle,
-	getTextWarpStyle,
-	renderTextSegments,
-} from '../../utils';
+import { cn, getTextLayoutStyle, getTextWarpStyle, renderTextSegments } from '../../utils';
 import { buildTextBody3DSceneStyle } from '../../utils/text-effects';
 import { shouldUseSvgWarp, WarpedText } from '../../utils/text-warp';
-import { ActionButtonGlyphOverlay, isActionButtonShape } from './ActionButtonGlyphOverlay';
 import type { RenderBodyOptions } from './element-body-types';
+import { renderEquationBox } from './EquationBox';
 
 export function renderTextElementBody(options: RenderBodyOptions): React.ReactNode {
 	const {
@@ -52,8 +47,11 @@ export function renderTextElementBody(options: RenderBodyOptions): React.ReactNo
 	// Through shared since wave 4: the same rotation now reaches vue, angular,
 	// svelte and vanilla, which all painted a rotated body upright.
 	const rotationTransform = getTextBodyRotationTransform(el);
+	// A flipped shape's text is never mirrored, and a vertical flip turns it
+	// upside down about its text rectangle's centre (`text-flip-compensation`).
+	const compensation = getTextCompensationStyle(el);
 	const composedTransform =
-		[rotationTransform, getTextCompensationTransform(el), scene3dStyle?.transform]
+		[rotationTransform, compensation?.transform, scene3dStyle?.transform]
 			.filter(Boolean)
 			.join(' ') || undefined;
 	const transformStyle: React.CSSProperties = {
@@ -66,7 +64,7 @@ export function renderTextElementBody(options: RenderBodyOptions): React.ReactNo
 		// hardcoded to `'center'` unconditionally, silently clobbering
 		// `scene3dStyle.transformOrigin` the same way Svelte's `ElementRenderer`
 		// once re-clobbered `pointerEvents` from its own interactive flag.
-		transformOrigin: scene3dStyle?.transformOrigin ?? 'center',
+		transformOrigin: scene3dStyle?.transformOrigin ?? compensation?.transformOrigin ?? 'center',
 		...(scene3dStyle?.perspective ? { perspective: scene3dStyle.perspective } : {}),
 		// COM-calibrated off-axis correction for a handful of camera presets
 		// (see `visual-3d-camera`'s module doc comment); only reachable when an
@@ -78,18 +76,20 @@ export function renderTextElementBody(options: RenderBodyOptions): React.ReactNo
 		...(scene3dStyle?.transformStyle ? { transformStyle: scene3dStyle.transformStyle } : {}),
 		...(isLinkedTextBox ? { overflow: 'hidden' } : {}),
 	};
-	const shapeType = 'shapeType' in el ? (el as { shapeType?: string }).shapeType : undefined;
 	// An empty inherited placeholder's greyed-out hint ("Click to add title").
 	// Shared owns the surface rule (editing canvas only); a non-text shape that
 	// carries nothing but the hint still needs a text body to show it in.
 	const placeholderPrompt = placeholderPromptDescriptor(el, placeholderPromptMode);
 	const shouldRenderText = isTxtEl || placeholderPrompt !== null;
+	// A pure equation box is laid out by the shared equation block descriptor.
+	const equationBox = shouldRenderText ? renderEquationBox(el, Boolean(onHyperlinkClick)) : null;
 
 	return (
 		<>
 			{vecShape}
-			{isActionButtonShape(shapeType) && <ActionButtonGlyphOverlay element={el} />}
+			{equationBox}
 			{shouldRenderText &&
+				!equationBox &&
 				(useSvgWarp ? (
 					<div
 						className={cn(

@@ -2,12 +2,17 @@ import {
 	compatibilityWarningToasts,
 	describeFontEmbedding,
 	partitionTemplateElements,
+	pptxLoadErrorMessage,
+	prefetchDeckWebfonts,
+	prepareDeckWebfonts,
 	readOnlyRecommendation,
+	reduceReadOnlySession,
 	resolveAuthoredCustomShowId,
+	resolveGoogleFontsCss2Base,
 	resolveInitialSlideIndex,
 } from 'ooxml-ui/pptx';
 import type { CollabLoadOrigin } from 'ooxml-ui/pptx';
-import type { PptxHandler } from 'pptx-viewer-core';
+import type { PptxEmbeddedFont, PptxHandler, PptxSlide } from 'pptx-viewer-core';
 import { EncryptedFileError } from 'pptx-viewer-core';
 
 import type { EditorController } from './editor';
@@ -16,7 +21,9 @@ import type { Translator } from './i18n';
 import type { PptxViewerSource } from './load';
 import { loadPresentation, resolveSourceToBuffer, revokeBlobUrls } from './load';
 import type { Store, ViewerState } from './state';
+import { readOnlySessionFields, readOnlySessionOf } from './state/read-only-session';
 import type { PptxViewerOptions } from './types';
+import { VANILLA_GOOGLE_FONTS_LINK_ID } from './webfonts';
 
 export interface LoadingControllerDeps {
 	options: PptxViewerOptions;
@@ -40,6 +47,12 @@ export interface LoadingControllerDeps {
 	 * core's own safe-by-default `allowExternalImages: false`.
 	 */
 	getAllowExternalContent?: () => boolean;
+	/**
+	 * The CSS2 base the load waits on for its webfonts (host `googleFonts`,
+	 * else Trust Center > "Download fonts"), `null` when downloads are off.
+	 * Read per load; omitted resolves the host `googleFonts` option alone.
+	 */
+	getGoogleFontsBase?: () => string | null;
 	/** Trust Center > "Open documents in Protected View" (same lazy-read reason). */
 	shouldOpenProtectedView?: () => boolean;
 	/**
@@ -49,6 +62,8 @@ export interface LoadingControllerDeps {
 	 * own mirrored one.
 	 */
 	setEditableForLoad?: (editable: boolean) => void;
+	/** The document the viewer renders into, where the loader injects the webfont `<link>`. */
+	doc?: Document;
 }
 
 export interface LoadOptions {
@@ -78,8 +93,10 @@ export interface LoadingController {
 	 * Adopt a handler produced by an IN-SESSION document mutation that returns
 	 * a fresh `PptxHandler` rather than patching the existing one (Slide
 	 * Master view CRUD's `applyMasterViewCrudAction`, which reloads a new ZIP
-	 * built from the current archive). Disposes the previous handler; leaves
-	 * Blob URLs and the load token alone, since this is not a new document.
+	 * built from the current archive). Disposes the previous handler unless
+	 * `keepPrevious` (a master command and a slide paste keep it, since the
+	 * slides on screen still show its pictures); leaves Blob URLs and the load
+	 * token alone, since this is not a new document.
 	 */
 	setHandler(next: PptxHandler, keepPrevious?: boolean): void;
 	/** Invalidate any in-flight load so it discards its result on resolution. */
@@ -113,12 +130,63 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 	): Promise<void> {
 		const token = ++loadToken;
 		deps.getEditor()?.reset();
-		store.set({ loading: true, error: null });
+		store.set({ loading: true, fontProgress: null, error: null });
 		try {
 			const buffer = await resolveSourceToBuffer(source);
+			// ── The deck's Google Fonts webfonts ─────
+			// Started as soon as core has parsed the slides (`onSlidesParsed`), so the
+			// download runs while the rest of the deck loads and media resolves;
+			// awaited before the deck is shown, which it holds back only briefly (see
+			// deck-webfont-readiness.ts). Nothing after that point changes slide text,
+			// so these slides name the same faces (and stylesheet) as the committed ones.
+			const doc = deps.doc ?? (typeof document === 'undefined' ? undefined : document);
+			let webfonts: Promise<unknown> | undefined;
+			const startWebfonts = (
+				slides: readonly PptxSlide[],
+				embeddedFonts: readonly PptxEmbeddedFont[],
+			): void => {
+				if (token !== loadToken || !doc) {
+					return;
+				}
+				webfonts = prepareDeckWebfonts({
+					document: doc,
+					linkId: VANILLA_GOOGLE_FONTS_LINK_ID,
+					slides: partitionTemplateElements([...slides]).slides,
+					embeddedFonts,
+					// `null` means off, so no `??` fallback here.
+					googleFontsBase: deps.getGoogleFontsBase
+						? deps.getGoogleFontsBase()
+						: resolveGoogleFontsCss2Base(options.googleFonts),
+					onProgress: (progress) => {
+						if (token === loadToken) {
+							store.set({ fontProgress: progress });
+						}
+					},
+				});
+			};
+			// Start the stylesheet for the fonts the deck declares from its bytes, before parsing even
+			// reaches the slides (`prefetchDeckWebfonts`); `startWebfonts` then adds the exact one.
+			if (doc) {
+				prefetchDeckWebfonts({
+					document: doc,
+					linkId: VANILLA_GOOGLE_FONTS_LINK_ID,
+					bytes: buffer,
+					googleFontsBase: deps.getGoogleFontsBase
+						? deps.getGoogleFontsBase()
+						: resolveGoogleFontsCss2Base(options.googleFonts),
+				});
+			}
 			const loaded = await loadPresentation(buffer, {
 				allowExternalImages: deps.getAllowExternalContent?.(),
+				limits: options.limits,
+				onSlidesParsed: ({ slides, embeddedFonts }) => startWebfonts(slides, embeddedFonts),
 			});
+			// A JSON document is imported without the slide hook.
+			if (!webfonts) {
+				startWebfonts(loaded.slides, loaded.embeddedFonts);
+			}
+			const partition = partitionTemplateElements(loaded.slides);
+			await webfonts;
 			if (token !== loadToken) {
 				revokeBlobUrls(loaded.blobUrls);
 				loaded.handler.dispose();
@@ -127,7 +195,6 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 			releaseLoaded();
 			handler = loaded.handler;
 			blobUrls = loaded.blobUrls;
-			const partition = partitionTemplateElements(loaded.slides);
 			deps.onContentApplying?.(origin);
 			// Trust Center > "Open documents in Protected View": a freshly-opened
 			// deck (not the host's own bootstrap content, and not a same-document
@@ -142,14 +209,17 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 			// `p:modifyVerifier` (a password-protected deck) or `docProps/custom.xml`
 			// "Mark as Final" both ask to open read-only, independent of Trust
 			// Center's Protected View above (which only gates a freshly opened file,
-			// not host bootstrap content). Only meaningful when the host permits
-			// editing at all.
+			// not host bootstrap content). The lock is part of the viewer's
+			// effective editable state until "Edit anyway" lifts it, so it never
+			// overrides what the host asked for.
 			const recommendation = readOnlyRecommendation({
 				modifyVerifier: loaded.modifyVerifier,
 				customProperties: loaded.customProperties,
 			});
-			const readOnlyLocked =
-				options.editable === true && recommendation.kind !== null && recommendation.defaultReadOnly;
+			// A new deck starts a new session; a password check still running is dropped.
+			const readOnlySession = readOnlySessionFields(
+				reduceReadOnlySession(readOnlySessionOf(store.get()), { type: 'reset' }),
+			);
 			const deckViewPreferences = seedDeckViewPreferences(store.get(), loaded.viewProperties);
 			const compatToasts = compatibilityWarningToasts([
 				...loaded.warnings,
@@ -159,11 +229,8 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 				slides: partition.slides,
 				protectedView,
 				readOnlyRecommendation: recommendation.kind === null ? null : recommendation,
-				readOnlyBannerDismissed: false,
+				...readOnlySession,
 				modifyVerifier: loaded.modifyVerifier ?? undefined,
-				readOnlyPasswordPromptOpen: false,
-				readOnlyPasswordError: null,
-				readOnlyCheckingPassword: false,
 				compatToasts,
 				...deckViewPreferences,
 				sections: loaded.sections,
@@ -220,13 +287,12 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 				tableStylesToDelete: [],
 				currentSlide: resolveInitialSlideIndex(options.initialSlide, partition.slides.length),
 				loading: false,
+				fontProgress: null,
 			});
 			// Goes through the central editable gate (store flag + the editor
 			// controller's own mirrored flag), not a bare store patch, so
 			// interaction gating and the store agree on whether editing is live.
-			deps.setEditableForLoad?.(
-				protectedView || readOnlyLocked ? false : options.editable === true,
-			);
+			deps.setEditableForLoad?.(protectedView ? false : options.editable === true);
 			deps.onContentApplied?.(origin);
 			options.onLoad?.({ slideCount: loaded.slides.length, canvasSize: loaded.canvasSize });
 		} catch (error) {
@@ -237,10 +303,8 @@ export function createLoadingController(deps: LoadingControllerDeps): LoadingCon
 			const message =
 				error instanceof EncryptedFileError
 					? t('pptx.security.currentlyProtected')
-					: error instanceof Error
-						? error.message
-						: String(error);
-			store.set({ loading: false, error: message });
+					: pptxLoadErrorMessage(error, t);
+			store.set({ loading: false, fontProgress: null, error: message });
 			options.onError?.(message, error);
 		}
 	}

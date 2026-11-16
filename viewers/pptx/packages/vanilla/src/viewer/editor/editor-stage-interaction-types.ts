@@ -18,7 +18,7 @@ export interface StageInteractionsDeps {
 	 * keystroke; the commit path is untouched. Omit outside a collaborative
 	 * viewer.
 	 */
-	onInlineTextInput?: (elementId: string, text: string) => void;
+	onInlineTextInput?: (elementId: string | null, text: string) => void;
 	/** Push any queued live-preview frame out before a commit lands. */
 	flushInlineTextInput?: () => void;
 	onEditEquation?(id: string, omml: Record<string, unknown>): void;
@@ -42,5 +42,9 @@ export interface StageInteractions {
 	beginAdjustGesture(event: PointerEvent, descriptor: ShapeAdjustmentHandleDescriptor): void;
 	closeInline(commit: boolean): void;
 	inlineActive(): boolean;
+	/** The element whose inline text editor is open, or null. */
+	inlineElementId(): string | null;
+	/** Open the inline text editor on `id` (caret at the end unless a caret is pending). */
+	openInlineEdit(id: string): void;
 	dispose(): void;
 }

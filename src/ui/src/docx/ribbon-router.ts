@@ -13,7 +13,7 @@ import { openGoToPanel } from './go-to-panel';
 import { selectNextObject } from './go-to';
 import { closeRibbonPopover } from './ribbon-popover';
 import { setHeadingLevel } from './heading-commands';
-import { readAloudAvailable, textToRead, toggleReadAloud } from './read-aloud';
+import { readAloudAvailable } from './read-aloud';
 import { showWordCount } from './word-count-panel';
 import { syncSpellingButton } from './spelling';
 import { applyParagraphFormat, readParagraphFormat } from './paragraph-format';
@@ -33,6 +33,10 @@ export function routeRibbonAction(core: EditorCore, action: RibbonAction): void 
 			'_blank',
 			'noopener,noreferrer',
 		);
+		return;
+	}
+	if (action.type === 'chart' && action.key === 'format') {
+		shell.chartFormat?.open(action.target);
 		return;
 	}
 	if (inserts.handle(action)) return;
@@ -143,16 +147,9 @@ export function routeRibbonAction(core: EditorCore, action: RibbonAction): void 
 			emit(core.element, 'document-warning', 'This document has no heading styles to apply.');
 		focusView(target);
 	} else if (action.type === 'readAloud' && target) {
-		const button = () =>
-			shell.toolbar?.querySelector(
-				'[aria-label="Read aloud"], [data-localearialabel="Read aloud"]',
-			);
 		if (!readAloudAvailable())
 			emit(core.element, 'document-warning', 'This browser cannot read text aloud.');
-		else
-			toggleReadAloud(textToRead(target), (on) =>
-				button()?.setAttribute('aria-pressed', String(on)),
-			);
+		else core.readAloud.toggle();
 	} else if (action.type === 'zoomFit') pages.zoomTo(action.mode);
 	else if (action.type === 'wordCount') {
 		const anchor = shell.toolbar?.querySelector<HTMLElement>(
@@ -174,6 +171,7 @@ export function routeRibbonAction(core: EditorCore, action: RibbonAction): void 
 	} else if (action.type === 'view') pages.setViewMode(action.value);
 	else if (action.type === 'print') pages.print();
 	else if (action.type === 'insertNote') parts.insertNote(action.kind, shell.canvas, shell.paper);
+	else if (action.type === 'convertNotes') parts.convertNotes(action.selection);
 	else if (action.type === 'page') pages.changePageSetup(action.key, action.value);
 	else if (action.type === 'sectionBreak') pages.insertSectionBreak(action.kind);
 	else if (action.type === 'evenOddHeaders') pages.toggleEvenOddHeaders();

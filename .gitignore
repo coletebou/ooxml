@@ -17,7 +17,6 @@ release-plan.json
 
 # Machine-specific agent notes (checkout paths and the like); see AGENTS.md
 CLAUDE.local.md
-scripts/fleet.local.json
 .playwright-mcp/
 
 # Session handover notes stay local, never committed
@@ -53,3 +52,6 @@ desktop/src-tauri/gen/
 
 # Report written by bun run docs:check
 /docs-health.md
+/.browser-timings/
+/office-acceptance-results/
+.suite-preview-onedrive/

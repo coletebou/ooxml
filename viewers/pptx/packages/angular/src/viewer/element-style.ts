@@ -18,9 +18,13 @@ import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
 
 import { buildDuotoneFilter } from './duotone-filter';
 import type { DuotoneFilterDef } from './duotone-filter';
-import { getSoftEdgeFilterDef, resolveShapeFilterCss } from './element-effect-defs';
+import {
+	getSilhouetteFilterDef,
+	getSoftEdgeFilterDef,
+	resolveShapeFilterCss,
+} from './element-effect-defs';
 import { merge3dStyleMap } from './merge-3d';
-import { isHollowShapeElement } from './shape-geometry';
+import { passesClicksThroughBox } from './shape-geometry';
 import { cssObjectToStyleMap } from './table-renderer-helpers';
 
 /**
@@ -172,7 +176,13 @@ export function getShapeFillStrokeStyle(
 	if (fx.boxShadow) {
 		style['box-shadow'] = fx.boxShadow;
 	}
-	const filterCss = resolveShapeFilterCss(fx.filter, duotone, softEdge);
+	const silhouette = getSilhouetteFilterDef(el);
+	const filterCss = resolveShapeFilterCss(
+		fx.filter,
+		duotone,
+		softEdge,
+		silhouette ? [silhouette.id] : [],
+	);
 	if (filterCss) {
 		style['filter'] = filterCss;
 	}
@@ -205,7 +215,7 @@ export function getShapeFillStrokeStyle(
 	// outline only, so its interior must not swallow clicks meant for what it is
 	// drawn over. ShapeEffectOverlay paints a transparent pointer-events:stroke
 	// band that opts the outline back in.
-	if (isHollowShapeElement(el)) {
+	if (passesClicksThroughBox(el)) {
 		style['pointer-events'] = 'none';
 	}
 

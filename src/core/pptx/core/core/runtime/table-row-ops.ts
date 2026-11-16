@@ -16,6 +16,7 @@ import {
 	createDefaultXmlCell,
 	getTblFromRawXml,
 } from './table-structural-helpers';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Add Row
@@ -42,7 +43,7 @@ export function addTableRow(
 	tableData: PptxTableData,
 	index: number,
 	rawXml?: XmlObject,
-): { tableData: PptxTableData; rawXml?: XmlObject } {
+): { tableData: PptxTableData; rawXml?: XmlObject | undefined } {
 	const colCount = tableData.columnWidths.length;
 	const clampedIndex = Math.max(0, Math.min(index, tableData.rows.length));
 
@@ -121,7 +122,7 @@ export function addTableRow(
 
 			// Adjust rowSpan in XML rows above
 			for (let ri = 0; ri < Math.min(clampedIndex, xmlRows.length); ri++) {
-				const xmlCells = ensureArray(xmlRows[ri]['a:tc'] as XmlObject | XmlObject[]);
+				const xmlCells = ensureArray(at(xmlRows, ri)['a:tc'] as XmlObject | XmlObject[]);
 				for (const xmlCell of xmlCells) {
 					const rs = parseInt(String(xmlCell['@_rowSpan'] || '0'), 10);
 					if (rs > 1 && ri + rs > clampedIndex) {
@@ -163,7 +164,7 @@ export function removeTableRow(
 	tableData: PptxTableData,
 	index: number,
 	rawXml?: XmlObject,
-): { tableData: PptxTableData; rawXml?: XmlObject } {
+): { tableData: PptxTableData; rawXml?: XmlObject | undefined } {
 	if (tableData.rows.length <= 1) {
 		return { tableData, rawXml };
 	}
@@ -171,7 +172,7 @@ export function removeTableRow(
 		return { tableData, rawXml };
 	}
 
-	const removedRow = tableData.rows[index];
+	const removedRow = at(tableData.rows, index);
 	const adjustedRows = [...tableData.rows];
 
 	// Helper to update a single cell's rowSpan in a row's cells array.
@@ -183,7 +184,7 @@ export function removeTableRow(
 
 	// Handle merge spans
 	for (let c = 0; c < removedRow.cells.length; c++) {
-		const cell = removedRow.cells[c];
+		const cell = at(removedRow.cells, c);
 
 		if (cell.vMerge) {
 			// This cell is a continuation of a vertical merge from above.
@@ -198,7 +199,7 @@ export function removeTableRow(
 					if (rs > 1) {
 						adjustedRows[r] = {
 							...adjustedRows[r],
-							cells: updateCellRowSpan(adjustedRows[r].cells, c, rs - 1),
+							cells: updateCellRowSpan(at(adjustedRows, r).cells, c, rs - 1),
 						};
 					}
 					break;
@@ -213,7 +214,7 @@ export function removeTableRow(
 				if (nextRowIdx < adjustedRows.length) {
 					adjustedRows[nextRowIdx] = {
 						...adjustedRows[nextRowIdx],
-						cells: adjustedRows[nextRowIdx].cells.map((cc, ci) => {
+						cells: at(adjustedRows, nextRowIdx).cells.map((cc, ci) => {
 							if (ci !== c) {
 								return cc;
 							}
@@ -222,6 +223,7 @@ export function removeTableRow(
 								...cc,
 								text: cell.text, // Move text from anchor to new anchor
 								textRuns: cell.textRuns,
+								textSegments: cell.textSegments,
 								paragraphs: cell.paragraphs,
 								style: cc.style || cell.style,
 								rowSpan: newRs > 1 ? newRs : undefined,
@@ -249,19 +251,19 @@ export function removeTableRow(
 			const xmlRows = ensureArray(tbl['a:tr'] as XmlObject | XmlObject[]);
 
 			if (index >= 0 && index < xmlRows.length) {
-				const xmlRemovedRow = xmlRows[index];
+				const xmlRemovedRow = at(xmlRows, index);
 				const xmlRemovedCells = ensureArray(xmlRemovedRow['a:tc'] as XmlObject | XmlObject[]);
 
 				// Handle merge spans in XML
 				for (let c = 0; c < xmlRemovedCells.length; c++) {
-					const xmlCell = xmlRemovedCells[c];
+					const xmlCell = at(xmlRemovedCells, c);
 
 					if (xmlCell['@_vMerge'] === '1') {
 						// Find anchor above and decrement rowSpan
 						for (let r = index - 1; r >= 0; r--) {
-							const aboveCells = ensureArray(xmlRows[r]['a:tc'] as XmlObject | XmlObject[]);
+							const aboveCells = ensureArray(at(xmlRows, r)['a:tc'] as XmlObject | XmlObject[]);
 							if (c < aboveCells.length) {
-								const aboveXmlCell = aboveCells[c];
+								const aboveXmlCell = at(aboveCells, c);
 								if (aboveXmlCell['@_vMerge'] !== '1') {
 									const rs = parseInt(String(aboveXmlCell['@_rowSpan'] || '0'), 10);
 									if (rs > 2) {
@@ -280,10 +282,10 @@ export function removeTableRow(
 							const nextRowIdx = index + 1;
 							if (nextRowIdx < xmlRows.length) {
 								const nextCells = ensureArray(
-									xmlRows[nextRowIdx]['a:tc'] as XmlObject | XmlObject[],
+									at(xmlRows, nextRowIdx)['a:tc'] as XmlObject | XmlObject[],
 								);
 								if (c < nextCells.length) {
-									const nextXmlCell = nextCells[c];
+									const nextXmlCell = at(nextCells, c);
 									delete nextXmlCell['@_vMerge'];
 									if (rs - 1 > 1) {
 										nextXmlCell['@_rowSpan'] = String(rs - 1);

@@ -14,7 +14,9 @@ import {
 	type NewRelationship,
 } from './relationship-allocator';
 import type { DocPrIdAllocator } from './docpr-ids';
+import { ensureContentTypeOverride } from './zip-parts';
 import type { XmlDocument } from './xml';
+import { writeNewChartExPart, writeNewChartPart } from './chart-save';
 
 const CONTENT_TYPES_PART = '[Content_Types].xml';
 const extensionOf = (partName: string): string => partName.split('.').pop()?.toLowerCase() ?? '';
@@ -23,6 +25,12 @@ const extensionOf = (partName: string): string => partName.split('.').pop()?.toL
 export function relationshipsPartFor(partName: string): string {
 	const slash = partName.lastIndexOf('/');
 	return `${partName.slice(0, slash)}/_rels/${partName.slice(slash + 1)}.rels`;
+}
+
+/** `target` as a relationship target of `source`: relative when it is in the same folder or below. */
+function relativeTarget(source: string, target: string): string {
+	const folder = source.slice(0, source.lastIndexOf('/') + 1);
+	return target.startsWith(folder) ? target.slice(folder.length) : `/${target}`;
 }
 
 /** An allocator that avoids every id already used by the part's XML or declared in its .rels. */
@@ -53,16 +61,42 @@ export async function writeNewRelationships(
 	if (!created.length) return;
 	const relsPath = relationshipsPartFor(partName);
 	const relationships = parseRelationships(await zip.file(relsPath)?.async('string'));
+	// New charts write their own parts and content types first, so the content types read below include them.
+	const chartTargets = new Map<string, string>();
+	for (const relationship of created)
+		if (relationship.chart)
+			chartTargets.set(
+				relationship.id,
+				relativeTarget(partName, await writeNewChartPart(zip, relationship.chart)),
+			);
+		else if (relationship.chartEx)
+			chartTargets.set(
+				relationship.id,
+				relativeTarget(partName, await writeNewChartExPart(zip, relationship.chartEx)),
+			);
 	let contentTypesXml = await zip.file(CONTENT_TYPES_PART)?.async('string');
+	const overrides: NewRelationship[] = [];
 	for (const relationship of created) {
 		relationships.set(relationship.id, {
 			id: relationship.id,
-			target: relationship.target,
+			target: chartTargets.get(relationship.id) ?? relationship.target,
 			mode: relationship.mode,
 			type: relationship.type,
 		});
 		if (!relationship.partName) continue;
+		if (relationship.overrideContentType) {
+			const bytes =
+				relationship.content ?? pendingMedia?.get(relationship.partName)?.bytes ?? undefined;
+			if (bytes === undefined)
+				throw new Error(`Missing content for newly inserted part: ${relationship.partName}`);
+			zip.file(relationship.partName, bytes);
+			overrides.push(relationship);
+			continue;
+		}
 		const pending = pendingMedia?.get(relationship.partName);
+		// A picture already in the package (a note moved to the other notes part) only needs
+		// the relationship; its bytes and content type are there already.
+		if (!pending && zip.file(relationship.partName)) continue;
 		if (!pending)
 			throw new Error(`Missing bytes for newly inserted media part: ${relationship.partName}`);
 		zip.file(relationship.partName, pending.bytes);
@@ -74,4 +108,7 @@ export async function writeNewRelationships(
 	}
 	zip.file(relsPath, buildRelationshipsXml(relationships));
 	if (contentTypesXml) zip.file(CONTENT_TYPES_PART, contentTypesXml);
+	for (const { partName, overrideContentType } of overrides)
+		if (partName && overrideContentType)
+			await ensureContentTypeOverride(zip, partName, overrideContentType);
 }

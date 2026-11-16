@@ -35,17 +35,53 @@ export type DrawingFill =
 			/** Gradient tile insets; corner directions can extend beyond the shape box. */
 			tileRect?: { l: number; t: number; r: number; b: number };
 	  }
-	| { kind: 'pattern'; preset: string; foreground?: DrawingColor; background?: DrawingColor }
-	| { kind: 'picture'; relId?: string }
+	| {
+			kind: 'pattern';
+			preset: string;
+			foreground?: DrawingColor;
+			background?: DrawingColor;
+			sourceXml?: string;
+	  }
+	| {
+			kind: 'picture';
+			relId?: string;
+			linkRelId?: string;
+			sourceXml?: string;
+			crop?: import('./picture-crop').DrawingPictureCrop;
+			effects?: import('./picture-effects').DrawingPictureEffect[];
+			unsupportedPicture?: string[];
+			layout?: import('./picture-layout').DrawingPictureLayout;
+	  }
 	| { kind: 'unsupported'; element: string };
 
 /** A DrawingML outline (`a:ln`). */
 export interface DrawingLine {
+	/** Original outline, retaining extensions and unsupported attributes during edits. */
+	sourceXml?: string;
 	/** Width in EMU. */
 	widthEmu?: number;
 	fill?: DrawingFill;
 	dash?: string;
 	cap?: string;
+	compound?: string;
+	alignment?: string;
+	/** Dash and space lengths in thousandths of one percent of the line width. */
+	customDash?: DrawingDashStop[];
+	join?: { kind: 'round' | 'bevel' | 'miter'; limit?: number };
+	headEnd?: DrawingLineEnd;
+	tailEnd?: DrawingLineEnd;
+}
+
+export interface DrawingDashStop {
+	dash: number;
+	space: number;
+	sourceXml?: string;
+}
+
+export interface DrawingLineEnd {
+	type?: string;
+	width?: string;
+	length?: string;
 }
 
 /** One run of a DrawingML text body. */

@@ -38,6 +38,7 @@ import {
 	resolveVertOverflowEllipsisStyle,
 } from './text-body-layout';
 import { resolveTextBodyRectPadding } from './text-body-rect';
+import { getTextCompensationStyle } from './text-flip-compensation';
 import { lineHeightToPx, resolveLineHeight } from './text-line-height';
 import { resolveVertOverflowClipLines } from './text-overflow-lines';
 import { resolveCssTextAlign } from './text-paragraph-style';
@@ -53,6 +54,11 @@ export type TextBlockStyle = Record<string, string | number>;
 
 /** Knobs the five bindings differ on; everything else is identical for all. */
 export interface TextBlockStyleOptions {
+	/**
+	 * Opt in to the `a:linkedTxbx` flow (clip chain members). Off by default:
+	 * PowerPoint ignores the link and does not clip.
+	 */
+	linkedFlow?: boolean;
 	/**
 	 * Colour used when the element authors none. React threads its
 	 * theme-resolved default here; the other bindings pass their own constant.
@@ -186,6 +192,14 @@ export function buildTextBlockStyle(
 	if (options.bodyLayout) {
 		style.width = '100%';
 		style.height = '100%';
+		// The insets below are padding inside that 100% box, so the box has to be
+		// `border-box` (the content-height math at the end assumes it too). Declared
+		// here rather than left to a stylesheet reset: a stage outside the viewer's
+		// scoped reset (the vanilla export stage) or html2canvas's cloned document
+		// (which reloads the host page's linked sheets without waiting) otherwise
+		// lays the body out as `content-box`: the box overflows the shape by its
+		// padding, and centred text moves right by half of it.
+		style.boxSizing = 'border-box';
 		style.whiteSpace = 'pre-wrap';
 		style.wordBreak = 'break-word';
 		// The box itself (columns, anchor, anchorCtr, tab-size, kinsoku) comes
@@ -198,10 +212,15 @@ export function buildTextBlockStyle(
 		// it here too would just be overwritten; these four either have no other
 		// transform on the block (svelte, vanilla) or already compose onto
 		// whatever this returns (vue, angular).
+		// The flip compensation joins it: a flipped shape's text is never
+		// mirrored and a vertical flip turns it upside down (see
+		// `text-flip-compensation`); these four painted it mirrored.
 		const rotation = getTextBodyRotationTransform(element);
-		if (rotation) {
-			style.transform = rotation;
-			style.transformOrigin = 'center';
+		const compensation = getTextCompensationStyle(element);
+		const transform = [rotation, compensation?.transform].filter(Boolean).join(' ');
+		if (transform) {
+			style.transform = transform;
+			style.transformOrigin = compensation?.transformOrigin ?? 'center';
 		}
 	}
 
@@ -284,7 +303,7 @@ export function buildTextBlockStyle(
 	// paints the same run twice (once escaping this box, once inside the next).
 	// Applied after the `wrap="none"` branch above so it wins for a no-wrap
 	// linked box, matching React, which appends the same `overflow: hidden` last.
-	if (isLinkedTextBox(element)) {
+	if (isLinkedTextBox(element, { flow: options.linkedFlow === true })) {
 		style.overflow = 'hidden';
 	}
 

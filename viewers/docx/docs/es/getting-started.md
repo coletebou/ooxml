@@ -1,6 +1,6 @@
 # Primeros pasos
 
-docx-viewer es un único componente web `<docx-editor>` más seis adaptadores de framework muy ligeros. Esta página instala un adaptador, monta el editor y carga y guarda un documento. Es una implementación temprana: no equivale a Microsoft Word ni garantiza una exportación sin pérdidas (consulte la [hoja de ruta de compatibilidad](/parity-roadmap)).
+docx-viewer es un único componente web `<docx-editor>` más seis adaptadores de framework muy ligeros. Esta página instala un adaptador, monta el editor y carga y guarda un documento. Es estable según la [política de estabilidad](https://github.com/ChristopherVR/ooxml/blob/main/docs/stability.md), con una [garantía de conservación](/preservation), pero no equivale a Microsoft Word (consulte la [hoja de ruta de compatibilidad](/parity-roadmap)).
 
 ## 1. Instalación
 
@@ -58,7 +58,7 @@ Los demás frameworks usan las mismas opciones: consulte las [guías por framewo
 
 ## 3. Cargar y guardar archivos
 
-La referencia al componente (o el manejador de la versión vanilla) expone `load(bytes)` y `save()`. La carga detecta DOCX y el formato `.doc` heredado; los archivos protegidos con contraseña no son compatibles.
+La referencia al componente (o el manejador de la versión vanilla) expone `load(bytes)` y `save()`. La carga detecta DOCX y el formato `.doc` heredado. Los archivos protegidos con contraseña solo se abren mediante `loadDocument(bytes, { password })` de `ooxml-core/docx/load`; el `load()` del elemento no admite contraseña, así que informa de ese archivo como `document-error`.
 
 ```ts
 const bytes = new Uint8Array(await file.arrayBuffer());
@@ -76,7 +76,8 @@ const blob = await editor.save(); // Blob of the serialized .docx
 - Para ejecutar la demo desde un clon del repositorio (requiere Bun):
 
 ```bash
-bun install
+bun install          # from the repository root
+cd viewers/docx
 bun run demo
 ```
 

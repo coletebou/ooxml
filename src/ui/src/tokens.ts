@@ -1,3 +1,5 @@
+import { LOOK_TOKENS } from './look-tokens';
+
 /**
  * The ooxml-ui design tokens: the single source of every colour, size, space, radius, type,
  * shadow, motion and layering value the controls use. Controls never write a literal; they read
@@ -254,6 +256,12 @@ export const OFFICE_TOKENS = {
 	'--office-title-bar-name-max-width-narrow': '140px',
 	'--office-title-bar-search-max-width': '448px',
 	'--office-title-bar-results-max-height': '256px',
+	// Office app brand colours (file-type badges, app tiles); kept in dark themes like Office icons
+	'--office-word-brand': '#185abd',
+	'--office-excel-brand': '#107c41',
+	'--office-powerpoint-brand': '#c43e1c',
+	'--office-visio-brand': '#3955a3',
+	'--office-app-brand-foreground': '#ffffff',
 	// Component: team workspace (a Teams-like surface)
 	'--office-teams-brand': '#5b5fc7',
 	'--office-teams-brand-hover': '#4f52b2',
@@ -288,6 +296,8 @@ export const OFFICE_TOKENS = {
 	'--office-call-live': '#6bb700',
 	'--office-call-scrim': 'rgb(0 0 0 / 60%)',
 	'--office-shadow-teams': '0 2px 4px rgb(0 0 0 / 14%), 0 0 2px rgb(0 0 0 / 12%)',
+	// The cards look (look-tokens.ts)
+	...LOOK_TOKENS,
 } as const;
 
 export type OfficeToken = keyof typeof OFFICE_TOKENS;

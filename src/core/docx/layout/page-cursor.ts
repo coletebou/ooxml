@@ -5,6 +5,7 @@ import { FootnoteFlow } from './footnote-flow';
 import { LegacyFootnoteFlow } from './legacy-footnote-flow';
 export { FOOTNOTE_SEPARATOR_PX } from './footnote-flow';
 import type { LayoutBlockBox, LayoutColumnBox, LayoutFootnoteBox, LayoutPageBox } from './result';
+import { inFlow } from './result';
 
 /**
  * Mutable fill-position bookkeeping for one section: which page/column is
@@ -119,9 +120,9 @@ export class PageCursor {
 	/** Reject trials that overflow an earlier column, including a kept table row. */
 	get columnContentFits(): boolean {
 		return this.activeColumns.every((column) =>
-			column.blocks.every(
-				(block) => block.yPx + block.heightPx <= this.columnTopPx + this.columnHeightPx,
-			),
+			column.blocks
+				.filter(inFlow)
+				.every((block) => block.yPx + block.heightPx <= this.columnTopPx + this.columnHeightPx),
 		);
 	}
 	endBalance(): void {
@@ -137,6 +138,18 @@ export class PageCursor {
 	}
 	get usedColumnHeightPx(): number {
 		return this.yPx - this.columnTopPx;
+	}
+	/**
+	 * At the top of a later page or a later column of the section (not the section's first page, nor
+	 * a continuous band). Word drops the space before of the paragraph placed here, whether a page
+	 * break, a natural overflow, `pageBreakBefore` or a column overflow brought it (spacing-probe.json).
+	 */
+	get atContinuationTop(): boolean {
+		return (
+			this.atColumnTop &&
+			this.columnTopPx === 0 &&
+			(this.page.pageInSection > 0 || this.columnIndex > 0)
+		);
 	}
 	get atColumnTop(): boolean {
 		return this.yPx === this.columnTopPx;
@@ -174,7 +187,7 @@ export class PageCursor {
 		const bottom = Math.max(
 			this.yPx,
 			...this.activeColumns.flatMap((column) =>
-				column.blocks.map((block) => block.yPx + block.heightPx),
+				column.blocks.filter(inFlow).map((block) => block.yPx + block.heightPx),
 			),
 		);
 		for (const column of this.activeColumns) {
@@ -231,7 +244,9 @@ export class PageCursor {
 						...this.activeColumns
 							.slice(0, this.columnIndex)
 							.flatMap((column) =>
-								column.blocks.map((block) => block.yPx + block.heightPx - this.columnTopPx),
+								column.blocks
+									.filter(inFlow)
+									.map((block) => block.yPx + block.heightPx - this.columnTopPx),
 							),
 					),
 				))
@@ -255,8 +270,11 @@ export class PageCursor {
 		}
 	}
 
-	/** Places a box at the current fill position (sets its `yPx`) and advances by `advancePx`. */
-	place(box: LayoutBlockBox, advancePx: number): void {
+	/**
+	 * Places a box at the current fill position (sets its `yPx`) and advances by `advancePx`. The box
+	 * sits `offsetPx` below the fill position when the advance starts with space above it.
+	 */
+	place(box: LayoutBlockBox, advancePx: number, offsetPx = 0): void {
 		if (
 			this.page.sectionIndex !== this.sectionIndex &&
 			!this.page.sectionIndices?.includes(this.sectionIndex)
@@ -264,7 +282,7 @@ export class PageCursor {
 			(this.page.sectionIndices ??= [this.page.sectionIndex]).push(this.sectionIndex);
 			this.pageInSection = 1;
 		}
-		box.yPx = this.yPx;
+		box.yPx = this.yPx + offsetPx;
 		this.column.blocks.push(box);
 		this.yPx += advancePx;
 		const bodyBottom = this.legacyFootnoteColumns
@@ -272,7 +290,7 @@ export class PageCursor {
 			: Math.max(
 					this.yPx,
 					...this.activeColumns.flatMap((column) =>
-						column.blocks.map((block) => block.yPx + block.heightPx),
+						column.blocks.filter(inFlow).map((block) => block.yPx + block.heightPx),
 					),
 				);
 		this.footnotes.commit(

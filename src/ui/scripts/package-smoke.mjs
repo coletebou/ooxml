@@ -1,13 +1,17 @@
 // Packs the built UI package AND the core package, installs both tarballs into a clean project
 // and imports every entry point the way a consumer would: once under plain Node (SSR: must import
 // and register as a no-op) and once inside a jsdom window (elements actually register).
-// Run after `bun run build` in src/core and in src/ui.
+// Then bundles every browser entry of both packages for the browser and fails if one reaches a
+// Node-only module. Run after `bun run build` in src/core and in src/ui.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { assertNoNodeOnlyModules } from '../../../scripts/browser-bundle-guard.mjs';
+import { walkModuleGraph } from '../../../scripts/module-graph.mjs';
 
 const uiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const coreRoot = path.resolve(uiRoot, '..', 'core');
@@ -72,6 +76,10 @@ try {
 			'--no-fund',
 			'--package-lock=false',
 			'jsdom@^26.1.0',
+			// The optional framework peers of the `ooxml-ui/bindings/*` component factories.
+			'react@^19.0.0',
+			'solid-js@^1.9.0',
+			'vue@^3.5.0',
 			path.join(work, core.filename),
 			path.join(work, ui.filename),
 		],
@@ -135,6 +143,28 @@ console.log('dom registration ok: ' + ui.OFFICE_UI_TAGS.length + ' tags');
 	);
 	console.log(run('node', ['ssr.mjs'], work).trim());
 	console.log(run('node', ['dom.mjs'], work).trim());
+
+	// The viewers' main entries import ooxml-ui/pptx/ai/host; neither its ESM nor its CJS build
+	// may reach the ai SDK (not even through a dynamic import), zod or the automation catalogue.
+	assert(specifiers.includes(`${manifest.name}/pptx/ai/host`), 'pptx/ai/host is not exported');
+	for (const format of ['mjs', 'cjs']) {
+		const entry = path.join(work, 'node_modules', manifest.name, 'dist/pptx/ai', `host.${format}`);
+		const reached = (await walkModuleGraph(entry)).bare
+			.filter(({ specifier }) =>
+				/^(?:ai|@ai-sdk\/.+|zod(?:\/.+)?|ooxml-core\/pptx\/automation(?:\/.+)?)$/.test(specifier),
+			)
+			.map(({ specifier, kind, importer }) => `${kind} of ${specifier} in ${importer}`);
+		assert.deepEqual(reached, [], `dist/pptx/ai/host.${format} reaches the assistant runtime`);
+	}
+	console.log('pptx/ai/host reaches no ai, zod or automation module');
+
+	// A web host bundles both packages for the browser, with no Node fallbacks.
+	const coreName = JSON.parse(await readFile(path.join(coreRoot, 'package.json'), 'utf8')).name;
+	const browserEntries = await assertNoNodeOnlyModules({
+		root: work,
+		packages: [coreName, manifest.name],
+	});
+	console.log(`${browserEntries} browser entries reach no Node-only module`);
 } finally {
 	await rm(work, { recursive: true, force: true });
 }

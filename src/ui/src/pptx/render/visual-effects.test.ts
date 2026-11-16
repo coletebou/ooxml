@@ -80,7 +80,11 @@ describe('getOuterShadowCss', () => {
 			shadowOpacity: 0.7,
 			outerShadowXml: {},
 		});
-		expect(css).toBe('0px 0px 10px rgba(0, 0, 0, 0.7)');
+		// PowerPoint's blurred shadow has a deviation of 0.326 blurRad (CSS length 0.654).
+		expect(css).toBe('0px 0px 13px rgba(0, 0, 0, 0.7)');
+		expect(getOuterShadowCss({ shadowColor: '#000000', shadowBlur: 50, outerShadowXml: {} })).toBe(
+			'0px 0px 33px rgba(0, 0, 0, 1)',
+		);
 	});
 
 	it('ignores rotation when shadowRotateWithShape is unset/true (rotates for free with the shape)', () => {
@@ -135,7 +139,7 @@ describe('getCompositeOuterShadowFilterCss', () => {
 				shadowOpacity: 0.7,
 				outerShadowXml: {},
 			}),
-		).toBe('drop-shadow(0px 0px 10px rgba(0, 0, 0, 0.7))');
+		).toBe('drop-shadow(0px 0px 13px rgba(0, 0, 0, 0.7))');
 	});
 });
 
@@ -154,7 +158,15 @@ describe('getInnerShadowCss', () => {
 			innerShadowBlur: 5,
 			innerShadowOpacity: 0.5,
 		});
-		expect(css).toBe('inset 2px 3px 5px rgba(0, 0, 0, 0.5)');
+		// PowerPoint hugs the edge the offset points to: the CSS inset offset is negated.
+		// The blur is PowerPoint's `blurRad`: a Gaussian of deviation 0.327 of it, so a
+		// CSS blur length of 0.654 of it (5 px of blurRad is 3.27 px of blur).
+		expect(css).toBe('inset -2px -3px 3px rgba(0, 0, 0, 0.5)');
+	});
+
+	it('maps the inner shadow blur like the outer one (a 16 px blurRad is a 10 px CSS blur)', () => {
+		const css = getInnerShadowCss({ innerShadowColor: '#000000', innerShadowBlur: 16 });
+		expect(css).toContain(' 10px ');
 	});
 });
 
@@ -185,12 +197,11 @@ describe('getGlowBoxShadowCss', () => {
 		expect(getGlowBoxShadowCss('#ff0', 0, 0.5)).toBeUndefined();
 	});
 
-	it('produces three layered shadows', () => {
-		const css = getGlowBoxShadowCss('#ffff00', 9, 1);
-		// r1 = 3, r2 = 6, r3 = 9
-		expect(css).toContain('0 0 3px rgba(255, 255, 0, 1)');
-		expect(css).toContain('0 0 6px rgba(255, 255, 0, 0.6)');
-		expect(css).toContain('0 0 9px');
+	it('grows the silhouette by 0.417 of the radius and blurs it by a third of it', () => {
+		// PowerPoint's glow: erfc edge centred 0.417 R out with a deviation of R / 6,
+		// which is one box-shadow of spread 0.417 R and blur length R / 3.
+		expect(getGlowBoxShadowCss('#ffff00', 9, 1)).toBe('0 0 3px 3.8px rgba(255, 255, 0, 1)');
+		expect(getGlowBoxShadowCss('#ff0000', 30, 0.6)).toBe('0 0 10px 12.5px rgba(255, 0, 0, 0.6)');
 	});
 });
 
@@ -257,7 +268,12 @@ describe('getEffectFilterCss', () => {
 	it('glow produces a drop-shadow filter', () => {
 		const css = getEffectFilterCss({ glowColor: '#ffff00', glowRadius: 12, glowOpacity: 0.75 });
 		expect(css).toBeDefined();
-		expect(css).toContain('drop-shadow(0 0 6px rgba(255, 255, 0, 0.75))');
+		// three chained layers of 0.38 radius stand in for the grown silhouette
+		expect(css).toBe(Array(3).fill('drop-shadow(0 0 4.56px rgba(255, 255, 0, 0.75))').join(' '));
+		// a shape paints its glow as a box-shadow spread instead
+		expect(
+			getEffectFilterCss({ glowColor: '#ffff00', glowRadius: 12 }, undefined, { glow: false }),
+		).toBeUndefined();
 	});
 
 	it('soft edge without an element id falls back to a minimised blur', () => {
@@ -435,6 +451,7 @@ describe('getComputedEffectStyle', () => {
 	it('aggregates box-shadow, filter, reflection, opacity and blend', () => {
 		const result = getComputedEffectStyle(
 			shape({
+				fillColor: '#336699',
 				shadowColor: '#000000',
 				glowColor: '#00ff00',
 				glowRadius: 10,
@@ -446,7 +463,9 @@ describe('getComputedEffectStyle', () => {
 			}),
 		);
 		expect(result.boxShadow).toContain('rgba(0, 0, 0,');
-		expect(result.filter).toContain('drop-shadow');
+		// a shape's glow is the spread box-shadow layer, not a filter
+		expect(result.boxShadow).toContain('4.2px rgba(0, 255, 0,');
+		expect(result.filter).not.toContain('drop-shadow');
 		// Soft edge now feathers via an SVG filter reference (element id 's1'),
 		// not a whole-element blur.
 		expect(result.filter).toContain('url(#soft-edge-s1)');
@@ -468,7 +487,7 @@ describe('getComputedEffectStyle', () => {
 			),
 		);
 		expect(result.boxShadow).toBeUndefined();
-		expect(result.filter).toBe('drop-shadow(0px 0px 10px rgba(0, 0, 0, 0.7))');
+		expect(result.filter).toBe('drop-shadow(0px 0px 13px rgba(0, 0, 0, 0.7))');
 	});
 
 	it('emits a fillOverlay tint layer (not a whole-element blend) when a colour is parsed', () => {
@@ -491,6 +510,7 @@ describe('getComputedEffectStyle', () => {
 		const rotated = getComputedEffectStyle(
 			shape(
 				{
+					fillColor: '#336699',
 					shadowColor: '#000000',
 					shadowAngle: 0,
 					shadowDistance: 10,
@@ -509,6 +529,7 @@ describe('getComputedEffectStyle', () => {
 		const notRotated = getComputedEffectStyle(
 			shape(
 				{
+					fillColor: '#336699',
 					shadowColor: '#000000',
 					shadowAngle: 0,
 					shadowDistance: 10,

@@ -9,11 +9,14 @@ import {
 	formatBackstageDate,
 	formatBackstageSize,
 	listBackstageRecentFiles,
+	CLOUD_OPEN_ACCEPT,
+	openPlacesLabels,
 } from 'ooxml-ui/pptx';
 import type {
 	BackstageNavEntry,
 	BackstagePage,
 	BackstageRecentFile,
+	CloudOpenedFile,
 	ViewerRegionContext,
 	ViewerRegionId,
 } from 'ooxml-ui/pptx';
@@ -23,6 +26,7 @@ import { useI18n } from 'vue-i18n';
 import { useToolbarVisibility } from '../../composables/useToolbarVisibility';
 import { useResolvedCustomization } from '../../composables/useViewerCustomization';
 import { useRegion, useRegionBase } from '../../composables/useViewerRegions';
+import { useViewerCloudFiles } from '../../composables/viewer-cloud-files';
 import { useViewerStorage } from '../../composables/viewer-storage';
 import ViewerRegion from '../ViewerRegion.vue';
 import AccountPage from './AccountPage.vue';
@@ -31,11 +35,27 @@ import { backstageIcon } from './file-section-icons';
 import type { FileSectionProps } from './file-section-types';
 
 const props = defineProps<FileSectionProps>();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const page = ref<string>('home');
 const query = ref('');
 const recent = ref<BackstageRecentFile[]>([]);
 const storage = useViewerStorage();
+// File > Open places: "This device" plus one per host `fileProviders` entry (none without them).
+const cloud = useViewerCloudFiles();
+const openAccept = CLOUD_OPEN_ACCEPT;
+const placeLabels = computed(() =>
+	openPlacesLabels((key, params) => (params ? t(key, params) : t(key))),
+);
+// The place tabs belong to File > Open; Home lists the device files alone.
+const placeProviders = computed(() => (page.value === 'open' ? cloud.providers() : []));
+const placeId = ref<string>();
+function createPresentation(templateId: string): void {
+	cloud.clear();
+	props.onCreatePresentation(templateId);
+}
+function openCloudFile(file: CloudOpenedFile): void {
+	run(() => cloud.open(file));
+}
 onMounted(
 	() =>
 		void listBackstageRecentFiles(t, props.recentPresentationsCount, storage()).then(
@@ -199,7 +219,7 @@ function selectPage(id: string): void {
 							:key="template.id"
 							type="button"
 							class="text-left"
-							@click="run(() => props.onCreatePresentation(template.id))"
+							@click="run(() => createPresentation(template.id))"
 						>
 							<span
 								class="block aspect-[16/9] border border-border shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:shadow-lg"
@@ -214,63 +234,76 @@ function selectPage(id: string): void {
 					</div>
 				</template>
 				<template v-if="page === 'home' || page === 'open'">
-					<pptx-ui-search
-						:value="query"
-						@input="query = ($event.target as HTMLElement & { value: string }).value"
-						data-pptx-search-input
-						data-pptx-search-surface
-						class="mt-8 w-full max-w-[540px]"
-						:placeholder="t('pptx.backstage.searchPlaceholder')"
-						:aria-label="t('pptx.backstage.searchPlaceholder')"
-					/>
-					<button
-						v-if="page === 'open'"
-						type="button"
-						class="mt-4 bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
-						@click="run(props.onOpenFile)"
+					<pptx-ui-open-places
+						class="block max-w-[900px]"
+						:providers.prop="placeProviders"
+						:accept.prop="openAccept"
+						:labels.prop="placeLabels"
+						:locale.prop="locale"
+						:selected.prop="placeId ?? 'device'"
+						@office-open-place-change="placeId = ($event as CustomEvent<{ place: string }>).detail.place"
+						@office-cloud-file-open="
+							openCloudFile(($event as CustomEvent<{ file: CloudOpenedFile }>).detail.file)
+						"
 					>
-						{{ t('pptx.backstage.browseDevice') }}
-					</button>
-					<h2 class="mt-6 text-[16px] font-semibold">{{ t('pptx.backstage.recentHeading') }}</h2>
-					<div class="mt-5 border-t border-border">
-						<div
-							class="grid grid-cols-[1fr_120px_90px] px-3 py-2 text-[11px] font-semibold text-muted-foreground"
-						>
-							<span>{{ t('pptx.backstage.columnName') }}</span
-							><span>{{ t('pptx.backstage.columnModified') }}</span
-							><span>{{ t('pptx.backstage.columnSize') }}</span>
-						</div>
+						<pptx-ui-search
+							:value="query"
+							@input="query = ($event.target as HTMLElement & { value: string }).value"
+							data-pptx-search-input
+							data-pptx-search-surface
+							class="mt-8 w-full max-w-[540px]"
+							:placeholder="t('pptx.backstage.searchPlaceholder')"
+							:aria-label="t('pptx.backstage.searchPlaceholder')"
+						/>
 						<button
-							v-for="file in visibleRecent"
-							:key="file.key"
+							v-if="page === 'open'"
 							type="button"
-							class="grid w-full grid-cols-[1fr_120px_90px] items-center border-t border-border px-3 py-3 text-left hover:bg-accent"
-							@click="run(() => props.onOpenRecentFile?.(file.key))"
+							class="mt-4 bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+							@click="run(props.onOpenFile)"
 						>
-							<span class="flex min-w-0 items-center gap-3"
-								><span
-									class="grid size-8 shrink-0 place-items-center bg-primary font-bold text-primary-foreground"
-									>P</span
-								><span class="min-w-0"
-									><strong class="block truncate text-[13px] font-normal">{{ file.name }}</strong
-									><small class="block truncate text-[11px] text-muted-foreground">{{
-										file.location
-									}}</small></span
-								></span
-							><span class="text-[11px] text-muted-foreground">{{
-								formatBackstageDate(file.timestamp, Date.now(), t)
-							}}</span
-							><span class="text-[11px] text-muted-foreground">{{
-								formatBackstageSize(file.size)
-							}}</span>
+							{{ t('pptx.backstage.browseDevice') }}
 						</button>
-						<div
-							v-if="visibleRecent.length === 0"
-							class="border-t border-border px-3 py-10 text-center text-sm text-muted-foreground"
-						>
-							{{ t('pptx.backstage.noRecent') }}
+						<h2 class="mt-6 text-[16px] font-semibold">{{ t('pptx.backstage.recentHeading') }}</h2>
+						<div class="mt-5 border-t border-border">
+							<div
+								class="grid grid-cols-[1fr_120px_90px] px-3 py-2 text-[11px] font-semibold text-muted-foreground"
+							>
+								<span>{{ t('pptx.backstage.columnName') }}</span
+								><span>{{ t('pptx.backstage.columnModified') }}</span
+								><span>{{ t('pptx.backstage.columnSize') }}</span>
+							</div>
+							<button
+								v-for="file in visibleRecent"
+								:key="file.key"
+								type="button"
+								class="grid w-full grid-cols-[1fr_120px_90px] items-center border-t border-border px-3 py-3 text-left hover:bg-accent"
+								@click="run(() => props.onOpenRecentFile?.(file.key))"
+							>
+								<span class="flex min-w-0 items-center gap-3"
+									><span
+										class="grid size-8 shrink-0 place-items-center bg-primary font-bold text-primary-foreground"
+										>P</span
+									><span class="min-w-0"
+										><strong class="block truncate text-[13px] font-normal">{{ file.name }}</strong
+										><small class="block truncate text-[11px] text-muted-foreground">{{
+											file.location
+										}}</small></span
+									></span
+								><span class="text-[11px] text-muted-foreground">{{
+									formatBackstageDate(file.timestamp, Date.now(), t)
+								}}</span
+								><span class="text-[11px] text-muted-foreground">{{
+									formatBackstageSize(file.size)
+								}}</span>
+							</button>
+							<div
+								v-if="visibleRecent.length === 0"
+								class="border-t border-border px-3 py-10 text-center text-sm text-muted-foreground"
+							>
+								{{ t('pptx.backstage.noRecent') }}
+							</div>
 						</div>
-					</div>
+					</pptx-ui-open-places>
 				</template>
 				<div v-if="actions.length" class="mt-8 grid max-w-[900px] grid-cols-2 gap-5">
 					<button

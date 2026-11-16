@@ -1,7 +1,10 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { EditorView } from 'prosemirror-view';
 import type { DocxEditorElement } from '../../viewers/docx/packages/web-component/src';
-import { newDocument, waitForEditorFocus } from './helpers';
+import { loadDocx } from '../../viewers/docx/packages/core/src';
+import JSZip from 'jszip';
+import { readFileSync } from 'node:fs';
+import { fileInput, newDocument, waitForEditorFocus } from './helpers';
 
 // Word's comments pane is the shared `office-ui-comments-pane`; its controls live in the
 // element's open shadow root, which Playwright's locators pierce. The pane only fires events, so
@@ -48,6 +51,40 @@ async function selectWord(surface: Locator, word: string) {
 }
 
 for (const framework of ['vanilla', 'react', 'vue', 'angular', 'svelte', 'solid']) {
+	test(`${framework}: native comment whitespace remains visible and survives a reply`, async ({
+		page,
+	}) => {
+		await page.goto(`/?framework=${framework}`);
+		await (
+			await fileInput(page)
+		).setInputFiles({
+			name: 'comment-whitespace.docx',
+			mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+			buffer: readFileSync(
+				new URL('./support/word-comment-whitespace-native.docx', import.meta.url),
+			),
+		});
+		const editor = page.locator('docx-editor');
+		await expect(editor.locator('.ProseMirror')).toBeVisible();
+		await editor.locator('office-ui-ribbon-actions [part="comments"]').click();
+		const pane = editor.locator('office-ui-comments-pane');
+		const original = ' lead \tA\nB\nC\u2011D\u00adE\n end ';
+		expect(await pane.locator('.text').first().textContent()).toBe(original);
+		await expect(pane.locator('.text').first()).toHaveCSS('white-space', 'pre-wrap');
+		await pane.getByRole('button', { name: 'Reopen', exact: true }).click();
+		await pane
+			.getByRole('textbox', { name: 'Reply', exact: true })
+			.fill('Reply\twith a tab\nand a paragraph');
+		await pane.getByRole('button', { name: 'Reply', exact: true }).click();
+		const bytes = await editor.evaluate(async (element) =>
+			Array.from(await (element as DocxEditorElement).saveBytes()),
+		);
+		const restored = (await loadDocx(new Uint8Array(bytes))).model.comments!;
+		expect(restored[0]!.text).toBe(original);
+		expect(restored.at(-1)!.text).toBe('Reply\twith a tab\nand a paragraph');
+		expect(restored.at(-1)!.parentId).toBe(restored[0]!.id);
+	});
+
 	test(`${framework}: the comments pane adds, replies, resolves, reopens, navigates and deletes`, async ({
 		page,
 	}) => {
@@ -143,6 +180,18 @@ for (const framework of ['vanilla', 'react', 'vue', 'angular', 'svelte', 'solid'
 		await expect
 			.poll(async () => (await comments(page)).map((comment) => comment.text))
 			.toEqual(['First note', 'A reply']);
+		const bytes = await editor.evaluate(async (element) =>
+			Array.from(new Uint8Array(await (await (element as DocxEditorElement).save()).arrayBuffer())),
+		);
+		const exported = await loadDocx(new Uint8Array(bytes));
+		const thread = exported.model.comments!;
+		expect(thread.map((comment) => comment.text)).toEqual(['First note', 'A reply']);
+		expect(thread.every((comment) => /^\d+$/.test(comment.id))).toBe(true);
+		expect(thread[1]!.parentId).toBe(thread[0]!.id);
+		const zip = await JSZip.loadAsync(new Uint8Array(bytes));
+		const xml = await zip.file('word/document.xml')!.async('string');
+		for (const comment of thread) expect(xml).toContain(`<w:commentReference w:id="${comment.id}"`);
+		expect(zip.file('word/commentsIds.xml')).not.toBeNull();
 		expect(errors).toEqual([]);
 	});
 }

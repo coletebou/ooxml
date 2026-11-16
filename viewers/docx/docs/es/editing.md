@@ -12,11 +12,11 @@ tenga el foco. Escriba una frase de búsqueda literal y use **Buscar siguiente**
 controla la distinción entre mayúsculas y minúsculas. Escape cierra el panel y devuelve
 el foco al documento.
 
-La búsqueda abarca fragmentos de texto contiguos con distinto formato dentro de un
-párrafo. No coincide entre párrafos, celdas de tabla ni saltos de línea forzados. Evita
-las coincidencias que dividirían un grafema Unicode, como parte de una secuencia
-combinada o de un emoji compuesto. Las búsquedas son literales; no se admiten las
-expresiones regulares ni la coincidencia lingüística específica de cada idioma.
+La búsqueda abarca fragmentos de texto contiguos con distinto formato. Una búsqueda
+normal no coincide entre párrafos, celdas de tabla ni saltos de línea forzados; `^p`
+busca a través de una marca de párrafo. Evita las coincidencias que dividirían un
+grafema Unicode, como parte de una secuencia combinada o de un emoji compuesto. Los
+comodines siguen la sintaxis de Word. La búsqueda por formato no se admite.
 
 **Reemplazar** cambia la coincidencia actual; **Reemplazar todo** cambia todas las
 coincidencias del documento en una única operación que se puede deshacer. El texto de
@@ -76,7 +76,8 @@ prioridad. Elegir un estilo cambia su referencia, sin aplanar las propiedades he
 en cada párrafo.
 
 La parte de estilos original se conserva al guardar el documento cargado. Todavía no se
-admite crear ni editar definiciones de estilo, estilos de carácter, formato de fragmento
-heredado ni la resolución de temas. Se rechaza la exportación de un paquete nuevo cuyo
+admite crear ni editar definiciones de estilo. Los estilos de carácter se pueden aplicar desde
+el selector de estilos de carácter, y el formato de fragmento heredado y los colores del
+tema se resuelven al mostrar el documento. Se rechaza la exportación de un paquete nuevo cuyo
 catálogo de estilos difiere de los valores predeterminados integrados; use Guardar sobre el documento cargado para conservar sus
 definiciones de estilo originales.

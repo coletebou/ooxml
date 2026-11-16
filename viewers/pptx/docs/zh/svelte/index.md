@@ -19,7 +19,7 @@ description: pptx-svelte-viewer 是 Svelte 5 PowerPoint 查看器组件，与 Re
 | **放映**       | 通过真实 Fullscreen API 进入全屏放映模式，支持切换效果、动画播放，以及带观众窗口的演示者视图。                         |
 | **导出**       | PNG、PDF、GIF、WebM 视频、SVG、打印（幻灯片、讲义、备注、大纲），以及另存为 `.pptx` / `.ppsx` / `.pptm`。              |
 | **协作**       | 可选的 Yjs 实时协同编辑，使用 y-websocket 或无服务器的 y-webrtc，包含在线状态、远程光标和共享或广播对话框。            |
-| **自动保存**   | 编辑时提供 `filePath`，即可在 IndexedDB 中保存带防抖的崩溃恢复快照；宿主可通过 `autosave={false}` 禁用。               |
+| **自动保存**   | 编辑时提供 `filePath`，即可在 IndexedDB 中保存崩溃恢复快照（有未保存修改时写入）；宿主可通过 `autosave={false}` 禁用。 |
 | **主题**       | 共享的 `ViewerTheme` 系统，使用 `--pptx-*` CSS 自定义属性，包含朱红色预设。参见[主题](/zh/svelte/theming)。            |
 | **国际化**     | 内置英文，可通过 `pptx-svelte-viewer/i18n` 注册更多语言。参见[本地化](/zh/svelte/i18n)。                               |
 
@@ -76,6 +76,27 @@ import 'pptx-svelte-viewer/styles.css';
 	<PowerPointViewer source={bytes} onload={({ slideCount }) => console.log(slideCount)} />
 {/if}
 ```
+
+## 导入路径 {#import-paths}
+
+`package.json` 的 `exports` 提供以下入口，仅有 ESM 构建：
+
+```ts
+// Root entry - viewer, theme utilities, export helpers
+import { PowerPointViewer } from 'pptx-svelte-viewer';
+// AI assistant entry - the recommended value for the `ai` prop
+import { createAiAssistant } from 'pptx-svelte-viewer/ai';
+```
+
+| 入口                                                                | 导出内容                                                                                                                                              |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pptx-svelte-viewer`                                                | `PowerPointViewer`、主题工具、导出与会话辅助函数和公开类型（参见[主要导出](#key-exports)）。                                                          |
+| `pptx-svelte-viewer/viewer`                                         | 同一个组件，以及 `SlideCanvas`、`EditorLayer`、协作叠加层和不依赖框架的状态辅助函数（参见[实例 API](/zh/svelte/api)）。                               |
+| `pptx-svelte-viewer/ai`                                             | `createAiAssistant`、句柄类型 `PptxAiAssistant` 和 `PptxAi*` 配置类型，是传入 `ai` 的推荐方式（参见 [`/ai` 入口](/zh/guide/ai-assistant#ai-entry)）。 |
+| `pptx-svelte-viewer/i18n`                                           | 英文字典和翻译辅助函数（`registerTranslations`、`translate` 等，参见[本地化](/zh/svelte/i18n)）。                                                     |
+| `pptx-svelte-viewer/i18n/fr`、`/i18n/es`、`/i18n/de`、`/i18n/zh-CN` | 随包提供的语言字典（`translationsFr` 等）。                                                                                                           |
+| `pptx-svelte-viewer/internals`                                      | 幻灯片切换辅助函数和切换叠加层组件，供自定义放映舞台使用，不受语义化版本兼容承诺保障。                                                                |
+| `pptx-svelte-viewer/styles`（或 `/styles.css`）                     | 提取出的样式表。                                                                                                                                      |
 
 ## 主要导出 {#key-exports}
 

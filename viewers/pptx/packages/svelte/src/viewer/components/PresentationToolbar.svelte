@@ -86,6 +86,7 @@
 		penColor: annotations.penColor,
 		highlighterColor: annotations.highlighterColor,
 		hasAnnotations: annotations.count > 0,
+		hasSlideAnnotations: annotations.strokes(current).length > 0,
 		blackout,
 		presenterViewVisible: true,
 		presenterViewActive: presenterMode,
@@ -120,7 +121,7 @@
 				break;
 			}
 			case 'clear':
-				annotations.clear();
+				annotations.clearSlide();
 				break;
 			case 'presenterView':
 				onpresenterview();

@@ -1,5 +1,6 @@
 import type { ViewerController, ViewerState } from './controller';
 import { ViewerInlineText } from './viewer-inline-text';
+import { ViewerControlHandles } from './viewer-control-handles';
 import { ViewerLineEndpoints } from './viewer-line-endpoints';
 import { ViewerPointerGestures } from './viewer-pointer-gestures';
 import { ViewerResizeHandles } from './viewer-resize-handles';
@@ -15,6 +16,8 @@ export interface CanvasEditingOptions {
 	announce(message: string): void;
 	snap?: ConstructorParameters<typeof ViewerPointerGestures>[2]['snap'];
 	clearSnap?: ConstructorParameters<typeof ViewerPointerGestures>[2]['clearSnap'];
+	/** Dynamic Grid and Guides for resize handles, where the host has them. */
+	resizeSnap?: NonNullable<ConstructorParameters<typeof ViewerResizeHandles>[2]['snap']>;
 	/**
 	 * The active tool, present only where the tools live in this wiring (the standalone canvas).
 	 * The full viewer owns its tools in its commands and leaves this out.
@@ -40,8 +43,12 @@ export function createCanvasEditing(
 		...(options.clearSnap ? { clearSnap: options.clearSnap } : {}),
 	});
 	const lineEndpoints = new ViewerLineEndpoints(viewport, controller, gesture);
+	const controls = new ViewerControlHandles(viewport, controller, gesture);
 	const rotation = new ViewerRotationHandle(viewport, controller, gesture);
-	const resize = new ViewerResizeHandles(viewport, controller, gesture);
+	const resize = new ViewerResizeHandles(viewport, controller, {
+		...gesture,
+		...(options.resizeSnap ? { snap: options.resizeSnap } : {}),
+	});
 	const edit = new ViewerInlineText(viewport, controller, options.announce);
 	const current = options.tool;
 	const draw = current
@@ -69,6 +76,7 @@ export function createCanvasEditing(
 	return {
 		pointer,
 		lineEndpoints,
+		controls,
 		rotation,
 		resize,
 		edit,
@@ -84,6 +92,7 @@ export function createCanvasEditing(
 		/** Redraw the selection handles after a state or tool change. */
 		renderHandles(state: ViewerState): void {
 			lineEndpoints.render(state);
+			controls.render(state);
 			rotation.render(state);
 			resize.render(state);
 		},
@@ -99,6 +108,7 @@ export function createCanvasEditing(
 			const stops = [
 				pointer.wire(),
 				lineEndpoints.wire(),
+				controls.wire(),
 				rotation.wire(),
 				resize.wire(),
 				edit.wire(),

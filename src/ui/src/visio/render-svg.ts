@@ -1,5 +1,6 @@
 import {
 	getVisioPageLayers,
+	projectPathData,
 	resolveVisioPageVisibility,
 	type VisioDocument,
 	type VisioPage,
@@ -31,6 +32,8 @@ import { createTextLayoutBudget, type TextLayoutBudget } from './text-layout';
 import { renderText } from './render-text';
 import { renderShadow } from './render-shadow';
 import { renderShapeEffects } from './render-effects';
+import { flatContent, groupChildrenWrapper, renderBevel, rotation3dWrapper } from './render-bevel';
+import { renderSolid, solidRender } from './render-solid';
 
 const NS = 'http://www.w3.org/2000/svg';
 export function svgElement<K extends keyof SVGElementTagNameMap>(name: K): SVGElementTagNameMap[K] {
@@ -194,7 +197,10 @@ function drawShape(
 	const world = composeVisioTransform(parentTransform, shape.transform);
 	const own = () => drawOwn(shape, group, context, world);
 	const children = () => {
-		for (const child of shape.children) drawShape(child, group, context, pageId, world);
+		// A turned group turns its children with it.
+		const host = groupChildrenWrapper(shape, world);
+		if (host) group.append(host);
+		for (const child of shape.children) drawShape(child, host ?? group, context, pageId, world);
 	};
 	if (shape.kind === 'group' && shape.groupDisplayMode === 0) {
 		children();
@@ -210,11 +216,18 @@ function drawShape(
 }
 function drawOwn(
 	shape: VisioShape,
-	group: SVGElement,
+	outer: SVGElement,
 	context: RenderContext,
 	world: VisioMatrix,
 ): void {
 	const { warnings, defs, resources } = context;
+	// A 3-D rotation turns the shape's own drawing (and its text, unless kept flat) as one unit.
+	const solid = solidRender(shape, world);
+	const turned = rotation3dWrapper(shape, !!solid);
+	if (turned) outer.append(turned);
+	const group = turned ?? outer;
+	// With projected outlines, text and pictures sit in a parallel-projected container.
+	const flat = solid && !shape.style.rotation3d?.keepTextFlat ? flatContent(shape, world) : group;
 	const lineStyle = context.static ? visioSvgStrokeStyle(shape.style) : shape.style;
 	// A paint-free text box needs its text bounds as a pointer target, including gaps between glyphs.
 	if (
@@ -234,7 +247,7 @@ function drawOwn(
 		hit.setAttribute('fill', 'transparent');
 		hit.setAttribute('pointer-events', 'all');
 		hit.setAttribute('vector-effect', 'non-scaling-stroke');
-		group.append(hit);
+		flat.append(hit);
 	}
 	const fill = shape.geometry.some((geometry) => geometry.fill)
 		? fillPaint(shape.style, defs, resources, world, context.pageHeight)
@@ -258,7 +271,11 @@ function drawOwn(
 		const path = svgElement('path');
 		if (shape.style.fillPattern) path.setAttribute('shape-rendering', 'crispEdges');
 		if (context.interactive) path.dataset.geometry = '';
-		path.setAttribute('d', jumps?.[index] ?? geometry.path);
+		path.setAttribute(
+			'd',
+			(solid && projectPathData(geometry.path, solid.projection)) ||
+				(jumps?.[index] ?? geometry.path),
+		);
 		if (jumps && context.interactive) path.dataset.lineJumps = '';
 		path.setAttribute('fill', geometry.fill ? fill : 'none');
 		path.setAttribute('fill-opacity', String(shape.style.fillOpacity));
@@ -288,13 +305,29 @@ function drawOwn(
 		for (const path of paths) path.setAttribute('filter', effects.geometryFilter);
 	const shadow = renderShadow(shape, paths, defs, world);
 	if (shadow) group.insertBefore(shadow, effects.below[0] ?? paths[0]!);
+	const bevel = renderBevel(shape, paths, defs, world, solid?.bounds);
+	if (bevel) group.append(bevel);
+	if (solid) {
+		const behind = renderSolid(
+			shape,
+			solid,
+			paths
+				.filter((path) => path.getAttribute('fill') !== 'none')
+				.map((path) => path.getAttribute('d') ?? ''),
+		);
+		if (behind) group.insertBefore(behind, paths[0] ?? null);
+	}
 	const raster = renderImage(shape, resources);
-	if (raster) group.append(raster);
+	if (raster) flat.append(raster);
 	const chart = renderEmbeddedChart(shape);
-	if (chart) group.append(chart);
+	if (chart) flat.append(chart);
 	const vector = renderForeignVectorShape(shape, context.vectorBudget);
-	if (vector) group.append(vector);
-	if (shape.text.plainText) group.append(renderText(shape.text, warnings, context.textBudget));
+	if (vector) flat.append(vector);
+	if (shape.text.plainText)
+		(shape.style.rotation3d?.keepTextFlat ? outer : flat).append(
+			renderText(shape.text, warnings, context.textBudget),
+		);
 	if (shape.kind === 'foreign' && !shape.image && !shape.foreignVector && !shape.embeddedObject)
 		warnings.add('Embedded or foreign objects are not rendered in this build.');
+	if (flat !== group) group.append(flat);
 }

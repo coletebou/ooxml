@@ -13,7 +13,7 @@
 // With `authenticate` or `users`, sockets must also present a session and the user id is the one
 // the session binds, never the claimed `user` parameter.
 import { createServer } from 'node:http';
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import {
 	mkdirSync,
 	existsSync,
@@ -22,7 +22,6 @@ import {
 	createReadStream,
 	createWriteStream,
 	statSync,
-	renameSync,
 	linkSync,
 	unlinkSync,
 } from 'node:fs';
@@ -42,7 +41,22 @@ import {
 	sameSecret as sameCredential,
 } from './auth.mjs';
 import { createSlidingLimiter } from './rate-limit.mjs';
+import {
+	PROTOCOL_PARAM,
+	PROTOCOL_VERSION,
+	protocolOfUrl,
+	validateTeamsSyncMessage,
+} from './validator.generated.mjs';
 import { authorizeChatJoin, isChatRoom, roomMembers } from './chat-access.mjs';
+import { createFileStore } from './files.mjs';
+import { createLogger, createMetrics } from './metrics.mjs';
+import {
+	compactSnapshotFile,
+	compactUpdate,
+	snapshotNames,
+	sweepRoomTemps,
+	writeFileAtomic,
+} from './room-store.mjs';
 import {
 	createBucket,
 	directoryBytes,
@@ -57,6 +71,32 @@ const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const MESSAGE_QUERY_AWARENESS = 3;
 const ROOM = /^[\w-]{1,128}$/u;
+/** WebSocket subprotocol marker: `openteams`, plus `openteams.session.<token>` to carry a credential. */
+const SUBPROTOCOL = 'openteams';
+
+/** TEAMS_TRUST_PROXY: `1`/`true` trusts one proxy hop, a number N trusts N hops, anything else none. */
+function parseTrustProxy(value) {
+	if (value === undefined || value === '' || value === '0' || value === 'false') return false;
+	if (value === 'true') return 1;
+	const hops = Number(value);
+	return Number.isInteger(hops) && hops > 0 ? hops : false;
+}
+
+/**
+ * The client address the trusted proxy reported in X-Forwarded-For, or null when proxies are not
+ * trusted or the header is absent. Each proxy appends the address it saw, so with N trusted hops the
+ * client is the Nth entry from the right; anything left of that is attacker-controlled.
+ */
+export function forwardedClient(req, trustProxy) {
+	if (!trustProxy) return null;
+	const hops = trustProxy === true ? 1 : trustProxy;
+	const raw = req.headers['x-forwarded-for'];
+	const parts = String(Array.isArray(raw) ? raw.join(',') : (raw ?? ''))
+		.split(',')
+		.map((part) => part.trim())
+		.filter(Boolean);
+	return parts.length >= hops ? (parts[parts.length - hops] ?? null) : null;
+}
 
 /**
  * What `authorizeSync` returns: `'write'`, `'read'`, `{ access, principal? }`, or a falsy value
@@ -77,6 +117,14 @@ const SERVER_OWNER = Symbol('server');
 
 const sameSecret = sameCredential;
 
+const quietSize = (path) => {
+	try {
+		return statSync(path).size;
+	} catch {
+		return 0;
+	}
+};
+
 const unlinkQuiet = (path) => {
 	try {
 		unlinkSync(path);
@@ -85,12 +133,13 @@ const unlinkQuiet = (path) => {
 
 /**
  * @param {{ port?: number, host?: string, token?: string, origins?: string[], dataDir?: string,
- *   insecure?: boolean, authenticate?: (request: { user: string, credential?: string,
+ *   insecure?: boolean, insecureDev?: boolean, trustProxy?: boolean | number, authenticate?: (request: { user: string, credential?: string,
  *   headers: Record<string, string | string[] | undefined> }) => unknown, users?: Record<string, string>,
  *   sessionSecret?: string, sessionTtlMs?: number, adminToken?: string,
  *   sessionRate?: { windowMs?: number, perIp?: number, perUser?: number }, maxFileBytes?: number, maxSyncBytes?: number, maxSignalBytes?: number,
  *   maxConnections?: number, maxConnectionsPerIp?: number, maxRooms?: number, maxDocBytes?: number,
- *   messageRate?: number, messageBurst?: number, filesQuotaBytes?: number,
+ *   metricsToken?: string, compactIntervalMs?: number, sweepIntervalMs?: number, workspaceQuotaBytes?: number,
+ *   messageRate?: number, messageBurst?: number, filesQuotaBytes?: number, enforceAuthorship?: boolean, maxMessageChars?: number, maxReactionsPerMessage?: number,
  *   authorizeSync?: (request: { room: string, user: string | null, url: URL,
  *   headers: Record<string, string | string[] | undefined> }) => SyncVerdict | Promise<SyncVerdict>,
  *   log?: (m: string) => void }} [options]
@@ -104,6 +153,8 @@ export function createTeamsServer(options = {}) {
 			.filter(Boolean),
 		dataDir = resolve(process.env.TEAMS_DATA || './data'),
 		insecure = process.env.TEAMS_INSECURE === '1',
+		insecureDev = false,
+		trustProxy = parseTrustProxy(process.env.TEAMS_TRUST_PROXY),
 		users,
 		sessionSecret = process.env.TEAMS_SESSION_SECRET || '',
 		sessionTtlMs,
@@ -111,13 +162,38 @@ export function createTeamsServer(options = {}) {
 		maxFileBytes = 25 * 1024 * 1024,
 		maxSyncBytes = 32 * 1024 * 1024,
 		maxSignalBytes = 256 * 1024,
+		metricsToken = process.env.TEAMS_METRICS_TOKEN || '',
 		log = () => {},
 	} = options;
+	// Reject updates that forge or destroy another user's rows (see "Authorship" in the README). It
+	// needs a verified identity, so it applies only to sockets that carry a signed session.
+	const enforceAuthorship =
+		options.enforceAuthorship ?? process.env.TEAMS_ENFORCE_AUTHORSHIP !== '0';
+	// Content caps of the same check: the longest message text and the most reactions on one message.
+	const contentLimits = {};
+	const maxMessageChars = options.maxMessageChars ?? Number(process.env.TEAMS_MAX_MESSAGE_CHARS);
+	if (Number.isInteger(maxMessageChars) && maxMessageChars > 0)
+		contentLimits.maxMessageChars = maxMessageChars;
+	const maxReactions =
+		options.maxReactionsPerMessage ?? Number(process.env.TEAMS_MAX_REACTIONS_PER_MESSAGE);
+	if (Number.isInteger(maxReactions) && maxReactions > 0)
+		contentLimits.maxReactionsPerMessage = maxReactions;
 	const authenticate = options.authenticate ?? (users ? authenticateFromUsers(users) : undefined);
 	// Per-room permissions decided by the host (see "Per-room permissions" in the README).
 	const authorizeSync = typeof options.authorizeSync === 'function' ? options.authorizeSync : null;
 	// Real accounts exist: sockets must carry a session. Otherwise identity is a claim (dev default).
 	const authRequired = typeof authenticate === 'function';
+	// Secure by default: without accounts, an `authenticate` hook or an `authorizeSync` hook every
+	// caller chooses who they are, so refuse to be built that way unless the host says it is a dev setup.
+	if (!authRequired && !authorizeSync) {
+		if (!insecureDev)
+			throw new Error(
+				'refusing to start without authentication: provide `users` (TEAMS_USERS_FILE), an `authenticate` hook or an `authorizeSync` hook, or pass `insecureDev: true` (--insecure-dev) for local development only',
+			);
+		log(
+			'WARNING: INSECURE DEV MODE. No accounts and no authenticate hook: every client may claim any user id and read and write every room. Never expose this server to a network.',
+		);
+	}
 	if (users) {
 		const plain = plainTextUsers(users).length;
 		if (plain > 0)
@@ -167,7 +243,38 @@ export function createTeamsServer(options = {}) {
 	const filesDir = join(dataDir, 'files');
 	mkdirSync(roomsDir, { recursive: true });
 	mkdirSync(filesDir, { recursive: true });
-	let filesBytes = directoryBytes(filesDir);
+	const fileStore = createFileStore({ filesDir, metaDir: join(dataDir, 'file-meta'), log });
+	// Nothing is in flight yet: drop what interrupted writes left behind.
+	sweepRoomTemps(roomsDir);
+	fileStore.sweep(0);
+
+	// ---- metrics ------------------------------------------------------------------------------
+	const metrics = createMetrics();
+	const countRejected = metrics.counter(
+		'teams_updates_rejected_total',
+		'Sync updates refused, by violation code.',
+	);
+	const countAuthFailure = metrics.counter(
+		'teams_auth_failures_total',
+		'Requests refused for a missing or invalid credential, by kind.',
+	);
+	const countRateLimited = metrics.counter(
+		'teams_rate_limited_total',
+		'Requests or sockets cut off by a rate limit, by scope.',
+	);
+	const countCompaction = metrics.counter(
+		'teams_room_compactions_total',
+		'Room snapshots rewritten as a smaller single update.',
+	);
+	metrics.gauge('teams_rooms_open', 'Sync rooms currently loaded.', () => syncRooms.size);
+	metrics.gauge('teams_connections', 'Open sockets, by kind.', () => [
+		{ labels: { kind: 'sync' }, value: syncWss.clients.size },
+		{ labels: { kind: 'signal' }, value: signalWss.clients.size },
+	]);
+	metrics.gauge('teams_stored_bytes', 'Bytes stored on disk, by kind.', () => [
+		{ labels: { kind: 'rooms' }, value: directoryBytes(roomsDir) },
+		{ labels: { kind: 'files' }, value: fileStore.totalBytes() },
+	]);
 
 	// Explicit origins win. Without them and without a token, only loopback pages and non-browser
 	// clients (no Origin header) get in, so a random website cannot drive a local server.
@@ -176,14 +283,30 @@ export function createTeamsServer(options = {}) {
 		if (token) return true;
 		return !origin || isLoopbackOrigin(origin);
 	};
-	const tokenOk = (url) => !token || sameSecret(url.searchParams.get('token') ?? '', token);
+	/** Credential from the query string, else from a `Sec-WebSocket-Protocol` entry `openteams.<kind>.<value>`. */
+	const credentialOf = (url, req, kind) => {
+		const query = url.searchParams.get(kind);
+		if (query !== null) return query;
+		const prefix = `${SUBPROTOCOL}.${kind}.`;
+		for (const entry of String(req.headers['sec-websocket-protocol'] ?? '').split(',')) {
+			const item = entry.trim();
+			if (item.startsWith(prefix)) return item.slice(prefix.length);
+		}
+		return null;
+	};
+	const tokenOk = (url, req) => !token || sameSecret(credentialOf(url, req, 'token') ?? '', token);
+	/** The address rate limits and connection caps key on: the proxy-reported one only if trusted. */
+	const clientIp = (req) => forwardedClient(req, trustProxy) ?? req.socket.remoteAddress ?? '';
 
 	// ---- signed file links ------------------------------------------------------------------
 	// A download link is valid for one path and a few minutes, so the long-lived token never has to
 	// appear in a URL (history, logs, Referer). WebSockets cannot send headers, so only /sync and
 	// /signal still take `?token=`.
 	const LINK_TTL_MS = 5 * 60 * 1000;
-	const linkKey = createHash('sha256').update(`teams-file-link|${token}`).digest();
+	const linkKey = createHash('sha256')
+		.update(`teams-file-link|${token}|`)
+		.update(randomBytes(32))
+		.digest();
 	const sign = (path, exp) => createHmac('sha256', linkKey).update(`${path}|${exp}`).digest('hex');
 	const signedUrl = (path) => {
 		const exp = Date.now() + LINK_TTL_MS;
@@ -207,12 +330,9 @@ export function createTeamsServer(options = {}) {
 	/** Write a room snapshot; a full disk or a permission error is logged, never fatal. */
 	function flushRoom(name, room) {
 		const file = snapshotPath(name);
-		const tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
 		try {
-			writeFileSync(tmp, Y.encodeStateAsUpdate(room.doc));
-			renameSync(tmp, file);
+			writeFileAtomic(file, Y.encodeStateAsUpdate(room.doc));
 		} catch (error) {
-			unlinkQuiet(tmp);
 			log(`room ${name}: could not persist snapshot (${error.message})`);
 		}
 	}
@@ -255,6 +375,17 @@ export function createTeamsServer(options = {}) {
 				const snapshot = readFileSync(file);
 				Y.applyUpdate(doc, snapshot);
 				bytes = snapshot.length;
+				// Re-encode as one compact update when that is smaller (see compactRooms).
+				const compact = compactUpdate(doc);
+				if (compact && compact.length < snapshot.length) {
+					try {
+						writeFileAtomic(file, compact);
+						bytes = compact.length;
+						countCompaction();
+					} catch (error) {
+						log(`room ${name}: could not compact snapshot (${error.message})`);
+					}
+				}
 			} catch (error) {
 				log(`room ${name}: ignoring unreadable snapshot (${error.message})`);
 			}
@@ -331,7 +462,7 @@ export function createTeamsServer(options = {}) {
 		}
 	}
 
-	function handleSync(ws, name, admission, grant) {
+	function handleSync(ws, name, admission, grant, actor) {
 		const room = getRoom(name);
 		if (grant) room.grants.set(ws, grant);
 		const readOnly = grant?.access === 'read';
@@ -347,7 +478,10 @@ export function createTeamsServer(options = {}) {
 		ws.binaryType = 'arraybuffer';
 		const bucket = createBucket(limits.messageRate, limits.messageBurst);
 		ws.on('message', (data) => {
-			if (!bucket.take()) return void ws.close(1008, 'rate limit');
+			if (!bucket.take()) {
+				countRateLimited({ scope: 'socket' });
+				return void ws.close(1008, 'rate limit');
+			}
 			try {
 				const decoder = decoding.createDecoder(new Uint8Array(data));
 				const type = decoding.readVarUint(decoder);
@@ -355,10 +489,26 @@ export function createTeamsServer(options = {}) {
 					// A read-only socket may ask for the document (step 1), never change it.
 					if (readOnly && decoding.peekVarUint(decoder) !== syncProtocol.messageYjsSyncStep1)
 						return;
+					if (actor && decoding.peekVarUint(decoder) !== syncProtocol.messageYjsSyncStep1) {
+						const verdict = validateTeamsSyncMessage(
+							room.doc,
+							new Uint8Array(data),
+							actor,
+							contentLimits,
+						);
+						if (!verdict.ok) {
+							const codes = [...new Set(verdict.violations.map((v) => v.code))].join(',');
+							for (const code of new Set(verdict.violations.map((v) => v.code)))
+								countRejected({ code });
+							log(`sync ${name}: update from ${actor.id} rejected (${codes})`);
+							return void ws.close(1008, `update rejected: ${codes}`);
+						}
+					}
 					if (room.bytes + data.byteLength > limits.maxDocBytes) {
 						// The running total over-counts (merged and deleted content shrinks); measure once.
 						room.bytes = Y.encodeStateAsUpdate(room.doc).length;
 						if (room.bytes + data.byteLength > limits.maxDocBytes) {
+							countRejected({ code: 'document_too_large' });
 							log(`sync ${name}: document is at its size limit, update rejected`);
 							return void ws.close(1009, 'document too large');
 						}
@@ -417,7 +567,10 @@ export function createTeamsServer(options = {}) {
 		let peerId = null;
 		const bucket = createBucket(limits.messageRate, limits.messageBurst);
 		ws.on('message', (data, isBinary) => {
-			if (!bucket.take()) return void ws.close(1008, 'rate limit');
+			if (!bucket.take()) {
+				countRateLimited({ scope: 'socket' });
+				return void ws.close(1008, 'rate limit');
+			}
 			if (isBinary) return;
 			const text = data.toString();
 			let parsed;
@@ -458,8 +611,11 @@ export function createTeamsServer(options = {}) {
 			res.setHeader('Access-Control-Allow-Origin', origin);
 			res.setHeader('Vary', 'Origin');
 		}
-		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-		res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+		res.setHeader(
+			'Access-Control-Allow-Headers',
+			'Content-Type, Authorization, X-Teams-Session, X-Teams-User',
+		);
 		res.setHeader('Access-Control-Expose-Headers', 'Retry-After');
 	};
 	/** The stored file name, or null for bad percent-encoding and names made only of dots. */
@@ -494,15 +650,19 @@ export function createTeamsServer(options = {}) {
 		res.on('close', () => stream.destroy());
 	}
 
-	function upload(req, res, dir, name, id) {
+	function upload(req, res, scope, name, who) {
+		const id = scope;
+		const dir = fileStore.dirOf(scope);
+		const overQuota = (extra) =>
+			fileStore.bytesOf(scope) + extra > limits.workspaceQuotaBytes ||
+			fileStore.totalBytes() + extra > limits.filesQuotaBytes;
 		const declared = Number(req.headers['content-length']);
 		const refuse = (status) => {
 			plain(res, status, { Connection: 'close' });
 			res.once('finish', () => req.destroy());
 		};
 		if (Number.isFinite(declared) && declared > maxFileBytes) return refuse(413);
-		if (filesBytes + (Number.isFinite(declared) ? declared : 0) > limits.filesQuotaBytes)
-			return refuse(507);
+		if (overQuota(Number.isFinite(declared) ? declared : 0)) return refuse(507);
 		mkdirSync(dir, { recursive: true });
 		const tmp = join(dir, `.${randomBytes(6).toString('hex')}.part`);
 		const out = createWriteStream(tmp, { flags: 'wx' });
@@ -519,7 +679,7 @@ export function createTeamsServer(options = {}) {
 		req.on('data', (chunk) => {
 			size += chunk.length;
 			if (size > maxFileBytes) abort(413);
-			else if (filesBytes + size > limits.filesQuotaBytes) abort(507);
+			else if (overQuota(size)) abort(507);
 		});
 		req.on('error', () => abort(400));
 		req.on('aborted', () => abort(400));
@@ -549,7 +709,7 @@ export function createTeamsServer(options = {}) {
 				}
 			}
 			unlinkQuiet(tmp);
-			filesBytes += size;
+			fileStore.added(scope, finalName, size, who.user);
 			res
 				.writeHead(201, { 'Content-Type': 'application/json' })
 				.end(JSON.stringify({ url: `/files/${id}/${encodeURIComponent(finalName)}`, size }));
@@ -567,8 +727,11 @@ export function createTeamsServer(options = {}) {
 		if (req.method !== 'POST') return plain(res, 405);
 		if (!originAllowed(req.headers.origin ?? '')) return plain(res, 403);
 		const bearer = /^Bearer (.+)$/u.exec(req.headers.authorization ?? '')?.[1];
-		if (token && (bearer === undefined || !sameSecret(bearer, token))) return plain(res, 401);
-		const ipVerdict = ipLimiter.check(req.socket.remoteAddress ?? '');
+		if (token && (bearer === undefined || !sameSecret(bearer, token))) {
+			countAuthFailure({ kind: 'token' });
+			return plain(res, 401);
+		}
+		const ipVerdict = ipLimiter.check(clientIp(req));
 		if (!ipVerdict.ok) return tooMany(res, ipVerdict);
 		readSmallJson(req, res, async (body) => {
 			const user = body?.user;
@@ -586,9 +749,19 @@ export function createTeamsServer(options = {}) {
 						})
 					: { id: user };
 				const id = typeof verdict === 'string' ? verdict : verdict?.id;
-				if (!isUserId(id)) return plain(res, 401);
-				const issued = signer.issue(id);
-				json(res, 200, { session: issued.token, user: id, expiresAt: issued.expiresAt });
+				if (!isUserId(id)) {
+					countAuthFailure({ kind: 'credentials' });
+					return plain(res, 401);
+				}
+				const role =
+					typeof verdict === 'object' && verdict?.role === 'moderator' ? 'moderator' : undefined;
+				const issued = signer.issue(id, role);
+				json(res, 200, {
+					session: issued.token,
+					user: id,
+					...(role ? { role } : {}),
+					expiresAt: issued.expiresAt,
+				});
 			} catch (error) {
 				// Never log the credential or the hook's input, only the failure.
 				log(`authenticate failed (${error?.message ?? 'error'})`);
@@ -597,8 +770,13 @@ export function createTeamsServer(options = {}) {
 		});
 	}
 
-	const tooMany = (res, verdict) =>
-		plain(res, 429, { 'Retry-After': String(verdict.retryAfterSec), 'Cache-Control': 'no-store' });
+	const tooMany = (res, verdict) => {
+		countRateLimited({ scope: 'auth' });
+		return plain(res, 429, {
+			'Retry-After': String(verdict.retryAfterSec),
+			'Cache-Control': 'no-store',
+		});
+	};
 
 	/** Read a small JSON body (at most 4 KiB), then call `done(body)`; 400 when it is not JSON. */
 	function readSmallJson(req, res, done) {
@@ -655,13 +833,56 @@ export function createTeamsServer(options = {}) {
 		if (req.method !== 'POST') return plain(res, 405);
 		const bearer = /^Bearer (.+)$/u.exec(req.headers.authorization ?? '')?.[1];
 		if (bearer === undefined || !sameSecret(bearer, adminToken)) return plain(res, 401);
-		const ipVerdict = ipLimiter.check(req.socket.remoteAddress ?? '');
+		const ipVerdict = ipLimiter.check(clientIp(req));
 		if (!ipVerdict.ok) return tooMany(res, ipVerdict);
 		readSmallJson(req, res, (body) => {
 			if (!isUserId(body?.user)) return plain(res, 400);
 			revokeSessions(body.user);
 			plain(res, 204);
 		});
+	}
+
+	/** Who a file request speaks for: the signed session, else (accounts off) the claimed user. */
+	function fileIdentity(req) {
+		const raw = req.headers['x-teams-session'];
+		if (typeof raw === 'string' && raw !== '') {
+			const claims = signer.inspect(raw);
+			return claims
+				? { user: claims.user, role: claims.role, verified: true, bad: false }
+				: { user: null, role: undefined, verified: false, bad: true };
+		}
+		const claim = req.headers['x-teams-user'];
+		const user = typeof claim === 'string' && isUserId(claim) ? claim : null;
+		return { user, role: undefined, verified: false, bad: false };
+	}
+
+	/**
+	 * Whether a file request may touch `scope`: 0 when it may, else the status to answer. A scope
+	 * is a workspace id (any signed-in member) or a private chat room name (its members only).
+	 * A valid signed link was issued after this check, so it stands for the file it names.
+	 */
+	function fileAccess(scope, who, signedRead) {
+		if (signedRead) return 0;
+		if (who.bad || (authRequired && !who.verified)) return 401;
+		if (isChatRoom(scope) && (who.user === null || !membersOf(scope).has(who.user))) return 403;
+		return 0;
+	}
+
+	/** GET /metrics: Prometheus text, only when a metrics token is configured and presented. */
+	function metricsRequest(req, res) {
+		if (!metricsToken) return plain(res, 404);
+		if (req.method !== 'GET') return plain(res, 405);
+		const bearer = /^Bearer (.+)$/u.exec(req.headers.authorization ?? '')?.[1];
+		if (bearer === undefined || !sameSecret(bearer, metricsToken)) {
+			countAuthFailure({ kind: 'metrics' });
+			return plain(res, 401);
+		}
+		res
+			.writeHead(200, {
+				'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+				'Cache-Control': 'no-store',
+			})
+			.end(metrics.render());
 	}
 
 	function onRequest(req, res) {
@@ -676,6 +897,10 @@ export function createTeamsServer(options = {}) {
 					calls: signalRooms.size,
 					auth: Boolean(token),
 					accounts: authRequired,
+					/** Compact every room snapshot now (also runs at start-up per room and on a timer). */
+					compactRooms,
+					/** The Prometheus text the `/metrics` endpoint serves (for hosts with their own exporter). */
+					renderMetrics: () => metrics.render(),
 				}),
 			);
 		}
@@ -683,27 +908,49 @@ export function createTeamsServer(options = {}) {
 		if (url.pathname === '/auth/check') return void checkRequest(req, res);
 		if (url.pathname === '/auth/signout') return void signoutRequest(req, res);
 		if (url.pathname === '/auth/revoke') return void revokeRequest(req, res);
-		const link = /^\/files\/link\/([\w-]{1,64})\/([^/]{1,200})$/u.exec(url.pathname);
-		const m = link ?? /^\/files\/([\w-]{1,64})\/([^/]{1,200})$/u.exec(url.pathname);
-		if (!m) return plain(res, 404);
+		if (url.pathname === '/metrics') return void metricsRequest(req, res);
+		const link = /^\/files\/link\/([\w-]{1,128})\/([^/]{1,200})$/u.exec(url.pathname);
+		const m = link ?? /^\/files\/([\w-]{1,128})\/([^/]{1,200})$/u.exec(url.pathname);
+		const listing = m ? null : /^\/files\/([\w-]{1,128})\/?$/u.exec(url.pathname);
+		if (!m && !listing) return plain(res, 404);
 		if (!originAllowed(req.headers.origin ?? '')) return plain(res, 403);
 		const bearer = /^Bearer (.+)$/u.exec(req.headers.authorization ?? '')?.[1];
 		const authorised = bearer !== undefined && sameSecret(bearer, token);
 		// A signed link only ever opens its own file, and only for reading.
-		const signedRead = req.method === 'GET' && !link && linkOk(url);
-		if (token && !authorised && !signedRead) return plain(res, 401);
+		const signedRead = Boolean(m) && req.method === 'GET' && !link && linkOk(url);
+		if (token && !authorised && !signedRead) {
+			countAuthFailure({ kind: 'token' });
+			return plain(res, 401);
+		}
+		const scope = (m ?? listing)[1];
+		const who = fileIdentity(req);
+		const denied = fileAccess(scope, who, signedRead);
+		if (denied) {
+			if (denied === 401) countAuthFailure({ kind: 'session' });
+			return plain(res, denied);
+		}
+		if (listing) {
+			if (req.method !== 'GET') return plain(res, 405);
+			return json(res, 200, { files: fileStore.list(scope) });
+		}
 		const name = cleanName(m[2]);
 		if (name === null) return plain(res, 400);
 		if (link) {
 			if (req.method !== 'POST') return plain(res, 405);
 			const path = `/files/${m[1]}/${m[2]}`;
-			return void res
-				.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-				.end(JSON.stringify({ url: token ? signedUrl(path) : path }));
+			return json(res, 200, { url: signedUrl(path) });
 		}
-		const dir = join(filesDir, m[1]);
-		if (req.method === 'GET') return download(res, join(dir, name));
-		if (req.method === 'POST') return upload(req, res, dir, name, m[1]);
+		if (req.method === 'GET') return download(res, join(fileStore.dirOf(scope), name));
+		if (req.method === 'POST') return upload(req, res, scope, name, who);
+		if (req.method === 'DELETE') {
+			if (!existsSync(join(fileStore.dirOf(scope), name))) return plain(res, 404);
+			const owner = fileStore.uploaderOf(scope, name);
+			const allowed = who.role === 'moderator' || (who.user !== null && owner === who.user);
+			if (!allowed) return plain(res, 403);
+			fileStore.remove(scope, name);
+			log(`file ${scope}/${name}: deleted by ${who.user ?? 'unknown'}`);
+			return plain(res, 204);
+		}
 		plain(res, 405);
 	}
 
@@ -718,8 +965,18 @@ export function createTeamsServer(options = {}) {
 	});
 
 	// ---- upgrades ---------------------------------------------------------------------------
-	const syncWss = new WebSocketServer({ noServer: true, maxPayload: maxSyncBytes });
-	const signalWss = new WebSocketServer({ noServer: true, maxPayload: maxSignalBytes });
+	// Echo only the bare marker, never an entry that carries a credential.
+	const handleProtocols = (protocols) => (protocols.has(SUBPROTOCOL) ? SUBPROTOCOL : false);
+	const syncWss = new WebSocketServer({
+		noServer: true,
+		maxPayload: maxSyncBytes,
+		handleProtocols,
+	});
+	const signalWss = new WebSocketServer({
+		noServer: true,
+		maxPayload: maxSignalBytes,
+		handleProtocols,
+	});
 	/** @type {Map<string, number>} open sockets per remote address */
 	const perIp = new Map();
 	const reject = (socket, line) => {
@@ -733,12 +990,19 @@ export function createTeamsServer(options = {}) {
 		if (!m) return void socket.destroy();
 		if (name === null || !ROOM.test(name)) return reject(socket, '400 Bad Request');
 		if (!originAllowed(req.headers.origin ?? '')) return reject(socket, '403 Forbidden');
-		if (!tokenOk(url)) return reject(socket, '401 Unauthorized');
-		// Identity: with accounts the session decides who this is; without, the claim stands (dev).
-		const sessionUser = signer.verify(url.searchParams.get('session'));
-		if (url.searchParams.has('session') && sessionUser === null)
+		if (!tokenOk(url, req)) {
+			countAuthFailure({ kind: 'token' });
 			return reject(socket, '401 Unauthorized');
-		if (authRequired && sessionUser === null) return reject(socket, '401 Unauthorized');
+		}
+		// Identity: with accounts the session decides who this is; without, the claim stands (dev).
+		const sessionToken = credentialOf(url, req, 'session');
+		const claims = signer.inspect(sessionToken);
+		const sessionUser = claims?.user ?? null;
+		const sessionRole = claims?.role;
+		if ((sessionToken !== null || authRequired) && sessionUser === null) {
+			countAuthFailure({ kind: 'session' });
+			return reject(socket, '401 Unauthorized');
+		}
 		// Private chats: only the people listed in the room's member map may join.
 		let admission = null;
 		if (m[1] === 'sync' && isChatRoom(name)) {
@@ -752,7 +1016,7 @@ export function createTeamsServer(options = {}) {
 			if (!verdict.ok) return reject(socket, '403 Forbidden');
 			admission = { seed: verdict.seed, user };
 		}
-		const ip = req.socket.remoteAddress ?? '';
+		const ip = clientIp(req);
 		const open = syncWss.clients.size + signalWss.clients.size;
 		const rooms = m[1] === 'sync' ? syncRooms : signalRooms;
 		if (
@@ -764,7 +1028,10 @@ export function createTeamsServer(options = {}) {
 		const admit = (grant) => {
 			if (socket.destroyed) return;
 			perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
-			upgradeSocket(req, socket, head, m[1], name, admission, sessionUser, ip, grant);
+			upgradeSocket(req, socket, head, m[1], name, admission, sessionUser, ip, grant, {
+				role: sessionRole,
+				proto: protocolCheck(url, name),
+			});
 		};
 		if (m[1] !== 'sync' || !authorizeSync) return admit(null);
 		const user = sessionUser ?? url.searchParams.get('user');
@@ -782,7 +1049,18 @@ export function createTeamsServer(options = {}) {
 				},
 			);
 	}
-	function upgradeSocket(req, socket, head, kind, name, admission, sessionUser, ip, grant) {
+	/** The reason to refuse a client's protocol version, or null. A missing version is a legacy client. */
+	function protocolCheck(url, name) {
+		if (!url.searchParams.has(PROTOCOL_PARAM)) {
+			log(`${name}: client announced no protocol version (legacy), accepted`);
+			return null;
+		}
+		const version = protocolOfUrl(url.href);
+		return version === PROTOCOL_VERSION
+			? null
+			: `unsupported protocol version ${url.searchParams.get(PROTOCOL_PARAM)?.slice(0, 12)}: this server speaks ${PROTOCOL_VERSION}`;
+	}
+	function upgradeSocket(req, socket, head, kind, name, admission, sessionUser, ip, grant, extra) {
 		const wss = kind === 'sync' ? syncWss : signalWss;
 		wss.handleUpgrade(req, socket, head, (ws) => {
 			if (sessionUser !== null) {
@@ -794,8 +1072,16 @@ export function createTeamsServer(options = {}) {
 				if (left <= 0) perIp.delete(ip);
 				else perIp.set(ip, left);
 			});
+			if (extra.proto) {
+				log(`${kind} ${name}: ${extra.proto}`);
+				return void ws.close(1008, extra.proto);
+			}
+			const actor =
+				enforceAuthorship && sessionUser !== null
+					? { id: sessionUser, moderator: extra.role === 'moderator' }
+					: null;
 			try {
-				if (kind === 'sync') handleSync(ws, name, admission, grant);
+				if (kind === 'sync') handleSync(ws, name, admission, grant, actor);
 				else handleSignal(ws, name);
 			} catch (error) {
 				log(`${kind} ${name}: setup failed (${error.message})`);
@@ -813,6 +1099,46 @@ export function createTeamsServer(options = {}) {
 		}
 	};
 	http.on('upgrade', upgrade);
+
+	// ---- maintenance --------------------------------------------------------------------------
+	/** Rewrite every snapshot as one compact update: open rooms from memory, the rest from disk. */
+	function compactRooms() {
+		let compacted = 0;
+		for (const name of snapshotNames(roomsDir)) {
+			const live = syncRooms.get(name);
+			try {
+				if (live) {
+					const compact = compactUpdate(live.doc);
+					const current = quietSize(snapshotPath(name));
+					if (compact && compact.length < current) {
+						writeFileAtomic(snapshotPath(name), compact);
+						live.bytes = compact.length;
+						countCompaction();
+						compacted++;
+					}
+				} else if (compactSnapshotFile(snapshotPath(name))) {
+					countCompaction();
+					compacted++;
+				}
+			} catch (error) {
+				log(`room ${name}: compaction failed (${error.message})`);
+			}
+		}
+		if (compacted) log(`compacted ${compacted} room snapshot(s)`);
+		return compacted;
+	}
+	const timers = [];
+	const every = (ms, fn) => {
+		if (!(ms > 0)) return;
+		const timer = setInterval(fn, ms);
+		timer.unref?.();
+		timers.push(timer);
+	};
+	every(
+		options.compactIntervalMs ?? (Number(process.env.TEAMS_COMPACT_INTERVAL_MIN) || 360) * 60_000,
+		compactRooms,
+	);
+	every(options.sweepIntervalMs ?? 15 * 60_000, () => fileStore.sweep(60 * 60_000));
 
 	return {
 		http,
@@ -858,6 +1184,10 @@ export function createTeamsServer(options = {}) {
 			}
 		},
 		accounts: authRequired,
+		/** Compact every room snapshot now (also runs at start-up per room and on a timer). */
+		compactRooms,
+		/** The Prometheus text the `/metrics` endpoint serves (for hosts with their own exporter). */
+		renderMetrics: () => metrics.render(),
 		/** Invalidate every session issued for `user` and drop their open sockets. */
 		revokeSessions,
 		listen: (port = Number(process.env.PORT) || 8787, host = process.env.HOST || '127.0.0.1') => {
@@ -880,6 +1210,7 @@ export function createTeamsServer(options = {}) {
 		},
 		close: () =>
 			new Promise((ok) => {
+				for (const timer of timers) clearInterval(timer);
 				// Flush every room (a debounced snapshot must not be lost on shutdown), then release it.
 				for (const [name, room] of syncRooms) {
 					clearTimeout(room.timer);
@@ -898,7 +1229,14 @@ export function createTeamsServer(options = {}) {
 
 /** Start a server configured from the environment and log where it listens (the CLI entry). */
 export async function runTeamsServer() {
-	const insecure = process.env.TEAMS_INSECURE === '1' || process.argv.includes('--insecure');
+	const args = process.argv.slice(2);
+	const insecure = process.env.TEAMS_INSECURE === '1' || args.includes('--insecure');
+	const insecureDev = args.includes('--insecure-dev');
+	const proxyArg = args.find((a) => a === '--trust-proxy' || a.startsWith('--trust-proxy='));
+	const trustProxy =
+		proxyArg === undefined
+			? parseTrustProxy(process.env.TEAMS_TRUST_PROXY)
+			: parseTrustProxy(proxyArg.includes('=') ? proxyArg.split('=')[1] : 'true');
 	// TEAMS_USERS_FILE: a JSON object of user id -> credential (see the README).
 	const usersFile = process.env.TEAMS_USERS_FILE;
 	let users;
@@ -912,10 +1250,17 @@ export async function runTeamsServer() {
 		if (!users || typeof users !== 'object' || Array.isArray(users))
 			throw new Error('TEAMS_USERS_FILE could not be read as a JSON object');
 	}
+	const formatArg = args.find((a) => a.startsWith('--log-format='));
+	const format = formatArg ? formatArg.split('=')[1] : (process.env.TEAMS_LOG_FORMAT ?? 'text');
+	if (format !== 'text' && format !== 'json')
+		throw new Error(`--log-format must be text or json, not ${format}`);
+	const log = createLogger(format);
 	const server = createTeamsServer({
 		insecure,
+		insecureDev,
+		trustProxy,
 		...(users ? { users } : {}),
-		log: (m) => console.log(m),
+		log,
 	});
 	const addr = await server.listen();
 	const auth = process.env.TEAMS_TOKEN
@@ -923,7 +1268,7 @@ export async function runTeamsServer() {
 		: 'no token (loopback only unless TEAMS_INSECURE=1)';
 	const accounts = server.accounts
 		? 'accounts required'
-		: 'NO ACCOUNTS: user ids are claims (dev default, not secure)';
+		: 'NO ACCOUNTS: user ids are claims (--insecure-dev, not secure)';
 	console.log(`teams server on http://${addr.address}:${addr.port}  [${auth}; ${accounts}]`);
 	console.log(
 		'  ws://%s:%d/sync/<room>   ws://%s:%d/signal/<room>   /files/<id>/<name>',
@@ -937,12 +1282,29 @@ export async function runTeamsServer() {
 
 /** CLI wrapper: print a startup refusal plainly and exit non-zero instead of a stack trace. */
 export async function runTeamsServerCli() {
+	let server;
 	try {
-		await runTeamsServer();
+		server = await runTeamsServer();
 	} catch (error) {
 		console.error(`openteams-server: ${error.message}`);
 		process.exit(1);
 	}
+	// Graceful shutdown: close() flushes every room, so a write made in the last 500 ms is kept.
+	let stopping = false;
+	const stop = (signal) => {
+		if (stopping) return;
+		stopping = true;
+		console.log(`${signal} received: saving rooms and shutting down`);
+		const force = setTimeout(() => process.exit(1), 10_000);
+		force.unref();
+		server.close().then(
+			() => process.exit(0),
+			() => process.exit(1),
+		);
+	};
+	process.on('SIGTERM', () => stop('SIGTERM'));
+	process.on('SIGINT', () => stop('SIGINT'));
+	return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

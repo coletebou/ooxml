@@ -20,10 +20,11 @@ import {
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { TranslateService } from '@ngx-translate/core';
-import { isActionHidden, resolveStatusBarSave } from 'ooxml-ui/pptx';
+import { dispatchStatusBarIntent, saveProgressStatus, statusBarState } from 'ooxml-ui/pptx';
 import type {
-	StatusBarControlId,
-	StatusBarRequestEvent,
+	DeckWebfontProgress,
+	SaveProgressState,
+	StatusBarIntentHandlers,
 	StatusBarViewState,
 	ToolbarActionId,
 } from 'ooxml-ui/pptx';
@@ -50,6 +51,10 @@ export class StatusBarComponent {
 	readonly dirty = input<boolean>(false);
 	/** Current autosave engine status; drives the save-state text + colour. */
 	readonly autosaveStatus = input<AutosaveStatus | undefined>(undefined);
+	/** The progress of a save to the host's storage; replaces the save indicator while it runs. */
+	readonly saveProgress = input<SaveProgressState | undefined>(undefined);
+	/** The deck's webfont download; shown while it runs after the deck is on screen. */
+	readonly fontProgress = input<DeckWebfontProgress | null>(null);
 	readonly notesOpen = input<boolean>(false);
 	readonly zoomPercent = input<number>(100);
 	/** True when the slide-sorter overlay is open (active-state styling). */
@@ -77,7 +82,7 @@ export class StatusBarComponent {
 		{ initialValue: 0 },
 	);
 
-	private readonly intents: Record<StatusBarControlId, () => void> = {
+	private readonly intents: StatusBarIntentHandlers = {
 		notes: () => this.toggleNotes.emit(),
 		normal: () => this.normalView.emit(),
 		sorter: () => this.openSorter.emit(),
@@ -87,28 +92,29 @@ export class StatusBarComponent {
 		zoomIn: () => this.zoomIn.emit(),
 	};
 
+	private saveProgressView() {
+		const state = this.saveProgress();
+		return state ? saveProgressStatus(state, (key) => this.translate.instant(key)) : undefined;
+	}
+
 	protected view(): StatusBarViewState {
 		this.translations();
-		const t = (key: string, params?: Record<string, string | number>): string =>
-			this.translate.instant(key, params);
-		const hidden = (id: ToolbarActionId) => isActionHidden(id, this.hiddenActions());
-		const save = resolveStatusBarSave(t, this.autosaveStatus(), this.dirty());
-		return {
+		return statusBarState({
 			slideCount: this.slideCount(),
 			activeSlideIndex: this.slideIndex(),
-			saveText: save.text,
-			saveKind: save.kind,
-			zoomPercent: hidden('zoom') ? undefined : this.zoomPercent(),
-			showNotes: !hidden('notes'),
+			dirty: this.dirty(),
+			autosave: this.autosaveStatus(),
+			saveProgress: this.saveProgressView(),
+			fontProgress: this.fontProgress(),
+			zoomPercent: this.zoomPercent(),
 			notesExpanded: this.notesOpen(),
-			showSlideShow: !hidden('fullscreen'),
-			// "Normal" is active when neither the sorter nor the slideshow is showing.
 			viewMode: this.presenting() ? 'slideShow' : this.sorterActive() ? 'sorter' : 'normal',
-			translate: t,
-		};
+			hiddenActions: this.hiddenActions(),
+			translate: (key, params) => this.translate.instant(key, params),
+		});
 	}
 
 	protected request(event: Event): void {
-		this.intents[(event as StatusBarRequestEvent).detail.id]();
+		dispatchStatusBarIntent(event, this.intents);
 	}
 }

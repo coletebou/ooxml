@@ -2,26 +2,41 @@
 import JSZip from 'jszip';
 import { openZip } from '../opc/zip-limits';
 import { dropAddedFolders, entryNames } from '../opc/zip-folders';
+import { stripPackageSignatures } from '../opc/signature/index';
 import { DOCX_ZIP_LIMITS } from './package-limits';
-import type { DocumentModel, PendingMediaPart } from './model';
+import type { DocumentModel, PendingMediaPart, SaveOptions } from './model';
+import { stampModified } from './save-modified';
+import { applyStyleFormatting } from './style-formatting-package';
+import { applyDataBindings } from './data-binding';
 import { buildXml, parseXml, type XmlDocument } from './xml';
 import type { PackageContext } from './parse';
 import { applyModel } from './write';
 import { DocPrIdAllocator } from './docpr-ids';
 import { assertValidDocumentModel } from './validate-model';
 import { applyCoreProperties } from './core-properties';
+import { applyPackageInformation } from './package-information-save';
+import { scrubPersonalParts } from './personal-information';
 import { applyNumberingCatalog } from './numbering-package';
 import { applyStyleNumbering, differsOnlyByStyleNumbering } from './style-numbering-package';
 import { applyHeaderFooterEdits, createHeaderFooterParts } from './write-header-footer';
 import { applyNoteEdits } from './write-notes';
 import { writeNewRelationships } from './part-relationships';
-import { applyCompatibilityMode, applySettingsFlag, applyTrackChangesSetting } from './settings';
+import {
+	applyCompatibilityMode,
+	applyDocumentProtection,
+	applySettingsFlag,
+	applyTrackChangesSetting,
+} from './settings';
 import { applyPageBackground } from './page-background';
 import { applyComments } from './write-comments';
 import { numberCommentIds } from './comment-spans';
 import { DEFAULT_STYLES_XML, hasDefaultStyles } from './default-styles';
 import { ensureContentTypeOverride, ensureDocumentRelationship } from './zip-parts';
 import { refreshStyleRefFields } from './style-ref-fields';
+import { refreshComputedFields } from './computed-fields';
+import { applyDiagramEdits } from './diagram-save';
+import { applyGeneratedDiagramCaches } from './diagram-cache';
+import { applyChartPartEdits } from './chart-save';
 
 const DEFAULT_STYLES_PATH = 'word/styles.xml';
 import { maxWordId, numberRevisionIds } from './revision-ids';
@@ -46,14 +61,28 @@ function newDocument(): XmlDocument {
 }
 
 /**
- * `model` with its header and footer STYLEREF results brought up to date, or undefined when none
- * changes. Word updates those fields as it draws each page, so a saved header should not keep a
- * stale result; a part the writer cannot rebuild with the new results keeps the ones it has, and
- * a model the update cannot read is saved as it is: the update never makes a save fail.
+ * `model` with its header and footer STYLEREF and computed field results (DOCPROPERTY...)
+ * brought up to date, or undefined when none changes. Word updates those fields as it draws each
+ * page, so a saved header should not keep a stale result; a part the writer cannot rebuild with
+ * the new results keeps the ones it has, and a model the update cannot read is saved as it is:
+ * the update never makes a save fail.
  */
+/** `model` with its body's computed field results up to date, or undefined when none changes. */
+function bodyResults(model: DocumentModel): DocumentModel | undefined {
+	try {
+		const refreshed = refreshComputedFields(model, { body: true });
+		if (refreshed.blocks === model.blocks) return undefined;
+		const body = { ...model, blocks: refreshed.blocks };
+		assertValidDocumentModel(body);
+		return body;
+	} catch {
+		return undefined;
+	}
+}
+
 function headerFooterResults(model: DocumentModel): DocumentModel | undefined {
 	try {
-		const refreshed = refreshStyleRefFields(model);
+		const refreshed = refreshStyleRefFields(refreshComputedFields(model));
 		if (refreshed === model) return undefined;
 		assertValidDocumentModel(refreshed);
 		return refreshed;
@@ -65,6 +94,7 @@ function headerFooterResults(model: DocumentModel): DocumentModel | undefined {
 export async function saveDocx(
 	model: DocumentModel,
 	pendingMedia?: ReadonlyMap<string, PendingMediaPart>,
+	options?: SaveOptions,
 ): Promise<Uint8Array> {
 	const ids = new Set<string>();
 	for (const block of model.blocks) {
@@ -111,7 +141,7 @@ export async function saveDocx(
 		);
 	const zip = binding ? await openZip(binding.context.original, DOCX_ZIP_LIMITS) : new JSZip();
 	const sourceEntries = entryNames(zip);
-	const document = binding ? parseXml(binding.context.sourceXml) : newDocument();
+	let document = binding ? parseXml(binding.context.sourceXml) : newDocument();
 	const docPrIds = new DocPrIdAllocator();
 	await docPrIds.reserveFromPackage(zip);
 	if (!binding) {
@@ -127,18 +157,32 @@ export async function saveDocx(
 	// Header/footer parts the model added exist (with their relationships) before the body is written.
 	const headerFooterIds = await createHeaderFooterParts(zip, model, binding?.base, docPrIds);
 	const existingRelationships = parseRelationships(await zip.file(RELS_PART)?.async('string'));
-	const { newRelationships } = applyModel(
-		document,
-		model,
-		binding?.base.blocks ?? [],
-		existingRelationships.keys(),
-		binding?.base.sections ?? [],
-		docPrIds,
-		headerFooterIds,
-	);
+	const write = (target: XmlDocument, source: DocumentModel) =>
+		applyModel(
+			target,
+			source,
+			binding?.base.blocks ?? [],
+			existingRelationships.keys(),
+			binding?.base.sections ?? [],
+			docPrIds,
+			headerFooterIds,
+		);
+	// The body's computed field results (DOCPROPERTY...) are saved up to date; a body the writer
+	// cannot rebuild with them is written as the model holds it.
+	const preferred = bodyResults(model);
+	let written: ReturnType<typeof write> | undefined;
+	if (preferred)
+		try {
+			written = write(document, preferred);
+		} catch {
+			document = binding ? parseXml(binding.context.sourceXml) : newDocument();
+		}
+	const { newRelationships } = written ?? write(document, model);
 	if (model.pageColor !== binding?.base.pageColor) applyPageBackground(document, model.pageColor);
 	zip.file('word/document.xml', buildXml(document));
 	await writeNewRelationships(zip, 'word/document.xml', newRelationships, pendingMedia);
+	if (binding) await applyDiagramEdits(zip, model.blocks, binding.base.blocks, pendingMedia);
+	await applyGeneratedDiagramCaches(zip, model.blocks, binding?.base.blocks ?? [], model.theme);
 	await applyHeaderFooterEdits(
 		zip,
 		model,
@@ -155,9 +199,12 @@ export async function saveDocx(
 		pendingMedia,
 		docPrIds,
 	);
-	await applyNumberingCatalog(zip, model, binding);
+	// Edited charts are written back with their workbooks; unedited chart parts are not touched.
+	await applyChartPartEdits(zip, model, binding?.base);
+	await applyNumberingCatalog(zip, model, binding, pendingMedia);
 	await applyCoreProperties(zip, model.properties, binding?.base.properties);
 	if (binding) await applyStyleNumbering(zip, model, binding.base);
+	if (binding) await applyStyleFormatting(zip, model, binding.base);
 	if (model.compatibilityMode !== binding?.base.compatibilityMode)
 		await applyCompatibilityMode(zip, model.compatibilityMode);
 	if (Boolean(model.evenAndOddHeaders) !== Boolean(binding?.base.evenAndOddHeaders))
@@ -169,6 +216,8 @@ export async function saveDocx(
 		await applySettingsFlag(zip, 'autoHyphenation', Boolean(model.autoHyphenation));
 	if (model.trackChanges !== binding?.base.trackChanges)
 		await applyTrackChangesSetting(zip, model.trackChanges === true);
+	if (JSON.stringify(model.protection) !== JSON.stringify(binding?.base.protection))
+		await applyDocumentProtection(zip, model.protection);
 	for (const [key, flag] of [
 		['trackFormatting', 'doNotTrackFormatting'],
 		['trackMoves', 'doNotTrackMoves'],
@@ -191,6 +240,14 @@ export async function saveDocx(
 	}
 	if (JSON.stringify(model.comments ?? []) !== JSON.stringify(binding?.base.comments ?? []))
 		await applyComments(zip, model.comments ?? []);
+	if (binding) await applyDataBindings(zip, model, binding.base, binding.context.sourceXml);
+	await applyPackageInformation(zip, model.packageInformation, binding?.base.packageInformation);
+	const privacy = model.packageInformation;
+	if (privacy?.removePersonalInformation)
+		await scrubPersonalParts(zip, privacy.removeDateAndTime === true);
+	if (binding)
+		await stampModified(zip, options?.modified, privacy?.removePersonalInformation === true);
+	if (binding) await stripPackageSignatures(zip);
 	dropAddedFolders(zip, sourceEntries);
 	return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }

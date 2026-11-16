@@ -45,6 +45,47 @@ describe('file info dialogs', () => {
 		expect(onToggle).toHaveBeenCalledWith(true);
 	});
 
+	it('shows the licence restriction of an embedded typeface with its reason', async () => {
+		const t = createTranslator();
+		const overlay = openFontEmbeddingDialog(document, t, {
+			slides: [
+				{
+					id: 'slide',
+					rId: 'rId1',
+					slideNumber: 1,
+					elements: ['Brand', 'Proof'].map((fontFamily) => ({
+						type: 'text' as const,
+						id: fontFamily,
+						x: 0,
+						y: 0,
+						width: 10,
+						height: 10,
+						text: 'Text',
+						textStyle: { fontFamily },
+					})),
+				},
+			],
+			embeddedFonts: [
+				{ name: 'Brand', dataUrl: '', fsType: 0x0002 },
+				{ name: 'Proof', dataUrl: '', fsType: 0x0004 },
+			],
+			enabled: true,
+			onToggle: vi.fn(),
+		});
+		await vi.waitFor(() =>
+			expect(overlay.querySelector('[data-font-restriction="restricted"]')).not.toBeNull(),
+		);
+		const restricted = overlay.querySelector<HTMLElement>('[data-font-restriction="restricted"]')!;
+		expect(restricted.textContent).toBe(t('pptx.fonts.restricted'));
+		expect(restricted.title).toBe(t('pptx.fonts.restrictedReason'));
+		expect(overlay.querySelector('[data-font-restriction-reason="restricted"]')!.textContent).toBe(
+			t('pptx.fonts.restrictedReason'),
+		);
+		expect(overlay.querySelector('[data-font-restriction="preview-print"]')!.textContent).toBe(
+			t('pptx.fonts.previewOnly'),
+		);
+	});
+
 	it('makes the embed toggle inert, with a reason, for a deck that embeds nothing', () => {
 		const t = createTranslator();
 		const overlay = openFontEmbeddingDialog(document, t, {
@@ -77,5 +118,26 @@ describe('file info dialogs', () => {
 		const save = allButtons(protection).find((button) => button.textContent === 'Set Password')!;
 		save.click();
 		expect(onSet).toHaveBeenCalledWith('Safe123!');
+	});
+
+	it('refuses a mismatched or too short password with the shared rule', () => {
+		const onSet = vi.fn();
+		const t = createTranslator();
+		const protection = openPasswordProtectionDialog(document, t, {
+			protected: false,
+			onSet,
+			onRemove: vi.fn(),
+		});
+		const inputs = protection.querySelectorAll<HTMLInputElement>('input');
+		const save = allButtons(protection).find((button) => button.textContent === 'Set Password')!;
+		inputs[0].value = 'Safe123!';
+		inputs[1].value = 'Other456!';
+		save.click();
+		expect(protection.textContent).toContain(t('pptx.security.errorPasswordMismatch'));
+		inputs[0].value = 'abc';
+		inputs[1].value = 'abc';
+		save.click();
+		expect(protection.textContent).toContain(t('pptx.security.errorPasswordTooShort'));
+		expect(onSet).not.toHaveBeenCalled();
 	});
 });

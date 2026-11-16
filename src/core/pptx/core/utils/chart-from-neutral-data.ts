@@ -17,6 +17,7 @@ import type {
 	ChartTitle,
 } from '../../../chart/index';
 import type { PptxChartDateCategories } from '../types';
+import { isFiniteNumber } from '../../../units/finite';
 
 const pointIndex = (point: ChartCachePoint) => point.index ?? 0;
 
@@ -44,7 +45,7 @@ function expandCache<T>(
 
 const readNumber = (text: string) => {
 	const value = Number.parseFloat(text);
-	return text.length > 0 && Number.isFinite(value) ? value : undefined;
+	return text.length > 0 && isFiniteNumber(value) ? value : undefined;
 };
 const readText = (text: string) => (text.length > 0 ? text : undefined);
 const isNumeric = (source: ChartDataSource | undefined) =>
@@ -87,7 +88,8 @@ export function neutralCategoryLevels(
 		if (levelIndex > 0) {
 			let last = '';
 			for (let at = 0; at < dense.length; at++) {
-				if (dense[at]) last = dense[at];
+				const label = dense[at];
+				if (label) last = label;
 				else dense[at] = last;
 			}
 		}

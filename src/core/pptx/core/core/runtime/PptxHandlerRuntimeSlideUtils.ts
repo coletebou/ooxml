@@ -2,7 +2,10 @@ import { XmlObject, TextSegment, PptxElement } from '../../types';
 import { partRelsPath } from '../../utils/part-rels-path';
 import { stripParentDirSegments } from '../../utils/strip-parent-dir-segments';
 import { selectNotesBodyShapes } from './notes-body-shapes';
+import { paragraphContentEntries } from './paragraph-sibling-order';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeBackgroundParsing';
+
+const PLAIN_TEXT_TAGS: ReadonlySet<string> = new Set(['a:r', 'a:fld', 'a:br']);
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	/**
@@ -185,6 +188,35 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	/**
+	 * Run `work` with one master's theme state active and no slide colour-map override, then
+	 * put back whatever state was active before, so a part parsed on request (a layout preview)
+	 * resolves through its own master without disturbing the caller's.
+	 */
+	protected async withMasterThemeState<T>(
+		masterPath: string | undefined,
+		work: () => Promise<T>,
+	): Promise<T> {
+		const saved = {
+			colors: this.themeColorMap,
+			fonts: this.themeFontMap,
+			format: this.themeFormatScheme,
+			clrMap: this.currentMasterClrMap,
+			slideClrMap: this.currentSlideClrMapOverride,
+		};
+		this.applyMasterThemeState(masterPath);
+		this.currentSlideClrMapOverride = null;
+		try {
+			return await work();
+		} finally {
+			this.themeColorMap = saved.colors;
+			this.themeFontMap = saved.fonts;
+			this.themeFormatScheme = saved.format;
+			this.currentMasterClrMap = saved.clrMap;
+			this.currentSlideClrMapOverride = saved.slideClrMap;
+		}
+	}
+
+	/**
 	 * Extract the `p:bg/@showAnimation` flag from a slide's XML.
 	 * Returns `true` when the background should animate, `false` when
 	 * explicitly disabled, or `undefined` when the attribute is absent
@@ -270,37 +302,20 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 		paragraphs.forEach((paragraph: XmlObject, paragraphIndex: number) => {
 			const runTexts: string[] = [];
-			const runs = this.ensureArray(paragraph?.['a:r']);
-			runs.forEach((run) => {
-				const value = run?.['a:t'];
-				if (typeof value === 'string') {
-					runTexts.push(value);
-				} else if (value !== undefined) {
-					runTexts.push(String(value));
+			const pushText = (value: unknown): void => {
+				if (value !== undefined) {
+					runTexts.push(typeof value === 'string' ? value : String(value));
 				}
-			});
-
-			const fields = this.ensureArray(paragraph?.['a:fld']);
-			fields.forEach((field) => {
-				const value = field?.['a:t'];
-				if (typeof value === 'string') {
-					runTexts.push(value);
-				} else if (value !== undefined) {
-					runTexts.push(String(value));
-				}
-			});
-
-			if (paragraph?.['a:t'] !== undefined) {
-				const value = paragraph['a:t'];
-				runTexts.push(typeof value === 'string' ? value : String(value));
-			}
-
-			const lineBreaks = this.ensureArray(paragraph?.['a:br']);
-			if (lineBreaks.length > 0) {
-				for (let idx = 0; idx < lineBreaks.length; idx++) {
+			};
+			// Authored order, so a soft break stays between the runs it separates.
+			for (const [tag, item] of paragraphContentEntries(paragraph, PLAIN_TEXT_TAGS).entries) {
+				if (tag === 'a:br') {
 					runTexts.push('\n');
+				} else {
+					pushText((item as XmlObject | undefined)?.['a:t']);
 				}
 			}
+			pushText(paragraph?.['a:t']);
 
 			chunks.push(runTexts.join(''));
 			if (paragraphIndex < paragraphs.length - 1) {
@@ -312,11 +327,11 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	protected async extractSlideNotes(slidePath: string): Promise<{
-		notes?: string;
-		notesSegments?: TextSegment[];
-		notesShapes?: PptxElement[];
-		notesClrMapOverride?: Record<string, string>;
-		notesCSldName?: string;
+		notes?: string | undefined;
+		notesSegments?: TextSegment[] | undefined;
+		notesShapes?: PptxElement[] | undefined;
+		notesClrMapOverride?: Record<string, string> | undefined;
+		notesCSldName?: string | undefined;
 	}> {
 		const slideRels = this.slideRelsMap.get(slidePath);
 		if (!slideRels) {
@@ -335,7 +350,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			return {};
 		}
 
-		const notesXml = await this.zip.file(notesPath)?.async('string');
+		const notesXml = await this.readPartText(notesPath);
 		if (!notesXml) {
 			return {};
 		}

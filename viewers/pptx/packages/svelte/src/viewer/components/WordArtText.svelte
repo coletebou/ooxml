@@ -4,13 +4,13 @@
 	import type { EnvelopeGlyphPlacement, EnvelopeSegmentInput } from 'ooxml-ui/pptx';
 	import {
 		buildGlyphEnvelopeBlock,
-		buildWarpPath,
 		DEFAULT_FONT_FAMILY,
 		groupIntoParagraphs,
 		hasGlyphEnvelope,
-		normalizeHexColor,
+		resolveWarpRunPaint,
 		shouldUseSvgWarp,
 		substituteFieldText,
+		warpParagraphLayouts,
 	} from 'ooxml-ui/pptx';
 
 	import { getFieldContextGetter } from '../state/field-context';
@@ -25,7 +25,7 @@
 	const textElement = $derived(hasTextProperties(element) ? element : undefined);
 	const preset = $derived(textElement?.textStyle?.textWarpPreset);
 	// Every classified preset renders along an SVG `<textPath>` baseline;
-	// only `textNoShape` / `textPlain` / unknown presets render nothing here.
+	// only `textNoShape` / unknown presets render nothing here.
 	// This used to additionally require `classifyTextWarp(preset) === 'path'`,
 	// which routed inflate/deflate/can/slant/fade/cascade to a flat CSS
 	// `transform` approximation instead - a cross-binding parity bug, since
@@ -62,26 +62,40 @@
 		}
 	});
 
-	function runStyle(segment: TextSegment): Record<string, string | number> {
-		const style: TextStyle = segment.style ?? {};
-		const inherited = textElement?.textStyle;
-		const decorations = [style.underline || style.hyperlink ? 'underline' : '', style.strikethrough ? 'line-through' : ''].filter(Boolean);
-		const family = style.fontFamily ?? inherited?.fontFamily;
+	function runStyle(segment: TextSegment, fitScale = 1): Record<string, string | number> {
+		// An SVG `<text>` is painted by `fill`; a CSS `color` is ignored (the
+		// glyphs rendered black). The shared descriptor keeps all bindings equal.
+		const paint = resolveWarpRunPaint(segment, textElement?.textStyle);
 		const result: Record<string, string | number> = {
-			color: normalizeHexColor(style.color ?? inherited?.color, style.hyperlink ? '#0563C1' : '#111827'),
-			fontSize: `${style.fontSize ?? inherited?.fontSize ?? 24}px`,
-			fontWeight: style.bold || inherited?.bold ? 700 : 400,
-			fontStyle: style.italic || inherited?.italic ? 'italic' : 'normal',
-			fontFamily: family ? getSubstituteFontFamily(family) : DEFAULT_FONT_FAMILY,
+			fill: paint.fill,
+			fontSize: `${paint.fontSizePx * fitScale}px`,
+			fontFamily: paint.fontFamily,
+			fontStyle: paint.fontStyle ?? 'normal',
+			fontWeight: paint.fontWeight ?? 'normal',
 		};
-		if (decorations.length) {
-			result.textDecoration = decorations.join(' ');
+		if (paint.textDecoration) {
+			result.textDecoration = paint.textDecoration;
 		}
 		return result;
 	}
 
+	// Path and font fit scale of every paragraph (shared with the other bindings).
+	const layouts = $derived(
+		preset
+			? warpParagraphLayouts(
+					preset,
+					width,
+					height,
+					paragraphs,
+					textElement?.textStyle?.textWarpAdj,
+					textElement?.textStyle?.textWarpAdj2,
+					textElement?.textStyle,
+				)
+			: [],
+	);
+
 	function pathFor(index: number): string {
-		return buildWarpPath(preset!, width, height, index, paragraphs.length, textElement?.textStyle?.textWarpAdj, textElement?.textStyle?.textWarpAdj2);
+		return layouts[index]?.d ?? '';
 	}
 
 	// Envelope presets (inflate/deflate/can) are laid out as ONE block and
@@ -127,12 +141,13 @@
 			textElement?.textStyle?.textWarpAdj,
 			textElement?.textStyle?.textWarpAdj2,
 			getGlyphOutline,
+			textElement?.textStyle,
 		);
 		return paragraphs.flatMap((paragraph, lineIndex) => {
 			const placements = perLine[lineIndex] ?? [];
 			return placements.map((p) => {
 				const s = runStyle(paragraph.segments[p.segmentIndex]);
-				return { ...p, styleStr: styleToString(s), fillColor: String(s.color) };
+				return { ...p, styleStr: styleToString(s), fillColor: String(s.fill) };
 			});
 		});
 	});
@@ -172,7 +187,7 @@
 		<defs>{#each paragraphs as _, i (i)}<path id={`${pathPrefix}-${i}`} d={pathFor(i)} fill="none" />{/each}</defs>
 		{#each paragraphs as paragraph, pi (pi)}
 			<text><textPath href={`#${pathPrefix}-${pi}`} startOffset={alignment.offset} text-anchor={alignment.anchor}>
-				{#each paragraph.segments as segment, si (si)}<tspan style={styleToString(runStyle(segment))}>{segment.text}</tspan>{/each}
+				{#each paragraph.segments as segment, si (si)}<tspan style={styleToString(runStyle(segment, layouts[pi]?.fitScale ?? 1))}>{segment.text}</tspan>{/each}
 			</textPath></text>
 		{/each}
 	</svg>

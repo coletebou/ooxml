@@ -17,9 +17,9 @@ import type { SlideSizeEmu } from 'ooxml-ui/pptx';
 import type {
 	PptxAppProperties,
 	PptxComment,
-	PptxCommentMention,
 	PptxCoreProperties,
 	PptxCustomProperty,
+	PptxElement,
 	PptxHandoutMaster,
 	PptxModernCommentAuthor,
 	PptxNotesMaster,
@@ -30,11 +30,14 @@ import type {
 	PptxTheme,
 	PptxThemeOption,
 } from 'pptx-viewer-core';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import { injectFormatPane } from '../../composables/format-pane-context';
+import { useController } from '../../composables/useController';
 import type { CanvasSize } from '../../types';
 import CommentsPanel from '../CommentsPanel.vue';
+import FormatSections from './FormatSections.vue';
 import type { InspectorTab } from './inspector-cards';
 import InspectorElementsTab from './InspectorElementsTab.vue';
 import InspectorTabs from './InspectorTabs.vue';
@@ -83,10 +86,6 @@ const emit = defineEmits<{
 	'update-tag-collections': [next: PptxTagCollection[]];
 	'set-template-background': [path: string, backgroundColor: string];
 	'select-element': [id: string];
-	'comment-add': [payload: { text: string; mentions?: PptxCommentMention[] }];
-	'comment-remove': [id: string];
-	'comment-resolve': [id: string];
-	'comment-reply': [payload: { parentId: string; text: string; mentions?: PptxCommentMention[] }];
 	close: [];
 }>();
 
@@ -94,6 +93,18 @@ const { t } = useI18n();
 
 /** Active tab; Properties by default, matching React's initial inspector tab. */
 const activeTab = ref<InspectorTab>('properties');
+
+// A Format pane launch (Format Background, a ribbon launcher) shows the Properties tab.
+const NO_SELECTION: readonly PptxElement[] = [];
+const formatPane = useController(injectFormatPane());
+watch(
+	() => formatPane.value.request,
+	(request) => {
+		if (request) {
+			activeTab.value = 'properties';
+		}
+	},
+);
 </script>
 
 <template>
@@ -119,7 +130,7 @@ const activeTab = ref<InspectorTab>('properties');
 			/>
 
 			<!-- Properties (no selection): presentation-level cards + background -->
-			<template v-else-if="activeTab === 'properties'">
+			<FormatSections v-else-if="activeTab === 'properties'" :elements="NO_SELECTION">
 				<PresentationPropertiesPanel
 					:slide="slide"
 					:theme="theme"
@@ -157,7 +168,7 @@ const activeTab = ref<InspectorTab>('properties');
 					@update="(patch) => emit('slide-update', patch)"
 					@set-template-background="(path, color) => emit('set-template-background', path, color)"
 				/>
-			</template>
+			</FormatSections>
 
 			<!-- Comments -->
 			<CommentsPanel
@@ -166,10 +177,6 @@ const activeTab = ref<InspectorTab>('properties');
 				:comments="comments ?? []"
 				:author-name="authorName"
 				:modern-comment-authors="modernCommentAuthors ?? []"
-				@add="(payload) => emit('comment-add', payload)"
-				@remove="(id) => emit('comment-remove', id)"
-				@resolve="(id) => emit('comment-resolve', id)"
-				@reply="(payload) => emit('comment-reply', payload)"
 			/>
 		</div>
 	</aside>

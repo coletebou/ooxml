@@ -1,6 +1,8 @@
 import { initTheme } from './theme';
 import './style.css';
 import { createDocument } from 'docx-core';
+import { mergeDocxSnapshots } from 'ooxml-core/docx';
+import { createDemoOneDriveProvider, pickCloudFile } from 'ooxml-demo-onedrive';
 import { normalizeEditorLocale, type DocxEditorElement } from 'docx-web-component';
 import type { EditorHandle } from '../../../viewers/docx/packages/bindings/src/index';
 import { mountFramework } from './framework';
@@ -37,6 +39,13 @@ localeSelect.addEventListener('change', () => {
 		element.locale = locale;
 });
 
+/** The demo's OneDrive place in File > Open: sign in through the demo dialog or an app registration. */
+const oneDrive = createDemoOneDriveProvider({
+	mergers: {
+		docx: ({ base, local, remote }) => mergeDocxSnapshots(base.bytes, local, remote.bytes),
+	},
+});
+
 let editor: EditorHandle | undefined;
 async function showEditor(): Promise<EditorHandle> {
 	get('landing').hidden = true;
@@ -44,6 +53,7 @@ async function showEditor(): Promise<EditorHandle> {
 	editor ??= await mountFramework(get('editor'), {
 		documentModel: createDocument(),
 		locale,
+		fileProviders: [oneDrive],
 		onDocumentError(error) {
 			toast(error.message);
 		},
@@ -104,6 +114,24 @@ async function openModel(model: ReturnType<typeof createDocument>, fileName: str
 	handle.element.documentModel = model;
 	handle.element.fileName = fileName;
 }
+
+/** Start page: pick a file in the shared OneDrive browser, then hand it to the editor. */
+get('onedrive').addEventListener('click', (event) => {
+	event.stopPropagation();
+	void (async () => {
+		const file = await pickCloudFile(oneDrive, ['docx']);
+		if (!file) return;
+		try {
+			await (await showEditor()).openCloudFile(file);
+		} catch (error) {
+			get('workspace').hidden = true;
+			get('landing').hidden = false;
+			const message = get('landing-error');
+			message.textContent = error instanceof Error ? error.message : String(error);
+			message.hidden = false;
+		}
+	})();
+});
 
 const landingFile = get<HTMLInputElement>('landing-file');
 landingFile.addEventListener('change', () => {

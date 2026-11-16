@@ -54,6 +54,14 @@ export * from './html2canvas-clone';
 // (`buildNotesPdfBytes`) builders plus the segment-merge helper. The binding
 // converts canvases to JPEG bytes and wraps the result in a Blob/object-URL.
 export * from './pdf-slides';
+// Vector PDF (Save as PDF): slide selection and page size, the display-list painter and the
+// DOM entry every binding calls with its own capture stage (`exportSlidesVectorPdf`).
+export * from './pdf-vector-select';
+export * from './pdf-vector-export';
+export * from './pdf-export-run';
+export * from './pdf-export-diagnostics';
+export * from './pdf-export-notice';
+export { resolvePdfTextFont } from './pdf-vector-paint';
 export * from './pdf-notes-builder';
 export * from './pdf-page-size';
 // Pure print helpers: settings validation, slide-range / colour-filter
@@ -63,6 +71,9 @@ export * from './print-document';
 // DOM-touching print-window open/finish lifecycle (window.open-based paths
 // only; the popup-blocking fix every binding needs lives here once).
 export * from './print-window';
+// The print job plan every binding's Print dialog runs (slides, output path,
+// window timing, translated title) and the documents it assembles.
+export * from './print-job';
 // Pure WebM video planning: frame-segment timing, fps maths, MediaRecorder MIME
 // selection. The MediaRecorder/canvas capture driver stays in each binding.
 export * from './video-plan';

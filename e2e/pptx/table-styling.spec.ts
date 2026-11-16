@@ -54,6 +54,7 @@ import {
 	selectTableCell,
 } from './support/context-menu';
 import { resetTabSession } from './support/deck';
+import { nextPaint, selectRibbonTab, selectSlide } from './support/render-ready';
 import { chooseSelectValue } from './support/select-control';
 
 const fixturePath = resolve(
@@ -201,7 +202,8 @@ async function loadDeck(page: Page, deck: string | DeckPayload = fixturePath): P
 	await page.goto('/');
 	await page.locator('#file-input').setInputFiles(deck);
 	await page.locator('[aria-label="Go to slide 5"]').first().waitFor({ timeout: LOAD_TIMEOUT_MS });
-	await page.waitForTimeout(1200);
+	await page.waitForFunction(() => document.fonts.status === 'loaded');
+	await nextPaint(page);
 }
 
 /**
@@ -350,17 +352,12 @@ async function richAnchorWithEmptyRightDeck(): Promise<DeckPayload> {
 }
 
 async function gotoSlide(page: Page, slideNumber: number): Promise<void> {
-	await page.locator(`[aria-label="Go to slide ${slideNumber}"]`).first().click();
-	await page.waitForTimeout(800);
+	await selectSlide(page, slideNumber);
 }
 
 /** Switch the ribbon to a tab by its accessible name (all five expose this). */
 async function openRibbonTab(page: Page, name: string): Promise<void> {
-	await page
-		.getByRole('toolbar', { name: 'Presentation toolbar' })
-		.getByRole('tab', { name, exact: true })
-		.click();
-	await page.waitForTimeout(300);
+	await selectRibbonTab(page, name);
 }
 
 /** Insert a table from the Insert tab; every binding labels the control "Table". */
@@ -535,6 +532,8 @@ async function mergeFromInspector(page: Page, direction: 'right' | 'down'): Prom
 }
 
 test.describe('table styling', () => {
+	// Every case owns its page, document and generated buffers.
+	test.describe.configure({ mode: 'parallel' });
 	test.beforeEach(async ({ page }) => {
 		await loadDeck(page);
 	});
@@ -688,11 +687,11 @@ test.describe('table styling', () => {
 		const input = page
 			.locator('[aria-roledescription="slide"]')
 			.first()
-			.locator('td input')
+			.locator('td [data-table-cell-editor]')
 			.first();
 		await expect(input).toBeVisible();
 		await input.fill('Edited cell');
-		await input.press('Enter');
+		await input.press('Escape');
 		await expect(canvasCell(page, 'Edited cell')).toBeVisible();
 
 		const edited = await measureTable(page);
@@ -719,11 +718,11 @@ test.describe('table styling', () => {
 		const input = page
 			.locator('[aria-roledescription="slide"]')
 			.first()
-			.locator('td input')
+			.locator('td [data-table-cell-editor]')
 			.first();
 		await expect(input).toBeVisible();
 		await input.fill('Fractional cell');
-		await input.press('Enter');
+		await input.press('Escape');
 		await expect(canvasCell(page, 'Fractional cell')).toBeVisible();
 
 		const edited = await measureTable(page);
@@ -756,9 +755,9 @@ test.describe('table styling', () => {
 		const input = page
 			.locator('[aria-roledescription="slide"]')
 			.first()
-			.locator('td input')
+			.locator('td [data-table-cell-editor]')
 			.first();
-		await expect(input).toHaveValue('Revenue grew 42%');
+		await expect(input).toHaveText('Revenue grew 42%');
 		await input.press('Escape');
 
 		const noOpDownload = await savePptxViaBackstage(page);
@@ -783,11 +782,11 @@ test.describe('table styling', () => {
 		const reloadedInput = page
 			.locator('[aria-roledescription="slide"]')
 			.first()
-			.locator('td input')
+			.locator('td [data-table-cell-editor]')
 			.first();
-		await expect(reloadedInput).toHaveValue('Revenue grew 42%');
+		await expect(reloadedInput).toHaveText('Revenue grew 42%');
 		await reloadedInput.fill('Edited attributed cell');
-		await reloadedInput.press('Enter');
+		await reloadedInput.press('Escape');
 		await expect(canvasCell(page, 'Edited attributed cell')).toBeVisible();
 		const undo = page.getByRole('button', { name: 'Undo' });
 		const redo = page.getByRole('button', { name: 'Redo' });

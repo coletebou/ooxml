@@ -94,17 +94,17 @@ También hay una pestaña **Dibujar** con herramientas a mano alzada: **Seleccio
 
 La pestaña **Propiedades** del inspector cambia según la selección:
 
-| Cuando selecciona...    | Puede cambiar...                                                                                                        |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Nada (la diapositiva)   | Información de la presentación, tema, tamaño de diapositiva, transición de diapositiva y fondo (color o imagen).        |
-| Una forma o un conector | Posición, tamaño, rotación, relleno (sólido, degradado, trama, imagen) y trazo.                                         |
-| Un elemento de texto    | Fuente, tamaño, color, alineación y espaciado.                                                                          |
-| Una imagen              | Recorte y ajustes de imagen.                                                                                            |
-| Una tabla               | Estilos de tabla predefinidos, anchos de columna, alturas de fila y formato de celda.                                   |
-| Un gráfico              | La cuadrícula de datos de series, tipo de gráfico, ejes, etiquetas de datos, marcadores, líneas de tendencia y colores. |
-| SmartArt                | Texto de nodos y diseño.                                                                                                |
-| Medios                  | Ajustes de reproducción.                                                                                                |
-| Cualquier elemento      | **Animaciones** de entrada, énfasis y salida con ajustes de dirección, temporización y desencadenador.                  |
+| Cuando selecciona...    | Puede cambiar...                                                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Nada (la diapositiva)   | Información de la presentación, tema, tamaño de diapositiva, transición de diapositiva y fondo (color o imagen).  |
+| Una forma o un conector | Posición, tamaño, rotación, relleno (sólido, degradado, trama, imagen) y trazo.                                   |
+| Un elemento de texto    | Fuente, tamaño, color, alineación y espaciado.                                                                    |
+| Una imagen              | Recorte y ajustes de imagen.                                                                                      |
+| Una tabla               | Estilos de tabla predefinidos, anchos de columna, alturas de fila y formato de celda.                             |
+| Un gráfico              | La hoja de datos de series, tipo de gráfico, ejes, etiquetas de datos, marcadores, líneas de tendencia y colores. |
+| SmartArt                | Texto de nodos y diseño.                                                                                          |
+| Medios                  | Ajustes de reproducción.                                                                                          |
+| Cualquier elemento      | **Animaciones** de entrada, énfasis y salida con ajustes de dirección, temporización y desencadenador.            |
 
 ![Inspector panel showing element properties](/user-guide/editing-inspector-panel.jpg)
 
@@ -113,11 +113,12 @@ La pestaña **Propiedades** del inspector cambia según la selección:
 Los gráficos se pueden editar directamente sin salir de la diapositiva:
 
 - **Pase el cursor** sobre una marca para ver su valor en una información sobre herramientas.
-- **Haga clic** en una barra, punto o sector para seleccionarlo; la celda correspondiente se resalta en la cuadrícula de datos del inspector.
+- **Haga clic** en una barra, punto o sector para seleccionarlo; la celda correspondiente se resalta en la hoja de datos del inspector.
 - **Arrastre** una barra o punto hacia arriba o abajo para cambiar su valor (gráficos de barras, líneas, áreas, dispersión y burbujas). Una insignia muestra el valor mientras arrastra; suelte para confirmar o pulse **Escape** para cancelar.
 - **Haga doble clic en el título del gráfico** para renombrarlo en el sitio.
+- La **hoja de datos** del gráfico, en el inspector, enumera sus categorías y series. Un valor se confirma al pulsar **Intro** o **Tab** o al pasar a otra celda; **Escape** restaura el valor anterior de la celda. Un valor que no es un número se rechaza.
 
-Las marcas de gráficos circulares, de anillo, radiales y apiladas/apiladas al 100 % se seleccionan con un clic; edite sus valores en la cuadrícula de datos. Cada cambio es un único paso de deshacer. Todo esto funciona igual en todos los enlaces (React, Vue, Angular, Svelte y vanilla).
+Las marcas de gráficos circulares, de anillo, radiales y apiladas/apiladas al 100 % se seleccionan con un clic; edite sus valores en la hoja de datos. Cada cambio es un único paso de deshacer. Todo esto funciona igual en todos los enlaces (React, Vue, Angular, Svelte y vanilla).
 
 ### Editar tablas
 
@@ -214,7 +215,7 @@ En ese caso, use **Insertar > Imagen** para elegir un archivo de imagen externo.
 
 ## Autoguardado y recuperación
 
-- El interruptor de **Autoguardado** de la barra de título activa o desactiva las instantáneas periódicas. Cuando está activado, la aplicación guarda una copia de recuperación de su trabajo en el almacenamiento local del navegador cada un par de minutos mientras haya cambios sin guardar.
+- El interruptor de **Autoguardado** de la barra de título activa o desactiva las instantáneas periódicas. Cuando está activado, la aplicación guarda una copia de recuperación de su trabajo en el almacenamiento IndexedDB del navegador. El primer cambio sin guardar inicia un temporizador, y la copia se escribe cuando termina (cada un par de minutos por defecto). Mientras no cambie nada, no se escribe nada.
 - La barra de estado muestra el estado actual: **Cambios sin guardar**, **Guardando...**, **Guardado [hora]** o **Todo guardado**.
 - Si cierra la pestaña con cambios sin guardar y vuelve, un aviso titulado **Cambios sin guardar recuperados** ofrece **Restaurar** y **Descartar**.
 - El **Historial de versiones** (en el menú de desbordamiento **"..."**) lista la instantánea de recuperación almacenada con su hora y tamaño, y permite restaurarla o eliminarla.

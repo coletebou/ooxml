@@ -1,3 +1,5 @@
+import { createSaveProgressController } from 'ooxml-ui/pptx';
+import type { DocumentSaveMeta } from 'ooxml-ui/pptx';
 import { registerPptxWebControls } from 'ooxml-ui/pptx';
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -40,12 +42,50 @@ function open(props: Record<string, unknown> = {}) {
 	return { host, root, button, handlers };
 }
 
+function openLive() {
+	const props = $state<Record<string, unknown>>({
+		current: 0,
+		total: 7,
+		zoomPercent: 100,
+		isDirty: false,
+		onzoomin: vi.fn(),
+		onzoomout: vi.fn(),
+		onzoomfit: vi.fn(),
+		onfullscreen: vi.fn(),
+	});
+	const target = document.createElement('div');
+	document.body.append(target);
+	const instance = mount(StatusBar, { target, props: props as never });
+	flushSync();
+	cleanup = () => {
+		unmount(instance);
+		target.remove();
+	};
+	const root = target.querySelector('pptx-ui-status-bar')!.shadowRoot!;
+	return {
+		root,
+		update(saveProgress: unknown) {
+			props.saveProgress = saveProgress;
+			flushSync();
+		},
+	};
+}
+
 describe('statusBar adapter', () => {
 	it('renders the counter, zoom percent and save state', () => {
 		const { root, button } = open({ current: 2, zoomPercent: 125, isDirty: true });
 		expect(root.querySelector('[data-item="counter"]')!.textContent).toBe('Slide 3 of 7');
 		expect(button('Zoom to fit').textContent).toBe('125%');
 		expect(root.querySelector('[data-item="save"]')!.textContent).toBe('Unsaved changes');
+	});
+
+	it('shows when autosave last saved, and falls back to the dirty flag without a time', () => {
+		const lastSavedAt = Date.now() - 3 * 60_000;
+		const saved = open({ autosaveStatus: 'saved', lastSavedAt, isDirty: true });
+		expect(saved.root.querySelector('[data-item="save"]')!.textContent).toBe('Saved 3 min ago');
+		cleanup?.();
+		const unknown = open({ autosaveStatus: 'saved', isDirty: true });
+		expect(unknown.root.querySelector('[data-item="save"]')!.textContent).toBe('Unsaved changes');
 	});
 
 	it('routes every control to its callback', () => {
@@ -91,5 +131,26 @@ describe('statusBar adapter', () => {
 			})),
 		});
 		expect(host.querySelector('[slot="collaboration"] #collab')).not.toBeNull();
+	});
+});
+
+describe('statusBar save progress', () => {
+	it('shows each step of a save to the host storage, then All saved again', async () => {
+		const controller = createSaveProgressController();
+		const { root, update } = openLive();
+		controller.subscribe(() => update(controller.getSnapshot()));
+		const save = () => root.querySelector('[data-item="save"]')!.textContent;
+		const seen: (string | null)[] = [];
+		const storage = controller.wrap({
+			async save(_bytes: Uint8Array, meta: DocumentSaveMeta) {
+				meta.onProgress?.({ phase: 'uploading', loaded: 45, total: 100 });
+				seen.push(save());
+				meta.onProgress?.({ phase: 'merging' });
+				seen.push(save());
+			},
+		});
+		await storage.save(new Uint8Array(), { fileName: 'a.pptx', mimeType: 'x', reason: 'save' });
+		expect(seen).toStrictEqual(['Saving… 45%', 'Combining edits…']);
+		expect(save()).toBe('All saved');
 	});
 });

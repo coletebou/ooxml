@@ -34,8 +34,8 @@ export function createStateSync(deps: StateSyncDeps): StoreListener<ViewerState>
 	const { renderer, callbacks } = deps;
 	return (state, previous) => {
 		const chrome = deps.getChrome();
-		if (state.loading !== previous.loading) {
-			chrome.setLoading(state.loading);
+		if (state.loading !== previous.loading || state.fontProgress !== previous.fontProgress) {
+			chrome.setLoading(state.loading, state.fontProgress);
 		}
 		if (state.error !== previous.error) {
 			chrome.setError(state.error);
@@ -97,6 +97,12 @@ export function createStateSync(deps: StateSyncDeps): StoreListener<ViewerState>
 			state.headerFooter !== previous.headerFooter ||
 			state.customProperties !== previous.customProperties ||
 			state.tableStyleMap !== previous.tableStyleMap ||
+			// The Find bar's marks are painted into the text.
+			state.findMatches !== previous.findMatches ||
+			state.findMatchIndex !== previous.findMatchIndex ||
+			// Glyph outlines landed: the canvas's WordArt envelope glyphs warp too,
+			// not only the thumbnails'. Not mid-gesture, as for the thumbnails.
+			(state.outlineFontsTick !== previous.outlineFontsTick && !state.interactionActive) ||
 			// A chart arms its on-canvas mark hit-testing only while selected (B3),
 			// so a chart entering/leaving the selection re-renders the stage to
 			// re-arm it. Only a chart: rebuilding on every selection change would
@@ -143,7 +149,7 @@ export function createStateSync(deps: StateSyncDeps): StoreListener<ViewerState>
 			);
 		}
 		if (state.zoom !== previous.zoom) {
-			callbacks.onZoomChange?.(renderer.effectiveScale());
+			callbacks.onZoomChange?.(renderer.editingScale());
 		}
 		if (state.selectedElementId !== previous.selectedElementId) {
 			callbacks.onSelectionChange?.(state.selectedElementId);

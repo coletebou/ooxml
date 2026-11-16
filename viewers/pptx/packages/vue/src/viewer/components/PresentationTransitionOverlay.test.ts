@@ -114,6 +114,47 @@ function discAndWording(): { from: PptxSlide; to: PptxSlide } {
 }
 
 /**
+ * Issue #141's slides 4 to 5: a departing picture keeps the unchanged
+ * backdrop's ghost painted, a full-slide picture fades in above the backdrop,
+ * and the title travels ABOVE that picture on the incoming slide.
+ */
+function veiledTitle(): { from: PptxSlide; to: PptxSlide } {
+	const picture = (id: string, name: string, imagePath: string): unknown => ({
+		id,
+		name,
+		type: 'picture',
+		x: 0,
+		y: 0,
+		width: 960,
+		height: 540,
+		imagePath,
+		imageData: `data:${imagePath}`,
+	});
+	const title = (id: string, x: number): unknown => ({
+		id,
+		name: 'Title',
+		type: 'text',
+		x,
+		y: 160,
+		width: 400,
+		height: 100,
+		text: 'Our Services',
+	});
+	return {
+		from: makeSlide('out', [
+			picture('out-gone', 'Leaving', 'ppt/media/leaving.png'),
+			picture('out-backdrop', 'Backdrop', 'ppt/media/backdrop.png'),
+			title('out-title', 520),
+		]),
+		to: makeSlide('in', [
+			picture('in-backdrop', 'Backdrop', 'ppt/media/backdrop.png'),
+			picture('in-veil', 'Veil', 'ppt/media/veil.png'),
+			title('in-title', 80),
+		]),
+	};
+}
+
+/**
  * The same panel with its wording REPLACED rather than arriving: a matched pair
  * the overlay paints both halves of, which is what has to be blended additively
  * (issue #161). `shapeId` is the identity that pairs two text boxes saying
@@ -146,6 +187,191 @@ function discAndReplacedWording(): { from: PptxSlide; to: PptxSlide } {
 	};
 }
 
+/** A full-width picture band, as issue #141's slides 6 and 7 frame their columns. */
+function band(id: string, name: string, y: number, height: number): unknown {
+	return {
+		id,
+		name,
+		type: 'picture',
+		x: 0,
+		y,
+		width: 1280,
+		height,
+		imagePath: `ppt/media/${name}.png`,
+		imageData: `data:image/png;base64,${name}`,
+	};
+}
+
+/** One of the "L" columns: the same runs, another font, another place. */
+function column(id: string, y: number, fontFamily: string): unknown {
+	return {
+		id,
+		name: 'Object 14',
+		type: 'text',
+		x: 284,
+		y,
+		width: 51,
+		height: 1066,
+		text: 'L\nL\nL',
+		textStyle: { color: '#FFFFFF', fontFamily },
+		textSegments: [{ text: 'L\nL\nL', style: { fontFamily, color: '#FFFFFF' } }],
+	};
+}
+
+/**
+ * Issue #141's slides 6 -> 7, synthetic: the column changes font (so it
+ * dissolves as a crossfade group) while it slides under the top band the
+ * incoming slide stacks ABOVE it; the left strip moves from above the column
+ * to below it.
+ */
+function columnUnderBand(): { from: PptxSlide; to: PptxSlide } {
+	return {
+		from: makeSlide('6', [
+			band('bg6', 'backdrop', 0, 720),
+			column('col6', -916, 'Calibri Light'),
+			band('strip6', 'strip', -1, 720),
+			band('band6', 'band', -1, 196),
+		]),
+		to: makeSlide('7', [
+			band('bg7', 'backdrop', 0, 720),
+			band('strip7', 'strip', -3, 720),
+			column('col7', -158, 'Calibri'),
+			band('band7', 'band', -2, 196),
+		]),
+	};
+}
+
+/**
+ * Issue #141's slides 17 -> 18, synthetic: a three-paragraph text box parked
+ * off the left edge whose second paragraph changes from 14 pt to the inherited
+ * size while it glides to x = 656 pt. A panel only on the source slide keeps
+ * the box's ghost painted, so the ghost path is the one exercised.
+ */
+function parkedParagraph(id: string, x: number, secondSize?: number): unknown {
+	return {
+		id,
+		type: 'text',
+		name: 'TextBox 9',
+		x,
+		y: 120,
+		width: 300,
+		height: 240,
+		text: 'Parked opener\nSecond paragraph\nClosing line',
+		textSegments: [
+			{ text: 'Parked opener', style: { fontFamily: 'Arial', fontSize: 18 } },
+			{ text: '\n' },
+			{
+				text: 'Second paragraph',
+				style: {
+					fontFamily: 'Arial',
+					...(secondSize === undefined ? {} : { fontSize: secondSize }),
+				},
+			},
+			{ text: '\n' },
+			{ text: 'Closing line', style: { fontFamily: 'Arial', fontSize: 18 } },
+		],
+	};
+}
+
+function panel(id: string): unknown {
+	return {
+		id,
+		type: 'shape',
+		name: 'Panel',
+		x: -600,
+		y: 0,
+		width: 1200,
+		height: 720,
+		shapeStyle: { fillMode: 'solid', fillColor: '#123456' },
+	};
+}
+
+/** The opacity a `@keyframes` block paints at `progress` (0..1), linearly between stops. */
+function keyframesOpacityAt(css: string, name: string, progress: number): number {
+	const start = css.indexOf(`@keyframes ${name} {`);
+	expect(start, `keyframes for ${name}`).toBeGreaterThanOrEqual(0);
+	const block = css.slice(start, css.indexOf('\n}', start));
+	const stops: { at: number; opacity: number }[] = [];
+	for (const match of block.matchAll(/([\w.%,\s]+)\{([^}]*)\}/gu)) {
+		const opacity = /opacity:\s*([\d.]+)/u.exec(match[2]!)?.[1];
+		if (opacity === undefined) {
+			continue;
+		}
+		for (const selector of match[1]!.split(',')) {
+			const key = selector.trim();
+			const at = key === 'from' ? 0 : key === 'to' ? 1 : Number.parseFloat(key) / 100;
+			if (!Number.isNaN(at)) {
+				stops.push({ at, opacity: Number(opacity) });
+			}
+		}
+	}
+	stops.sort((a, b) => a.at - b.at);
+	if (stops.length === 0) {
+		return 1;
+	}
+	const after = stops.findIndex((stop) => stop.at >= progress);
+	if (after <= 0) {
+		return stops[after === -1 ? stops.length - 1 : 0]!.opacity;
+	}
+	const a = stops[after - 1]!;
+	const b = stops[after]!;
+	return a.opacity + ((b.opacity - a.opacity) * (progress - a.at)) / (b.at - a.at || 1);
+}
+
+/** The animation names applied to `node`: inline on it or an ancestor, or by a scoped rule. */
+function animationNamesOf(node: Element, css: string): string[] {
+	const names: string[] = [];
+	for (let at: Element | null = node; at; at = at.parentElement) {
+		const inline = /animation:\s*([\w-]+)/u.exec(at.getAttribute('style') ?? '')?.[1];
+		if (inline && inline !== 'none') {
+			names.push(inline);
+		}
+	}
+	const id = node.getAttribute('data-element-id');
+	for (const scope of [
+		'data-pptx-morph-incoming',
+		'data-pptx-morph-outgoing',
+		'data-pptx-morph-lifted',
+	]) {
+		if (!node.closest(`[${scope}]`)) {
+			continue;
+		}
+		const rule = new RegExp(
+			`\\[${scope}\\] \\[data-element-id="${id}"\\] \\{ animation: ([\\w-]+)`,
+			'u',
+		).exec(css)?.[1];
+		if (rule) {
+			names.push(rule);
+		}
+	}
+	return names;
+}
+
+/**
+ * Every copy of `text` the overlay paints, across the stage (incoming) layer
+ * and every morph layer, and those of them visible at `progress`: a copy held
+ * at opacity 0 by the plan's keyframes does not count as visible.
+ */
+function copiesOf(
+	root: Element,
+	text: string,
+	progress: number,
+): { painted: string[]; visible: string[] } {
+	const css = [...root.querySelectorAll('style')].map((node) => node.textContent).join('\n');
+	const painted = [...root.querySelectorAll('[data-element-id]')].filter(
+		(node) =>
+			node.textContent?.includes(text) &&
+			![...node.querySelectorAll('[data-element-id]')].some((inner) =>
+				inner.textContent?.includes(text),
+			),
+	);
+	const visible = painted.filter((node) =>
+		animationNamesOf(node, css).every((name) => keyframesOpacityAt(css, name, progress) > 0),
+	);
+	const idOf = (node: Element): string => node.getAttribute('data-element-id')!;
+	return { painted: painted.map(idOf), visible: visible.map(idOf) };
+}
+
 function mountOverlay(transition: PptxSlideTransition | undefined, scale = 1) {
 	const morph = transition?.type === 'morph';
 	return mount(PresentationTransitionOverlay, {
@@ -160,12 +386,53 @@ function mountOverlay(transition: PptxSlideTransition | undefined, scale = 1) {
 	});
 }
 
+/**
+ * Mounts that `afterEach` unmounts, so a failing assertion never leaves an
+ * overlay (and its document-level listeners) behind for the next test.
+ */
+const tracked: { unmount: () => void }[] = [];
+
+/** Mount the overlay between two slides as a morph, tracked for cleanup. */
+function mountMorph(from: PptxSlide, to: PptxSlide, durationMs: number) {
+	const wrapper = mount(PresentationTransitionOverlay, {
+		props: {
+			outgoingSlide: from,
+			incomingSlide: to,
+			canvasSize,
+			mediaDataUrls: new Map<string, string>(),
+			scale: 1,
+			transition: { type: 'morph', durationMs } as PptxSlideTransition,
+		},
+	});
+	tracked.push(wrapper);
+	return wrapper;
+}
+
+/**
+ * The selectors of every rendered rule that animates a picture's `<img>`,
+ * parsed out of the overlay's own stylesheets.
+ */
+function imgAnimationSelectors(root: Element): string[] {
+	const css = [...root.querySelectorAll('style')].map((node) => node.textContent ?? '').join('\n');
+	const selectors: string[] = [];
+	for (const [, selector = '', body = ''] of css.matchAll(/([^{}@]+)\{([^{}]*)\}/gu)) {
+		const trimmed = selector.trim();
+		if (/\bimg$/u.test(trimmed) && /\banimation\s*:/u.test(body)) {
+			selectors.push(trimmed);
+		}
+	}
+	return selectors;
+}
+
 describe('presentationTransitionOverlay', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
+		for (const wrapper of tracked.splice(0)) {
+			wrapper.unmount();
+		}
 		vi.useRealTimers();
 	});
 
@@ -242,12 +509,13 @@ describe('presentationTransitionOverlay', () => {
 
 	it('paints no slide background on the morph departing layer', () => {
 		const wrapper = mountOverlay({ type: 'morph', durationMs: 800 });
-		const [outgoing, incoming] = wrapper.findAll('.pptx-vue-stage');
+		const outgoing = wrapper.find('[data-pptx-morph-outgoing] .pptx-vue-stage');
+		const incoming = wrapper.find('[data-pptx-morph-incoming] .pptx-vue-stage');
 		// The departing shapes float over the incoming slide, so the layer has to
 		// be see-through. `getSlideBackgroundStyle` always resolves to an OPAQUE
 		// paint (it falls back to #ffffff), so inheriting it hid the whole morph
 		// behind a flat slab for the entire transition.
-		expect(wrapper.findAll('[data-pptx-morph-outgoing]')).not.toHaveLength(0);
+		expect(outgoing.exists()).toBeTruthy();
 		expect(outgoing.attributes('style')).toMatch(/background:\s*none transparent|transparent/u);
 		expect(outgoing.attributes('style')).not.toContain('#ffffff');
 		// The incoming layer is a real surface and keeps its background.
@@ -339,6 +607,34 @@ describe('presentationTransitionOverlay', () => {
 		wrapper.unmount();
 	});
 
+	// Regression (issue #141): every lifted arrival used to be painted above
+	// every ghost, so a full-slide picture fading in veiled the title travelling
+	// ABOVE it on the incoming slide, which then snapped bright at the end.
+	it('stacks a travelling title ghost above a lifted picture arriving under it', () => {
+		const { from, to } = veiledTitle();
+		const wrapper = mount(PresentationTransitionOverlay, {
+			props: {
+				outgoingSlide: from,
+				incomingSlide: to,
+				canvasSize,
+				mediaDataUrls: new Map<string, string>(),
+				scale: 1,
+				transition: { type: 'morph', durationMs: 800 } as PptxSlideTransition,
+			},
+		});
+
+		const layers = wrapper
+			.findAll('[data-pptx-morph-outgoing], [data-pptx-morph-lifted]')
+			.map((layer) => ({
+				z: Number(/z-index:\s*(\d+)/u.exec(layer.attributes('style') ?? '')?.[1]),
+				ids: layer.findAll('[data-element-id]').map((node) => node.attributes('data-element-id')),
+			}));
+		const zOf = (id: string): number => layers.find((layer) => layer.ids.includes(id))!.z;
+		expect(zOf('out-backdrop')).toBeLessThan(zOf('in-veil'));
+		expect(zOf('in-veil')).toBeLessThan(zOf('out-title'));
+		wrapper.unmount();
+	});
+
 	// Regression (issue #161): two fades stacked as ordinary layers composite
 	// source-over, leaving the ink the halves SHARE at 0.75 of full strength
 	// halfway through - measured 34.6/255 too dark on the wheel deck, which
@@ -361,8 +657,8 @@ describe('presentationTransitionOverlay', () => {
 		const group = wrapper.find('[data-pptx-morph-crossfade="in-wording"]');
 		expect(group.exists(), 'the pair must be rendered as its own group').toBeTruthy();
 		expect(group.attributes('style')).toContain('isolation: isolate');
-		// Above the ghost layer (2) and the lifted layer (3).
-		expect(group.attributes('style')).toContain('z-index: 4');
+		// Above the one ghost layer (2).
+		expect(group.attributes('style')).toContain('z-index: 3');
 		const halves = group.findAll('[data-pptx-transition-layer]');
 		expect(halves).toHaveLength(2);
 		for (const half of halves) {
@@ -377,6 +673,110 @@ describe('presentationTransitionOverlay', () => {
 		// Painted exactly once: not left in the flat layers as well.
 		expect(wrapper.html().match(/Open Integration/gu)).toHaveLength(1);
 		wrapper.unmount();
+	});
+
+	// Regression (issue #141, slides 6 -> 7): crossfade groups used to be
+	// painted above every overlay layer, so the dissolving "L" column showed
+	// across the top band the incoming slide stacks above it, then vanished
+	// from it in one frame when the overlay came down.
+	it('stacks a dissolving column under the band above it and over the strip below it', () => {
+		const { from, to } = columnUnderBand();
+		const wrapper = mountMorph(from, to, 2000);
+
+		const zOfStyle = (style: string | undefined): number =>
+			Number(/z-index:\s*(\d+)/u.exec(style ?? '')?.[1]);
+		const group = wrapper.find('[data-pptx-morph-crossfade="col7"]');
+		expect(group.exists(), 'the column must dissolve as a group').toBeTruthy();
+		const layerOf = (id: string): number => {
+			const layer = wrapper
+				.findAll('[data-pptx-morph-outgoing], [data-pptx-morph-lifted]')
+				.find(
+					(node) =>
+						node.find(`[data-element-id="${id}"]`).exists() &&
+						!node.element.closest('[data-pptx-morph-crossfade]'),
+				);
+			expect(layer, `${id} must be painted in a layer`).toBeDefined();
+			return zOfStyle(layer!.attributes('style'));
+		};
+		const groupZ = zOfStyle(group.attributes('style'));
+		expect(layerOf('band6')).toBeGreaterThan(groupZ);
+		expect(layerOf('strip6')).toBeLessThan(groupZ);
+	});
+
+	// Regression (issue #141, slides 17 -> 18 and back): a paragraph parked off
+	// the left edge whose run size changes used to cross-dissolve two layouts
+	// of the same text as it glided across the slide, so the words showed twice.
+	it.each([
+		[
+			'forward',
+			makeSlide('17', [panel('p17'), parkedParagraph('t17', -400, 14)]),
+			makeSlide('18', [parkedParagraph('t18', 875)]),
+		],
+		[
+			'backward',
+			makeSlide('18', [panel('p18'), parkedParagraph('t18', 875)]),
+			makeSlide('17', [parkedParagraph('t17', -400, 14)]),
+		],
+	])('paints an off-stage paragraph whose run size changes once (%s)', (_, from, to) => {
+		const wrapper = mountMorph(from, to, 1000);
+
+		const copies = copiesOf(wrapper.element, 'Second paragraph', 0.5);
+		// The ghost travels and the stage copy is held invisible behind it.
+		expect(copies.painted).toHaveLength(2);
+		expect(copies.visible).toHaveLength(1);
+	});
+
+	// Regression (issue #141, slides 8 -> 9): a picture faded in through its
+	// transparency tweens the opacity of its `<img>`, so the rule only plays if
+	// the picture really is painted as an `<img>` inside its element container.
+	it('paints a fading picture as an <img> its alpha keyframes reach', () => {
+		const picture = (id: string, alphaModFix: number): unknown => ({
+			id,
+			name: 'Faded',
+			type: 'picture',
+			x: 0,
+			y: 0,
+			width: 960,
+			height: 540,
+			imagePath: 'ppt/media/faded.png',
+			imageData: 'data:image/png;base64,faded',
+			imageEffects: { alphaModFix },
+		});
+		// A band with no counterpart departs beneath the picture, so the
+		// picture's own ghost is painted too and has to fade with it.
+		const departingBand = {
+			id: 's8-band',
+			name: 'Band',
+			type: 'picture',
+			x: 0,
+			y: 340,
+			width: 960,
+			height: 200,
+			imagePath: 'ppt/media/band.png',
+			imageData: 'data:image/png;base64,band',
+		};
+		const wrapper = mountMorph(
+			makeSlide('8', [departingBand, picture('s8-faded', 0)]),
+			makeSlide('9', [picture('s9-faded', 100)]),
+			2000,
+		);
+
+		const selectors = imgAnimationSelectors(wrapper.element);
+		const reaches = (scope: string, id: string): void => {
+			const selector = selectors.find(
+				(candidate) =>
+					candidate.startsWith(`[${scope}]`) && candidate.includes(`[data-element-id="${id}"]`),
+			);
+			expect(selector, `an alpha rule for ${id} in ${scope}`).toBeDefined();
+			const images = wrapper.element.querySelectorAll(selector!);
+			expect(images.length, `${selector} must reach the <img> it animates`).toBeGreaterThan(0);
+			for (const image of images) {
+				expect(image.tagName).toBe('IMG');
+			}
+		};
+		// The arriving picture on the incoming layer, and the departing one's ghost.
+		reaches('data-pptx-morph-incoming', 's9-faded');
+		reaches('data-pptx-morph-outgoing', 's8-faded');
 	});
 
 	// Mirrors React's `PresentationTransitionOverlay.test.tsx` coverage for the

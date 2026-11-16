@@ -1,9 +1,9 @@
 import {
-	collectReferencedFontFamilies,
-	fetchGoogleWebfontOutlineBytes,
-	selectGoogleWebfontFamilies,
-	selectTrustedEmbeddedFonts,
+	createEmbeddedFontsSheet,
+	loadDeckWebfontOutlines,
+	resolveGoogleFontsCss2Base,
 } from 'ooxml-ui/pptx';
+import type { GoogleFontsOption } from 'ooxml-ui/pptx';
 import { untrack } from 'svelte';
 
 import type { Translator } from '../../i18n/translator';
@@ -25,6 +25,8 @@ export interface ViewerEffectsDeps {
 	/** Commit already-accepted inline input before disabling local editing. */
 	commitPendingText?(): void;
 	getInitialSlide(): number;
+	/** Host `googleFonts` policy: unset loads from Google, `false` disables, `{ baseUrl }` mirrors. */
+	getGoogleFonts?(): GoogleFontsOption | undefined;
 	getTranslator(): Translator;
 	loader: PresentationLoader;
 	viewer: ViewerState;
@@ -84,7 +86,10 @@ export function useViewerEffects(deps: ViewerEffectsDeps): void {
 			lastSyncedSlide = index;
 			untrack(() => {
 				deps.controller.closeInline();
-				deps.editor.select(null);
+				// A selection made for this slide in the same step (Find's) stays.
+				if (!deps.viewer.takeSelectionSlide(index)) {
+					deps.editor.select(null);
+				}
 			});
 		}
 	});
@@ -176,9 +181,19 @@ export function useViewerEffects(deps: ViewerEffectsDeps): void {
 	// nor embedded (Microsoft 365 "cloud fonts" have no browser equivalent);
 	// the probe is session-cached, so only unseen families hit the network.
 	if (typeof document !== 'undefined') {
+		// The deck's embedded fonts as `@font-face` rules, like the other bindings.
+		$effect(() => {
+			const sheet = createEmbeddedFontsSheet(document, 'pptx-svelte-embedded-fonts');
+			sheet.set(deps.loader.embeddedFonts);
+			return () => sheet.dispose();
+		});
 		$effect(() => {
 			let cancelled = false;
-			void resolveWebfontHref(deps.loader.slides, deps.loader.embeddedFonts).then((href) => {
+			void resolveWebfontHref(
+				deps.loader.slides,
+				deps.loader.embeddedFonts,
+				deps.getGoogleFonts?.(),
+			).then((href) => {
 				if (cancelled) {
 					return null;
 				}
@@ -202,46 +217,14 @@ export function useViewerEffects(deps: ViewerEffectsDeps): void {
 		// (which reads it) recomputes once bytes land.
 		$effect(() => {
 			let cancelled = false;
-			const slides = deps.loader.slides;
-			const embeddedFonts = deps.loader.embeddedFonts;
-			const referenced = collectReferencedFontFamilies(slides);
-			const candidates = selectGoogleWebfontFamilies(
-				referenced,
-				selectTrustedEmbeddedFonts(embeddedFonts).map((font) => font.name),
-			);
-			if (candidates.length === 0) {
-				return;
-			}
-			void resolveWebfontHref(slides, embeddedFonts).then(async (href) => {
-				if (cancelled || !href) {
-					return;
-				}
-				const variants: Array<{ bold: boolean; italic: boolean }> = [
-					{ bold: false, italic: false },
-					{ bold: true, italic: false },
-				];
-				let registeredAny = false;
-				for (const family of candidates) {
-					for (const variant of variants) {
-						if (cancelled) {
-							return;
-						}
-						const bytes = await fetchGoogleWebfontOutlineBytes(
-							href,
-							family,
-							variant.bold,
-							variant.italic,
-							fetch,
-						);
-						if (
-							bytes &&
-							glyphOutlineFontCache.registerFontBytes(family, variant.bold, variant.italic, bytes)
-						) {
-							registeredAny = true;
-						}
-					}
-				}
-				if (registeredAny && !cancelled) {
+			void loadDeckWebfontOutlines({
+				slides: deps.loader.slides,
+				embeddedFonts: deps.loader.embeddedFonts,
+				googleFontsBase: resolveGoogleFontsCss2Base(deps.getGoogleFonts?.()),
+				cache: glyphOutlineFontCache,
+				isCancelled: () => cancelled,
+			}).then((registered) => {
+				if (registered && !cancelled) {
 					glyphOutlineFontsTick.value += 1;
 				}
 				return undefined;

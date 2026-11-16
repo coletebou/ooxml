@@ -1,6 +1,10 @@
 /** Pure context-menu model: which items appear, and which are disabled, for a given editor state. */
 import type { EditorView } from 'prosemirror-view';
+import { selectedChart } from 'ooxml-core/docx/ui';
+import type { DrawingWrap } from 'ooxml-core/docx';
 import { linkAtSelection } from './link-commands';
+import { pictureWrapOf, selectedPicturePos } from './picture-format-commands';
+import { noteReferenceAtSelection, type NoteKind } from './note-commands';
 import type { LocalizationKey } from './localization';
 import type { RibbonAction } from './ribbon-action';
 import { schema } from './schema';
@@ -20,6 +24,10 @@ export interface MenuItem {
 	reason?: LocalizationKey;
 	/** Starts a new group; rendered as a separator. */
 	separatorBefore: boolean;
+	/** A heading shown before this row (Wrap Text over its choices). */
+	heading?: LocalizationKey;
+	/** A choice in this state (the picture's current wrapping). */
+	checked?: boolean;
 }
 
 export interface MenuState {
@@ -27,6 +35,12 @@ export interface MenuState {
 	hasSelection: boolean;
 	onLink: boolean;
 	inTable: boolean;
+	/** An editable chart is selected: Edit Data and Format Chart Area appear. */
+	onChart?: boolean;
+	/** The Wrap Text choice of the selected picture; set only while a picture is selected. */
+	pictureWrap?: DrawingWrap;
+	/** The caret touches a note reference: Convert to Endnote/Footnote appears. */
+	onNote?: { kind: NoteKind; id: string } | undefined;
 	/** The browser exposes an async clipboard read API. */
 	canReadClipboard: boolean;
 	canTable(command: TableCommand): boolean;
@@ -39,7 +53,19 @@ const TABLE_ITEMS: [TableCommand, LocalizationKey][] = [
 	['columnBefore', 'Insert column left'],
 	['columnAfter', 'Insert column right'],
 	['deleteColumn', 'Delete column'],
+	['mergeCells', 'Merge cells'],
+	['splitCell', 'Split cells'],
 	['deleteTable', 'Delete table'],
+];
+
+const WRAP_ITEMS: [DrawingWrap, LocalizationKey][] = [
+	['inline', 'In Line with Text'],
+	['square', 'Square'],
+	['tight', 'Tight'],
+	['through', 'Through'],
+	['topAndBottom', 'Top and Bottom'],
+	['behind', 'Behind Text'],
+	['front', 'In Front of Text'],
 ];
 
 /** Items for the current state; table items only exist while the selection is in a table. */
@@ -80,12 +106,52 @@ export function computeMenuItems(state: MenuState): MenuItem[] {
 			action: { type: 'comments', key: 'add' },
 		}),
 	]);
+	if (state.onNote) {
+		const { kind, id } = state.onNote;
+		groups.push([
+			link('note-convert', kind === 'footnote' ? 'Convert to Endnote' : 'Convert to Footnote', {
+				kind: 'ribbon',
+				action: { type: 'convertNotes', selection: { kind, id } },
+			}),
+		]);
+	}
+	if (state.onChart)
+		groups.push([
+			link('chart-data', 'Edit Data', {
+				kind: 'ribbon',
+				action: { type: 'formatDialog', kind: 'chartData' },
+			}),
+			link('chart-format', 'Format Chart Area...', {
+				kind: 'ribbon',
+				action: { type: 'chart', key: 'format' },
+			}),
+		]);
+	if (state.pictureWrap)
+		groups.push(
+			WRAP_ITEMS.map(([wrap, label], index) => ({
+				id: `picture-wrap-${wrap}`,
+				label,
+				command: { kind: 'ribbon', action: { type: 'picture', key: 'wrap', value: wrap } } as const,
+				disabled: state.readOnly,
+				checked: state.pictureWrap === wrap,
+				...(index === 0 ? { heading: 'Wrap text' as const } : {}),
+			})),
+			[
+				link('picture-format', 'Format picture', {
+					kind: 'ribbon',
+					action: { type: 'formatPicture' },
+				}),
+			],
+		);
 	if (state.inTable)
 		groups.push(
 			TABLE_ITEMS.map(([key, label]) => ({
 				id: `table-${key}`,
 				label,
-				command: { kind: 'ribbon', action: { type: 'tableEdit', key } } as const,
+				command:
+					key === 'splitCell'
+						? ({ kind: 'ribbon', action: { type: 'formatDialog', kind: 'splitCells' } } as const)
+						: ({ kind: 'ribbon', action: { type: 'tableEdit', key } } as const),
 				disabled: state.readOnly || !state.canTable(key),
 			})),
 		);
@@ -101,12 +167,21 @@ function selectionInTable(view: EditorView): boolean {
 	return false;
 }
 
+function pictureWrapState(view: EditorView): Pick<MenuState, 'pictureWrap'> {
+	const pos = selectedPicturePos(view.state);
+	const node = pos === undefined ? null : view.state.doc.nodeAt(pos);
+	return node ? { pictureWrap: pictureWrapOf(node) } : {};
+}
+
 export function menuStateFromView(view: EditorView, readOnly: boolean): MenuState {
 	return {
 		readOnly: readOnly || !view.editable,
 		hasSelection: !view.state.selection.empty,
 		onLink: Boolean(linkAtSelection(view)),
 		inTable: selectionInTable(view),
+		onChart: Boolean(selectedChart(view.state)?.editable),
+		...pictureWrapState(view),
+		onNote: noteReferenceAtSelection(view),
 		canReadClipboard:
 			typeof navigator !== 'undefined' &&
 			(typeof navigator.clipboard?.read === 'function' ||

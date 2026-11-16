@@ -1,14 +1,21 @@
 import {
+	attachViewportNavigation,
 	clampZoomScale,
 	createViewerZoomStore,
-	createWheelStepBuffer,
-	mapEditingWheel,
+	resetViewportScroll,
+	selectionScrollTarget,
+	selectionZoomBounds,
+	zoomToSelectionScale,
 } from 'ooxml-ui/pptx';
-import type { ViewerZoomState, ViewerZoomStore, ViewportFitOptions } from 'ooxml-ui/pptx';
+import type {
+	SelectionZoomBounds,
+	ViewerZoomState,
+	ViewerZoomStore,
+	ViewportFitOptions,
+} from 'ooxml-ui/pptx';
 import type { PptxElement } from 'pptx-viewer-core';
 import { useRef, useCallback, useEffect } from 'react';
 
-import { MIN_ELEMENT_SIZE, ZOOM_TO_SELECTION_PADDING } from '../constants';
 import type { CanvasSize } from '../types';
 import { useViewerStore } from './useViewerStore';
 import { useViewportFit } from './useViewportFit';
@@ -18,16 +25,15 @@ import { useViewportNode } from './useViewportNode';
 const selectZoom = (state: ViewerZoomState): number => state.zoom;
 
 /** Axis-aligned bounding box used by zoom / viewport helpers. */
-interface SelectionBounds {
-	minX: number;
-	minY: number;
-	maxX: number;
-	maxY: number;
-}
+type SelectionBounds = SelectionZoomBounds;
 
 interface UseZoomViewportInput extends ViewportFitOptions {
 	canvasSize: CanvasSize;
 	selectedElements: PptxElement[];
+	/** True when a plain drag on the slide has nothing to select and should pan (read-only view). */
+	dragPans?: boolean;
+	/** Id of the slide on the canvas. Showing another slide keeps the zoom and scrolls to its top-left. */
+	activeSlideId?: string;
 }
 
 export interface UseZoomViewportResult {
@@ -52,7 +58,6 @@ export interface UseZoomViewportResult {
 	handleResetZoom: () => void;
 	handleZoomToFit: () => void;
 	handleZoomToSelection: () => void;
-	handleWheel: (e: WheelEvent) => void;
 	centerBoundsInViewport: (bounds: SelectionBounds, nextScale: number) => void;
 	getCanvasPointFromClient: (clientX: number, clientY: number) => { x: number; y: number } | null;
 }
@@ -62,14 +67,14 @@ export function useZoomViewport({
 	selectedElements,
 	fitPadding,
 	maxFitScale,
+	dragPans = false,
+	activeSlideId,
 }: UseZoomViewportInput): UseZoomViewportResult {
 	// ── Refs ──────────────────────────────────────────────────────────────
 	const editWrapperRef = useRef<HTMLDivElement>(null);
 	const canvasStageRef = useRef<HTMLDivElement>(null);
 	const { viewportRef: canvasViewportRef, viewportNode, setCanvasViewportNode } = useViewportNode();
 	const renderScaleRef = useRef(1);
-	// Partial wheel charge, shared with the editing-wheel mapper.
-	const wheelBufferRef = useRef(createWheelStepBuffer());
 
 	// ── State ─────────────────────────────────────────────────────────────
 	// The user's zoom factor lives in the shared zoom store, so the zoom MODEL
@@ -111,20 +116,13 @@ export function useZoomViewport({
 				return;
 			}
 
-			const boundedScale = clampZoomScale(nextScale);
-			const nextEditorScale = fitScale * boundedScale;
-			const centerX = (bounds.minX + bounds.maxX) / 2;
-			const centerY = (bounds.minY + bounds.maxY) / 2;
-			const targetScrollLeft =
-				canvasViewport.offsetLeft + centerX * nextEditorScale - wrapper.clientWidth / 2;
-			const targetScrollTop =
-				canvasViewport.offsetTop + centerY * nextEditorScale - wrapper.clientHeight / 2;
-
-			wrapper.scrollTo({
-				left: Math.max(targetScrollLeft, 0),
-				top: Math.max(targetScrollTop, 0),
-				behavior: 'smooth',
-			});
+			const target = selectionScrollTarget(
+				bounds,
+				fitScale * clampZoomScale(nextScale),
+				{ left: canvasViewport.offsetLeft, top: canvasViewport.offsetTop },
+				{ width: wrapper.clientWidth, height: wrapper.clientHeight },
+			);
+			wrapper.scrollTo({ ...target, behavior: 'smooth' });
 		},
 		[canvasViewportRef, fitScale],
 	);
@@ -147,49 +145,11 @@ export function useZoomViewport({
 	}, [store]);
 
 	const handleZoomToSelection = useCallback(() => {
-		if (selectedElements.length === 0) {
+		const selectionBounds = selectionZoomBounds(selectedElements);
+		if (!selectionBounds) {
 			return;
 		}
-
-		let minX = Number.POSITIVE_INFINITY;
-		let minY = Number.POSITIVE_INFINITY;
-		let maxX = Number.NEGATIVE_INFINITY;
-		let maxY = Number.NEGATIVE_INFINITY;
-
-		selectedElements.forEach((element) => {
-			minX = Math.min(minX, element.x);
-			minY = Math.min(minY, element.y);
-			maxX = Math.max(maxX, element.x + Math.max(element.width, MIN_ELEMENT_SIZE));
-			maxY = Math.max(maxY, element.y + Math.max(element.height, MIN_ELEMENT_SIZE));
-		});
-
-		if (
-			!Number.isFinite(minX) ||
-			!Number.isFinite(minY) ||
-			!Number.isFinite(maxX) ||
-			!Number.isFinite(maxY)
-		) {
-			return;
-		}
-
-		const selectionBounds: SelectionBounds = { minX, minY, maxX, maxY };
-
-		const boundsWidth = Math.max(selectionBounds.maxX - selectionBounds.minX, MIN_ELEMENT_SIZE);
-		const boundsHeight = Math.max(selectionBounds.maxY - selectionBounds.minY, MIN_ELEMENT_SIZE);
-		const availableWidth = Math.max(
-			effectiveEditorDimensions.width - ZOOM_TO_SELECTION_PADDING,
-			MIN_ELEMENT_SIZE,
-		);
-		const availableHeight = Math.max(
-			effectiveEditorDimensions.height - ZOOM_TO_SELECTION_PADDING,
-			MIN_ELEMENT_SIZE,
-		);
-		const targetEditorScale = Math.min(
-			availableWidth / boundsWidth,
-			availableHeight / boundsHeight,
-		);
-		const safeFitScale = fitScale > Number.EPSILON ? fitScale : Number.EPSILON;
-		const nextScale = clampZoomScale(targetEditorScale / safeFitScale);
+		const nextScale = zoomToSelectionScale(selectionBounds, effectiveEditorDimensions, fitScale);
 
 		setScale(nextScale);
 
@@ -198,38 +158,16 @@ export function useZoomViewport({
 				centerBoundsInViewport(selectionBounds, nextScale);
 			});
 		});
-	}, [
-		centerBoundsInViewport,
-		effectiveEditorDimensions.height,
-		effectiveEditorDimensions.width,
-		fitScale,
-		selectedElements,
-		setScale,
-	]);
+	}, [centerBoundsInViewport, effectiveEditorDimensions, fitScale, selectedElements, setScale]);
 
-	const handleWheel = useCallback(
-		(event: WheelEvent) => {
-			// `canScrollFurther: true` keeps a plain wheel scrolling the viewport
-			// natively; only Ctrl+wheel is claimed here. Slide-stepping at the scroll
-			// extent needs navigation this hook does not own - see wheel-intent.
-			const mapped = mapEditingWheel(event, wheelBufferRef.current, true);
-			if (mapped.intent !== 'zoom') {
-				return;
-			}
-			event.preventDefault();
-			// Read the live value from the store rather than closing over `scale`:
-			// wheel events arrive faster than React commits, so a captured value
-			// would quantise the gesture to the last rendered scale.
-			store.dispatch({
-				type: 'set-zoom',
-				zoom: clampZoomScale(store.getState().zoom + mapped.deltaScale),
-			});
-		},
-		[store],
-	);
+	// Read live by the viewport controller, so a mode change does not re-attach it.
+	const dragPansRef = useRef(dragPans);
+	useEffect(() => {
+		dragPansRef.current = dragPans;
+	}, [dragPans]);
 
-	// Attach the wheel listener natively with { passive: false } so that
-	// preventDefault() works. React's onWheel is passive since React 17+.
+	// Ctrl+wheel and pinch zoom at the pointer, and drag to pan, in the
+	// viewport. Shared with the other bindings so the gestures match.
 	//
 	// Follow remounted canvases; retain initial frame retries for object-ref users.
 	useEffect(() => {
@@ -237,22 +175,36 @@ export function useZoomViewport({
 			return;
 		}
 		let raf = 0;
-		let attached: HTMLDivElement | null = null;
+		let detach: (() => void) | null = null;
 		const attach = (): void => {
 			const viewport = viewportNode ?? canvasViewportRef.current;
 			if (!viewport) {
 				raf = requestAnimationFrame(attach);
 				return;
 			}
-			attached = viewport;
-			viewport.addEventListener('wheel', handleWheel, { passive: false });
+			detach = attachViewportNavigation(viewport, {
+				getZoom: () => store.getState().zoom,
+				setZoom: (zoom) => store.dispatch({ type: 'set-zoom', zoom }),
+				dragPans: () => dragPansRef.current,
+			});
 		};
 		attach();
 		return () => {
 			cancelAnimationFrame(raf);
-			attached?.removeEventListener('wheel', handleWheel);
+			detach?.();
 		};
-	}, [canvasViewportRef, viewportNode, handleWheel]);
+	}, [canvasViewportRef, viewportNode, store]);
+
+	// The zoom belongs to the window and is kept across slides; the scroll
+	// position belongs to the slide it was chosen on (shared policy).
+	useEffect(() => {
+		const viewport = viewportNode ?? canvasViewportRef.current;
+		if (viewport) {
+			resetViewportScroll(viewport);
+		}
+		// Only a slide change resets the scroll, not a remounted viewport.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [activeSlideId]);
 
 	const getCanvasPointFromClient = useCallback(
 		(clientX: number, clientY: number): { x: number; y: number } | null => {
@@ -293,7 +245,6 @@ export function useZoomViewport({
 		handleResetZoom,
 		handleZoomToFit,
 		handleZoomToSelection,
-		handleWheel,
 		centerBoundsInViewport,
 		getCanvasPointFromClient,
 	};

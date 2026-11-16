@@ -66,6 +66,7 @@ describe('buildSvgGradientDef', () => {
 			style({
 				fillGradientStops: [
 					{ color: '#000000', position: 0 },
+					{ color: '#808080', position: 50 },
 					{ color: '#FFFFFF', position: 100, opacity: 0 },
 				],
 			}),
@@ -73,8 +74,18 @@ describe('buildSvgGradientDef', () => {
 		);
 		expect(def?.stops).toStrictEqual([
 			{ offset: 0, color: '#000000' },
+			{ offset: 0.5, color: '#808080' },
 			{ offset: 1, color: '#FFFFFF', opacity: 0 },
 		]);
+	});
+
+	it('re-samples a two-stop 0/100 pair onto the Office sigma curve', () => {
+		// PowerPoint paints white to black 186 (not 128) at the midpoint.
+		const def = buildSvgGradientDef(style(), 'e1');
+		const stops = def!.stops;
+		expect(stops.length).toBeGreaterThan(20);
+		const mid = stops.find((stop) => Math.abs(stop.offset - 0.5) < 0.01)!;
+		expect(Number.parseInt(mid.color.slice(1, 3), 16)).toBeGreaterThan(170);
 	});
 
 	it('centres a radial gradient on its fillToRect', () => {
@@ -107,7 +118,7 @@ describe('buildSvgGradientDef', () => {
 		// the CSS `url("...")` wrapper `buildRectPathGradientImage` returns.
 		expect((def as { href: string }).href).toMatch(/^data:image\/svg\+xml,/u);
 		// The nested-rectangle band SVG itself, embedded in the data URI.
-		expect(decodeURIComponent((def as { href: string }).href)).toContain('<rect ');
+		expect(decodeURIComponent((def as { href: string }).href)).toContain('<polygon ');
 	});
 
 	it('keeps path type "shape" elliptical (only "rect" gets the band field)', () => {
@@ -158,8 +169,74 @@ describe('svgGradientFillRef / svgGradientMarkup', () => {
 		);
 		const markup = svgGradientMarkup(def!);
 		expect(markup).toContain('<pattern id="pptx-grad-e1" patternUnits="objectBoundingBox"');
+		// The tile's own content must be in bounding-box units too, else the 1x1 image
+		// is one user unit big and the fill paints nothing (React's blank rect path).
+		expect(markup).toContain('patternContentUnits="objectBoundingBox"');
 		expect(markup).toContain('width="1" height="1"');
 		expect(markup).toContain('preserveAspectRatio="none"');
 		expect(markup).not.toContain('<radialGradient');
+	});
+});
+
+describe('buildSvgGradientDef with the shape size (freeform)', () => {
+	const bounds = { width: 400, height: 200 };
+
+	it('paints path="shape" and path="circle" as a true circle to the farthest corner', () => {
+		for (const path of ['shape', 'circle'] as const) {
+			const def = buildSvgGradientDef(
+				style({ fillGradientType: 'radial', fillGradientPathType: path }),
+				'e1',
+				bounds,
+			);
+			expect(def?.kind).toBe('rectPath');
+			const svg = decodeURIComponent((def as { href: string }).href);
+			// radius is half the diagonal in the box's own pixels, not the 0.707 of a stretched box
+			expect(svg).toContain('r="223.6068"');
+			expect(svg).toContain('viewBox="0 0 400 200"');
+		}
+	});
+
+	it('keeps an off-centre focus on the circumscribed circle', () => {
+		const def = buildSvgGradientDef(
+			style({
+				fillGradientType: 'radial',
+				fillGradientPathType: 'shape',
+				fillGradientFillToRect: { l: 0, t: 0, r: 1, b: 1 },
+			}),
+			'e1',
+			bounds,
+		);
+		const svg = decodeURIComponent((def as { href: string }).href);
+		expect(svg).toContain('fx="0" fy="0"');
+		expect(svg).toContain('cx="200" cy="100"');
+	});
+
+	it('keeps the bounding-box ellipse when the size is unknown', () => {
+		const def = buildSvgGradientDef(
+			style({ fillGradientType: 'radial', fillGradientPathType: 'shape' }),
+			'e1',
+		);
+		expect(def?.kind).toBe('radial');
+	});
+
+	it('honours scaled="0": a true angle on a wide box', () => {
+		const def = buildSvgGradientDef(
+			style({ fillGradientType: 'linear', fillGradientAngle: 45, fillGradientScaled: false }),
+			'e1',
+			bounds,
+		);
+		expect(def?.kind).toBe('rectPath');
+		const svg = decodeURIComponent((def as { href: string }).href);
+		// 45 degrees through the centre, spanning the box's projection (|cos| w + |sin| h) / 2
+		expect(svg).toContain('x1="50"');
+		expect(svg).toContain('y1="-50"');
+		// the default scaled gradient stays a bounding-box linear gradient
+		expect(
+			buildSvgGradientDef(
+				style({ fillGradientType: 'linear', fillGradientAngle: 45 }),
+				'e1',
+				bounds,
+			)?.kind,
+		).toBe('linear');
 	});
 });

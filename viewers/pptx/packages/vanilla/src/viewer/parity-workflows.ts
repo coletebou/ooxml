@@ -14,11 +14,14 @@ import {
 	applyAcceptSlide,
 	applyRehearsalTimings,
 	compareSlides,
+	firstShowSlideIndex,
 	isDialogAvailable,
 	isPanelVisible,
 	openPptxFile,
+	resolveAllowExternalContent,
 	resolveAuthoredCustomShowId,
 	resolveDefaultPrintSettings,
+	resolveShowSlideIndexes,
 } from 'ooxml-ui/pptx';
 import type { LocaleCatalogEntry } from 'ooxml-ui/pptx/i18n';
 import type { PptxSlide } from 'pptx-viewer-core';
@@ -53,6 +56,8 @@ export interface ParityWorkflowHost {
 	editor: EditorController;
 	/** The File > Options store the Options dialog reads and writes. */
 	optionsStore: ViewerOptionsStore;
+	/** The host `allowExternalContent` option: overrides the Trust Center setting when set. */
+	allowExternalContent?: boolean;
 	/** Options > Save > "Delete cached files". */
 	clearOptionsCache(): void;
 	/**
@@ -216,9 +221,8 @@ export function createParityWorkflows(host: ParityWorkflowHost): ParityWorkflows
 		},
 		startRehearsal() {
 			openRehearseTimings(host.doc, host.root(), host.t, {
-				slideCount: state().slides.length,
-				currentSlide: () => state().currentSlide,
-				navigate: host.goToSlide,
+				store: host.store,
+				enterPresentation: () => host.enterPresentation(),
 				onSave: (timings) =>
 					host.editor.commitSlides(applyRehearsalTimings(state().slides, timings)),
 			});
@@ -276,7 +280,7 @@ export function createParityWorkflows(host: ParityWorkflowHost): ParityWorkflows
 					},
 					subscribe: (listener) => host.store.subscribe(() => listener()),
 				},
-				host.editor.getEditActions().comments,
+				host.editor.getEditActions().comments.panel,
 			);
 		},
 		openHyperlink() {
@@ -303,14 +307,22 @@ export function createParityWorkflows(host: ParityWorkflowHost): ParityWorkflows
 				shows: current.customShows,
 				slides: current.slides,
 				activeShowId: current.activeCustomShowId,
-				onSave: (shows) => host.editor.updateCustomShows(shows),
+				onSave: (shows, clearedSlides) => {
+					host.editor.updateCustomShows(shows);
+					// Jumps into a removed show are cleared so none points at a show that is gone.
+					if (clearedSlides) {
+						host.editor.commitSlides(clearedSlides, state().currentSlide);
+					}
+				},
 				// The id lives in viewer state, not the editor's document state: it is
 				// a playback choice for this session, not an edit to the deck, so it
 				// must not enter the undo history or mark the file dirty.
 				onSetActive: (id) => host.store.set({ activeCustomShowId: id }),
 				onRun: (show) => {
-					const first = state().slides.findIndex(({ rId }) => show.slideRIds.includes(rId));
-					if (first >= 0) {
+					// The show's own first slide, not its first slide in deck order: "Reverse"
+					// (3, 2, 1) opens on slide 3, as in every other binding.
+					const first = firstShowSlideIndex(resolveShowSlideIndexes(state().slides, show));
+					if (first !== undefined) {
 						host.goToSlide(first);
 					}
 					void host.enterPresentation();
@@ -327,7 +339,10 @@ async function comparePresentation(host: ParityWorkflowHost): Promise<void> {
 		return;
 	}
 	const incoming = await loadPresentation(picked.buffer, {
-		allowExternalImages: host.optionsStore.getOptions().trust.allowExternalContent,
+		allowExternalImages: resolveAllowExternalContent(
+			host.allowExternalContent,
+			host.optionsStore.getOptions(),
+		),
 	});
 	try {
 		const result = compareSlides(host.store.get().slides, incoming.slides);

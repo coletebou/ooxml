@@ -5,6 +5,7 @@
  * `pptx/core/types/smart-art-node.ts`.
  */
 
+import type { DrawingParagraphProperties, DrawingRunProperties } from '../../drawingml/text-model';
 import type { DiagramNodeCustomLayout } from '../types';
 
 /**
@@ -32,10 +33,12 @@ export interface DiagramNodeTextRun<S = unknown> {
 	rPr?: Record<string, unknown>;
 	/** Resolved standard shape-text style derived from {@link rPr}. */
 	style?: S;
+	/** Neutral run properties, set by readers on the shared DOM (`readDiagramNodeParagraphs`). */
+	properties?: DrawingRunProperties;
 	/** Raw run XML used to retain unmodelled extension children on save. */
 	rawXml?: Record<string, unknown>;
 	/** Original direct-child order, including unmodelled extension children. */
-	childOrder?: string[];
+	childOrder?: string[] | undefined;
 }
 
 /** An ordered item within a SmartArt text paragraph. */
@@ -45,8 +48,9 @@ export type DiagramNodeTextParagraphItem<S = unknown> =
 			kind: 'break';
 			rPr?: Record<string, unknown>;
 			style?: S;
+			properties?: DrawingRunProperties;
 			rawXml?: Record<string, unknown>;
-			childOrder?: string[];
+			childOrder?: string[] | undefined;
 	  }
 	| {
 			kind: 'field';
@@ -56,10 +60,12 @@ export type DiagramNodeTextParagraphItem<S = unknown> =
 			rPr?: Record<string, unknown>;
 			style?: S;
 			pPr?: Record<string, unknown>;
+			properties?: DrawingRunProperties;
+			paragraphProperties?: DrawingParagraphProperties;
 			rawXml?: Record<string, unknown>;
-			childOrder?: string[];
+			childOrder?: string[] | undefined;
 	  }
-	| { kind: 'tab'; rawXml?: Record<string, unknown>; childOrder?: string[] }
+	| { kind: 'tab'; rawXml?: Record<string, unknown>; childOrder?: string[] | undefined }
 	| { kind: 'raw'; name: string; value: unknown };
 
 /** A complete `a:p` paragraph in a SmartArt data-model text body. */
@@ -72,6 +78,10 @@ export interface DiagramNodeTextParagraph<S = unknown> {
 	endParaRPr?: Record<string, unknown>;
 	/** Resolved style for the paragraph terminator. */
 	endParaStyle?: S;
+	/** Neutral paragraph properties, set by readers on the shared DOM. */
+	properties?: DrawingParagraphProperties;
+	/** Neutral end-paragraph run properties, set by readers on the shared DOM. */
+	endProperties?: DrawingRunProperties;
 	/** Raw paragraph XML used to retain unmodelled extension children on save. */
 	rawXml?: Record<string, unknown>;
 }
@@ -132,11 +142,11 @@ export interface DiagramNode<S = unknown> {
 	id: string;
 	text: string;
 	/** CT_Pt connection identifier, when the point references a connection. */
-	connectionId?: string | null;
+	connectionId?: string | null | undefined;
 	parentId?: string | undefined;
-	children?: DiagramNode<S>[];
+	children?: DiagramNode<S>[] | undefined;
 	/** Node type from `@_type` attribute (e.g. "doc", "node", "asst", "pres"). */
-	nodeType?: string;
+	nodeType?: string | undefined;
 	/**
 	 * The node's own quick-style role (`dgm:prSet/@presStyleLbl` from its
 	 * paired `type="pres"` presentation point, resolved via a `presOf`
@@ -146,14 +156,14 @@ export interface DiagramNode<S = unknown> {
 	 * colour list from a colour transform's per-role palettes instead of the
 	 * generic cycled palette (see `applySmartArtRoleColors`).
 	 */
-	styleRole?: string;
+	styleRole?: string | undefined;
 	/**
 	 * `dgm:prSet/@coherent3DOff` (`CT_ElemPropSet`) resolved from the node's
 	 * paired presentation point: when true, this node opts out of the
 	 * diagram's overall coherent-3D scene rotation (a `dgm:scene3d`/`dgm:sp3d`
 	 * quick-style variation) applied to every other node.
 	 */
-	coherent3DOff?: boolean;
+	coherent3DOff?: boolean | undefined;
 	/**
 	 * The layout variables PowerPoint recorded for each presentation node
 	 * this point drives (`dgm:prSet/@presName` -> `dgm:presLayoutVars`
@@ -161,7 +171,7 @@ export interface DiagramNode<S = unknown> {
 	 * org-chart manager set to "Left Hanging". Read-only: the presentation
 	 * points themselves round-trip verbatim.
 	 */
-	presLayoutVarsByName?: Record<string, Record<string, string>>;
+	presLayoutVarsByName?: Record<string, Record<string, string>> | undefined;
 	/**
 	 * Per-run text + run-properties for the node's first paragraph, captured at
 	 * parse time. When the joined run text still equals {@link text} (the node
@@ -169,19 +179,19 @@ export interface DiagramNode<S = unknown> {
 	 * the save path rebuilds the paragraph from these runs so per-run rich text
 	 * is not flattened. When {@link text} diverges, the runs are ignored.
 	 */
-	runs?: DiagramNodeTextRun<S>[];
+	runs?: DiagramNodeTextRun<S>[] | undefined;
 	/**
 	 * Complete typed paragraph model. Unlike {@link runs}, this retains every
 	 * paragraph and the ordered run, field, break, and tab children within it.
 	 */
-	paragraphs?: DiagramNodeTextParagraph<S>[];
+	paragraphs?: DiagramNodeTextParagraph<S>[] | undefined;
 	/**
 	 * Optional per-node visual override (fill / line / font colour, bold /
 	 * italic). Read at parse time from the point's `spPr` / first-run `rPr`, set
 	 * by the editing op, honoured by the render path, and written back on save so
 	 * it round-trips.
 	 */
-	style?: DiagramNodeStyle;
+	style?: DiagramNodeStyle | undefined;
 	/**
 	 * Manual layout override read from the node's `dgm:prSet` `cust*`
 	 * attributes (drag/resize/rotate/flip performed in PowerPoint's own diagram
@@ -189,5 +199,5 @@ export interface DiagramNode<S = unknown> {
 	 * {@link module:smartart-layout-interpreter-custom} so it survives even
 	 * when there is no cached `dsp:` drawing to fall back on.
 	 */
-	customLayout?: DiagramNodeCustomLayout;
+	customLayout?: DiagramNodeCustomLayout | undefined;
 }

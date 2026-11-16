@@ -95,9 +95,9 @@ Use la URL local que muestra Vite. Esto inicia un servidor de desarrollo; no pub
 
 Cargue un paquete de origen local, seleccione una forma compatible y use sus controles de texto. `replacePlainText(pageId, shapeId, text)`, `undo()` y `redo()` exponen las mismas operaciones a través de cada manejador. Un modelo asignado con `document` no tiene bytes de paquete y permanece en solo lectura.
 
-La edición rechaza el texto vinculado a una plantilla maestra, el texto enriquecido, los campos, los paquetes firmados y el contenido con macros. El historial está acotado y puede descartar estados de deshacer antiguos. Las cachés de fórmulas guardadas no se recalculan. No se ha implementado la edición general de dibujo ni de estilos.
+La edición rechaza el texto vinculado a una plantilla maestra, el texto enriquecido, los campos, los paquetes firmados y el contenido con macros. El historial está acotado y puede descartar estados de deshacer antiguos. Las cachés de fórmulas guardadas no se recalculan. Los límites del formato, la geometría y los comandos de dibujo se enumeran en la [API del visor](/es/api).
 
-`exportVsdx()` devuelve los bytes del paquete original o editado y los diagnósticos para una descarga explícita de una copia. Nunca sobrescribe el archivo de entrada. La reapertura nativa en Visio y la fidelidad de un viaje de ida y vuelta sin pérdidas siguen sin verificarse.
+`exportVsdx()` devuelve los bytes del paquete original o editado y los diagnósticos para una descarga explícita de una copia. Nunca sobrescribe el archivo de entrada. La reapertura nativa en Visio solo está verificada para los casos registrados en el [registro de verificación](/verification), y la fidelidad de un viaje de ida y vuelta sin pérdidas sigue sin verificarse.
 
 ## Exporte un SVG estático {#export}
 
@@ -111,11 +111,11 @@ Se incrustan el contenido de fondo compatible y las imágenes rasterizadas valid
 
 ## Propiedades y eventos {#properties-and-events}
 
-| Superficie    | Contrato actual                                                                                                                                                        |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Propiedades   | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `ribbonAddIns`, `collaboration`                                                                             |
-| Eventos       | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change` |
-| Ciclo de vida | `update`, `load`, `fit`, `exportSvg`, `createPrintSnapshot`, `replacePlainText`, `undo`, `redo`, `cancelEdit`, `exportVsdx`, `destroy`                                 |
+| Superficie    | Contrato actual                                                                                                                                                                        |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Propiedades   | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `readOnly`, `ribbonAddIns`, `collaboration`, `storage`, `fileProviders`, `customization`                                    |
+| Eventos       | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change`, `file-command` |
+| Ciclo de vida | `update`, `load`, `fit`, `exportSvg`, `createPrintSnapshot`, `replacePlainText`, `undo`, `redo`, `cancelEdit`, `exportVsdx`, `destroy`                                                 |
 
 `canEdit` es el permiso de edición (el visor es editable por defecto; `false` lo deja en solo lectura), `collaboration` comparte el dibujo abierto en una sala y `document-change` informa `kind` como `edit`, `undo`, `redo`, `remote` o `save`. Cuando el anfitrión ha guardado los bytes de `exportVsdx()`, `controller.markClean()` borra el indicador de cambios. Para componer su propia interfaz con las piezas del visor, consulte los [bloques de construcción](/building-blocks); para compartir un dibujo, consulte [Colaboración](/es/collaboration).
 

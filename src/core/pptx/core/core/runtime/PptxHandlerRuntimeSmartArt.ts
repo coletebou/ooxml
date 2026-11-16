@@ -17,6 +17,10 @@ import {
 } from './smartart-text-paragraphs';
 import { resolveSmartArtTextStyles } from './smartart-text-style-resolution';
 import { isContentPoint } from './smartart-xml-builders';
+import { loadDiagram } from '../../../../diagram/load';
+import { parseRelationships } from '../../../../opc/relationships';
+import { inspectRasterImage } from '../../../../drawingml/raster-image';
+import { decodeBase64 } from '../../../../digest/base64';
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	public async getSmartArtDataForGraphicFrame(
@@ -185,8 +189,50 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// ── Parse quick style from ppt/diagrams/quickStyles*.xml ─────────
 		const styleRelationshipId = parsedRelationshipIds?.styleRelId ?? '';
 		const quickStyle = await this.parseSmartArtQuickStyle(slidePath, styleRelationshipId);
+		const neutral = await loadDiagram(slidePath, parsedRelationshipIds ?? {}, {
+			hostRelationships: (path) => this.slideRelsMap.get(path),
+			resolvePath: (base, target) => this.resolveImagePath(base, target),
+			readText: (path) => this.zip.file(path)?.async('string') ?? Promise.resolve(undefined),
+			readRelationshipEntries: async (path) => {
+				const xml = await this.zip.file(path)?.async('string');
+				return xml ? [...parseRelationships(xml).values()] : undefined;
+			},
+		});
+		const pictureLayoutSource = neutral.layoutSource?.pictures?.length
+			? neutral.layoutSource
+			: undefined;
+		const pictureUrls: Record<string, string> = {};
+		const pictureSizes: Record<string, { width: number; height: number }> = {};
+		for (const part of Object.values(pictureLayoutSource?.pictureParts ?? {})) {
+			const url = await this.getImageDataAsDataUrl(part);
+			if (url) pictureUrls[part] = url;
+			const payload = url ? /^data:[^,]*;base64,(.*)$/s.exec(url)?.[1] : undefined;
+			const bytes = payload ? decodeBase64(payload) : undefined;
+			if (bytes) {
+				try {
+					const info = inspectRasterImage(bytes);
+					pictureSizes[part] = { width: info.pixelWidth, height: info.pixelHeight };
+				} catch {
+					/* Unknown/unsupported raster formats retain the source image and browser fallback. */
+				}
+			}
+		}
+		for (const shape of drawingShapes) {
+			const part = shape.fillBlipEmbedId
+				? neutral.drawing?.pictureParts?.[shape.fillBlipEmbedId]
+				: undefined;
+			if (part && pictureUrls[part]) shape.fillImageUrl = pictureUrls[part];
+			if (part && pictureSizes[part]) {
+				shape.fillImageWidth = pictureSizes[part].width;
+				shape.fillImageHeight = pictureSizes[part].height;
+			}
+		}
 
 		return {
+			pictureLayoutSource,
+			pictureUrls: pictureLayoutSource ? pictureUrls : undefined,
+			pictureScheme: pictureLayoutSource ? { ...this.themeColorMap } : undefined,
+			pictureSizes: pictureLayoutSource ? pictureSizes : undefined,
 			layoutType,
 			resolvedLayoutType,
 			layoutDefinition,

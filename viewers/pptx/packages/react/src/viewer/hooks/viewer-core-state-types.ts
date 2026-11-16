@@ -1,4 +1,5 @@
-import type { CollaborationLivePatcher, SlideSizeEmu } from 'ooxml-ui/pptx';
+import type { CollaborationLivePatcher, DeckWebfontProgress, SlideSizeEmu } from 'ooxml-ui/pptx';
+import type { InlineTextDraftSink } from 'ooxml-ui/pptx';
 import type {
 	PptxAppProperties,
 	PptxCoreProperties,
@@ -35,8 +36,10 @@ import type {
 	SupportedShapeType,
 } from '../types';
 import type { ViewerMode } from '../types-core';
+import type { CanvasGestures } from './canvas-gestures';
 import type { EditPointsModeState } from './useEditPointsState';
 import type { InlineEditingState } from './useInlineEditingState';
+import type { SlideChangeSelection } from './useSlideChangeSelection';
 
 /* ------------------------------------------------------------------ */
 /*  Input                                                             */
@@ -64,7 +67,8 @@ export interface UseViewerCoreStateInput {
  * that comprises the core viewer state. It is merged with {@link ViewerUIState}
  * inside {@link useViewerState} to produce the unified {@link ViewerState}.
  */
-export interface ViewerCoreState extends InlineEditingState, EditPointsModeState {
+export interface ViewerCoreState
+	extends InlineEditingState, EditPointsModeState, SlideChangeSelection {
 	// ── Refs ──────────────────────────────────────────────────────────
 
 	/** Ref to the outermost container `<div>` wrapping the viewer. */
@@ -75,6 +79,8 @@ export interface ViewerCoreState extends InlineEditingState, EditPointsModeState
 	mediaInputRef: React.RefObject<HTMLInputElement | null>;
 	/** Mutable ref mirroring `activeSlideIndex` for use in event handlers that must not re-subscribe on index change. */
 	activeSlideIndexRef: React.MutableRefObject<number>;
+	/** The autosave engine, which receives in-progress inline text (set by useAutosave). */
+	autosaveDraftSinkRef: React.MutableRefObject<InlineTextDraftSink | null>;
 	/** Tracks the in-progress drag operation (move) for element(s). */
 	dragStateRef: React.MutableRefObject<DragState | null>;
 	/** Tracks the in-progress resize operation for an element. */
@@ -100,6 +106,11 @@ export interface ViewerCoreState extends InlineEditingState, EditPointsModeState
 	 * that made a single Ctrl+Z look like it did nothing.
 	 */
 	justInteractedRef: React.MutableRefObject<boolean>;
+	/**
+	 * The canvas's move/resize gesture controller, set by `usePointerHandlers`
+	 * and started by the press handlers (see canvas-gestures.ts).
+	 */
+	gestureControllerRef: React.MutableRefObject<CanvasGestures | null>;
 
 	// ── Collaboration ─────────────────────────────────────────────────
 
@@ -118,6 +129,9 @@ export interface ViewerCoreState extends InlineEditingState, EditPointsModeState
 	/** Whether the presentation content is currently being loaded/parsed. */
 	loading: boolean;
 	setLoading: React.Dispatch<React.SetStateAction<boolean>>;
+	/** Webfont download progress while a load waits for its fonts (after a short delay), else `null`. */
+	fontProgress: DeckWebfontProgress | null;
+	setFontProgress: React.Dispatch<React.SetStateAction<DeckWebfontProgress | null>>;
 	/** Non-null when an error occurred during loading or processing. */
 	error: string | null;
 	setError: React.Dispatch<React.SetStateAction<string | null>>;

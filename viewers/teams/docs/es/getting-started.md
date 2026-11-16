@@ -2,7 +2,7 @@
 
 OpenTeams es un espacio de trabajo de equipo de código abierto en el que aportas tu propio servidor: canales y chat, presencia, reuniones con vídeo y pantalla compartida sobre WebRTC, y archivos de Office compartidos en la conversación. Instalas un binding para tu framework, lo apuntas a un servidor (o empiezas sin ninguno) y obtienes la interfaz completa, o un hook sin procesar para construir la tuya.
 
-::: warning Una implementación temprana
+::: warning Beta
 Esto no es Microsoft Teams y no está afiliado a Microsoft. **No hay cifrado de extremo a extremo**: quien administre el servidor puede leer todos los mensajes y archivos. Consulta las
 [Limitaciones](/es/limitations) antes de depender de él.
 :::
@@ -98,7 +98,7 @@ O con marcado simple, tras llamar a `defineTeamsApp()` desde `openteams-vanilla-
 ></teams-app>
 ```
 
-Todos los bindings aceptan las mismas props: `workspaceId` (la sala compartida: letras, dígitos, `-` y `_`), `userName`, `userId` (un id estable; por defecto usa uno recordado en este navegador), `config`, `uploadFile` (adónde van los adjuntos), `openers` (manejadores por tipo de archivo de Office) y tres eventos: listo, abrir archivo (llama a `preventDefault()` sobre él para abrir el archivo por tu cuenta) y cambio de configuración (`onReady`, `onOpenFile`, `onConfigChange` en React, Solid, Svelte y vanilla; `@ready`, `@open-file`, `@config-change` en Vue; `(ready)`, `(openFile)`, `(configChange)` en Angular). Consulta las
+Todos los bindings aceptan las mismas props: `workspaceId` (la sala compartida: letras, dígitos, `-` y `_`), `userName`, `userId` (un id estable; por defecto usa uno recordado en este navegador), `config`, `uploadFile` (adónde van los adjuntos), `openers` (manejadores por tipo de archivo de Office), `embeds` (páginas de visor por tipo de archivo), `locale` (una etiqueta BCP 47 como `de`) y tres eventos: listo, abrir archivo (llama a `preventDefault()` sobre él para abrir el archivo por tu cuenta) y cambio de configuración (`onReady`, `onOpenFile`, `onConfigChange` en React, Solid, Svelte y vanilla; `@ready`, `@open-file`, `@config-change` en Vue; `(ready)`, `(openFile)`, `(configChange)` en Angular). Consulta las
 [guías por framework](/frameworks/react) para cada binding.
 
 Si omites `config`, el elemento ofrece un cuadro de diálogo de ajustes (recordado en este navegador) o funciona en modo local.
@@ -113,7 +113,7 @@ Si omites `config`, el elemento ofrece un cuadro de diálogo de ajustes (recorda
 El modo local es el que usan las [demos en vivo](/demos). Para cualquier caso con más de un navegador, ejecuta un servidor:
 
 ```bash
-npx openteams-server                    # the reference server on 127.0.0.1:8787
+npx openteams-server --insecure-dev     # solo para desarrollo local: 127.0.0.1:8787
 ```
 
 Después usa `ws://127.0.0.1:8787/sync` y `ws://127.0.0.1:8787/signal` (o `wss://` detrás de TLS). La [guía del servidor](/es/server) cubre el protocolo, las variables de entorno y lo que el servidor de referencia no hace; el [despliegue](/es/deploy) cubre TLS, tokens, TURN y Docker.
@@ -135,7 +135,7 @@ state?.channels.map((c) => <button onClick={() => client!.select(c.id)}>{c.name}
 
 `state` es una instantánea inmutable de `TeamsState` (estado de la conexión, canales con contadores de no leídos, los mensajes y archivos del canal seleccionado, personas, escritura, resultados de búsqueda, la llamada). Las acciones incluyen `select`, `createChannel`, `send`, `startReply`, `startEdit`, `deleteMessage`, `toggleReaction`, `search`, `openCall`, `joinCall`, `leaveCall`, `toggleMic`, `toggleCamera`, `toggleScreenShare` y `toggleHand`. La demo de React muestra ambos estilos lado a lado.
 
-## Ejecútalo desde el código fuente
+## Ejecútalo desde el código fuente {#run-it-from-source}
 
 Requiere Node 22+ y Bun. Esta carpeta es `viewers/teams` del repositorio [`ooxml`](https://github.com/ChristopherVR/ooxml): ejecuta `bun install` en la raíz del repositorio y luego los comandos siguientes aquí. Las demos (`demos/teams/*` en la raíz) y las pruebas usan el código fuente de `ooxml-core` y `ooxml-ui` del mismo árbol.
 

@@ -29,8 +29,15 @@ function chartOf(data: Loaded): ChartPptxElement {
 	return data.slides[0].elements.find((element) => element.type === 'chart') as ChartPptxElement;
 }
 
+/**
+ * Empty elements in their long form, the shape the object-tree writer saves: the shared chart
+ * writer (`writeChartSpace`) closes them instead, and these assertions compare markup as text.
+ */
+const longForm = (xml: string): string =>
+	xml.replace(/<([\w:.-]+)((?:\s[^<>]*?)?)\s*\/>/gu, '<$1$2></$1>');
+
 async function readPart(bytes: Uint8Array, part = CHART_PART): Promise<string> {
-	return (await JSZip.loadAsync(bytes)).file(part)!.async('string');
+	return longForm(await (await JSZip.loadAsync(bytes)).file(part)!.async('string'));
 }
 
 async function writePart(bytes: Uint8Array, xml: string): Promise<Uint8Array> {
@@ -81,8 +88,10 @@ describe('chart gradient fills: new charts', () => {
 			{ name: 'Revenue', values: [1, 2, 3], color: '#FF0000', gradientFill: topToBottom },
 		]);
 		const spPr = seriesSpPr(seriesXml(await readPart(saved))[0]);
+		// Written through the shared chart core, whose gradient leaves `rotWithShape` out: a chart
+		// series never rotates (the legacy generator wrote `rotWithShape="1"`).
 		expect(spPr).toBe(
-			'<c:spPr><a:gradFill rotWithShape="1"><a:gsLst>' +
+			'<c:spPr><a:gradFill><a:gsLst>' +
 				'<a:gs pos="0"><a:srgbClr val="60A5FA"></a:srgbClr></a:gs>' +
 				'<a:gs pos="100000"><a:srgbClr val="1E3A8A"></a:srgbClr></a:gs>' +
 				'</a:gsLst><a:lin ang="5400000" scaled="0"></a:lin></a:gradFill></c:spPr>',
@@ -215,7 +224,7 @@ describe('chart gradient fills: existing charts', () => {
 		});
 		const ser = seriesXml(await readPart(withPoint))[0];
 		expect(ser).toMatch(
-			/<c:dPt><c:idx val="2"><\/c:idx>[\s\S]*?<c:spPr><a:gradFill rotWithShape="1">[\s\S]*?<\/c:dPt>/u,
+			/<c:dPt><c:idx val="2"><\/c:idx>[\s\S]*?<c:spPr><a:gradFill(?: rotWithShape="1")?>[\s\S]*?<\/c:dPt>/u,
 		);
 		expect(ser.indexOf('<c:dPt>')).toBeLessThan(ser.indexOf('<c:cat>'));
 		const { data } = await load(withPoint);

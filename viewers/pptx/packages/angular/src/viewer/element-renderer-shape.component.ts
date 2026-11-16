@@ -1,5 +1,5 @@
 import { NgStyle } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import {
 	build3DExtrusionData,
 	buildHollowHitOutline,
@@ -20,16 +20,20 @@ import type {
 import type { PptxElement } from 'pptx-viewer-core';
 import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
 
+import { CanvasFindHighlights } from './canvas-find-highlights';
 import { DynamicStyleComponent } from './dynamic-style.component';
 import {
 	getEffectFillOverlay,
 	getReflectionOverlay,
 	getStrokeOutline,
+	getFillLayer,
 	getSubpathFillOverlay,
 } from './element-effect-defs';
 import type { ReflectionOverlay } from './element-effect-defs';
 import { getTextBlockStyle } from './element-style';
 import type { StyleMap } from './element-style';
+import { resolveEquationBox } from './equation-box';
+import { EquationRendererComponent } from './equation-renderer.component';
 import { Extrusion3DOverlayComponent } from './extrusion-3d-overlay.component';
 import { buildAngularParagraphs } from './paragraph-view';
 import type { Paragraph } from './paragraph-view';
@@ -62,6 +66,7 @@ import type { TextWarpGlyphDef, TextWarpPathDef } from './text-warp';
 	imports: [
 		NgStyle,
 		DynamicStyleComponent,
+		EquationRendererComponent,
 		Extrusion3DOverlayComponent,
 		ReflectionMirrorContentComponent,
 		SlideTextBlockComponent,
@@ -71,6 +76,8 @@ import type { TextWarpGlyphDef, TextWarpPathDef } from './text-warp';
 })
 export class ElementRendererShapeComponent {
 	readonly element = input.required<PptxElement>();
+	/** The Find bar's marks, provided by the editing canvas only. */
+	private readonly findHighlights = inject(CanvasFindHighlights, { optional: true });
 	readonly mediaDataUrls = input<Map<string, string>>(new Map());
 	readonly shapeContainerStyle = input<StyleMap>({});
 	readonly rootPointerEvents = input<'none' | null>(null);
@@ -113,6 +120,7 @@ export class ElementRendererShapeComponent {
 	 * Per-sub-path fill overlay for a multi-sub-path preset or custom geometry,
 	 * or `undefined` when a single merged fill is correct (the ordinary case).
 	 */
+	readonly fillLayer = computed(() => getFillLayer(this.element()));
 	readonly subpathFill = computed(() => getSubpathFillOverlay(this.element()));
 
 	/** `viewBox` for the sub-path fill overlay, in its own coordinate space. */
@@ -173,6 +181,8 @@ export class ElementRendererShapeComponent {
 	readonly hollowHit = computed(() => buildHollowHitOutline(this.element()));
 
 	readonly textStyle = computed<StyleMap>(() => getTextBlockStyle(this.element()));
+	/** A pure equation box, laid out by the shared equation block descriptor. */
+	readonly equationBox = computed(() => resolveEquationBox(this.element()));
 	/** Text-warp (WordArt) descriptor for the element, if any. */
 	readonly textWarp = computed(() => getTextWarp(this.element(), this.fieldContext()));
 	/** Only the SVG-textPath warp variant (for the `<svg>` overlay branch). */
@@ -230,7 +240,12 @@ export class ElementRendererShapeComponent {
 		// the normal path. Everything downstream (autofit scale, paragraph indents,
 		// bullets) still reads the element itself, exactly as React does.
 		const segments = getOverflowSegments(el, this.slideElements()) ?? el.textSegments;
-		return buildAngularParagraphs(el, this.fieldContext(), segments);
+		return buildAngularParagraphs(
+			el,
+			this.fieldContext(),
+			segments,
+			this.findHighlights?.forElement(el.id),
+		);
 	});
 
 	readonly hasText = computed(() =>

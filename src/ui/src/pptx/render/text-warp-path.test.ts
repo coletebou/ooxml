@@ -61,9 +61,12 @@ describe('the SVG_WARP_PRESETS table', () => {
 		expect(SVG_WARP_PRESETS.has('textDeflateInflateDeflate')).toBeTruthy();
 	});
 
-	it('should not contain plain text presets', () => {
+	it('should not contain textNoShape', () => {
 		expect(SVG_WARP_PRESETS.has('textNoShape')).toBeFalsy();
-		expect(SVG_WARP_PRESETS.has('textPlain')).toBeFalsy();
+	});
+
+	it('should contain textPlain', () => {
+		expect(SVG_WARP_PRESETS.has('textPlain')).toBeTruthy();
 	});
 });
 
@@ -76,8 +79,8 @@ describe('shouldUseSvgWarp', () => {
 		expect(shouldUseSvgWarp('textNoShape')).toBeFalsy();
 	});
 
-	it('should return false for "textPlain"', () => {
-		expect(shouldUseSvgWarp('textPlain')).toBeFalsy();
+	it('should return true for "textPlain"', () => {
+		expect(shouldUseSvgWarp('textPlain')).toBeTruthy();
 	});
 
 	it('should return true for known SVG warp presets', () => {
@@ -121,7 +124,7 @@ describe('the WARP_PATH_GENERATORS table', () => {
 	});
 
 	it('should produce different paths for different t values', () => {
-		const gen = WARP_PATH_GENERATORS['textArchUp'];
+		const gen = WARP_PATH_GENERATORS['textWave1'];
 		const pathTop = gen(200, 100, 0);
 		const pathBottom = gen(200, 100, 1);
 		expect(pathTop).not.toBe(pathBottom);
@@ -317,13 +320,17 @@ describe('adjustment values (adj/adj2)', () => {
 		expect(baseline).not.toBe(adjusted);
 	});
 
-	it.each(['textArchUp', 'textArchUpPour', 'textCirclePour', 'textCircle'] as const)(
-		'%s: arc-style adj changes the generated path',
-		(preset) => {
-			const gen = WARP_PATH_GENERATORS[preset];
-			expect(gen(200, 100, 0.3)).not.toBe(gen(200, 100, 0.3, 5400000));
-		},
-	);
+	// Arch Up and Circle only pick a half or a tip from the start angle (the
+	// default sits on the 90..269 / 180..359 side), so they change on the other.
+	it.each([
+		['textArchUp', 16200000],
+		['textArchUpPour', 5400000],
+		['textCirclePour', 5400000],
+		['textCircle', 5400000],
+	] as const)('%s: arc-style adj changes the generated path', (preset, angle) => {
+		const gen = WARP_PATH_GENERATORS[preset];
+		expect(gen(200, 100, 0.3)).not.toBe(gen(200, 100, 0.3, angle));
+	});
 
 	it.each(['textWave1', 'textWave2'] as const)('%s: adj2 controls horizontal shift', (preset) => {
 		const gen = WARP_PATH_GENERATORS[preset];

@@ -4,6 +4,7 @@ import type { DefinedName, Workbook } from '../model';
 import { addFuturePrefixes } from '../read/formula-text';
 import { selfContainedXml } from '../read/xml-util';
 import { modernHashValues } from './password-hash';
+import { customWorkbookViewsXml } from './custom-views';
 import { XML_HEADER, attrs, escapeAttr, escapeText, inlineFragment } from './xml-out';
 
 /** CT_Workbook children kept verbatim from the source, by position in the schema sequence. */
@@ -41,6 +42,17 @@ function absoluteRange(
 ): string {
 	const cell = (row: number, col: number) => `$${columnLabel(col)}$${row + 1}`;
 	return `${cell(range.start.row, range.start.col)}:${cell(range.end.row, range.end.col)}`;
+}
+
+/** Whether a formula has no cached result: one written without a value, or loaded without one. */
+function hasUncachedFormula(workbook: Workbook): boolean {
+	return workbook.sheets.some((sheet) => {
+		for (const row of sheet.rows.values())
+			for (const cell of row.values())
+				if (cell.formula !== undefined && (cell.value === null || cell.value === undefined))
+					return true;
+		return false;
+	});
 }
 
 /** Defined names plus print areas lifted onto page setup at load time. */
@@ -111,8 +123,14 @@ export function workbookXml(
 			: '';
 		out += `<workbookProtection${copyAttrs(kept.get('workbookProtection'), skip)}${modern}${password} lockStructure="1"/>`;
 	}
-	const view = kept.get('bookViews') ? elements(kept.get('bookViews') as XmlElement)[0] : undefined;
-	out += `<bookViews><workbookView${copyAttrs(view, ['activeTab', 'firstSheet', 'xr2:uid'])}${activeTab ? ` activeTab="${activeTab}"` : ''}/></bookViews>`;
+	const views = kept.get('bookViews') ? elements(kept.get('bookViews') as XmlElement) : [];
+	// The first window follows the model's active sheet; further windows are kept verbatim.
+	const first = views[0];
+	const otherWindows = views
+		.slice(1)
+		.map((view) => inlineFragment(selfContainedXml(view)))
+		.join('');
+	out += `<bookViews><workbookView${copyAttrs(first, ['activeTab', 'firstSheet', 'xr2:uid'])}${activeTab ? ` activeTab="${activeTab}"` : ''}/>${otherWindows}</bookViews>`;
 	out += `<sheets>${sheets
 		.map(
 			(sheet) =>
@@ -125,7 +143,7 @@ export function workbookXml(
 		out += `<definedNames>${names
 			.map(
 				(name) =>
-					`<definedName${attrs({ name: name.name, comment: name.comment, localSheetId: name.localSheet, hidden: name.hidden || undefined })}>${escapeText(addFuturePrefixes(name.formula))}</definedName>`,
+					`<definedName${attrs({ name: name.name, comment: name.comment, localSheetId: name.localSheet, hidden: name.hidden || undefined, ...name.extra })}>${escapeText(addFuturePrefixes(name.formula))}</definedName>`,
 			)
 			.join('')}</definedNames>`;
 	const calc = kept.get('calcPr');
@@ -133,15 +151,31 @@ export function workbookXml(
 	const iterate = workbook.iterate
 		? ` iterate="1" iterateCount="${workbook.iterate.count}" iterateDelta="${workbook.iterate.delta}"`
 		: '';
+	// The source's calcPr attributes survive (calcId included, 191029 only when the source has
+	// none). fullCalcOnLoad is written only when a cached result may be stale, so Excel does not
+	// recalculate and ask to save an untouched workbook.
 	const owned = ['fullCalcOnLoad', 'calcId', 'calcMode', 'iterate', 'iterateCount', 'iterateDelta'];
-	out += `<calcPr${copyAttrs(calc, owned)} calcId="191029"${mode}${iterate} fullCalcOnLoad="1"/>`;
+	const sourceAttr = (name: string): string | undefined =>
+		calc ? Array.from(calc.attributes).find((a) => a.name === name)?.value : undefined;
+	const calcId = sourceAttr('calcId') ?? '191029';
+	const recalculate =
+		workbook.fullCalcOnLoad || workbook.valuesStale || hasUncachedFormula(workbook);
+	const sourceFull = sourceAttr('fullCalcOnLoad');
+	const fullCalc = recalculate
+		? ' fullCalcOnLoad="1"'
+		: sourceFull !== undefined
+			? ` fullCalcOnLoad="${escapeAttr(sourceFull)}"`
+			: '';
+	out += `<calcPr${copyAttrs(calc, owned)} calcId="${escapeAttr(calcId)}"${mode}${iterate}${fullCalc}/>`;
 	// The model owns oleSize; a source's own element is kept only when the model sets none.
 	const tailOf = (names: readonly string[]) =>
 		names
 			.map((name) =>
 				name === 'oleSize' && workbook.oleSize
 					? `<oleSize ref="${escapeAttr(workbook.oleSize)}"/>`
-					: raw([name]),
+					: name === 'customWorkbookViews' && workbook.customViews
+						? customWorkbookViewsXml(workbook.customViews)
+						: raw([name]),
 			)
 			.join('');
 	out +=

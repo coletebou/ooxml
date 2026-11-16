@@ -3,13 +3,16 @@
 // supplied as DrawingML fragments. Visio adds its `vt:` extensions this way.
 import { NS, buildXml, elements, parseXml, type XmlElement } from '../xml/index';
 import { drawingColorXml } from './write-color';
+import { drawingThemeFormatSchemeXml } from './format-scheme';
 import { THEME_COLOR_SLOTS, type DrawingTheme, type ThemeFontCollection } from './theme-model';
 
 export interface DrawingThemeXmlParts {
 	/** The `a:fmtScheme` element (required by the schema), as one `a:` fragment. */
-	formatScheme: string;
+	formatScheme?: string;
 	/** Children of an `a:ext` appended to `a:clrScheme`, keyed by extension URI. */
 	colorSchemeExtensions?: Readonly<Record<string, string>>;
+	/** Children of an `a:ext` appended to `a:fontScheme`, keyed by extension URI. */
+	fontSchemeExtensions?: Readonly<Record<string, string>>;
 	/** Children of an `a:ext` appended to `a:themeElements`, keyed by extension URI. */
 	themeElementsExtensions?: Readonly<Record<string, string>>;
 	/** Extra namespace prefixes the fragments use (the `a` prefix is always declared). */
@@ -28,6 +31,24 @@ function fragment(
 	return elements(wrapper.documentElement).map(
 		(node) => host.ownerDocument!.importNode(node, true) as XmlElement,
 	);
+}
+
+/**
+ * Removes the `xmlns:p` declarations an imported fragment brought along when the root already
+ * declares the same prefix with the same namespace (every colour fragment repeats `xmlns:a`).
+ */
+function dropRedundantDeclarations(root: XmlElement): void {
+	const declared = new Map<string, string>();
+	for (const attribute of Array.from(root.attributes)) {
+		if (attribute.name.startsWith('xmlns:')) declared.set(attribute.name, attribute.value);
+	}
+	const visit = (element: XmlElement) => {
+		for (const attribute of Array.from(element.attributes)) {
+			if (declared.get(attribute.name) === attribute.value) element.removeAttribute(attribute.name);
+		}
+		for (const child of elements(element)) visit(child);
+	};
+	for (const child of elements(root)) visit(child);
 }
 
 function extensionList(
@@ -73,7 +94,7 @@ function fontCollection(parent: XmlElement, name: string, fonts: ThemeFontCollec
  * A complete `a:theme` part. Every one of the twelve colour slots must be present in the model;
  * the format scheme and extensions are product data and are copied as given.
  */
-export function drawingThemeXml(theme: DrawingTheme, parts: DrawingThemeXmlParts): string {
+export function drawingThemeXml(theme: DrawingTheme, parts: DrawingThemeXmlParts = {}): string {
 	const namespaces = parts.namespaces ?? {};
 	const doc = parseXml(
 		`<a:theme xmlns:a="${NS.a}"${Object.entries(namespaces)
@@ -99,8 +120,12 @@ export function drawingThemeXml(theme: DrawingTheme, parts: DrawingThemeXmlParts
 	fonts.setAttribute('name', theme.fontScheme.name ?? theme.name ?? 'Custom');
 	fontCollection(fonts, 'majorFont', theme.fontScheme.major);
 	fontCollection(fonts, 'minorFont', theme.fontScheme.minor);
+	extensionList(fonts, parts.fontSchemeExtensions, namespaces);
 	elementsNode.appendChild(fonts);
-	const format = fragment(elementsNode, parts.formatScheme, namespaces);
+	const formatXml =
+		parts.formatScheme ?? (theme.formatScheme && drawingThemeFormatSchemeXml(theme.formatScheme));
+	if (!formatXml) throw new Error('The theme has no format scheme.');
+	const format = fragment(elementsNode, formatXml, namespaces);
 	if (
 		format.length !== 1 ||
 		format[0]!.localName !== 'fmtScheme' ||
@@ -111,5 +136,6 @@ export function drawingThemeXml(theme: DrawingTheme, parts: DrawingThemeXmlParts
 	extensionList(elementsNode, parts.themeElementsExtensions, namespaces);
 	root.appendChild(doc.createElementNS(NS.a, 'a:objectDefaults'));
 	root.appendChild(doc.createElementNS(NS.a, 'a:extraClrSchemeLst'));
+	dropRedundantDeclarations(root);
 	return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${buildXml(doc)}`;
 }

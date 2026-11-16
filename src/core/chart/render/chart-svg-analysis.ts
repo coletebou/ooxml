@@ -26,7 +26,7 @@ const DASHES: Readonly<Record<string, readonly number[]>> = {
 
 const CAP = 4;
 
-function strokeAttributes(stroke: ChartStrokeView): string {
+export function strokeAttributes(stroke: ChartStrokeView): string {
 	const pattern = stroke.dash ? DASHES[stroke.dash] : undefined;
 	const dash = pattern
 		? ` stroke-dasharray="${pattern.map((step) => n(step * stroke.width)).join(' ')}"`
@@ -110,7 +110,7 @@ function seriesAnalysis(
 	const points = plottedPoints(series, xOf);
 	const xs = points.map((p) => p.x);
 	const ys = points.map((p) => p.y);
-	trendlines(series, si, xs, ys, plane, out);
+	trendlines(series, series.sourceIndex ?? si, xs, ys, plane, out);
 	for (const bars of series.errorBars ?? []) {
 		// A category chart has no x error: its x axis is not a value axis.
 		if (categoryAxis && bars.direction === 'x') continue;

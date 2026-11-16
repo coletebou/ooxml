@@ -34,6 +34,8 @@ export type ChartGroupKind =
 /** One chart group of the plot area (`c:barChart`, `c:pie3DChart`, `c:stockChart`...). */
 export interface ChartPlotGroup {
 	kind: ChartGroupKind;
+	/** Surface charts: `c:bandFmts` as written (band formatting is not modelled), kept verbatim. */
+	bandFormatsXml?: string;
 	/** The element's local name, e.g. `bar3DChart`. */
 	element: string;
 	is3D: boolean;
@@ -75,6 +77,14 @@ export interface ChartPlotGroup {
 	holeSize?: number;
 	/** Pie of pie / bar of pie: `pie` or `bar`. */
 	ofPieType?: string;
+	/** Pie of pie: how points move to the second plot (`auto`, `cust`, `percent`, `pos`, `val`). */
+	splitType?: string;
+	/** Pie of pie: the split threshold (`c:splitPos`). */
+	splitPosition?: number;
+	/** Pie of pie: point indexes of a custom split (`c:custSplit/c:secondPiePt`), when written. */
+	customSplit?: number[];
+	/** Pie of pie: size of the second plot, percent of the first (`c:secondPieSize`). */
+	secondPieSize?: number;
 	/** Scatter: `lineMarker`, `smoothMarker`, `marker`... */
 	scatterStyle?: string;
 	/** Radar: `standard`, `marker`, `filled`. */
@@ -136,6 +146,10 @@ export interface ChartAxis {
 	tickMarkSkip?: number;
 	noMultiLevelLabels?: boolean;
 	baseTimeUnit?: string;
+	/** Date axis: the unit of `majorUnit` (`days`, `months`, `years`). */
+	majorTimeUnit?: string;
+	/** Date axis: the unit of `minorUnit`. */
+	minorTimeUnit?: string;
 	/** Value axis: `c:dispUnits`. */
 	displayUnits?: ChartDisplayUnits;
 	spPr?: ChartShapeProperties;
@@ -181,15 +195,24 @@ export interface ChartView3D {
 
 /** A chart part (`c:chartSpace`). */
 export interface ChartSpace {
+	/** Null explicitly removes source protection; undefined leaves legacy passthrough behavior. */
+	protection?: import('./protection').ChartProtection | null;
 	date1904?: boolean;
 	language?: string;
 	roundedCorners?: boolean;
+	/**
+	 * `c:clrMapOvr` as written (the part's own theme colour mapping, CT_ColorMapping), kept for
+	 * round-trip and edited by `setChartColorMapOverride`.
+	 */
+	colorMapOverrideXml?: string;
 	/** `c:style` (1..48), read through `mc:AlternateContent` when Office wraps it. */
 	style?: number;
 	/** `c14:style` (101..148), the `mc:Choice` Office writes beside the `c:style` fallback. */
 	c14Style?: number;
 	title?: ChartTitle;
 	autoTitleDeleted?: boolean;
+	/** `c:chart/c:pivotFmts` as written (pivot chart format overrides), kept for round-trip. */
+	pivotFormatsXml?: string;
 	view3D?: ChartView3D;
 	/** 3-D chart floor and walls (`c:floor`, `c:sideWall`, `c:backWall`). */
 	floor?: ChartSurface;
@@ -220,6 +243,13 @@ export interface ChartSpace {
 	 * in document order, so extension lists keep the prefixes they were written with.
 	 */
 	namespaceDeclarations?: { prefix: string; uri: string }[];
+	/**
+	 * Not part of the XML: the picture of each picture fill's relationship id, as a URL (a `data:`
+	 * URL), so the painter can draw it. A host fills in the pictures it read from the package; a
+	 * Format pane edit adds a picture under a pending id (`chart/picture-parts`), which the host
+	 * stores as a media part and replaces with a real relationship id when it saves.
+	 */
+	pictureSources?: Record<string, string>;
 }
 
 /** What {@link parseChartSpace} returns: the model and what it did not model. */

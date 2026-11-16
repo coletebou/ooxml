@@ -136,7 +136,17 @@ function buildRenderedNode(
 		fontSize: 0,
 		textX: x + width / 2,
 		textY: y + height / 2,
-		nodeId: primary?.id,
+		// Picture roles often omit presOf: they present the current point's image, not its text.
+		nodeId: primary?.id ?? (node.shape?.blipPhldr ? node.point.source?.id : undefined),
+		picturePlaceholder: node.shape?.blipPhldr,
+		layoutRole: node.name,
+		contextNodeId: node.point.source?.id,
+		textAlign: ['l', 'ctr', 'r'].includes(node.alg.params.parTxLTRAlign ?? '')
+			? (node.alg.params.parTxLTRAlign as 'l' | 'ctr' | 'r')
+			: undefined,
+		textVerticalAnchor: ['t', 'ctr', 'b'].includes(node.alg.params.txAnchorVert ?? '')
+			? (node.alg.params.txAnchorVert as 't' | 'ctr' | 'b')
+			: undefined,
 		rotation: transform.rotation === 0 ? undefined : transform.rotation,
 		presetOverride: node.shape?.type ?? 'roundRect',
 		foldedNodeIds: foldedNodeIds.length > 0 ? foldedNodeIds : undefined,

@@ -36,6 +36,28 @@ export const COPY_IMAGE_CARD = /copy as image/iu;
  */
 export const EXPORT_DOWNLOAD_TIMEOUT_MS = 120_000;
 
+/**
+ * Seed File > Options > Advanced values before the app boots, through the `pptx-viewer-prefs`
+ * entry the Options dialog persists to (`{ options: { advanced: { <key>: value } } }`).
+ */
+export async function seedAdvancedOptions(
+	page: Page,
+	patch: Record<string, string | number | boolean>,
+): Promise<void> {
+	await page.addInitScript((values) => {
+		try {
+			const raw = localStorage.getItem('pptx-viewer-prefs');
+			const prefs: Record<string, unknown> = raw ? JSON.parse(raw) : {};
+			const options = (prefs.options as Record<string, unknown> | undefined) ?? {};
+			const advanced = (options.advanced as Record<string, unknown> | undefined) ?? {};
+			prefs.options = { ...options, advanced: { ...advanced, ...values } };
+			localStorage.setItem('pptx-viewer-prefs', JSON.stringify(prefs));
+		} catch {
+			// Private-browsing/quota edge case; the test's own assertions surface it.
+		}
+	}, patch);
+}
+
 /** The backstage dialog (shared `aria-label="File"` contract). */
 export function backstage(page: Page): Locator {
 	return page.locator('[role="dialog"][aria-label="File"]');
@@ -61,15 +83,72 @@ export function exportCard(page: Page, title: RegExp): Locator {
 	return backstage(page).getByRole('button', { name: title }).first();
 }
 
-/** Click a card and capture the download it produces. */
+/**
+ * Click a card and capture the download it produces.
+ *
+ * The click shares the download's budget: after dispatching it, Playwright runs a script in the
+ * page, which waits while a raster capture holds the main thread (the html2canvas fallback can
+ * for seconds on a loaded runner), so the default action timeout failed the click itself.
+ */
 export async function downloadViaCard(
 	page: Page,
 	title: RegExp,
 	timeoutMs: number = EXPORT_DOWNLOAD_TIMEOUT_MS,
+	pdfOptions: PdfOptionsChoice = {},
 ): Promise<Download> {
 	const downloadPromise = page.waitForEvent('download', { timeout: timeoutMs });
-	await exportCard(page, title).click();
+	await exportCard(page, title).click({ timeout: timeoutMs });
+	if (title === PDF_CARD) pdfOptionsAsked.set(page, await confirmPdfOptions(page, pdfOptions));
 	return downloadPromise;
+}
+
+/** Whether the last PDF export through {@link downloadViaCard} on a page showed the options step. */
+export const pdfOptionsAsked = new WeakMap<Page, boolean>();
+
+/** The PDF options step (Range, Include hidden slides) that File > Export > PDF opens first. */
+export function pdfOptionsDialog(page: Page): Locator {
+	return page.locator('pptx-ui-pdf-export-dialog [data-testid="pptx-pdf-export-dialog"]');
+}
+
+export interface PdfOptionsChoice {
+	range?: 'all' | 'current' | 'slides';
+	from?: number;
+	to?: number;
+	/** Toggle "Include hidden slides" to this value. */
+	includeHidden?: boolean;
+	/** Cancel instead of exporting. */
+	cancel?: boolean;
+}
+
+/**
+ * Answer the PDF options dialog when it opens (the picture export, "Save slides as pictures",
+ * has none, so a dialog that does not appear within a moment is not an error).
+ */
+export async function confirmPdfOptions(
+	page: Page,
+	choice: PdfOptionsChoice = {},
+): Promise<boolean> {
+	const host = page.locator('pptx-ui-pdf-export-dialog');
+	const shown = await host
+		.waitFor({ state: 'attached', timeout: 5_000 })
+		.then(() => true)
+		.catch(() => false);
+	if (!shown) return false;
+	if (choice.range) await host.getByTestId(`pptx-pdf-export-range-${choice.range}`).click();
+	if (choice.from !== undefined)
+		await host.getByTestId('pptx-pdf-export-from').fill(String(choice.from));
+	if (choice.to !== undefined) await host.getByTestId('pptx-pdf-export-to').fill(String(choice.to));
+	if (choice.includeHidden !== undefined) {
+		const box = host.getByTestId('pptx-pdf-export-include-hidden');
+		if (
+			(await box.evaluate((el) => (el as { checked?: boolean }).checked === true)) !==
+			choice.includeHidden
+		)
+			await box.click();
+	}
+	const footer = host.locator('office-ui-dialog-footer');
+	await footer.locator(`button[data-action="${choice.cancel ? 'cancel' : 'insert'}"]`).click();
+	return true;
 }
 
 /** Read a completed download's bytes. */
@@ -179,8 +258,14 @@ export async function watchProgress(
 			const regex = new RegExp(source, flags);
 			const w = window as unknown as Record<string, boolean>;
 			w[key] = false;
+			// Shared elements draw their text in open shadow roots (the export progress modal does).
+			const everything = (scope: ParentNode): Element[] =>
+				[...scope.querySelectorAll('*')].flatMap((element) => [
+					element,
+					...(element.shadowRoot ? everything(element.shadowRoot) : []),
+				]);
 			const matching = () =>
-				[...document.querySelectorAll('body *')].filter(
+				everything(document.body).filter(
 					(element) =>
 						element.children.length === 0 &&
 						regex.test(element.textContent ?? '') &&

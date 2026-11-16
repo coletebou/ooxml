@@ -1,7 +1,7 @@
 import { PptxHandler } from '../index';
 import type { PptxData } from '../index';
 
-import type { ExecutionContext, TableStyleSaveOptions, ToolContext, ToolResult } from './types';
+import type { ExecutionContext, ToolContext, ToolResult } from './types';
 
 const PPTX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
@@ -36,9 +36,12 @@ export async function loadPresentation(
 	return { pptxData, rawBytes };
 }
 
-/** The bytes as a standalone ArrayBuffer (a view into a pooled buffer must not leak the rest). */
+/**
+ * The bytes as a standalone ArrayBuffer (a view into a pooled buffer must not leak the rest). The copy
+ * goes through the Uint8Array constructor because `slice()` on a Node Buffer is a view, not a copy.
+ */
 export function arrayBufferOf(bytes: Uint8Array): ArrayBuffer {
-	return bytes.slice().buffer as ArrayBuffer;
+	return new Uint8Array(bytes).buffer;
 }
 
 /**
@@ -53,6 +56,9 @@ export async function saveDeckBytes(
 	await handler.load(arrayBufferOf(original));
 	return handler.save(result.pptxData.slides, {
 		headerFooter: result.pptxData.headerFooter,
+		sections: result.pptxData.sections,
+		presentationProperties: result.pptxData.presentationProperties,
+		customShows: result.pptxData.customShows,
 		// `pptxData.tableStyleMap` carries any in-memory table-style edits a tool made (e.g.
 		// `set_table_style_section`, `create_table_style`); without forwarding it here those edits
 		// were silently dropped on save even though the core save pipeline supports them.
@@ -69,12 +75,9 @@ export async function savePresentation(
 	pptxData: PptxData,
 	rawBytes: Uint8Array,
 	execCtx: ExecutionContext,
-	tableStyleSaveOptions?: TableStyleSaveOptions,
+	saveOptions?: ToolResult['saveOptions'],
 ): Promise<{ savedToDisk: boolean; routedThroughCollaboration: boolean }> {
-	const outputBytes = await saveDeckBytes(
-		{ pptxData, ...(tableStyleSaveOptions && { saveOptions: tableStyleSaveOptions }) },
-		rawBytes,
-	);
+	const outputBytes = await saveDeckBytes({ pptxData, saveOptions }, rawBytes);
 
 	// Collaboration mode: hydrate Y.Doc so peers receive the change
 	if (execCtx.collaboration) {
@@ -120,7 +123,9 @@ export async function executeToolWithContext<T>(
 	filePath: string,
 	execCtx: ExecutionContext,
 	toolFn: (ctx: ToolContext) => ToolResult<T> | Promise<ToolResult<T>>,
-): Promise<T & { savedToDisk?: boolean; routedThroughCollaboration?: boolean }> {
+): Promise<
+	T & { savedToDisk?: boolean | undefined; routedThroughCollaboration?: boolean | undefined }
+> {
 	const { pptxData, rawBytes } = await loadPresentation(filePath, execCtx);
 
 	const toolResult = await toolFn({ pptxData });
@@ -137,7 +142,7 @@ export async function executeToolWithContext<T>(
 	}
 
 	return toolResult.result as T & {
-		savedToDisk?: boolean;
-		routedThroughCollaboration?: boolean;
+		savedToDisk?: boolean | undefined;
+		routedThroughCollaboration?: boolean | undefined;
 	};
 }

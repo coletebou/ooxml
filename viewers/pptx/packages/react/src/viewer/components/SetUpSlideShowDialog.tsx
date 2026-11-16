@@ -1,3 +1,4 @@
+import { applySlideShowSettingsPatch } from 'ooxml-ui/pptx';
 import type { PptxPresentationProperties, PptxCustomShow } from 'pptx-viewer-core';
 /**
  * SetUpSlideShowDialog
@@ -6,8 +7,8 @@ import type { PptxPresentationProperties, PptxCustomShow } from 'pptx-viewer-cor
  * advance mode, loop, narration, animation, subtitles).
  */
 import React, { useState, useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
 
+import { useTranslation } from '../i18n/use-translation';
 import { DialogFooter } from './DialogFooter';
 import { ShowOptionsFieldset } from './ShowOptionsFieldset';
 import { ShowSlidesFieldset } from './ShowSlidesFieldset';
@@ -44,9 +45,13 @@ export function SetUpSlideShowDialog({
 		...properties,
 	});
 
-	const update = useCallback((patch: Partial<PptxPresentationProperties>) => {
-		setDraft((prev) => ({ ...prev, ...patch }));
-	}, []);
+	// The same rules a host-rendered dialog gets (a kiosk show loops, a range defaults to the deck).
+	const update = useCallback(
+		(patch: Partial<PptxPresentationProperties>) => {
+			setDraft((prev) => applySlideShowSettingsPatch(prev, patch, { slideCount, customShows }));
+		},
+		[slideCount, customShows],
+	);
 
 	const handleSave = useCallback(() => {
 		onSave(draft);
@@ -111,12 +116,7 @@ export function SetUpSlideShowDialog({
 										name='showType'
 										value={value}
 										checked={showType === value}
-										onChange={() =>
-											update({
-												showType: value,
-												...(value === 'kiosk' ? { loopContinuously: true } : {}),
-											})
-										}
+										onChange={() => update({ showType: value })}
 										className='accent-primary'
 									/>
 									<span>{label}</span>

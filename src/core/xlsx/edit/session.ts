@@ -5,6 +5,7 @@ import * as borders from './borders';
 import * as cellShift from './cell-shift';
 import * as values from './cell-values';
 import * as clipboard from './clipboard';
+import { copyAreas } from './clipboard-areas';
 import { pasteSelection } from './paste-selection';
 import type { EditContext, RunInfo } from './context';
 import { createCalcEngine, type CellPosition } from './deps';
@@ -26,6 +27,9 @@ import * as calcMode from './calc-mode';
 import * as dataTable from './data-table';
 import * as goalSeek from './goal-seek';
 import * as scenarios from './scenarios';
+import { mergeScenarios } from './scenario-merge';
+import * as customViews from './custom-views';
+import * as sparklineGrouping from './sparkline-grouping';
 import * as docProps from './doc-properties';
 import * as drawings from './drawings';
 import * as sparklines from './sparklines';
@@ -36,6 +40,8 @@ import { rangesIntersect } from '../address';
 import * as cellStyle from './cell-style';
 import * as cfEdits from './conditional-formats';
 import * as charts from './charts';
+import * as chartEx from './chart-ex';
+import * as smartArt from './smart-art';
 import * as tableEdits from './table-edits';
 import * as duplicates from './duplicates';
 import * as outline from './outline';
@@ -237,9 +243,11 @@ export function createEditSession(
 		setHidden: (s, axis, indices, hidden) => dimensions.setHidden(ctx, s, axis, indices, hidden),
 		merge: (s, range, mode) => merge.merge(ctx, s, range, mode),
 		unmerge: (s, range) => merge.unmerge(ctx, s, range),
-		sort: (s, range, keys, hasHeader) => sort.sortRange(ctx, s, range, keys, hasHeader),
+		sort: (s, range, keys, hasHeader, options) =>
+			sort.sortRange(ctx, s, range, keys, hasHeader, options),
 		fill: (s, source, target, mode) => fill.fillRange(ctx, s, source, target, mode),
 		copy: (s, range) => clipboard.copyRange(workbook, s, range),
+		copyAreas: (s, ranges) => copyAreas(workbook, s, ranges),
 		cut: (s, range) => ({ ...clipboard.copyRange(workbook, s, range), cut: true }),
 		paste: (s, at, payload, mode) =>
 			'start' in at
@@ -256,19 +264,27 @@ export function createEditSession(
 		setSheetState: (i, state) => sheets.setSheetState(ctx, i, state),
 		setTabColor: (i, color) => sheets.setTabColor(ctx, i, color),
 		setFreeze: (s, freeze) => view.setFreeze(ctx, s, freeze),
+		setSplit: (s, split, topLeft) => view.setSplit(ctx, s, split, topLeft),
 		setComment: (s, at, text, author) => annotations.setComment(ctx, s, at, text, author),
+		setCommentReply: (s, at, index, text) => annotations.setCommentReply(ctx, s, at, index, text),
+		setCommentResolved: (s, at, resolved) => annotations.setCommentResolved(ctx, s, at, resolved),
 		setHyperlink: (s, range, link) => annotations.setHyperlink(ctx, s, range, link),
 		addConditionalFormat: (s, cf) => annotations.addConditionalFormat(ctx, s, cf),
 		clearConditionalFormats: (s, range) => annotations.clearConditionalFormats(ctx, s, range),
 		setDataValidation: (s, dv, range) => annotations.setDataValidation(ctx, s, dv, range),
 		setAutoFilter: (s, range) => filter.setAutoFilter(ctx, s, range),
 		filterColumn: (s, col, vals) => filter.filterColumn(ctx, s, col, vals),
+		setFilterCriteria: (s, col, criteria) => filter.setColumnCriteria(ctx, s, col, criteria),
+		reapplyFilter: (s, at) => filter.reapplyFilter(ctx, s, at),
 		sortByColumn: (s, col, descending) => filter.sortByColumn(ctx, s, col, descending ?? false),
 		createTable: (s, range, hasHeader, styleName) =>
 			tables.createTable(ctx, s, range, hasHeader, styleName),
 		setSheetView: (s, patch) => view.setSheetView(ctx, s, patch),
+		setIgnoredErrors: (s, list) => view.setIgnoredErrors(ctx, s, list),
 		setDefinedName: (name) => view.setDefinedName(ctx, name),
 		deleteDefinedName: (name, localSheet) => view.deleteDefinedName(ctx, name, localSheet),
+		editPictureEffects: (s, index, patch) => drawings.editPictureEffects(ctx, s, index, patch),
+		setPictureCrop: (s, index, crop) => drawings.setPictureCrop(ctx, s, index, crop),
 		setDrawingAnchor: (s, index, anchor) => drawings.setDrawingAnchor(ctx, s, index, anchor),
 		createPivotTable: (s, destination, options) =>
 			pivots.createPivotTable(ctx, s, destination, options),
@@ -284,15 +300,25 @@ export function createEditSession(
 		insertTimeline: (s, source) => timelines.insertTimeline(ctx, s, source),
 		deleteTimeline: (name) => timelines.deleteTimeline(ctx, name),
 		deleteDrawing: (s, index) => drawings.deleteDrawing(ctx, s, index),
+		editSmartArt: (s, index, edit) => smartArt.editSmartArt(ctx, s, index, edit),
+		formatSmartArt: (s, index, change) => smartArt.formatSmartArt(ctx, s, index, change),
+		changeSmartArtLayout: (s, index, change) =>
+			smartArt.changeSmartArtLayout(ctx, s, index, change),
+		insertSmartArt: (s, insertion) => smartArt.insertSmartArt(ctx, s, insertion),
 		createSparklineGroup: (s, source, locations, patch) =>
 			sparklines.createSparklineGroup(ctx, s, source, locations, patch),
 		setSparklineGroups: (s, ranges, patch) => sparklines.setSparklineGroups(ctx, s, ranges, patch),
 		setSparklineDateRange: (s, ranges, source) =>
 			sparklines.setSparklineDateRange(ctx, s, ranges, source),
+		groupSparklines: (s, ranges) => sparklineGrouping.groupSparklines(ctx, s, ranges),
+		ungroupSparklines: (s, ranges) => sparklineGrouping.ungroupSparklines(ctx, s, ranges),
 		deleteSparklines: (s, ranges, wholeGroups) =>
 			sparklines.deleteSparklines(ctx, s, ranges, wholeGroups),
 		addChart: (s, chart) => charts.addChart(ctx, s, chart),
 		updateChart: (s, index, patch) => charts.updateChart(ctx, s, index, patch),
+		editChart: (s, index, intent) => charts.editChart(ctx, s, index, intent),
+		editChartEx: (s, index, operation) => chartEx.editChartEx(ctx, s, index, operation),
+		addChartEx: (s, chart) => chartEx.addChartEx(ctx, s, chart),
 		addImage: (s, bytes, type, anchor, name) => charts.addImage(ctx, s, bytes, type, anchor, name),
 		replaceConditionalFormat: (s, index, cf) => cfEdits.replaceConditionalFormat(ctx, s, index, cf),
 		removeConditionalFormat: (s, index) => cfEdits.removeConditionalFormat(ctx, s, index),
@@ -326,6 +352,10 @@ export function createEditSession(
 		editScenario: (s, i, draft) => scenarios.editScenario(ctx, s, i, draft),
 		deleteScenario: (s, i) => scenarios.deleteScenario(ctx, s, i),
 		showScenario: (s, i) => scenarios.showScenario(ctx, s, i),
+		mergeScenarios: (s, from) => mergeScenarios(ctx, s, from),
+		addCustomView: (draft) => customViews.addCustomView(ctx, draft),
+		showCustomView: (guid) => customViews.showCustomView(ctx, guid),
+		deleteCustomView: (guid) => customViews.deleteCustomView(ctx, guid),
 		setCalcMode: (mode) => calcMode.setCalcMode(ctx, mode),
 		setDocumentProperties: (patch) => docProps.setDocumentProperties(ctx, patch),
 		setAutoRecalc: (enabled) => calcMode.setCalcMode(ctx, enabled ? 'auto' : 'manual'),

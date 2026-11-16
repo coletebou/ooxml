@@ -1,17 +1,15 @@
 import {
 	applySlidePasteTemplates,
 	buildDeckSaveOptions,
-	buildPresentationAudienceUrl,
 	buildUserFontFaceStyles,
-	checkModifyPassword,
-	clearPresentationDeck,
 	collectAccessibilityIssues,
-	collectReferencedFontFamilies,
 	commitElementUpdateBatch,
 	createBackstagePresentation,
 	createBlankSlide,
-	createInitialPresentationSnapshot,
-	createPresentationSessionId,
+	createCloudDocumentController,
+	createEmbeddedFontsSheet,
+	createSaveProgressController,
+	createEmbeddedOutlineFontsSlot,
 	createPresenterShowGuard,
 	clearAutosaveSnapshots,
 	createSlidePackageClipboard,
@@ -19,34 +17,31 @@ import {
 	deleteAutosaveSnapshot,
 	describeFontEmbedding,
 	endAudienceDisplay,
-	fetchGoogleWebfontOutlineBytes,
 	insertSlidePaste,
 	isEditingAllowed,
 	isPanelVisible,
-	isPresentationSessionMessage,
+	loadDeckWebfontOutlines,
 	loadPresentationDeck,
 	makeSlideId,
 	mayLeaveSlideShow,
-	mergePresentationSnapshot,
 	openPptxFile,
 	parsePresentationSessionId,
-	placeAudienceWindow,
 	prepareElementForInsertion,
-	PRESENTATION_CHANNEL_NAME,
-	PRESENTATION_MESSAGE_ORIGIN,
 	pruneExpiredAutosaveSnapshots,
 	readBackstageRecentFile,
+	readOnlySessionActions,
 	readStoredViewerPrefs,
 	reflowSmartArtData,
 	resolve3DRenderingFlags,
-	resolveAudienceScreenPlacement,
+	resolveAllowExternalContent,
 	resolveAuthoredSlideRange,
 	resolveAutosaveFileKey,
+	resolveCloudDocumentView,
+	resolveFontDownloadBase,
 	resolveGoogleWebfontHref,
 	resolveImageResolutionScale,
+	resolvePdfExportSettings,
 	resolveSlideSizeSelection,
-	selectGoogleWebfontFamilies,
-	selectTrustedEmbeddedFonts,
 	saveFailureMessage,
 	shouldClearAutosaveCacheOnClose,
 	shouldCommitSmartArtNodeText,
@@ -54,15 +49,23 @@ import {
 	shouldDiscardAutosaveOnSuccessfulSave,
 	slideSpaceElement,
 	stepPresenterZoom,
-	storePresentationDeck,
 	subtitleSettingsFromOptions,
-	swapPresentationWindows,
 	THEME_CATALOG,
 	withSaveFailureToast,
 	writeStoredViewerPrefs,
+	confirmExternalHyperlinkDialog,
+	createPresenterSessionController,
+	installSvgIdScope,
+	createRibbonDisplayController,
 } from 'ooxml-ui/pptx';
 import type {
+	PptxSaveAcknowledgement,
+	PptxSaveSnapshot,
+	CloudDocumentHostValues,
+	CloudOpenedFile,
 	DocumentStorage,
+	EmbeddedFontsSheet,
+	ReadOnlySessionActions,
 	SlidePackageClipboard,
 	SlidePasteRequest,
 	ElementUpdate,
@@ -71,6 +74,8 @@ import type {
 	Rendering3DFlags,
 	ResolvedCustomization,
 	RibbonAddInTab,
+	RibbonDisplayController,
+	RibbonDisplayMode,
 	RunProgramNotice,
 	ThemeCatalogEntry,
 	ViewerMode,
@@ -99,6 +104,7 @@ import type {
 
 import type { AiChatMount, AiFocusController } from './ai';
 import { createAiFocusController, createVanillaAiBridge, mountAiChat } from './ai';
+import { aiAssistants } from './ai-assistant-registry';
 import type { ChromeHost, ChromeLifecycle } from './chrome-lifecycle';
 import { buildMountChromeDeps, mountChrome, unmountChrome } from './chrome-lifecycle';
 import { ViewerCustomizationHost } from './customization-host';
@@ -106,6 +112,7 @@ import type { ViewerCustomizationLifecycle } from './customization-lifecycle';
 import { createViewerCustomizationLifecycle } from './customization-lifecycle';
 import type { EditorController } from './editor';
 import { createEditorController } from './editor';
+import type { HostDialogRequest } from './editor/editor-controller';
 import type { ExportLifecycle } from './export-lifecycle';
 import { createExportLifecycle } from './export-lifecycle';
 import { glyphOutlineFontCache } from './glyph-outline-cache';
@@ -133,6 +140,7 @@ import { createSessionControllers } from './session-controllers';
 import type { Store, ViewerState } from './state';
 import { createInitialViewerState, createStore } from './state';
 import { createStateSync } from './state-sync';
+import { isReadOnlyLocked, readOnlySessionStore } from './state/read-only-session';
 import { ensureViewerStyles } from './styles';
 import { toggleMasterView } from './template-view-control';
 import { applyThemeVars } from './theme-apply';
@@ -162,6 +170,7 @@ import type { PasteOptionsToolbarHandle } from './ui/paste-options-toolbar';
 import { mountPasteOptionsToolbar } from './ui/paste-options-toolbar';
 import type { RegionSet, RegionSupport } from './ui/region-set';
 import { createRegionSet } from './ui/region-set';
+import type { BackstageCloudFiles } from './ui/ribbon/ribbon-types';
 import { openSignatureStrippedDialog } from './ui/signature-stripped-dialog';
 import { openVersionHistoryPanel } from './ui/version-history-panel';
 import type { ViewerControls } from './viewer-controls';
@@ -191,6 +200,14 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	private readonly availableLocales: readonly LocaleCatalogEntry[];
 	private currentThemeKey: string;
 	private currentLocale: string;
+	/**
+	 * The file opened from a File > Open cloud place: its storage, name, recovery key and edit
+	 * right apply until another document is loaded (shared `render/cloud-open`).
+	 */
+	private readonly cloudDocument = createCloudDocumentController();
+	/** The progress of a save to the open document's storage, shown by the status bar. */
+	private readonly saveProgress = createSaveProgressController();
+	private unsubscribeSaveProgress: (() => void) | undefined;
 	lifecycle!: ChromeLifecycle;
 	editor!: EditorController;
 	protected readonly exporter: ExportLifecycle;
@@ -200,11 +217,39 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	private readonly sessions: SessionControllers;
 	private readonly controls: ViewerControls;
 	private destroyed = false;
-	private presenterChannel: BroadcastChannel | null = null;
-	private audienceWindow: Window | null = null;
-	private presenterSessionId = '';
-	private presenterSequence = 0;
-	private presenterSnapshot = createInitialPresentationSnapshot();
+	private releaseSvgIdScope: (() => void) | undefined;
+	/**
+	 * The presenter and audience windows: the shared presenter session
+	 * controller (window, deck hand-over, channel protocol, Swap Displays) that
+	 * every binding uses. It owns the snapshot both windows share.
+	 */
+	private readonly presenterSession = createPresenterSessionController({
+		// The audience gets the deck as edited, not as loaded.
+		getSource: () => {
+			const handler = this.loading.getHandler();
+			return handler ? handler.save(this.store.get().slides) : null;
+		},
+		onAudienceSnapshot: (snapshot) => {
+			// Same target as updatePresenterSnapshot: the chrome root, so the
+			// effects stay visible when this audience tab goes fullscreen.
+			renderAudienceEffects(this.lifecycle.chrome.root, snapshot);
+		},
+		onAudienceSlide: (index) => this.goToSlide(index),
+		onAudienceExit: () => {
+			// Close this tab; when the browser refuses, raise the black
+			// end-of-slide-show screen. Leaving presentation mode would drop the
+			// room into the editor.
+			if (endAudienceDisplay(window)) {
+				this.store.set({ endOfShow: true });
+			}
+		},
+		// The console's `audience` control flips back to "Open Audience Window".
+		onAudienceClosed: () => this.presenterView?.syncSnapshot(),
+	});
+
+	private get presenterSnapshot(): PresentationSnapshot {
+		return this.presenterSession.getSnapshot().snapshot;
+	}
 	private presenterView: PresenterViewHandle | null = null;
 	private presenterCaptions: PresenterCaptions | null = null;
 	/**
@@ -214,13 +259,22 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	 */
 	private readonly presenterShowGuard = createPresenterShowGuard();
 	private userFontsStyle: HTMLStyleElement | null = null;
+	/** The deck's embedded fonts as `@font-face` rules (shared with the other bindings). */
+	private embeddedFontsSheet: EmbeddedFontsSheet | null = null;
 	private signatureWarningAcknowledged = false;
 	private detachSignatureWarning: (() => void) | null = null;
+	/** Stops repainting when the outline cache fills in deferred glyph outlines. */
+	private detachOutlineFonts: (() => void) | null = null;
 	/** Tags in-flight webfont resolutions; only the newest deck may apply its result. */
 	private webfontsToken = 0;
+	private detachFontDownloads: (() => void) | null = null;
+	/** The current deck's fonts in the module-wide glyph-outline cache; released on destroy. */
+	private readonly outlineFonts = createEmbeddedOutlineFontsSlot(glyphOutlineFontCache);
 	/** Host/user intent is retained while collaboration temporarily disables editing. */
 	private requestedEditable = false;
 	private requestedReadOnly = false;
+	/** The read-only banner's actions over the store (the shared `read-only-session` model). */
+	private readonly readOnlyActions: ReadOnlySessionActions;
 	private annotations!: PresentationAnnotationsHost;
 	private parityWorkflows!: ParityWorkflows;
 	private aiChat: AiChatMount | null = null;
@@ -237,6 +291,8 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	private optionsController!: ViewerOptionsController;
 	/** The host's ribbon tabs (`ribbonAddIns` option, `setRibbonAddIns`). */
 	private ribbonAddIns: readonly RibbonAddInTab[];
+	/** Ribbon Display Options; owned here so the state survives a chrome rebuild. */
+	readonly ribbonDisplay: RibbonDisplayController;
 	/** The host `customization` option + the imperative API's live edits. */
 	protected readonly customization: ViewerCustomizationLifecycle;
 	/** Region context + subscription for host-replaced regions (built on first use). */
@@ -245,13 +301,28 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	private dialogRegions: RegionSet | null = null;
 	private chromeRegions: RegionSet | null = null;
 
+	/**
+	 * Offered every dialog the editor would open (hyperlink, equation, find) before it opens its
+	 * own; true means the host took it. The full viewer keeps its dialogs; the building blocks
+	 * override this to raise host requests.
+	 */
+	protected requestHostDialog(_request: HostDialogRequest): boolean {
+		return false;
+	}
+
 	constructor(container: HTMLElement, options: PptxViewerOptions = {}) {
 		super();
 		this.container = container;
 		this.doc = container.ownerDocument;
+		// One id scheme for every painted copy of a slide: see `installSvgIdScope`.
+		this.releaseSvgIdScope = installSvgIdScope(this.doc);
 		this.options = options;
 		this.customization = createViewerCustomizationLifecycle(options);
 		this.ribbonAddIns = options.ribbonAddIns ?? [];
+		this.ribbonDisplay = createRibbonDisplayController({
+			initial: options.ribbonDisplay,
+			onChange: (mode) => this.options.onRibbonDisplayChange?.(mode),
+		});
 		// `readOnly` is AND-ed in: it can only take editing away.
 		this.requestedEditable = options.editable ?? false;
 		this.requestedReadOnly = Boolean(options.readOnly);
@@ -271,11 +342,19 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			this.availableLocales,
 		);
 		this.t = createTranslator(this.currentLocale, options.messages);
+		this.unsubscribeSaveProgress = this.saveProgress.subscribe(() =>
+			this.lifecycle?.chrome.statusBar?.setSaveProgress(this.saveProgress.getSnapshot()),
+		);
 		this.registry = options.registry ?? createDefaultRegistry();
 		this.store = createStore(createInitialViewerState(options.inspectorInitiallyOpen));
+		this.readOnlyActions = readOnlySessionActions(readOnlySessionStore(this.store), {
+			recommendation: () => this.store.get().readOnlyRecommendation,
+			modifyVerifier: () => this.store.get().modifyVerifier,
+		});
 		this.loading = createLoadingController({
 			options,
 			store: this.store,
+			doc: this.doc,
 			getTranslator: () => this.t,
 			getEditor: () => this.editor,
 			// Late-joiner bootstrap protection: bracket the load commit so an
@@ -297,9 +376,13 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			},
 			// Trust Center > "Allow external content"; the options controller is
 			// constructed after this one, hence the lazy read (see its own comment).
+			// The host `allowExternalContent` option wins when set.
 			getAllowExternalContent: () =>
-				this.optionsController?.getOptions().trust.allowExternalContent ??
-				DEFAULT_VIEWER_OPTIONS.trust.allowExternalContent,
+				resolveAllowExternalContent(
+					this.options.allowExternalContent,
+					this.optionsController?.getOptions() ?? DEFAULT_VIEWER_OPTIONS,
+				),
+			getGoogleFontsBase: () => this.googleFontsBase(),
 			shouldOpenProtectedView: () => this.optionsController?.isProtectedView() ?? false,
 			setEditableForLoad: (editable) => this.setEditable(editable),
 		});
@@ -317,6 +400,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			getAreaChart3D: () => this.effective3DFlags().areaChart3D,
 			getPieChart3D: () => this.effective3DFlags().pieChart3D,
 			// Read lazily: the options controller is constructed further down.
+			getElementRenderErrorHandler: () => this.options.onElementRenderError,
 			getPixelateMosaicAnimation: () =>
 				this.optionsController?.getOptions().advanced.pixelateMosaicAnimation ?? false,
 			onHandoutSlidesPerPageChange: (count) => this.editor?.setHandoutSlidesPerPage(count),
@@ -426,6 +510,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		}
 		this.lifecycle = mountChrome(buildMountChromeDeps(this));
 		this.lifecycle.chrome.ribbon?.setRibbonAddIns(this.ribbonAddIns);
+		this.lifecycle.chrome.ribbon?.syncRibbonDisplay();
 		this.editor = createEditorController({
 			doc: this.doc,
 			store: this.store,
@@ -433,13 +518,15 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			getTranslator: () => this.t,
 			getDialogRegions: () => this.getDialogRegions(),
 			getScale: () => this.renderer.effectiveScale(),
-			getStorage: () => this.options.storage,
+			getStorage: () => this.documentView().storage,
+			discardRecoveryOnHostSave: () => this.discardRecoveryAfterHostSave(),
 			getHandler: () => this.loading.getHandler(),
-			setHandler: (handler) => this.loading.setHandler(handler),
+			setHandler: (handler, keepPrevious) => this.loading.setHandler(handler, keepPrevious),
 			getUserName: () =>
 				options.authorName || this.optionsController?.getOptions().general.userName,
-			transformCommittedText: (text) =>
-				this.optionsController?.transformCommittedText(text) ?? text,
+			getListConversionScope: () => this.options.listConversionScope,
+			transformCommittedText: (text, previous) =>
+				this.optionsController?.transformCommittedText(text, previous) ?? text,
 			onChange: () => {
 				options.onChange?.();
 				this.emitContentChange();
@@ -452,6 +539,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			flushInlineTextInput: () => this.sessions.flushCollaborationLivePatch(),
 			getKeyboardCustomization: () => this.customization.getResolved().keyboard,
 			getCustomization: () => this.customization.getResolved(),
+			requestHostDialog: (request) => this.requestHostDialog(request),
 		});
 		this.editor.attachChrome();
 		this.rulers = createRulerController({
@@ -477,6 +565,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		this.exporter = createExportLifecycle({
 			doc: this.doc,
 			container: this.container,
+			getModalHost: () => this.lifecycle.chrome.root,
 			store: this.store,
 			registry: this.registry,
 			getTranslator: () => this.t,
@@ -490,7 +579,13 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 				resolveImageResolutionScale(this.optionsController.getOptions()),
 			getIncludeHiddenSlides: () => this.optionsController.getOptions().advanced.printHiddenSlides,
 			getPrintHighQuality: () => this.optionsController.getOptions().advanced.printHighQuality,
-			fileName: options.fileName,
+			getPdfExportSettings: () => resolvePdfExportSettings(this.optionsController.getOptions()),
+			getFileName: () => this.documentView().fileName,
+			onPdfExportReport: (result) => this.options.onPdfExportReport?.(result),
+			notify: (toast) =>
+				this.store.set({
+					compatToasts: [toast, ...this.store.get().compatToasts.filter((t) => t.id !== toast.id)],
+				}),
 		});
 		// File > Options controller: owns the persisted options store and turns
 		// option values into behavior. Created before the parity workflows (which
@@ -511,6 +606,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 				setAutosaveIntervalMs: (ms) => this.sessions?.setAutosaveIntervalMs(ms),
 				setHistoryDepth: (depth) => this.editor?.setHistoryDepth(depth),
 				setRibbonHiddenTabs: (tabIds) => this.lifecycle?.chrome.ribbon?.setHiddenOptionTabs(tabIds),
+				setRibbonAutoCollapse: (enabled) => this.ribbonDisplay.setAutoCollapse(enabled),
 				refreshQuickAccess: () => {
 					this.lifecycle?.chrome.titleBar?.refreshQuickAccess();
 					this.lifecycle?.chrome.setQuickAccessPosition(this.getQuickAccessOptions().position);
@@ -537,7 +633,10 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 							slides: state.slides,
 							templateElementsBySlideId: state.templateElementsBySlideId,
 							editable: state.editable,
-							allowExternalImages: this.optionsController.getOptions().trust.allowExternalContent,
+							allowExternalImages: resolveAllowExternalContent(
+								this.options.allowExternalContent,
+								this.optionsController.getOptions(),
+							),
 						}
 					: null;
 			},
@@ -564,6 +663,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			store: this.store,
 			editor: this.editor,
 			optionsStore: this.optionsController.optionsStore,
+			allowExternalContent: this.options.allowExternalContent,
 			clearOptionsCache: () => this.clearOptionsCache(),
 			registerCustomFont: (family) => {
 				const current = this.store.get().customFontFamilies;
@@ -646,8 +746,8 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			}),
 		);
 		this.store.subscribe((state, previous) => {
-			if (this.presenterSessionId) {
-				this.syncAudience(state.currentSlide);
+			if (this.presenterSession.getSnapshot().role === 'presenter') {
+				this.presenterSession.updateSnapshot({ slideIndex: state.currentSlide });
 			}
 			this.annotations.sync(this.presenterSnapshot);
 			if (previous.presenting && !state.presenting) {
@@ -675,6 +775,9 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 				);
 			}
 		});
+		this.detachOutlineFonts = glyphOutlineFontCache.subscribe(() => {
+			this.store.set({ outlineFontsTick: this.store.get().outlineFontsTick + 1 });
+		});
 		// Fetch Google-served webfonts for referenced families that are neither
 		// installed nor embedded (Microsoft 365 "cloud fonts" have no browser
 		// equivalent); re-evaluated only when the inputs actually change, since
@@ -687,25 +790,22 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			}
 			// Register this deck's embedded fonts' real outlines (see
 			// glyph-outline-cache.ts) for WordArt envelope glyph-outline
-			// warping. Synchronous and idempotent, before the async webfont
-			// work below, so an embedded font is outline-warpable in the very
-			// first repaint this state change causes.
-			glyphOutlineFontCache.registerEmbeddedFonts(state.embeddedFonts);
-			const token = ++this.webfontsToken;
-			void resolveGoogleWebfontHref(state.slides, state.embeddedFonts).then((href) => {
-				if (token !== this.webfontsToken) {
-					return null;
-				}
-				syncGoogleWebfontsLink(this.doc, href);
-				return href;
-			});
-			this.syncGlyphOutlineWebfonts(state.slides, state.embeddedFonts, token);
+			// warping. Synchronous, before the async webfont work below, so an
+			// embedded font is outline-warpable as soon as the font parser,
+			// loaded on the first envelope glyph that needs it, is ready (the
+			// cache subscription above repaints then). A new list releases the
+			// previous deck's fonts.
+			this.outlineFonts.set(state.embeddedFonts);
+			this.embeddedFontsSheet ??= createEmbeddedFontsSheet(this.doc, 'pptx-vanilla-embedded-fonts');
+			this.embeddedFontsSheet.set(state.embeddedFonts);
+			this.syncWebfonts(state.slides, state.embeddedFonts);
 		});
 		this.sessions = createSessionControllers({
 			doc: this.doc,
 			store: this.store,
 			options,
 			getHandler: () => this.loading.getHandler(),
+			getHistory: () => this.editor?.history,
 			// Session-level save options (view properties, table styles, tags, deck
 			// properties, ...), built the same way as `editor.save`, so an owner's
 			// write-back file no longer drops every session-level edit outside
@@ -745,7 +845,16 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			// exactly as `openRecentFile` does, except it is the SAME document the
 			// user was already editing (not a new one), so Protected View does not
 			// apply to it.
-			loadFile: (bytes) => this.loadFile(bytes, { skipProtectedView: true }),
+			loadFile: (bytes) => this.loadDocument(bytes, { skipProtectedView: true }),
+			// A file opened from a cloud place recovers to its own storage and key.
+			getDocument: () => {
+				const view = this.documentView();
+				return {
+					storage: view.storage,
+					filePath: this.autosaveFilePath(),
+					fileName: view.fileName,
+				};
+			},
 			// Options > General > "Initials": explicit override for the Share
 			// dialog's local-user avatar-circle fallback (see `getUserInitials`
 			// in `collaboration-active-session.ts`).
@@ -765,6 +874,15 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		// persisted File > Options values (undo depth, ribbon visibility, root
 		// classes, ScreenTips, etc.) for the first time.
 		this.optionsController.applyAll();
+		// Trust Center > "Download fonts" applies to the open deck at once: off
+		// removes the managed webfont `<link>`, on adds it back.
+		this.detachFontDownloads = this.optionsController.optionsStore.subscribeSelector(
+			(o) => o.trust.allowFontDownloads,
+			() => {
+				const state = this.store.get();
+				this.syncWebfonts(state.slides, state.embeddedFonts);
+			},
+		);
 		// File > Options > Save > "Automatically delete files older than N days":
 		// a one-time sweep on mount is enough since new snapshots only ever land
 		// with a fresh timestamp; no periodic timer is needed to keep it honest.
@@ -787,6 +905,52 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	 * remount. No-op (and never touches the `ai` SDK) when `ai` is absent.
 	 */
 	/**
+	 * The CSS2 base the webfont fallback requests, or `null` when font
+	 * downloads are off: the host `googleFonts` option when set, otherwise
+	 * Trust Center > "Download fonts" (read live, so a load and a later
+	 * toggle both see the current value).
+	 */
+	private googleFontsBase(): string | null {
+		return resolveFontDownloadBase(
+			this.options.googleFonts,
+			this.optionsController?.getOptions() ?? DEFAULT_VIEWER_OPTIONS,
+		);
+	}
+
+	/**
+	 * Resolve the managed webfont `<link>` (removed when downloads are off)
+	 * and the glyph outlines for a deck. Each run is tagged, so a superseded
+	 * run's late result never applies.
+	 */
+	/** Resolve the open deck's webfonts again (after the host `googleFonts` policy changed). */
+	protected refreshWebfonts(): void {
+		const state = this.store.get();
+		this.syncWebfonts(state.slides, state.embeddedFonts);
+	}
+
+	/** Whether the collaboration session (its role or readiness) currently blocks editing. */
+	protected isCollaborationReadOnly(): boolean {
+		return this.sessions?.isCollaborationReadOnly() ?? false;
+	}
+
+	private syncWebfonts(
+		slides: readonly PptxSlide[],
+		embeddedFonts: readonly PptxEmbeddedFont[],
+	): void {
+		const token = ++this.webfontsToken;
+		void resolveGoogleWebfontHref(slides, embeddedFonts, undefined, this.googleFontsBase()).then(
+			(href) => {
+				if (token !== this.webfontsToken) {
+					return null;
+				}
+				syncGoogleWebfontsLink(this.doc, href);
+				return href;
+			},
+		);
+		this.syncGlyphOutlineWebfonts(slides, embeddedFonts, token);
+	}
+
+	/**
 	 * Best-effort glyph-outline bytes for catalogue webfonts. A WordArt
 	 * envelope glyph (inflate/deflate/can) in a referenced (not embedded)
 	 * family only gets true outline warping once the ACTUAL font file's bytes
@@ -805,44 +969,14 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		embeddedFonts: readonly PptxEmbeddedFont[],
 		token: number,
 	): void {
-		const referenced = collectReferencedFontFamilies(slides);
-		const candidates = selectGoogleWebfontFamilies(
-			referenced,
-			selectTrustedEmbeddedFonts(embeddedFonts).map((font) => font.name),
-		);
-		if (candidates.length === 0) {
-			return;
-		}
-		void resolveGoogleWebfontHref(slides, embeddedFonts).then(async (href) => {
-			if (token !== this.webfontsToken || !href) {
-				return;
-			}
-			const variants: Array<{ bold: boolean; italic: boolean }> = [
-				{ bold: false, italic: false },
-				{ bold: true, italic: false },
-			];
-			let registeredAny = false;
-			for (const family of candidates) {
-				for (const variant of variants) {
-					if (token !== this.webfontsToken) {
-						return;
-					}
-					const bytes = await fetchGoogleWebfontOutlineBytes(
-						href,
-						family,
-						variant.bold,
-						variant.italic,
-						fetch,
-					);
-					if (
-						bytes &&
-						glyphOutlineFontCache.registerFontBytes(family, variant.bold, variant.italic, bytes)
-					) {
-						registeredAny = true;
-					}
-				}
-			}
-			if (registeredAny && token === this.webfontsToken) {
+		void loadDeckWebfontOutlines({
+			slides,
+			embeddedFonts,
+			googleFontsBase: this.googleFontsBase(),
+			cache: glyphOutlineFontCache,
+			isCancelled: () => token !== this.webfontsToken,
+		}).then((registered) => {
+			if (registered && token === this.webfontsToken) {
 				this.store.set({ outlineFontsTick: this.store.get().outlineFontsTick + 1 });
 			}
 			return undefined;
@@ -886,9 +1020,11 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	}
 
 	private setupAiChat(): void {
-		const config = this.options.ai;
+		// A handle from `pptx-vanilla-viewer/ai` brings its config and panel loader; any other
+		// value is a plain config for the viewer's own lazy panel, as before.
+		const assistant = aiAssistants.resolve(this.options.ai);
 		this.aiChat?.destroy();
-		if (!config || !this.customization.isAiEnabled()) {
+		if (!this.options.ai || !assistant || !this.customization.isAiEnabled()) {
 			this.aiChat = null;
 			this.aiFocus = null;
 			return;
@@ -919,7 +1055,8 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			chrome: this.lifecycle.chrome,
 			t: this.t,
 			bridge,
-			config,
+			config: assistant.config,
+			loadPanel: assistant.panel,
 			store: this.store,
 			controller,
 			goToSlide: (index) => this.controls.goToSlide(index),
@@ -941,12 +1078,75 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		this.renderer.renderAll();
 	}
 
+	/**
+	 * Load another document (the host's, a device file or a recent one): a file opened from a
+	 * cloud place no longer applies.
+	 */
 	async loadFile(
+		file: Blob | ArrayBuffer | Uint8Array,
+		options?: { skipProtectedView?: boolean },
+	): Promise<void> {
+		this.clearCloudFile();
+		await this.loadDocument(file, options);
+	}
+
+	/** The load path itself; a recovery or version restore of the SAME document keeps its origin. */
+	private async loadDocument(
 		file: Blob | ArrayBuffer | Uint8Array,
 		options?: { skipProtectedView?: boolean },
 	): Promise<void> {
 		this.signatureWarningAcknowledged = false;
 		await this.loading.load(file, 'user', options);
+	}
+
+	/**
+	 * File > Open > a cloud place: load the bytes like any open, then save, recover and gate
+	 * editing through the file's own storage and edit right.
+	 */
+	async openCloudFile(file: CloudOpenedFile): Promise<void> {
+		this.cloudDocument.open(file);
+		this.applyCloudDocument();
+		await this.loadDocument(file.bytes);
+	}
+
+	/** Another document replaces the cloud file: the host's storage, name and edit right return. */
+	private clearCloudFile(): void {
+		if (this.cloudDocument.getSnapshot().file) {
+			this.cloudDocument.clear();
+			this.applyCloudDocument();
+		}
+	}
+
+	/** Push the document's name and edit right to the chrome after a cloud open or clear. */
+	private applyCloudDocument(): void {
+		this.lifecycle?.chrome.titleBar?.setFileName(this.documentView().fileName);
+		this.applyEditable(this.effectiveEditable());
+	}
+
+	/** The storage, edit right, name and recovery key of the open document (host's or cloud file's). */
+	private documentView(): CloudDocumentHostValues {
+		const view = resolveCloudDocumentView(this.cloudDocument.getSnapshot().file, {
+			storage: this.options.storage,
+			canEdit: true,
+			fileName: this.options.fileName,
+			filePath: this.options.filePath ?? this.options.autosaveFilePath,
+		});
+		// Saves through it report their steps (upload, merge) to the status bar.
+		return view.storage ? { ...view, storage: this.saveProgress.wrap(view.storage) } : view;
+	}
+
+	/** The open document's name, for the title bar (chrome rebuilds read it again). */
+	getFileName(): string | undefined {
+		return this.documentView().fileName;
+	}
+
+	/** The host's `fileProviders` as File > Open places (empty: the Open page has none). */
+	getCloudFiles(): BackstageCloudFiles {
+		return {
+			providers: this.options.fileProviders ?? [],
+			locale: this.currentLocale,
+			open: (file) => void this.openCloudFile(file),
+		};
 	}
 
 	/**
@@ -976,10 +1176,12 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	}
 
 	createPresentation(templateId: string): void {
+		this.clearCloudFile();
 		this.editor.commitSlides(createBackstagePresentation(templateId), 0);
 	}
 
 	async loadUrl(url: string): Promise<void> {
+		this.clearCloudFile();
 		this.signatureWarningAcknowledged = false;
 		await this.loading.load(url);
 	}
@@ -1040,6 +1242,13 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	getActiveSlideIndex = (): number => this.getCurrentSlide();
 	setActiveSlideIndex = (index: number): void => this.goToSlide(index);
 	isDirty = (): boolean => this.store.get().dirty;
+	/** The revision of the document as it is now; changes after every edit. */
+	getSaveRevision = (): number => this.editor.getSaveRevision();
+	/** Serialise for a host that persists the deck itself; the document stays dirty. */
+	getSaveSnapshot = (): Promise<PptxSaveSnapshot> => this.editor.getSaveSnapshot();
+	/** The host persisted `revision`: the document is clean only if it is still current. */
+	acknowledgeSave = (revision: number): PptxSaveAcknowledgement =>
+		this.editor.acknowledgeSave(revision);
 	getSlides = (): readonly PptxSlide[] => this.store.get().slides;
 	getSlide = (index: number): PptxSlide | undefined => this.store.get().slides[index];
 	getActiveSlide = (): PptxSlide | undefined => this.getSlide(this.getCurrentSlide());
@@ -1057,10 +1266,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			getTarget: () => {
 				const state = this.store.get();
 				return {
-					canEdit:
-						state.editable &&
-						!state.protectedView &&
-						!(state.readOnlyRecommendation?.defaultReadOnly && !state.readOnlyBannerDismissed),
+					canEdit: this.canMutate(),
 					mode: this.getMode(),
 					loaded: !state.loading && !state.error,
 					editTemplateMode: state.editTemplateMode,
@@ -1073,15 +1279,20 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 			commitSlides: (next, label) => this.editor.commitElementUpdates(next, label),
 		});
 	};
-	updateElement = (id: string, updates: Partial<PptxElement>): void =>
-		this.editor.applyElementPatch(id, updates);
+	/** The effective edit right: host, cloud file, Protected View and a read-only lock together. */
+	private canMutate(): boolean {
+		const state = this.store.get();
+		return state.editable && !state.protectedView && !isReadOnlyLocked(state);
+	}
+	updateElement = (id: string, updates: Partial<PptxElement>): void => {
+		if (this.canMutate()) {
+			this.editor.applyElementPatch(id, updates);
+		}
+	};
 	addElement = (element: PptxElement): string | undefined => {
 		const state = this.store.get();
 		const prepared = prepareElementForInsertion(element, {
-			canEdit:
-				state.editable &&
-				!state.protectedView &&
-				!(state.readOnlyRecommendation?.defaultReadOnly && !state.readOnlyBannerDismissed),
+			canEdit: this.canMutate(),
 			mode: this.getMode(),
 			hasActiveSlide: !state.loading && !state.error && Boolean(state.slides[state.currentSlide]),
 			editTemplateMode: state.editTemplateMode,
@@ -1094,10 +1305,16 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		return prepared.id;
 	};
 	deleteElements = (ids: string[]): void => {
+		if (!this.canMutate()) {
+			return;
+		}
 		this.editor.selectElements(ids);
 		this.editor.deleteSelected();
 	};
 	duplicateElement = (id: string): string | undefined => {
+		if (!this.canMutate()) {
+			return undefined;
+		}
 		this.editor.selectElements([id]);
 		return this.editor.duplicateSelected() ?? undefined;
 	};
@@ -1105,12 +1322,19 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	selectElements = (ids: string[]): void => this.editor.selectElements(ids);
 	clearSelection = (): void => this.editor.selectElements([]);
 	addSlide = (afterIndex = this.store.get().slides.length - 1): void => {
+		// Refused read-only, except the first slide of an empty deck (host-side deck creation).
+		if (!this.canMutate() && this.store.get().slides.length > 0) {
+			return;
+		}
 		const next = [...this.store.get().slides];
 		const index = Math.min(Math.max(afterIndex + 1, 0), next.length);
 		next.splice(index, 0, createBlankSlide(index + 1, makeSlideId));
 		this.editor.commitSlides(this.renumber(next), index);
 	};
 	deleteSlides = (indexes: number[]): void => {
+		if (!this.canMutate()) {
+			return;
+		}
 		const remove = new Set(indexes);
 		const next = this.store.get().slides.filter((_, index) => !remove.has(index));
 		if (next.length > 0) {
@@ -1128,6 +1352,9 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		});
 	};
 	duplicateSlides = (indexes: number[]): void => {
+		if (!this.canMutate()) {
+			return;
+		}
 		const selected = new Set(indexes);
 		const next = this.store
 			.get()
@@ -1139,6 +1366,9 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		this.editor.commitSlides(this.renumber(next));
 	};
 	moveSlide = (fromIndex: number, toIndex: number): void => {
+		if (!this.canMutate()) {
+			return;
+		}
 		const next = [...this.store.get().slides];
 		if (!next[fromIndex] || toIndex < 0 || toIndex >= next.length || fromIndex === toIndex) {
 			return;
@@ -1148,6 +1378,9 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		this.editor.commitSlides(this.renumber(next), toIndex);
 	};
 	toggleHideSlides = (indexes: number[]): void => {
+		if (!this.canMutate()) {
+			return;
+		}
 		const selected = new Set(indexes);
 		this.editor.commitSlides(
 			this.store
@@ -1362,10 +1595,10 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	openVersionHistory(): void {
 		openVersionHistoryPanel(this.doc, this.lifecycle.chrome.root, this.t, {
 			filePath: this.autosaveFilePath(),
-			storage: this.options.storage,
+			storage: this.documentView().storage,
 			// A prior local AutoRecover snapshot of the SAME document, not a new
 			// file being opened, so Protected View does not apply.
-			onRestore: (bytes) => this.loadFile(bytes, { skipProtectedView: true }),
+			onRestore: (bytes) => this.loadDocument(bytes, { skipProtectedView: true }),
 		});
 	}
 
@@ -1413,63 +1646,17 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		if (this.store.get().presenting) {
 			this.presenterShowGuard.expectAudienceBounce();
 		}
-		const popup = window.open(
-			'about:blank',
-			'pptx-viewer-audience',
-			'popup=yes,width=1280,height=720',
-		);
-		if (!popup) {
+		if (!this.presenterSession.openAudience()) {
 			// A blocked popup causes no bounce, so a latch left armed here would
 			// eat the presenter's next Escape.
 			this.presenterShowGuard.disarm();
 			return;
 		}
-		this.audienceWindow = popup;
-		this.presenterSessionId = createPresentationSessionId();
 		this.presenterView?.syncSnapshot();
-		const sessionId = this.presenterSessionId;
-		const url = buildPresentationAudienceUrl(window.location.href, sessionId);
-		void resolveAudienceScreenPlacement(window).then((placement) => {
-			if (placement && this.audienceWindow === popup && !popup.closed) {
-				placeAudienceWindow(popup, placement);
-			}
-			return undefined;
-		});
-		const handler = this.loading.getHandler();
-		if (!handler) {
-			this.closeAudienceWindow();
-			return;
-		}
-		void handler
-			.save(this.store.get().slides)
-			.then((bytes) => storePresentationDeck(sessionId, bytes))
-			.then(() => popup.location.replace(url))
-			.catch(() => this.closeAudienceWindow());
-	}
-
-	private getPresenterChannel(): BroadcastChannel | null {
-		try {
-			this.presenterChannel ??= new BroadcastChannel(PRESENTATION_CHANNEL_NAME);
-			return this.presenterChannel;
-		} catch {
-			return null;
-		}
 	}
 
 	private isAudienceWindowOpen(): boolean {
-		return Boolean(this.audienceWindow && !this.audienceWindow.closed);
-	}
-
-	private syncAudience(slideIndex = this.getCurrentSlide()): void {
-		if (!this.presenterSessionId) {
-			return;
-		}
-		this.getPresenterChannel()?.postMessage({
-			origin: PRESENTATION_MESSAGE_ORIGIN,
-			type: 'presenter-state',
-			sessionId: this.presenterSessionId,
-			snapshot: { ...this.presenterSnapshot, slideIndex, sequence: ++this.presenterSequence },
-		});
+		return this.presenterSession.getSnapshot().audienceOpen;
 	}
 
 	/** Current presenter snapshot (pointer tool, blackout, ink, captions). */
@@ -1478,13 +1665,12 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	}
 
 	updatePresenterSnapshot(patch: Partial<PresentationSnapshot>): void {
-		this.presenterSnapshot = mergePresentationSnapshot(this.presenterSnapshot, patch);
+		this.presenterSession.updateSnapshot(patch);
 		// Painted into the CHROME ROOT (the element the Fullscreen API holds and
 		// the `.pptxv` positioning context), not the host container: a blackout
 		// sheet mounted beside the fullscreen element is never drawn during a
 		// real fullscreen show.
 		renderAudienceEffects(this.lifecycle.chrome.root, this.presenterSnapshot);
-		this.syncAudience(this.presenterSnapshot.slideIndex);
 		this.annotations.sync(this.presenterSnapshot);
 		this.syncPresentationToolbar();
 		// The console reads the snapshot for its pressed states and its zoom, and
@@ -1564,9 +1750,12 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		};
 	}
 
-	/** Discard the show's ink strokes (E, and the show toolbar's Clear button). */
+	/**
+	 * Erase All Ink on Slide (E, and the show toolbar's Erase button): the slide on stage only,
+	 * as in every binding. Leaving the show still offers to keep the other slides' ink.
+	 */
 	clearPresentationAnnotations(): void {
-		this.annotations.clear();
+		this.annotations.clearSlide();
 	}
 
 	/**
@@ -1591,7 +1780,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		this.lifecycle.chrome.presentationToolbar.update({
 			tool: this.presenterSnapshot.pointer?.tool ?? 'none',
 			blackout: this.presenterSnapshot.blackout,
-			hasAnnotations: (this.presenterSnapshot.inkStrokes?.length ?? 0) > 0,
+			inkSlides: (this.presenterSnapshot.inkStrokes ?? []).map((stroke) => stroke.slideIndex),
 			presenterViewActive: this.presenterView !== null,
 		});
 	}
@@ -1655,11 +1844,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	 * control is disabled in that state.
 	 */
 	private swapPresenterDisplays(): void {
-		const audience = this.audienceWindow;
-		if (!audience || audience.closed) {
-			return;
-		}
-		void swapPresentationWindows(window, audience);
+		void this.presenterSession.swapDisplays();
 	}
 
 	/**
@@ -1672,50 +1857,11 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	}
 
 	private connectAudienceRole(): void {
+		this.presenterSession.connect();
 		const audienceSession = parsePresentationSessionId(window.location.hash);
-		const channel = this.getPresenterChannel();
-		if (!channel) {
-			return;
-		}
-		channel.addEventListener('message', (event: MessageEvent) => {
-			const message = event.data;
-			if (!isPresentationSessionMessage(message)) {
-				return;
-			}
-			if (audienceSession && message.sessionId === audienceSession) {
-				if (message.type === 'presenter-state') {
-					this.presenterSnapshot = message.snapshot;
-					// Same target as updatePresenterSnapshot: the chrome root, so the
-					// effects stay visible when this audience tab goes fullscreen.
-					renderAudienceEffects(this.lifecycle.chrome.root, message.snapshot);
-					this.goToSlide(message.snapshot.slideIndex);
-				}
-				if (message.type === 'presenter-slide-change') {
-					this.goToSlide(message.slideIndex);
-				}
-				if (message.type === 'presenter-exit') {
-					// Close this tab; when the browser refuses, raise the black
-					// end-of-slide-show screen. Leaving presentation mode would drop
-					// the room into the editor.
-					if (endAudienceDisplay(window)) {
-						this.store.set({ endOfShow: true });
-					}
-				}
-			} else if (
-				message.type === 'audience-ready' &&
-				message.sessionId === this.presenterSessionId
-			) {
-				this.syncAudience();
-			}
-		});
 		if (!audienceSession) {
 			return;
 		}
-		channel.postMessage({
-			origin: PRESENTATION_MESSAGE_ORIGIN,
-			type: 'audience-ready',
-			sessionId: audienceSession,
-		});
 		if (this.options.source === undefined) {
 			void loadPresentationDeck(audienceSession).then(async (bytes) => {
 				if (!bytes) {
@@ -1731,22 +1877,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	}
 
 	private closeAudienceWindow(): void {
-		const sessionId = this.presenterSessionId;
-		if (sessionId) {
-			this.getPresenterChannel()?.postMessage({
-				origin: PRESENTATION_MESSAGE_ORIGIN,
-				type: 'presenter-exit',
-				sessionId,
-			});
-			void clearPresentationDeck(sessionId);
-		}
-		try {
-			this.audienceWindow?.close();
-		} catch {
-			/* ignore */
-		}
-		this.audienceWindow = null;
-		this.presenterSessionId = '';
+		this.presenterSession.closeAudience();
 		// The console outlives the audience display: they are independent
 		// surfaces, and repainting is only needed so the `audience` control
 		// flips back to "Open Audience Window".
@@ -1776,6 +1907,17 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		}
 	}
 
+	/**
+	 * Show or hide the toolbar (the `showToolbar` option) on a live viewer. Only
+	 * the chrome is rebuilt, as for a locale switch: the deck, the selection's
+	 * slide, unsaved edits and the undo history stay as they are.
+	 */
+	setShowToolbar(show: boolean): void {
+		if (this.customization.setShowToolbar(show)) {
+			this.rebuildChrome();
+		}
+	}
+
 	setEditable(editable: boolean): void {
 		this.requestedEditable = editable;
 		this.applyEditable(this.effectiveEditable());
@@ -1790,14 +1932,18 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	/**
 	 * The edit state the viewer actually runs in: what the host asked for (the
 	 * `editable` option and `readOnly` flag, `setEditable`), AND-ed with a
-	 * collaboration read-only role and the `capabilities.edit` customisation.
+	 * collaboration read-only role, the `capabilities.edit` customisation and
+	 * the deck's read-only recommendation until "Edit anyway" lifts it.
 	 */
 	private effectiveEditable(): boolean {
 		return (
 			this.requestedEditable &&
 			!this.requestedReadOnly &&
 			!this.sessions?.isCollaborationReadOnly() &&
-			isEditingAllowed(this.customization.getResolved())
+			isEditingAllowed(this.customization.getResolved()) &&
+			!isReadOnlyLocked(this.store.get()) &&
+			// A file the cloud service leaves read-only stays read-only.
+			this.documentView().canEdit
 		);
 	}
 
@@ -1815,7 +1961,9 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	/**
 	 * The read-only recommendation banner's "Edit anyway" button
 	 * (`p:modifyVerifier` / "Mark as Final"): lifts the lock and hides the
-	 * banner, unlike plain dismiss which only hides it.
+	 * banner, unlike plain dismiss which only hides it. The lock is ANDed into
+	 * {@link effectiveEditable}, so lifting it never turns on editing the host
+	 * did not ask for.
 	 *
 	 * When the recommendation's `requiresPassword` is set (a `modifyVerifier`
 	 * with a hash this viewer can check), this opens the inline password
@@ -1824,49 +1972,34 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	 * entered, and a wrong one leaves it locked.
 	 */
 	editAnywayFromReadOnlyRecommendation(): void {
-		if (this.store.get().readOnlyRecommendation?.requiresPassword) {
-			this.store.set({ readOnlyPasswordPromptOpen: true, readOnlyPasswordError: null });
-			return;
-		}
-		this.store.set({ readOnlyBannerDismissed: true });
-		this.setEditable(true);
+		this.readOnlyActions.editAnyway();
+		this.applyEditable(this.effectiveEditable());
 	}
 
 	/** The read-only recommendation banner's plain close button: hides the banner, keeps the lock. */
 	dismissReadOnlyBanner(): void {
-		this.store.set({ readOnlyBannerDismissed: true });
+		this.readOnlyActions.dismiss();
 	}
 
 	/** The read-only recommendation banner's password form "Cancel": closes the prompt without unlocking. */
 	cancelReadOnlyPasswordPrompt(): void {
-		this.store.set({ readOnlyPasswordPromptOpen: false, readOnlyPasswordError: null });
+		this.readOnlyActions.cancelPassword();
 	}
 
 	/**
 	 * Check `password` against the deck's `modifyVerifier`
-	 * (`checkModifyPassword`, `pptx-viewer-shared`); unlocks and closes the
-	 * prompt on a match, otherwise leaves the deck locked and reports why.
+	 * (`checkModifyPassword`, `ooxml-ui/pptx`); unlocks and closes the prompt
+	 * on a match, otherwise leaves the deck locked and reports why. A result
+	 * that arrives after a new load or Cancel is dropped.
 	 */
 	submitReadOnlyPassword(password: string): void {
 		void this.checkReadOnlyPassword(password);
 	}
 
 	private async checkReadOnlyPassword(password: string): Promise<void> {
-		this.store.set({ readOnlyCheckingPassword: true });
-		try {
-			const result = await checkModifyPassword(this.store.get().modifyVerifier, password);
-			if (result.ok) {
-				this.store.set({
-					readOnlyBannerDismissed: true,
-					readOnlyPasswordPromptOpen: false,
-					readOnlyPasswordError: null,
-				});
-				this.setEditable(true);
-			} else {
-				this.store.set({ readOnlyPasswordError: result.reason });
-			}
-		} finally {
-			this.store.set({ readOnlyCheckingPassword: false });
+		await this.readOnlyActions.submitPassword(password);
+		if (!this.destroyed) {
+			this.applyEditable(this.effectiveEditable());
 		}
 	}
 
@@ -1905,11 +2038,14 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	 * run-level text hyperlink click and an on-slide Action Setting's
 	 * "Hyperlink to a URL" clear this same gate before the URL opens.
 	 */
-	confirmExternalHyperlink(url: string): boolean {
+	confirmExternalHyperlink(url: string): boolean | Promise<boolean> {
 		if (!shouldConfirmExternalHyperlink(this.optionsController.getOptions(), url)) {
 			return true;
 		}
-		return window.confirm(`${this.t('pptx.options.trust.confirmHyperlinks')}\n\n${url}`);
+		return confirmExternalHyperlinkDialog(url, {
+			t: (key) => this.t(key),
+			host: this.container,
+		});
 	}
 
 	setEditTemplateMode(enabled: boolean): void {
@@ -2077,15 +2213,27 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	 * the crash-recovery snapshot for this file is stale (the real file already
 	 * has the work), so it is discarded unless the user asked to keep it.
 	 */
+	private discardRecoveryAfterHostSave(): void {
+		if (shouldDiscardAutosaveOnSuccessfulSave(this.optionsController.getOptions())) {
+			void deleteAutosaveSnapshot(this.autosaveFilePath(), this.documentView().storage).catch(
+				() => {
+					// The host save succeeded; recovery cleanup is best-effort here.
+				},
+			);
+		}
+	}
+
 	private afterSuccessfulSave(format: PptxSaveFormat): void {
 		this.optionsController.notifyActionSuccess();
 		if (
 			format === 'pptx' &&
 			shouldDiscardAutosaveOnSuccessfulSave(this.optionsController.getOptions())
 		) {
-			void deleteAutosaveSnapshot(this.autosaveFilePath(), this.options.storage).catch(() => {
-				// Saving succeeded; recovery cleanup is best-effort here.
-			});
+			void deleteAutosaveSnapshot(this.autosaveFilePath(), this.documentView().storage).catch(
+				() => {
+					// Saving succeeded; recovery cleanup is best-effort here.
+				},
+			);
 		}
 	}
 
@@ -2105,10 +2253,8 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 
 	/** IndexedDB key for this deck's AutoRecover snapshot. */
 	private autosaveFilePath(): string {
-		return resolveAutosaveFileKey(
-			this.options.filePath ?? this.options.autosaveFilePath,
-			this.options.fileName,
-		);
+		const view = this.documentView();
+		return resolveAutosaveFileKey(view.filePath, view.fileName);
 	}
 
 	/** File > Options > Save > "cache retention": a one-time sweep on mount. */
@@ -2187,10 +2333,12 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	}
 
 	destroy(): void {
+		this.releaseSvgIdScope?.();
 		if (this.destroyed) {
 			return;
 		}
 		this.destroyed = true;
+		this.unsubscribeSaveProgress?.();
 		this.slidePackageClipboard.dispose();
 		this.customization.destroy();
 		this.dialogRegions?.destroy();
@@ -2212,17 +2360,21 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		this.rulers = null;
 		this.parityWorkflows.closeReadingView();
 		this.parityWorkflows.closeOutlineView();
-		this.closeAudienceWindow();
-		this.presenterChannel?.close();
+		this.presenterSession.dispose();
 		this.sessions.destroy();
 		this.optionsController.dispose();
 		this.detachSignatureWarning?.();
+		this.detachOutlineFonts?.();
+		this.detachFontDownloads?.();
 		this.loading.invalidate();
 		this.editor.destroy();
 		this.annotations.dispose();
 		this.exporter.destroy();
 		this.userFontsStyle?.remove();
+		this.embeddedFontsSheet?.dispose();
+		this.embeddedFontsSheet = null;
 		this.webfontsToken++;
+		this.outlineFonts.release();
 		removeGoogleWebfontsLink(this.doc);
 		unmountChrome(this.lifecycle, () => this.editor?.detachChrome());
 		this.chromeRegions?.destroy();
@@ -2258,6 +2410,19 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 	/** The host options with the UI customisation folded in (read on every chrome mount). */
 	getChromeOptions(): PptxViewerOptions {
 		return this.customization.getChromeOptions();
+	}
+
+	/**
+	 * Set PowerPoint's Ribbon Display Options from the host: `always` (the docked ribbon), `tabs`
+	 * (the tab row; a tab shows its commands over the slide) or `fullScreen` (no title bar or
+	 * ribbon until the strip at the top is pressed). `onRibbonDisplayChange` is not called.
+	 */
+	setRibbonDisplay(mode: RibbonDisplayMode): void {
+		this.ribbonDisplay.setMode(mode);
+	}
+
+	getRibbonDisplay(): RibbonDisplayMode {
+		return this.ribbonDisplay.getSnapshot().mode;
 	}
 
 	/** Replace the host's ribbon tabs (the `ribbonAddIns` option); an empty list removes them. */
@@ -2311,6 +2476,7 @@ export class PptxViewer extends ViewerCustomizationHost implements PptxViewerIns
 		unmountChrome(this.lifecycle, () => this.editor?.detachChrome(), { keepRegions: true });
 		this.lifecycle = mountChrome(buildMountChromeDeps(this));
 		this.lifecycle.chrome.ribbon?.setRibbonAddIns(this.ribbonAddIns);
+		this.lifecycle.chrome.ribbon?.syncRibbonDisplay();
 		// Re-apply option-driven chrome behavior (ribbon visibility, ScreenTips,
 		// quick access) against the freshly mounted chrome.
 		this.optionsController.applyAll();

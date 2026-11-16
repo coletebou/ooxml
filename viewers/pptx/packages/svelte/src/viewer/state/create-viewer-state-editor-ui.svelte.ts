@@ -1,5 +1,8 @@
+import type { GoogleFontsOption, InlineTextDraftSink } from 'ooxml-ui/pptx';
 import {
 	computeGridSpacingPx,
+	resolveAllowExternalContent,
+	resolveEffectiveGoogleFonts,
 	resolveAuthoredCustomShowId,
 	seedRecentColors,
 	viewerPreferencesFromViewProperties,
@@ -13,6 +16,7 @@ import { useCanvasImagePaste } from '../editor/canvas-image-paste.svelte';
 import { EditorController } from '../editor/editor-controller.svelte';
 import { FindReplaceState } from '../editor/editor-find-replace.svelte';
 import type { EditorState } from '../editor/editor-state.svelte';
+import { useInlineRichTextPaste } from '../editor/inline-rich-paste.svelte';
 import type { PresentationController } from '../presentation';
 import { ChromeUiState } from './chrome-ui.svelte';
 import { CompatToastsState } from './compat-toasts.svelte';
@@ -32,6 +36,8 @@ export interface EditorUiClusterDeps {
 	editor: EditorState;
 	viewer: ViewerState;
 	collab: CollaborationController;
+	/** The autosave engine, which receives in-progress inline text. */
+	autosave?: InlineTextDraftSink;
 	options: CreateViewerStateOptions;
 	/** Effective canvas scale (main stage), or master-view scale when applicable. */
 	getScale(): number;
@@ -67,6 +73,8 @@ export interface EditorUiCluster {
 	compatToasts: CompatToastsState;
 	chromeUi: ChromeUiState;
 	optionsState: ViewerOptionsState;
+	/** Host `googleFonts` first, else Trust Center > "Download fonts"; reactive. */
+	getGoogleFonts(): GoogleFontsOption | undefined;
 	controller: EditorController;
 	findReplace: FindReplaceState;
 	stageContextMenu: StageContextMenu | null;
@@ -89,7 +97,16 @@ export interface EditorUiCluster {
 export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 	const { loader, editor, viewer, collab, options } = deps;
 
-	const parityUi = new ViewerParityUiState(editor);
+	const optionsState = new ViewerOptionsState();
+	provideViewerOptions(optionsState);
+	// Derived, so the webfont effects re-run only when the policy itself changes.
+	const effectiveGoogleFonts = $derived(
+		resolveEffectiveGoogleFonts(options.getGoogleFonts?.(), optionsState.options),
+	);
+	const getGoogleFonts = (): GoogleFontsOption | undefined => effectiveGoogleFonts;
+	const parityUi = new ViewerParityUiState(editor, () =>
+		resolveAllowExternalContent(options.getAllowExternalContent?.(), optionsState.options),
+	);
 	// Wave 4 #2: the deck's own `p:modifyVerifier` / "Mark as Final" read-only
 	// recommendation. `locked` is ANDed into the editable gate below, mirroring
 	// (not duplicating) the existing Protected View mechanism.
@@ -104,8 +121,6 @@ export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 	// Full PowerPoint File > Options model (persisted); provided to chrome
 	// components (quick access, ribbon) and the Options dialog. The wiring below
 	// keeps it in sync with the six legacy preference toggles both ways.
-	const optionsState = new ViewerOptionsState();
-	provideViewerOptions(optionsState);
 	const chromeUi = new ChromeUiState(options.inspectorInitiallyOpen);
 	provideZoomNavigation({
 		// A zoom tile is only clickable while presenting (`ZoomView.svelte`'s
@@ -150,6 +165,7 @@ export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 		getSnapToShape: () => parityUi.snapToShape,
 		getGuides: () => parityUi.guides,
 		getLivePatcher: () => collab.livePatcher,
+		getAutosave: () => deps.autosave,
 		getActiveSlide: () => editor.slides[viewer.current],
 		// The stage gesture preventDefault()s the click, so the keymap's focus has
 		// to be put back on the (focusable) viewer root after every canvas press.
@@ -166,10 +182,10 @@ export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 		},
 		// `findReplace` is constructed just below; the closure only runs on a real
 		// key press, long after this function has returned.
-		toggleFind: () => findReplace.toggle(),
-		// Ctrl+H: PowerPoint's Find & Replace. The panel has no distinct
-		// find-only/replace mode, so this is the same toggle as Ctrl+F.
-		toggleFindReplace: () => findReplace.toggle(),
+		toggleFind: () => findReplace.toggle('find'),
+		// Ctrl+H: PowerPoint's Find & Replace. One bar shows both rows; the shared
+		// controller switches an open bar's mode rather than closing it.
+		toggleFindReplace: () => findReplace.toggle('replace'),
 		newSlide: () => deps.newSlide?.(),
 	});
 
@@ -201,12 +217,19 @@ export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 			editor.insertElement(element);
 		},
 	});
+	// oxlint-disable-next-line react-hooks/rules-of-hooks
+	useInlineRichTextPaste(() => options.getRootEl() ?? null, {
+		editingElement: () => controller.editingElement,
+		closeInline: () => controller.closeInline(),
+		enterInlineEdit: (id) => controller.enterInlineEdit(id),
+		applyElementPatch: (id, patch) => editor.applyElementPatch(id, patch),
+	});
 
 	const findReplace = new FindReplaceState({
 		getSlides: () => editor.slides,
 		commitSlides: (next) => editor.commitSlides(next),
 		onNavigate: (slideIndex, elementId) => {
-			viewer.goTo(slideIndex);
+			viewer.goToWithSelection(slideIndex);
 			editor.select(elementId);
 		},
 	});
@@ -231,6 +254,7 @@ export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 		commitPendingText: () =>
 			options.getRootEl()?.querySelector<HTMLElement>('[data-inline-editor]')?.blur(),
 		getInitialSlide: options.getInitialSlide,
+		getGoogleFonts,
 		getTranslator: () => options.t,
 		loader,
 		viewer,
@@ -312,6 +336,7 @@ export function useEditorUiCluster(deps: EditorUiClusterDeps): EditorUiCluster {
 		compatToasts,
 		chromeUi,
 		optionsState,
+		getGoogleFonts,
 		controller,
 		findReplace,
 		get stageContextMenu() {

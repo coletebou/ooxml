@@ -12,7 +12,31 @@ export interface VisioPageThemeEdit {
 	pageId: string;
 	theme?: VisioBuiltInThemeId | 'none';
 	variant?: number;
+	/**
+	 * Design > Variants > More > Colors: take only the colour scheme (ColorSchemeIndex, the
+	 * variant selectors and the theme-colour caches) from a built-in theme, leaving the page's
+	 * effect, connector and font scheme selections as they are. Excludes `theme`.
+	 */
+	colors?: VisioBuiltInThemeId;
+	/** More > Fonts: only FontSchemeIndex, the theme fonts of themed text. */
+	fonts?: VisioBuiltInThemeId;
+	/** More > Effects: only EffectSchemeIndex, the theme effect styles of quick-styled shapes. */
+	effects?: VisioBuiltInThemeId;
+	/** More > Connectors: only ConnectorSchemeIndex, the theme line styles of connectors. */
+	connectors?: VisioBuiltInThemeId;
+	/**
+	 * Design > Variants > More > Embellishment: the page's EmbellishmentIndex cell. Only the cell is
+	 * written; Visio's decorative embellishment geometry is not drawn by this viewer. Alone in its edit.
+	 */
+	embellishment?: VisioEmbellishment;
 }
+
+/** The scheme parts that can be taken from a built-in theme on their own. */
+export const PAGE_THEME_PARTS = ['colors', 'fonts', 'effects', 'connectors'] as const;
+
+/** The Embellishment levels and the EmbellishmentIndex value each one writes. */
+export const VISIO_EMBELLISHMENT_INDEX = { low: 1, medium: 2, high: 3 } as const;
+export type VisioEmbellishment = keyof typeof VISIO_EMBELLISHMENT_INDEX;
 
 export function snapshotPageTheme(edit: VisioPageThemeEdit): VisioPageThemeEdit {
 	if (typeof edit.pageId !== 'string' || !edit.pageId || edit.pageId.length > 256)
@@ -23,13 +47,29 @@ export function snapshotPageTheme(edit: VisioPageThemeEdit): VisioPageThemeEdit 
 			fail('INVALID_EDIT', 'Unknown built-in theme.');
 		result.theme = edit.theme;
 	}
+	const given = PAGE_THEME_PARTS.filter((part) => edit[part] !== undefined);
+	if (edit.embellishment !== undefined) {
+		if (given.length || edit.theme !== undefined || edit.variant !== undefined)
+			fail('INVALID_EDIT', 'An embellishment is applied on its own.');
+		if (!Object.keys(VISIO_EMBELLISHMENT_INDEX).includes(edit.embellishment))
+			fail('INVALID_EDIT', 'Unknown embellishment.');
+		result.embellishment = edit.embellishment;
+		return result;
+	}
+	if (given.length > 1 || (given.length && edit.theme !== undefined))
+		fail('INVALID_EDIT', 'A theme or one scheme part can be applied at a time.');
+	for (const part of given) {
+		const value = edit[part];
+		if (!isVisioBuiltInThemeId(value)) fail('INVALID_EDIT', 'Unknown built-in theme.');
+		result[part] = value;
+	}
 	if (edit.variant !== undefined) {
 		if (!Number.isInteger(edit.variant) || edit.variant < 0 || edit.variant > 3)
 			fail('INVALID_EDIT', 'Theme variants are numbered 0 to 3.');
 		if (edit.theme === 'none') fail('INVALID_EDIT', 'No Theme has no variants.');
 		result.variant = edit.variant;
 	}
-	if (result.theme === undefined && result.variant === undefined)
-		fail('INVALID_EDIT', 'A page theme edit needs a theme or a variant.');
+	if (result.theme === undefined && !given.length && result.variant === undefined)
+		fail('INVALID_EDIT', 'A page theme edit needs a theme, a scheme part or a variant.');
 	return result;
 }

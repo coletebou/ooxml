@@ -1,13 +1,12 @@
 import {
-	mediaTrimEndAbsoluteMs,
-	mediaTrimEndMsFromAbsoluteMs,
+	MEDIA_TRIM_SECTIONS,
 	mediaTrimResetPatch,
 	mediaTrimResetState,
+	MEDIA_PLAYBACK_SECTIONS,
 } from 'ooxml-ui/pptx';
 
 import type { Translator } from '../../i18n';
-import { makeNumberField } from '../controls';
-import { makeCheckboxField, makeRangeField, makeSelectField } from './controls-extra';
+import { createInspectorFields } from './inspector-fields';
 import { createMediaTrimTimeline } from './media-trim-timeline';
 import type { InspectorHandlers, InspectorState } from './types';
 
@@ -18,12 +17,8 @@ export function createMediaSection(
 	handlers: InspectorHandlers,
 ) {
 	const el = section(t('pptx.media.title'));
-	// G17/trim-end: `trimEndMs` is `p14:trim/@end`'s distance from the clip's
-	// TAIL (COM-verified, see shared `media-trim-range.ts`), not an absolute
-	// stop time. The "Trim end" number field below used to bind that distance
-	// directly, so typing "the last 5s" of a 20s clip meant computing
-	// 20000-5000 by hand; it now shows/accepts the absolute end position, like
-	// React's `MediaInspector` and Vue's `MediaPropertiesPanel.vue`.
+	// The trim fields (`MEDIA_TRIM_SECTIONS`) show the absolute end and are
+	// bounded by the clip's live duration, read off the preview when it loads.
 	let currentMedia: InspectorState['media'];
 	const resolveDurationMs = (): number => {
 		const liveSeconds = Number.isFinite(preview.duration) ? preview.duration : 0;
@@ -43,58 +38,33 @@ export function createMediaSection(
 			},
 		});
 		paintTimeline();
+		paintTrim();
 	});
 	const poster = doc.createElement('img');
 	poster.className = 'pptxv-media-poster';
 	poster.alt = t('pptx.media.posterFrame');
-	const autoPlay = makeCheckboxField(doc, {
-		label: t('pptx.media.autoPlay'),
-		onChange: (enabled) => handlers.setMediaProperties({ autoPlay: enabled }),
+	// Volume, start, play across slides, loop, full screen, hide while not
+	// playing, fades and speed: the shared descriptors.
+	const playback = createInspectorFields(doc, t, {
+		sections: MEDIA_PLAYBACK_SECTIONS,
+		onPatch: (patch) =>
+			handlers.setMediaProperties(patch as Parameters<InspectorHandlers['setMediaProperties']>[0]),
 	});
-	const loop = makeCheckboxField(doc, {
-		label: t('pptx.media.loop'),
-		onChange: (enabled) => handlers.setMediaProperties({ loop: enabled }),
+	// Start and end times, bounded by the clip's live duration: the shared descriptors.
+	const trim = createInspectorFields(doc, t, {
+		sections: MEDIA_TRIM_SECTIONS,
+		onPatch: (patch) =>
+			handlers.setMediaProperties(patch as Parameters<InspectorHandlers['setMediaProperties']>[0]),
 	});
-	const across = makeCheckboxField(doc, {
-		label: t('pptx.media.playAcrossSlides'),
-		onChange: (playAcrossSlides) => handlers.setMediaProperties({ playAcrossSlides }),
-	});
-	const fullScreen = makeCheckboxField(doc, {
-		label: t('pptx.media.fullScreen'),
-		onChange: (enabled) => handlers.setMediaProperties({ fullScreen: enabled }),
-	});
-	const hide = makeCheckboxField(doc, {
-		label: t('pptx.media.hideWhenNotPlaying'),
-		onChange: (hideWhenNotPlaying) => handlers.setMediaProperties({ hideWhenNotPlaying }),
-	});
-	const volume = makeRangeField(doc, {
-		label: t('pptx.media.volume'),
-		min: 0,
-		max: 100,
-		formatValue: (value) => `${Math.round(value)}%`,
-		onCommit: (value) => handlers.setMediaProperties({ volume: value / 100 }),
-	});
-	const speed = makeSelectField(doc, {
-		label: t('pptx.media.playbackSpeed'),
-		options: [0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => ({
-			value: String(value),
-			label: `${value}x`,
-		})),
-		onChange: (value) => handlers.setMediaProperties({ playbackSpeed: Number(value) }),
-	});
-	const trimStart = makeNumberField(doc, {
-		label: t('pptx.media.trimStart'),
-		min: 0,
-		onCommit: (trimStartMs) => handlers.setMediaProperties({ trimStartMs }),
-	});
-	const trimEnd = makeNumberField(doc, {
-		label: t('pptx.media.trimEnd'),
-		min: 0,
-		onCommit: (absoluteEndMs) =>
-			handlers.setMediaProperties({
-				trimEndMs: mediaTrimEndMsFromAbsoluteMs(resolveDurationMs(), absoluteEndMs),
-			}),
-	});
+	const paintTrim = (): void => {
+		if (currentMedia) {
+			trim.update(
+				{ media: currentMedia, durationMs: resolveDurationMs() },
+				!canEditMedia,
+				currentMedia.id,
+			);
+		}
+	};
 	const resetTrim = doc.createElement('button');
 	resetTrim.type = 'button';
 	resetTrim.className = 'pptxv-media-reset-trim';
@@ -136,7 +106,6 @@ export function createMediaSection(
 	);
 	const metadata = doc.createElement('output');
 	metadata.className = 'pptxv-media-metadata';
-	const toggles = [autoPlay, loop, across, fullScreen, hide];
 
 	// Scrub bar with draggable trim handles + bookmark ticks (React's
 	// `TrimTimeline`). It reads the live `<video>` for duration/playhead, so it
@@ -146,8 +115,6 @@ export function createMediaSection(
 	const timeline = createMediaTrimTimeline(doc, {
 		onTrimChange: (trimStartMs, trimEndMs) => {
 			handlers.setMediaProperties({ trimStartMs, trimEndMs });
-			trimStart.setValue(trimStartMs);
-			trimEnd.setValue(mediaTrimEndAbsoluteMs(resolveDurationMs(), trimEndMs));
 		},
 		onSeek: (seconds) => {
 			if (Number.isFinite(preview.duration)) {
@@ -171,11 +138,8 @@ export function createMediaSection(
 		preview,
 		poster,
 		timeline.el,
-		...toggles.map(({ el: node }) => node),
-		volume.el,
-		speed.el,
-		trimStart.el,
-		trimEnd.el,
+		playback.el,
+		trim.el,
 		resetTrim,
 		bookmarks.label,
 		captions.label,
@@ -197,15 +161,10 @@ export function createMediaSection(
 			preview.poster = state.mediaPosterUrl ?? '';
 			poster.src = state.mediaPosterUrl ?? '';
 			poster.hidden = !state.mediaPosterUrl;
-			autoPlay.setValue(media?.autoPlay ?? false);
-			loop.setValue(media?.loop ?? false);
-			across.setValue(media?.playAcrossSlides ?? false);
-			fullScreen.setValue(media?.fullScreen ?? false);
-			hide.setValue(media?.hideWhenNotPlaying ?? false);
-			volume.setValue((media?.volume ?? 1) * 100);
-			speed.setValue(String(media?.playbackSpeed ?? 1));
-			trimStart.setValue(media?.trimStartMs ?? 0);
-			trimEnd.setValue(mediaTrimEndAbsoluteMs(resolveDurationMs(), media?.trimEndMs ?? 0));
+			if (media) {
+				playback.update(media, !state.isMedia, media.id);
+			}
+			paintTrim();
 			bookmarks.control.value = (media?.bookmarks ?? [])
 				.map(({ time, label }) => `${time} | ${label}`)
 				.join('\n');
@@ -215,9 +174,6 @@ export function createMediaSection(
 			metadata.textContent = media?.metadata
 				? `${media.metadata.duration ?? 0}s, ${media.metadata.videoWidth ?? 0} x ${media.metadata.videoHeight ?? 0}, ${media.metadata.codecInfo ?? media.mediaMimeType ?? ''}`
 				: (media?.mediaMimeType ?? '');
-			for (const control of [...toggles, volume, speed, trimStart, trimEnd]) {
-				control.setDisabled(!state.isMedia);
-			}
 			resetTrim.hidden = !state.isMedia || !mediaTrimResetState(media, true).visible;
 			bookmarks.control.disabled = !state.isMedia;
 			captions.control.disabled = !state.isMedia;

@@ -1,7 +1,13 @@
 // Find and Replace: Find / Replace tabs, options, Find All results, Find Next, Replace and
 // Replace All, all through the core session's find API.
 import { type FindMatch, type FindQuery, formatAddress, getCell } from 'ooxml-core/xlsx';
-import type { EditorContext } from 'ooxml-core/xlsx/ui';
+import {
+	orderFrom,
+	replaceAllValidated,
+	replaceOneValidated,
+	type EditorContext,
+	type RefusedReplacement,
+} from 'ooxml-core/xlsx/ui';
 import { checkbox, el, field, row, select, tabs, textInput } from './fields';
 import { button, showDialog } from './frame';
 import { selectOn } from './go-to';
@@ -10,23 +16,7 @@ export interface FindReplaceProps {
 	tab?: 'find' | 'replace';
 }
 
-/** Matches after the active cell first (wrapping), as Find Next walks them. */
-export function orderFrom(
-	matches: FindMatch[],
-	sheet: number,
-	row: number,
-	col: number,
-	byColumns: boolean,
-): FindMatch[] {
-	const after = (m: FindMatch): boolean =>
-		m.sheet > sheet ||
-		(m.sheet === sheet &&
-			(byColumns
-				? m.col > col || (m.col === col && m.row > row)
-				: m.row > row || (m.row === row && m.col > col)));
-	const index = matches.findIndex(after);
-	return index < 0 ? matches : [...matches.slice(index), ...matches.slice(0, index)];
-}
+export { orderFrom };
 
 export function openFindReplace(
 	ctx: EditorContext,
@@ -140,6 +130,16 @@ export function openFindReplace(
 	};
 	const notFound = (): void =>
 		ctx.toast(ctx.t("We couldn't find what you were looking for."), 'info');
+	const reportRefused = (refused: RefusedReplacement[]): void => {
+		if (refused.length)
+			ctx.toast(
+				ctx.t(
+					'{count} cell(s) were not replaced because the new value does not match their data validation.',
+					{ count: refused.length },
+				),
+				'warning',
+			);
+	};
 	const next = (): boolean => {
 		const q = query();
 		const session = ctx.session();
@@ -210,7 +210,11 @@ export function openFindReplace(
 		const q = query();
 		const session = ctx.session();
 		if (!q || !session || ctx.readOnly()) return;
-		if (current) session.replaceOne(q, withText.value, current);
+		if (current) {
+			if (ctx.validateReplace?.())
+				reportRefused(replaceOneValidated(session, q, withText.value, current).refused);
+			else session.replaceOne(q, withText.value, current);
+		}
 		current = undefined;
 		next();
 	});
@@ -219,7 +223,12 @@ export function openFindReplace(
 		const q = query();
 		const session = ctx.session();
 		if (!q || !session || ctx.readOnly()) return;
-		const count = session.replaceAll(q, withText.value);
+		let count: number;
+		if (ctx.validateReplace?.()) {
+			const result = replaceAllValidated(session, q, withText.value);
+			count = result.replaced;
+			reportRefused(result.refused);
+		} else count = session.replaceAll(q, withText.value);
 		replaced = (replaced ?? 0) + count;
 		if (count) ctx.toast(ctx.t('All done. We made {count} replacements.', { count }), 'info');
 		else notFound();

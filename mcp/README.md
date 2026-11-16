@@ -25,8 +25,9 @@ npm install ooxml-mcp docx-viewer-mcp xlsx-viewer-mcp visio-viewer-mcp pptx-view
 
 ## Quick start
 
-Run `ooxml-tools /path/to/documents` for all four formats, or
-`ooxml-tools /path/to/documents docx,xlsx,visio` for a selected set.
+Run `ooxml-tools --root /path/to/documents` for all four formats, or
+`ooxml-tools --root /path/to/documents --formats docx,xlsx,visio` for a selected set
+(`--name=value` works too; the older `ooxml-tools /path/to/documents docx,xlsx,visio` form still works).
 A missing selected package is a startup error, so tools are never silently omitted.
 `ooxml-core` is a dependency of this package, so the format servers always share one core.
 
@@ -60,6 +61,19 @@ This package ships JavaScript source and needs no separate build.
 [Source and tools](https://github.com/ChristopherVR/ooxml/tree/main/mcp) |
 [Core automation](https://github.com/ChristopherVR/ooxml/blob/main/docs/mcp.md)
 
+## Privacy and network use
+
+The MCP server talks to its client over stdio only and makes no network request of its own. It reads and writes files under its root directory, and linked pictures in a deck are not fetched. Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 Apache-2.0.
+
+## OneDrive host integration
+
+This package does not acquire Microsoft credentials or synchronize OneDrive automatically.
+An authorized application can use `ooxml-core/embedding/onedrive` to retrieve or persist Office
+bytes and provide them to its normal document/tool workflow. See the
+[package reference and conflict recovery guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md)
+and [live acceptance requirements](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md).
+OpenTeams server attachments remain independent copies; no simulation service is shipped.

@@ -4,6 +4,7 @@ import { NO_TWIPS } from './units';
 import { PageCursor } from './page-cursor';
 import { placeParagraph } from './flow-paragraph';
 import { placeTable } from './flow-table';
+import { resolveTableAutofit } from './table-autofit';
 import { layoutParagraph, type ParagraphLayoutResult } from './paragraph-layout';
 import { layoutRow, stackParagraphs } from './table-layout';
 import { suppressesSpacing } from './keep-rules';
@@ -206,7 +207,11 @@ export class SectionFlow {
 		const key = `${index}:${this.cursor.columnWidthPx}`;
 		let cached = this.firstRowHeightCache.get(key);
 		if (cached === undefined) {
-			const table = this.blocks[index] as Extract<LayoutBlock, { kind: 'table' }>;
+			const table = resolveTableAutofit(
+				this.blocks[index] as Extract<LayoutBlock, { kind: 'table' }>,
+				this.cursor.columnWidthPx,
+				this.measurer,
+			);
 			const [firstRow] = table.rows;
 			cached = firstRow
 				? layoutRow(firstRow, this.cursor.columnWidthPx, this.measurer, this.note).heightPx
@@ -221,15 +226,32 @@ export class SectionFlow {
 		if (block?.kind !== 'paragraph') return 0;
 		const layout = this.paragraphLayout(index);
 		const previous = index > 0 ? this.blocks[index - 1] : undefined;
-		if (previous?.kind === 'paragraph' && suppressesSpacing(previous, block)) return 0;
-		return layout.spacingBeforePx;
+		if (index === 0 && !this.section.addParagraphSpacing)
+			return Math.max(0, layout.spacingBeforePx - (this.section.leadingSpacingAfterPx ?? 0));
+		if (previous?.kind !== 'paragraph') return layout.spacingBeforePx;
+		if (suppressesSpacing(previous, block)) return 0;
+		// Unless the document sets doNotUseHTMLParagraphAutoSpacing, Word leaves the larger of the space
+		// after the first paragraph and the space before the second (measured, spacing-probe.json), not
+		// their sum: the first already took its own. Tables and sections are handled by their callers.
+		if (this.section.addParagraphSpacing) return layout.spacingBeforePx;
+		return Math.max(0, layout.spacingBeforePx - this.paragraphLayout(index - 1).spacingAfterPx);
+	}
+
+	/** Contextual spacing: no space after a paragraph that is followed by one of its own style. */
+	private spacingAfterSuppressed(index: number): boolean {
+		const block = this.blocks[index];
+		const next = this.blocks[index + 1];
+		return (
+			block?.kind === 'paragraph' && next?.kind === 'paragraph' && suppressesSpacing(block, next)
+		);
 	}
 
 	/** Minimum height that must fit before `index` may start, walking a `keepNext` chain. */
 	private requiredKeepHeight(index: number, depth = 0): number {
 		if (index >= this.blocks.length || depth > 64) return 0;
 		const block = expectDefined(this.blocks[index], 'keep-chain block index');
-		if (block.kind === 'table') return this.firstRowHeight(index);
+		// A floating table takes no room from the flow.
+		if (block.kind === 'table') return block.floating ? 0 : this.firstRowHeight(index);
 		const layout = this.paragraphLayout(index);
 		const before = this.spacingBeforeFor(index);
 		const own =
@@ -311,6 +333,8 @@ export class SectionFlow {
 					layout,
 					footnotes,
 					spacingBeforePx,
+					...(this.section.keepSpaceBeforePageBreak ? { keepSpaceBeforePageBreak: true } : {}),
+					...(this.spacingAfterSuppressed(index) ? { spacingAfterPx: 0 } : {}),
 					...(this.section.modernFootnoteSeparator || this.section.legacyFootnoteColumns
 						? { trimLeadingColumnBreak: true }
 						: {}),

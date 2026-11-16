@@ -158,6 +158,96 @@ describe('insertSlideFromLayout', () => {
 	});
 });
 
+describe('undo of Home > Layout and of New Slide from a layout', () => {
+	const L1 = 'ppt/slideLayouts/slideLayout1.xml';
+	const L2 = 'ppt/slideLayouts/slideLayout2.xml';
+	const L3 = 'ppt/slideLayouts/slideLayout3.xml';
+
+	/** The core contract: the slide at `index` is replaced in the array it is given, and returned. */
+	function inPlaceDeck() {
+		const handler = {
+			applyLayoutToSlide: vi.fn(async (index: number, layoutPath: string, slides: PptxSlide[]) => {
+				const updated = { ...slides[index]!, layoutPath, layoutName: 'Remapped' };
+				slides[index] = updated;
+				return updated;
+			}),
+			getTemplateElementsForSlide: vi.fn().mockResolvedValue([]),
+		} as unknown as PptxHandler;
+		const store = createStore({
+			...createInitialViewerState(),
+			slides: buildSlides(2).map((slide) => ({ ...slide, layoutPath: L1 })),
+			currentSlide: 0,
+			editable: true,
+		});
+		const ops = createEditorOps({ store, getHandler: () => handler, onHistoryChange: vi.fn() });
+		const actions = createSlideActions({ store, ops, getHandler: () => handler });
+		return { store, ops, actions };
+	}
+
+	it('one Undo takes back one layout pick', async () => {
+		const { store, ops, actions } = inPlaceDeck();
+		const layout = () => store.get().slides[0]?.layoutPath;
+		actions.applyLayout(L2);
+		await vi.waitFor(() => expect(layout()).toBe(L2));
+		actions.applyLayout(L3);
+		await vi.waitFor(() => expect(layout()).toBe(L3));
+		ops.undo();
+		expect(layout()).toBe(L2);
+		ops.undo();
+		expect(layout()).toBe(L1);
+		expect(ops.canUndo()).toBeFalsy();
+	});
+
+	it('keeps an edit made to the new slide while its layout loads', async () => {
+		let layoutArrives: () => void = () => {};
+		const handler = {
+			applyLayoutToSlide: vi.fn(async (index: number, layoutPath: string, slides: PptxSlide[]) => {
+				await new Promise<void>((resolve) => {
+					layoutArrives = resolve;
+				});
+				return { ...slides[index]!, layoutPath, layoutName: 'Remapped' };
+			}),
+			getTemplateElementsForSlide: vi
+				.fn()
+				.mockResolvedValue([{ id: 'layout-art', type: 'shape' } as PptxElement]),
+		} as unknown as PptxHandler;
+		const store = createStore({
+			...createInitialViewerState(),
+			slides: buildSlides(1).map((slide) => ({ ...slide, layoutPath: L1 })),
+			currentSlide: 0,
+			editable: true,
+		});
+		const ops = createEditorOps({ store, getHandler: () => handler, onHistoryChange: vi.fn() });
+		const actions = createSlideActions({ store, ops, getHandler: () => handler });
+
+		actions.insertSlideFromLayout(L2);
+		await vi.waitFor(() => expect(handler.applyLayoutToSlide).toHaveBeenCalledOnce());
+		const typed = { id: 'typed', type: 'shape' } as PptxElement;
+		store.set({
+			slides: store
+				.get()
+				.slides.map((slide, index) => (index === 1 ? { ...slide, elements: [typed] } : slide)),
+		});
+		layoutArrives();
+		const inserted = () => store.get().slides[1]!;
+		await vi.waitFor(() =>
+			expect(store.get().templateElementsBySlideId[inserted().id]).toHaveLength(1),
+		);
+		expect(inserted().elements.map((element) => element.id)).toStrictEqual(['typed']);
+		expect(inserted().layoutName).toBeUndefined();
+	});
+
+	it('one Undo takes back a new slide from a layout', async () => {
+		const { store, ops, actions } = inPlaceDeck();
+		actions.insertSlideFromLayout(L2);
+		await vi.waitFor(() => expect(store.get().slides[1]?.layoutName).toBe('Remapped'));
+		expect(store.get().slides).toHaveLength(3);
+		ops.undo();
+		expect(store.get().slides.map((slide) => slide.id)).toStrictEqual(['slide-1', 'slide-2']);
+		expect(ops.canUndo()).toBeFalsy();
+	});
+});
+
 describe('getTemplateScheme', () => {
 	it('maps the loaded theme colour scheme into a template scheme', () => {
 		const colorScheme: PptxThemeColorScheme = {

@@ -1,6 +1,11 @@
 import type { AppProperties, CoreProperties, CustomProperty } from '../opc/properties/types';
-import type { DiagramDrawing, DiagramIssue } from '../diagram/types';
+import type { DiagramDrawing, DiagramIssue, DiagramLayoutType } from '../diagram/types';
+import type { DiagramLayoutSource } from '../diagram/layout-preview';
+import type { ThemeFormatScheme } from '../drawingml/format-scheme';
+import type { DiagramHostNode } from '../diagram/edit/node-edit';
 import type { CellAddress, CellRange } from './address';
+import type { FormControlObject, ShapeNode } from './model-shapes';
+import type { CustomSheetView, CustomWorkbookView } from './model-custom-views';
 import type { SlicerBook, SlicerFrameObject, TableColumnFilter } from './model-slicers';
 import type {
 	ChartSummary,
@@ -8,6 +13,9 @@ import type {
 	ChartSummaryType,
 	ChartThemePalette,
 } from '../chart/render/summary';
+import type { ChartSpace } from '../chart/model';
+import type { ChartExSpace } from '../chart/ex/model';
+import type { ChartParseIssue } from '../chart/model-series';
 
 /** Excel error values. */
 export const ERROR_CODES = [
@@ -191,6 +199,26 @@ export interface RichTextRun {
 	font?: Font;
 }
 
+/** One phonetic guide run (`rPh`): the reading of the base characters `sb` up to `eb`. */
+export interface PhoneticRun {
+	text: string;
+	sb: number;
+	eb: number;
+}
+
+/** Phonetic guide settings (`phoneticPr`), kept as read. */
+export interface PhoneticProperties {
+	fontId?: number;
+	type?: 'halfwidthKatakana' | 'fullwidthKatakana' | 'Hiragana' | 'noConversion';
+	alignment?: 'noControl' | 'left' | 'center' | 'distributed';
+}
+
+/** The phonetic guide of a string (East Asian reading runs), kept with the cell it is shown in. */
+export interface PhoneticText {
+	runs: PhoneticRun[];
+	properties?: PhoneticProperties;
+}
+
 export interface Cell {
 	value: CellValue;
 	/** The formula without its leading `=`, as written in `<f>`. */
@@ -201,6 +229,8 @@ export interface Cell {
 	styleId?: number;
 	/** Rich text runs for a string value with mixed formatting. */
 	richText?: RichTextRun[];
+	/** Phonetic guide runs and settings of a string (`rPh`, `phoneticPr`). */
+	phonetic?: PhoneticText;
 	/**
 	 * The formula was stored as an Excel dynamic-array formula (`cm` pointing at `XLDAPR`
 	 * cell metadata with `fDynamic`). Informational: formulas without {@link legacyFormula}
@@ -240,6 +270,9 @@ export interface RowInfo {
 	styleId?: number;
 	outlineLevel?: number;
 	collapsed?: boolean;
+	/** The row has a thick top / bottom border (a rendering hint Excel writes; kept as read). */
+	thickTop?: boolean;
+	thickBot?: boolean;
 }
 
 export interface ColumnInfo {
@@ -266,12 +299,25 @@ export interface Hyperlink {
 	display?: string;
 }
 
-export interface Comment {
-	address: CellAddress;
+export interface CommentMessage {
 	author: string;
 	text: string;
+	/** Creation timestamp of a threaded message. */
+	date?: string;
+	/** Source message markup; edited fields are patched over this on save. */
+	threadedXml?: string;
+}
+
+export interface Comment extends CommentMessage {
+	address: CellAddress;
+	/** Source person records needed by this thread, also carried by clipboard and collaboration. */
+	threadedPersons?: Record<string, string>;
+	/** A copied thread needs new ids; its source ids still describe parent and mention links. */
+	regenerateThreadIds?: boolean;
+	/** Resolution state of a threaded comment. */
+	resolved?: boolean;
 	/** Threaded-comment replies, oldest first (read from `threadedComments` when present). */
-	replies?: { author: string; text: string; date?: string }[];
+	replies?: CommentMessage[];
 }
 
 export type ConditionalOperator =
@@ -437,6 +483,8 @@ export type ValidationType =
 	| 'custom';
 
 export interface DataValidation {
+	/** Source x14 rule, retaining attributes and children outside the editable model. */
+	extensionXml?: string;
 	ranges: CellRange[];
 	type: ValidationType;
 	operator?: ConditionalOperator;
@@ -461,23 +509,56 @@ export interface FreezePane {
 	cols: number;
 }
 
+/**
+ * A split window (`pane` with `state="split"`). Unlike a frozen pane the sizes are in twentieths of
+ * a point (not rows and columns) and every pane scrolls on its own.
+ */
+export interface SplitPane {
+	/** Width of the left panes (`xSplit`); 0 when the window is split horizontally only. */
+	x: number;
+	/** Height of the top panes (`ySplit`); 0 when the window is split vertically only. */
+	y: number;
+	/** First cell of the top-left pane (`sheetView/@topLeftCell`). */
+	topLeft?: CellAddress;
+	/** The pane holding the selection (`activePane`). */
+	activePane?: SplitPaneName;
+	/** The selection each other pane keeps (`selection pane=...`); the active pane uses `selection`. */
+	paneSelections?: Partial<Record<SplitPaneName, { active: CellAddress; ranges: CellRange[] }>>;
+}
+
+export type SplitPaneName = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+
 export interface AutoFilter {
 	range: CellRange;
 	/** Per-column filters keyed by zero-based column offset within the range. */
 	columns?: AutoFilterColumn[];
+	/** The sort saved with the filter. */
+	sortState?: import('./model-sort').SortState;
 }
 
 export interface AutoFilterColumn {
 	offset: number;
+	/** Value checklist (`filters/filter`), compared with the cell's display text. */
 	values?: string[];
 	blank?: boolean;
+	/** Date groups of the checklist (`filters/dateGroupItem`), OR-ed with `values`. */
+	dateGroups?: import('./model-filter').DateGroupItem[];
+	custom?: import('./model-filter').CustomFilters;
+	top10?: import('./model-filter').Top10Filter;
+	dynamic?: import('./model-filter').DynamicFilter;
+	color?: import('./model-filter').ColorFilter;
+	icon?: import('./model-filter').IconFilter;
+	/** The drop-down button is hidden (`hiddenButton`). */
+	hiddenButton?: true;
 	/**
-	 * The `<filterColumn>` XML as read (custom, top 10, dynamic, colour, icon and date-group
-	 * criteria the model does not represent). Written back, re-indexed to `offset`, while
-	 * `values` and `blank` still match it; an edit that replaces the column drops it.
+	 * The `<filterColumn>` XML as read. Written back, re-indexed to `offset`, while the
+	 * criteria above still match it; an edit that replaces them drops it.
 	 */
 	sourceXml?: string;
 }
+
+/** The criteria of one auto-filter column, without its position or source XML. */
+export type FilterCriteria = Omit<AutoFilterColumn, 'offset' | 'sourceXml'>;
 
 export interface TableColumn {
 	name: string;
@@ -511,6 +592,8 @@ export interface Table {
 	partName?: string;
 	/** The table part filters columns by criteria the model does not hold (custom, top 10, ...). */
 	filterNotModeled?: boolean;
+	/** The sort saved in the table part's `autoFilter`. */
+	sortState?: import('./model-sort').SortState;
 }
 
 /** Where a drawing object sits on the grid (two-cell anchor, offsets in EMU). */
@@ -529,6 +612,11 @@ export interface ImageObject {
 	contentType: string;
 	name?: string;
 	description?: string;
+	crop?: import('../drawingml/picture-crop').DrawingPictureCrop;
+	layout?: import('../drawingml/picture-layout').DrawingPictureLayout;
+	effects?: import('../drawingml/picture-effects').DrawingPictureEffect[];
+	/** Original anchor keeps picture extensions through unrelated edits. */
+	sourceXml?: string;
 }
 
 export type ChartType = ChartSummaryType;
@@ -545,6 +633,27 @@ export interface ChartObject extends ChartSummary<ChartSeries> {
 	/** Package part of the chart (`xl/charts/chart1.xml`), kept so unmodelled detail survives. */
 	partName?: string;
 	name?: string;
+	/**
+	 * The chart part as the format-neutral model (`chart/parseChartSpace`): what edits change (the
+	 * `chart/edit` operations, through `updateChart` or `editChart`) and what is saved, with
+	 * `chart/writeChartSpace`, when it differs from the kept part. The summary fields above are
+	 * derived from it after every edit. Absent on a chart built by hand; `addChart` and the reader
+	 * set it.
+	 */
+	chartSpace?: ChartSpace;
+	/**
+	 * Why the chart cannot be edited, when its part holds content `ChartSpace` does not model below
+	 * the top level (writing the part from the model would lose it). Such a chart is shown and saved
+	 * unchanged; only reference moves are patched into its part.
+	 */
+	editBlocked?: string;
+	/**
+	 * Chart Design > Quick Layout applied in this session (1..11). The title, legend and bar spacing
+	 * it sets live on the summary fields; on save the layout's axis titles, gridlines, value axis,
+	 * data labels and data table are written into the part (`chart/edit` `applyChartQuickLayout`).
+	 * Not read back from a file.
+	 */
+	quickLayout?: number;
 }
 
 /** A shape or object the model does not draw; reported so the UI can say so honestly. */
@@ -555,46 +664,89 @@ export interface UnsupportedDrawingObject {
 	description: string;
 	/** The anchor element's XML as read, written back verbatim when the drawing is regenerated. */
 	sourceXml?: string;
+	/** A DrawingML shape, connector or group the painter draws (saved from `sourceXml`). */
+	shape?: ShapeNode;
 	/**
 	 * An extended chart (waterfall, histogram) the chart painter draws: its summary, read for
 	 * display only. The frame is still saved from `sourceXml`.
 	 */
 	chartEx?: ChartObject;
-}
-
-/** One content node of a SmartArt data model (for a placeholder or an outline view). */
-export interface SmartArtNode {
-	id: string;
-	text: string;
-	/** Model id of the parent content node, when it has one. */
-	parentId?: string;
+	/** Editable neutral ChartEx part; the original drawing anchor remains verbatim. */
+	chartExSpace?: ChartExSpace;
+	chartExPartName?: string;
+	chartExIssues?: ChartParseIssue[];
 }
 
 /**
- * A SmartArt graphic (`xdr:graphicFrame` with the DiagramML graphic). Shown from the drawing the
- * producing application cached (`dsp:drawing`); no SmartArt layout is computed and the content
- * is not editable. On save the frame XML and every diagram part are kept verbatim; only the
- * anchor position is written from the model.
+ * One content node of a SmartArt data model: the host node Word and Excel share
+ * (`diagram/edit/node-edit.ts`). Nodes are kept in tree order; `paragraphs` (read-only) project
+ * with `projectDiagramNodeTextNeutral` from `ooxml-core/diagram`.
+ */
+export type SmartArtNode = DiagramHostNode;
+
+/** Package part names of a SmartArt graphic's diagram parts, as read. */
+export interface SmartArtParts {
+	data?: string;
+	layout?: string;
+	quickStyle?: string;
+	colors?: string;
+	/** The cached drawing (`dsp:drawing`), when the data model names one. */
+	drawing?: string;
+}
+
+/**
+ * Definition XML a save writes for an inserted diagram (all three) or after Change Layout (the
+ * layout), from `ooxml-core/diagram/builtin`.
+ */
+export interface SmartArtDefinitions {
+	layout?: string;
+	colors?: string;
+	quickStyle?: string;
+}
+
+/**
+ * A SmartArt graphic (`xdr:graphicFrame` with the DiagramML graphic). Drawn from the drawing the
+ * producing application cached (`dsp:drawing`), or with an approximate layout when there is none;
+ * Office's layout is not computed here. Unedited, the frame XML and every diagram part are kept
+ * verbatim on save (only the anchor position is written from the model). Edited (`edited`, see
+ * `edit/smart-art.ts`), the data part is rewritten and the cached drawing dropped, because Excel
+ * lays an edited diagram out again (docs/agnostic-core-plan.md); inserted (`inserted`), new parts
+ * are written.
  */
 export interface SmartArtObject {
+	cacheGenerated?: true;
+	layoutSource?: DiagramLayoutSource;
 	kind: 'smartArt';
 	anchor: DrawingAnchor;
 	name?: string;
 	/**
 	 * The cached drawing, in EMU relative to the frame: what `<office-ui-smartart>` (`ooxml-ui`)
-	 * takes as `drawing`. Absent when the file has no usable cached drawing: show a placeholder
-	 * with `nodes`.
+	 * takes as `drawing`. Absent when the file has none or an edit dropped it: draw the nodes with
+	 * `approximateDiagramDrawingFromNodes` (`ooxml-core/diagram`).
 	 */
 	diagram?: DiagramDrawing;
-	/** Content nodes of the data model, in document order. */
+	/** Content nodes of the data model, in tree order. */
 	nodes: SmartArtNode[];
 	/** `dgm:layoutDef/@uniqueId` (`urn:microsoft.com/office/officeart/2005/8/layout/default`). */
 	layoutId?: string;
+	/** Category of the layout (`list`, `process`...), for the approximate drawing. */
+	layoutFamily?: DiagramLayoutType;
+	/** `dgm:colorsDef/@uniqueId` and `dgm:styleDef/@uniqueId`. */
+	colorsId?: string;
+	quickStyleId?: string;
+	/** The diagram parts as read; absent for an inserted diagram. */
+	parts?: SmartArtParts;
+	/** The nodes or layout changed since loading: the save rewrites the data part. */
+	edited?: true;
+	/** Created by Insert SmartArt: the save writes its parts from `nodes` and `definitions`. */
+	inserted?: true;
+	/** Definitions the save writes (inserted diagram, Change Layout). */
+	definitions?: SmartArtDefinitions;
 	/** What is and is not shown, for the UI to display honestly. */
 	notice: string;
 	/** Problems met reading the diagram parts; empty when everything resolved. */
 	issues: DiagramIssue[];
-	/** The anchor element's XML as read, written back (re-anchored) on save. */
+	/** The anchor element's XML as read, written back (re-anchored) on save; empty when inserted. */
 	sourceXml: string;
 }
 
@@ -603,6 +755,7 @@ export type DrawingObject =
 	| ChartObject
 	| SmartArtObject
 	| SlicerFrameObject
+	| FormControlObject
 	| UnsupportedDrawingObject;
 
 /** `sheetView/@view`: absent means Normal. */
@@ -618,7 +771,9 @@ export interface SheetView {
 	/** Percent. */
 	zoom: number;
 	freeze?: FreezePane;
-	/** Top-left visible cell of the scrollable pane. */
+	/** A split window; never set together with `freeze`. */
+	split?: SplitPane;
+	/** Top-left visible cell of the scrollable (bottom-right) pane. */
 	topLeft?: CellAddress;
 	selection?: { active: CellAddress; ranges: CellRange[] };
 	/** Show formula text instead of results (`showFormulas`, Ctrl+`). */
@@ -666,6 +821,17 @@ export interface PageSetup {
 	/** Absent means the Excel default (on); kept as read. */
 	scaleWithDoc?: boolean;
 	alignWithMargins?: boolean;
+}
+
+/** A picture of a header or footer (`&G`), from the VML drawing `legacyDrawingHF`. */
+export interface HeaderFooterImage {
+	/** Package part of the image (`xl/media/image1.png`). */
+	partName: string;
+	contentType: string;
+	/** Size of the shape in points. */
+	widthPt: number;
+	heightPt: number;
+	title?: string;
 }
 
 /** `<sheetFormatPr>` attributes besides the default row height and column width. */
@@ -724,6 +890,8 @@ export interface Worksheet {
 	view: SheetView;
 	hyperlinks: Hyperlink[];
 	comments: Comment[];
+	/** Threaded-comments container attributes and extensions, without its message elements. */
+	threadedCommentsXml?: string;
 	conditionalFormats: ConditionalFormat[];
 	dataValidations: DataValidation[];
 	tables: Table[];
@@ -732,10 +900,21 @@ export interface Worksheet {
 	pivotTables?: import('./model-pivots').PivotTable[];
 	/** What-if data tables (`{=TABLE()}`); their result cells hold plain values. */
 	dataTables?: import('./model-whatif').DataTable[];
+	/** Error Checking rules the user turned off for ranges (ignoredErrors). */
+	ignoredErrors?: IgnoredError[];
 	/** Scenario Manager scenarios. */
 	scenarios?: import('./model-whatif').ScenarioSet;
 	autoFilter?: AutoFilter;
+	/** The saved sort of the sheet (outside a filter or table). */
+	sortState?: import('./model-sort').SortState;
 	pageSetup?: PageSetup;
+	/**
+	 * Header and footer pictures by their VML id (`LH`, `CH`, `RH`, `LF`... with `FIRST` or `EVEN`
+	 * for those pages), read for display; the VML part itself is kept verbatim.
+	 */
+	headerFooterImages?: Record<string, HeaderFooterImage>;
+	/** Custom views of this sheet (`customSheetViews`); see {@link Workbook.customViews}. */
+	customViews?: CustomSheetView[];
 	/** Print options; absent means none set. */
 	printOptions?: PrintOptions;
 	protection?: SheetProtection;
@@ -757,10 +936,18 @@ export interface DefinedName {
 	localSheet?: number;
 	hidden?: boolean;
 	comment?: string;
+	/**
+	 * Attributes of the name the model does not interpret (`function`, `vbProcedure`, `xlm`,
+	 * `customMenu`, `description`, `help`, `statusBar`, `shortcutKey`, `functionGroupId`,
+	 * `publishToServer`, `workbookParameter`), kept so a macro or function name saves unchanged.
+	 */
+	extra?: Record<string, string>;
 }
 
 /** The workbook theme's colour palette and fonts, resolved for rendering. */
-export type ThemePalette = ChartThemePalette;
+export interface ThemePalette extends ChartThemePalette {
+	formatScheme?: ThemeFormatScheme;
+}
 
 /**
  * Document properties: every core (`docProps/core.xml`) and extended (`docProps/app.xml`) field
@@ -773,6 +960,25 @@ export interface WorkbookProperties extends CoreProperties, AppProperties {
 	 * empty) it replaces the part, and an empty list removes it.
 	 */
 	custom?: CustomProperty[];
+}
+
+/** The ignoredError flags: which Error Checking rule is off for a range (evalError is error values). */
+export const IGNORED_ERROR_FLAGS = [
+	'evalError',
+	'twoDigitTextYear',
+	'numberStoredAsText',
+	'formula',
+	'formulaRange',
+	'unlockedFormula',
+	'emptyCellReference',
+	'listDataValidation',
+	'calculatedColumn',
+] as const;
+export type IgnoredErrorFlag = (typeof IGNORED_ERROR_FLAGS)[number];
+
+export interface IgnoredError {
+	ranges: CellRange[];
+	flags: IgnoredErrorFlag[];
 }
 
 export interface Workbook {
@@ -793,8 +999,20 @@ export interface Workbook {
 	 * Word). A chart-only object sets it to the chart's cells so only the chart is visible.
 	 */
 	oleSize?: string;
+	/**
+	 * Custom views (`customWorkbookViews`). Replaced, never mutated, by the edits so history can
+	 * restore them; absent when the file has none.
+	 */
+	customViews?: CustomWorkbookView[];
 	/** Recalculate formulas when the file opens (`calcPr fullCalcOnLoad`). */
 	fullCalcOnLoad?: boolean;
+	/**
+	 * Cached formula results may not match the cells: an edit was applied without recalculating
+	 * (recalculation off, or manual calculation with pending changes). Cleared by the next full
+	 * recalculation. The save then writes `calcPr fullCalcOnLoad="1"`, as it does for a formula
+	 * with no cached result.
+	 */
+	valuesStale?: boolean;
 	/** Workbook structure protection (no adding, deleting or renaming sheets). */
 	structureLocked?: boolean;
 	/** Legacy 16-bit hash of the structure protection password (`workbookPassword`, hex). */
@@ -851,6 +1069,10 @@ export type {
 	HeadingPair,
 } from '../opc/properties/types';
 export type * from './model-sparklines';
+export type * from './model-filter';
+export type * from './model-sort';
 export type * from './model-pivots';
 export type * from './model-slicers';
 export type * from './model-whatif';
+export type * from './model-shapes';
+export type * from './model-custom-views';

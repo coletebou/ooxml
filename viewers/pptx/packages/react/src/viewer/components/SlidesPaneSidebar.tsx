@@ -1,11 +1,12 @@
 import { editorThumbnailWidth, SLIDE_VIRTUALIZATION_THRESHOLD } from 'ooxml-ui/pptx';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
+import React, { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { LuPlus } from 'react-icons/lu';
 
 import { DEFAULT_SECTION_GROUP_ID } from '../constants';
 import { useVirtualizedSlides } from '../hooks/useVirtualizedSlides';
+import { useTranslation } from '../i18n/use-translation';
 import { useCollaboration } from './collaboration';
+import { ElementRenderErrorReportingContext } from './ElementErrorBoundary';
 import { SectionContextMenu } from './slides-pane/SectionContextMenu';
 import { SectionHeader } from './slides-pane/SectionHeader';
 import { SlideContextMenu } from './slides-pane/SlideContextMenu';
@@ -34,7 +35,18 @@ export const VIRTUALIZATION_THRESHOLD = SLIDE_VIRTUALIZATION_THRESHOLD;
 // Component
 // ---------------------------------------------------------------------------
 
-export function SlidesPaneSidebar({
+export function SlidesPaneSidebar(props: SlidesPaneSidebarProps): React.ReactElement {
+	const inherited = useContext(ElementRenderErrorReportingContext);
+	const reporter = props.onElementRenderError ?? inherited?.onElementRenderError;
+	const errorReporting = useMemo(() => ({ onElementRenderError: reporter }), [reporter]);
+	return (
+		<ElementRenderErrorReportingContext.Provider value={errorReporting}>
+			<SlidesPaneSidebarContent {...props} />
+		</ElementRenderErrorReportingContext.Provider>
+	);
+}
+
+function SlidesPaneSidebarContent({
 	slides,
 	templateElementsBySlideId,
 	activeSlideIndex,
@@ -147,21 +159,9 @@ export function SlidesPaneSidebar({
 	// selection; a right-click elsewhere acts on just that one slide (PowerPoint
 	// parity, and what the per-element context menu already does).
 	const openSlideCtxMenu = useCallback(
-		(x: number, y: number, slideIndex: number) => {
-			const slide = slides[slideIndex];
-			if (!slide) {
-				return;
-			}
-			const idsForMenu =
-				selectedSlideIds.length > 0 && selectedSlideIds.includes(slide.id)
-					? selectedSlideIds
-					: [slide.id];
-			const selectedIndexes = idsForMenu
-				.map((id) => slides.findIndex((s) => s.id === id))
-				.filter((i) => i !== -1);
-			handleOpenSlideCtxMenu(x, y, slideIndex, selectedIndexes);
-		},
-		[slides, selectedSlideIds, handleOpenSlideCtxMenu],
+		(x: number, y: number, slideIndex: number) =>
+			handleOpenSlideCtxMenu(x, y, slideIndex, orderedIds),
+		[orderedIds, handleOpenSlideCtxMenu],
 	);
 
 	// PowerPoint's Enter on a focused thumbnail inserts a new slide after it;

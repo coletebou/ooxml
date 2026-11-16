@@ -1,12 +1,14 @@
 import type {
 	AutosaveActivation,
 	CollabLoadOrigin,
+	CollaborationHistoryTarget,
 	CollaborationInput,
 	CollaborationState,
 	ConnectionStatus,
+	DocumentStorage,
 	ToolbarActionId,
 } from 'ooxml-ui/pptx';
-import { publishLiveInlineText, resolveAutosaveFileKey } from 'ooxml-ui/pptx';
+import { reportInlineTextDraft, resolveAutosaveFileKey } from 'ooxml-ui/pptx';
 import type { PptxHandler, PptxHandlerSaveOptions } from 'pptx-viewer-core';
 
 import type { AutosaveStatus } from './autosave';
@@ -33,6 +35,8 @@ export interface SessionControllersDeps {
 	 * dropped every session-level edit outside `slides`.
 	 */
 	getSaveOptions?: () => PptxHandlerSaveOptions;
+	/** The editor's history; collaboration routes Undo and Redo through the room's own. */
+	getHistory?: () => CollaborationHistoryTarget | undefined;
 	getChrome: () => ViewerChrome;
 	getTranslator: () => Translator;
 	getScale: () => number;
@@ -44,6 +48,15 @@ export interface SessionControllersDeps {
 	goToSlide: (index: number) => void;
 	/** Load bytes through the viewer's normal pipeline (recovery restore). */
 	loadFile: (bytes: Uint8Array) => Promise<void>;
+	/**
+	 * The open document's storage, recovery key and name: a file opened from a File > Open cloud
+	 * place brings its own. Omitted: the `storage`, `filePath` and `fileName` options.
+	 */
+	getDocument?: () => {
+		storage: DocumentStorage | undefined;
+		filePath: string;
+		fileName: string | undefined;
+	};
 	/** Options > General > "Initials" override for the Share dialog's local-user avatar. */
 	getUserInitials?: () => string | undefined;
 	/** Effective hidden actions (host list + customisation); defaults to `options.hiddenActions`. */
@@ -54,9 +67,10 @@ export interface SessionControllersDeps {
 
 /**
  * Owns the collaboration + autosave session controllers and their thin wiring
- * into the viewer chrome (the autosave status pill in the toolbar). Kept out of
- * `PptxViewer` so the orchestrator class stays under its file-size budget and
- * new session capabilities hang off this one indirection module.
+ * into the viewer chrome (the autosave state in the toolbar, title bar and
+ * status bar). Kept out of `PptxViewer` so the orchestrator class stays under
+ * its file-size budget and new session capabilities hang off this one
+ * indirection module.
  */
 export interface SessionControllers {
 	startCollaboration(config: CollaborationInput): Promise<void>;
@@ -72,7 +86,7 @@ export interface SessionControllers {
 	 * reaches the store on commit, so without this peers saw nothing while a peer
 	 * typed. No-op when no session is active.
 	 */
-	publishCollaborationInlineText(elementId: string, text: string): void;
+	publishCollaborationInlineText(elementId: string | null, text: string): void;
 	/** Push any queued live-preview frame out (called just before a commit). */
 	flushCollaborationLivePatch(): void;
 	/** Follow the given peer's active slide, or `null` to stop following. */
@@ -108,7 +122,10 @@ export interface SessionControllers {
 	openBroadcast(): void;
 	/** Open the viewer's built-in collaboration sharing dialog. */
 	openShare(): void;
-	/** Rebuild the collaboration chrome (Share button, status pill) into a remounted chrome. */
+	/**
+	 * Rebuild the collaboration chrome (Share button, status pill) into a remounted chrome and
+	 * show the last autosave state there again.
+	 */
 	remountUi(): void;
 	destroy(): void;
 }
@@ -129,6 +146,21 @@ function autosaveLabel(status: AutosaveStatus, t: Translator): string {
 
 export function createSessionControllers(deps: SessionControllersDeps): SessionControllers {
 	const { options } = deps;
+	// The last autosave state and when it arrived (a "saved" arrives as the snapshot lands), shown
+	// again by a rebuilt chrome.
+	let lastAutosave: { status: AutosaveStatus; at: number } | undefined;
+	const showAutosave = (): void => {
+		if (!lastAutosave) {
+			return;
+		}
+		const { status, at } = lastAutosave;
+		const chrome = deps.getChrome();
+		chrome.ribbon?.setAutosaveStatus(autosaveLabel(status, deps.getTranslator()), status);
+		chrome.titleBar?.setAutosaveState(status);
+		chrome.statusBar?.setAutosave(
+			status === 'saved' ? { state: 'saved', timestamp: at } : { state: status },
+		);
+	};
 
 	// Activation, cadence and the crash-recovery prompt all live in the shared
 	// policy modules; this only supplies the host's options and the viewer's own
@@ -145,7 +177,8 @@ export function createSessionControllers(deps: SessionControllersDeps): SessionC
 			options.fileName,
 		),
 		fileName: options.fileName,
-		getStorage: () => options.storage,
+		...(deps.getDocument ? { getDocument: deps.getDocument } : {}),
+		getStorage: () => (deps.getDocument ? deps.getDocument().storage : options.storage),
 		// Threaded through only so the snapshot uses the shared save decision;
 		// a recovery snapshot stays plaintext whatever the protection state is.
 		getSaveIntent: () => ({
@@ -153,10 +186,8 @@ export function createSessionControllers(deps: SessionControllersDeps): SessionC
 			passwordProtected: deps.store.get().isPasswordProtected,
 		}),
 		onStatus: (status) => {
-			deps
-				.getChrome()
-				.ribbon?.setAutosaveStatus(autosaveLabel(status, deps.getTranslator()), status);
-			deps.getChrome().titleBar?.setAutosaveState(status);
+			lastAutosave = { status, at: Date.now() };
+			showAutosave();
 			options.onAutosaveStatus?.(status);
 		},
 		onSaved: (bytes) => options.onAutosave?.(bytes),
@@ -173,6 +204,7 @@ export function createSessionControllers(deps: SessionControllersDeps): SessionC
 		store: deps.store,
 		getHandler: deps.getHandler,
 		getSaveOptions: deps.getSaveOptions,
+		...(deps.getHistory ? { getHistory: deps.getHistory } : {}),
 		setEditable: deps.setEditable,
 		onReadOnlyChange: deps.onCollaborationReadOnlyChange,
 		onStatusChange: (status) => {
@@ -244,8 +276,10 @@ export function createSessionControllers(deps: SessionControllersDeps): SessionC
 		setCollaborationCursor: (x, y) => collaboration.setCursor(x, y, deps.store.get().currentSlide),
 		publishCollaborationInlineText: (elementId, text) => {
 			const state = deps.store.get();
-			publishLiveInlineText(
-				collaboration.livePatcher,
+			// The collaboration preview, and the autosave draft: typing that was
+			// never committed still reaches the recovery snapshot.
+			reportInlineTextDraft(
+				{ livePatcher: collaboration.livePatcher, autosave },
 				state.slides[state.currentSlide],
 				elementId,
 				text,
@@ -274,6 +308,7 @@ export function createSessionControllers(deps: SessionControllersDeps): SessionC
 			collabUi.destroy();
 			collabUi = buildCollabUi();
 			collabUi.onStatusChange(collaboration.getStatus());
+			showAutosave();
 		},
 		destroy() {
 			unsubscribePresence();

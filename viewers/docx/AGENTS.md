@@ -38,8 +38,20 @@ the element, forward props and options, and re-emit its events.
   pattern and fix them in the same change; the binding contract tests in
   `packages/bindings/src/*.test.ts` and `packages/vanilla/src/index.test.ts`
   should cover all of them.
-- Never put editor logic in an adapter. If two adapters need the same helper, it
-  goes in `packages/bindings/src/common.ts` (or the editor in `src/ui/src/docx`).
+- Never put editor logic in an adapter. The props, events and handle every
+  adapter shares are one contract, `EDITOR_CONTRACT` in
+  `packages/bindings/src/contract.ts`, and `contract-parity.test.ts` checks each
+  adapter against it. Binding machinery that is not Word-specific (prop
+  tracking, event mapping, the deferred handle, the React, Vue and Solid
+  component factories) lives in the shared kit `ooxml-ui/bindings`
+  (`src/ui/src/bindings`, see its README section). `contract.ts` keeps only Word's
+  wrappers over that kit (`deferredHandle`, typed to the editor handle, and
+  `svelteEditorOptions`, which maps Svelte's lower-case callbacks); a helper only
+  Word needs goes in `packages/bindings/src/index.ts` (or the editor in
+  `src/ui/src/docx`). `common.ts` is the re-export surface that every framework
+  package spreads (the model API, the web component, `loadDocument`, the binding
+  types and `mountEditorSurface`); add an export there only when a published
+  package must see it.
 
 ## Working agreements
 
@@ -64,7 +76,10 @@ the element, forward props and options, and re-emit its events.
   dependency of every framework package, never bundled. Its element tag names
   keep the `office-ui-` prefix. Generic chrome is drawn by it: the context menu,
   status bar and zoom slider, title bar, File view (backstage) and the modal
-  shell of every format dialog (`dialog-shell.ts`), plus SmartArt. The docx
+  shell of every format dialog (`dialog-shell.ts`), and the chart and SmartArt
+  elements every product mounts (`office-ui-chart-picker`, `office-ui-chart-data-sheet`,
+  `office-ui-chart-format-pane`, `office-ui-smartart`, `office-ui-smartart-picker`,
+  `office-ui-smartart-text-pane`). The docx
   content inside them (dialog fields, File pages, ribbon commands) lives with
   the editor in `src/ui/src/docx` and is fed translated state. The shared
   elements read `--office-*` tokens; the editor's `--dve-*` theme is mapped onto
@@ -73,22 +88,26 @@ the element, forward props and options, and re-emit its events.
   element that is missing something (a translatable label, a tooltip) gets an
   additive option in `src/ui`, not a copy.
 - Still hand-built in `src/ui/src/docx`, pending a move to shared `ooxml-ui`
-  controls: the Word ribbon (native controls and its own overflow folding, see
-  `ribbon-tabs.ts` and `ribbon-home.ts`), the indent ruler (`ruler.ts`;
-  draggable markers; the shared ruler is decorative) and the comments panel
-  (`comments-panel.ts`). Move one only when `ooxml-ui` can carry its behaviour
-  without a test-visible regression.
+  controls: the Word ribbon (native controls, see `ribbon-tabs.ts` and
+  `ribbon-home.ts`; its group overflow uses the shared `ribbon/overflow.ts`). The
+  indent ruler (`ruler.ts`) mounts the shared `office-ui-ruler`, but Word's draggable
+  indent markers stay its own since the shared ruler is decorative. The comments pane
+  (`comments-panel.ts`) mounts the shared `office-ui-comments-pane`. Move a control
+  only when `ooxml-ui` can carry its behaviour without a test-visible regression.
 - `ole2` (legacy compound-file codecs) reaches this repository only through
   `ooxml-core/docx/load`, which inlines it. Never add `@christophervr/ole2` or an
   internal package to a manifest here, and never fork its code.
 - The browser `createCanvasMeasurer` stays in
   `src/ui/src/docx/canvas-measurer.ts` and is injected into the core's layout
   engine; it is the one piece of layout that needs a DOM.
-- Unsupported document features must be reported honestly (for example SmartArt
-  is display-only, charts paint from their cached values for the common families (including bubble and
-  open-high-low-close stock), bar/line combinations, waterfalls, histograms, treemaps and
-  sunbursts, and surface, volume-stock and other chartex charts show a labelled frame). Never claim Word layout
-  parity or lossless export.
+- Unsupported document features must be reported honestly. SmartArt that Word has
+  not laid out (inserted, edited, or saved without a cached drawing) is drawn with
+  an approximate layout, not Word's.
+  Charts paint from their cached values; classic charts can be inserted, edited
+  (type, legend, data, the shared Format pane's fills, outlines and options) and
+  resized through the shared chart core. Admitted ChartEx charts are editable through the same core: waterfall,
+  histogram, treemap and sunburst are drawn, and the other families show a labelled
+  frame. Never claim Word layout parity or lossless export.
 - Bun, TypeScript strict mode, Vitest (tests next to the code) and Playwright
   browser tests (`e2e/docx/*.spec.ts`). Keep source modules under 300 lines where
   practical. Add regression tests for editing, preservation and binding
@@ -97,17 +116,17 @@ the element, forward props and options, and re-emit its events.
 
 ## Packages
 
-| Directory                | npm name              | Published | What it is                                                                    |
-| ------------------------ | --------------------- | --------- | ----------------------------------------------------------------------------- |
-| `packages/core`          | `docx-core`           | yes       | Re-export of `ooxml-core/docx` and `/docx/embedded`.                          |
-| `packages/web-component` | `docx-web-component`  | internal  | One-line re-export of `ooxml-ui/docx`, the `<docx-editor>` element.           |
-| `packages/bindings`      | `docx-bindings`       | internal  | Framework adapters over one framework-neutral core (`index.ts`, `common.ts`). |
-| `packages/react`         | `docx-react-viewer`   | yes       | React entry (`WordEditor`).                                                   |
-| `packages/vue`           | `docx-vue-viewer`     | yes       | Vue 3 entry (`WordEditor`).                                                   |
-| `packages/angular`       | `docx-angular-viewer` | yes       | Angular entry (`WordEditorComponent`).                                        |
-| `packages/svelte`        | `docx-svelte-viewer`  | yes       | Svelte 5 entry (`/runtime`, `mountEditor`).                                   |
-| `packages/solid`         | `docx-solid-viewer`   | yes       | Solid entry (`WordEditor`).                                                   |
-| `packages/vanilla`       | `docx-vanilla-viewer` | yes       | Plain `<docx-editor>` registration and `mountEditor`.                         |
+| Directory                | npm name              | Published | What it is                                                                                                           |
+| ------------------------ | --------------------- | --------- | -------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`          | `docx-core`           | yes       | Re-export of `ooxml-core/docx` and `/docx/embedded`.                                                                 |
+| `packages/web-component` | `docx-web-component`  | internal  | One-line re-export of `ooxml-ui/docx`, the `<docx-editor>` element.                                                  |
+| `packages/bindings`      | `docx-bindings`       | internal  | Framework adapters over one framework-neutral core (`contract.ts`, `index.ts`, `common.ts`) and `ooxml-ui/bindings`. |
+| `packages/react`         | `docx-react-viewer`   | yes       | React entry (`WordEditor`).                                                                                          |
+| `packages/vue`           | `docx-vue-viewer`     | yes       | Vue 3 entry (`WordEditor`).                                                                                          |
+| `packages/angular`       | `docx-angular-viewer` | yes       | Angular entry (`WordEditorComponent`).                                                                               |
+| `packages/svelte`        | `docx-svelte-viewer`  | yes       | Svelte 5 entry (`/runtime`, `mountEditor`).                                                                          |
+| `packages/solid`         | `docx-solid-viewer`   | yes       | Solid entry (`WordEditor`).                                                                                          |
+| `packages/vanilla`       | `docx-vanilla-viewer` | yes       | Plain `<docx-editor>` registration and `mountEditor`.                                                                |
 
 `demos/docx/demo-vanilla` is the single demo app; `?framework=<name>` mounts the
 editor through that framework's adapter (`demos/docx/demo-vanilla/framework.ts`), and
@@ -138,15 +157,17 @@ or UI and this viewer lands in one push (see the root `AGENTS.md`).
 
 ### Where does my change go?
 
-| The change is about...                                                              | Make it in                                        |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Parsing, the document model, editing commands, saving or round-trip loss            | `src/core/docx/`, with a round-trip test          |
-| Pagination, line breaking, page layout, `.doc` loading, collaboration sync          | `src/core` (`docx/layout`, `docx/load`, `collab`) |
-| A control shared by Word and PowerPoint (SmartArt drawing, shared ribbon controls)  | `ooxml-ui` (`src/ui`)                             |
-| `.doc` / `.xls` / `.ppt` binary codecs, CFB containers                              | `ole2`                                            |
-| Ribbon, dialogs, panels, keyboard, how the editor shows the model, styling, locales | `src/ui/src/docx`                                 |
-| Framework wiring (props, events, lifecycle)                                         | `packages/bindings` here (all adapters at once)   |
-| Docs site, packaging scripts, build wiring for the demo                             | here (`demos/docx` and `e2e/docx` at the root)    |
+| The change is about...                                                                             | Make it in                                                                          |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Parsing, the document model, editing commands, saving or round-trip loss                           | `src/core/docx/`, with a round-trip test                                            |
+| Pagination, line breaking, page layout, `.doc` loading, collaboration sync                         | `src/core` (`docx/layout`, `docx/load`, `collab`)                                   |
+| A control shared by Word and the other products (SmartArt, chart elements, shared ribbon controls) | `ooxml-ui` (`src/ui`)                                                               |
+| `.doc` / `.xls` / `.ppt` binary codecs, CFB containers                                             | `ole2`                                                                              |
+| Ribbon, dialogs, panels, keyboard, how the editor shows the model, styling, locales                | `src/ui/src/docx`                                                                   |
+| Chart or SmartArt edit operations, part writers, layout (shared by every product)                  | `src/core/chart`, `src/core/diagram` (`edit`, `write`, `builtin`)                   |
+| Chart or SmartArt commands, the Chart Design and SmartArt Design tabs in Word                      | `src/ui/src/docx` (`chart-*.ts`, `smartart-dialog.ts`); shared elements in `src/ui` |
+| Framework wiring (props, events, lifecycle)                                                        | `packages/bindings` here (all adapters at once)                                     |
+| Docs site, packaging scripts, build wiring for the demo                                            | here (`demos/docx` and `e2e/docx` at the root)                                      |
 
 ### GitHub Pages
 

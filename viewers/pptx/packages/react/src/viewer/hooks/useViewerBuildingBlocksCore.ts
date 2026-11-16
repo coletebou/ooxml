@@ -1,5 +1,14 @@
-import type { ViewerOptions, ViewportFitOptions } from 'ooxml-ui/pptx';
-import { resolveHistoryDepth, resolveImageResolutionScale } from 'ooxml-ui/pptx';
+import type {
+	PdfExportSettings,
+	ViewerOptions,
+	ViewerOptionsStore,
+	ViewportFitOptions,
+} from 'ooxml-ui/pptx';
+import {
+	resolveHistoryDepth,
+	resolveImageResolutionScale,
+	resolvePdfExportSettings,
+} from 'ooxml-ui/pptx';
 import type { PptxHandler, PptxSlide } from 'pptx-viewer-core';
 /**
  * useViewerBuildingBlocksCore: The "core state" third of
@@ -14,6 +23,7 @@ import type { PptxHandler, PptxSlide } from 'pptx-viewer-core';
 import { buildThemeColorMap } from 'pptx-viewer-core';
 import { useCallback, useMemo } from 'react';
 
+import type { SlideSectionGroup } from '../types';
 import type { ViewerMode } from '../types-core';
 import { useDerivedSlideState } from './useDerivedSlideState';
 import type { EditorHistoryResult } from './useEditorHistory';
@@ -55,6 +65,8 @@ export interface ViewerBuildingBlocksCore {
 	setExitModeHandler: (handler: ((nextMode: ViewerMode) => void) | null) => void;
 	masterPseudoSlide: PptxSlide | undefined;
 	gridSpacingPx: number;
+	/** Slides grouped by section, as the slides pane lists them. */
+	slideSectionGroups: SlideSectionGroup[];
 	/** File > Options > Advanced > "Image Size and Quality" raster-scale multiplier. */
 	imageExportScale: number;
 	/**
@@ -63,8 +75,12 @@ export interface ViewerBuildingBlocksCore {
 	 * `resolveExportCaptureDecision`.
 	 */
 	imageResolutionScale: number;
+	/** File > Options > Advanced > Save as PDF. */
+	pdfExportSettings: PdfExportSettings;
 	/** Full File > Options snapshot, for Trust Center gates in the canvas mapping. */
 	viewerOptions: ViewerOptions;
+	/** The File > Options store behind `viewerOptions`, for host locks. */
+	optionsStore: ViewerOptionsStore;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +137,9 @@ export function useViewerBuildingBlocksCore(
 		selectedElements: state.selectedElements,
 		fitPadding: input.fitPadding,
 		maxFitScale: input.maxFitScale,
+		// Nothing to select in a read-only view, so a plain drag pans instead.
+		dragPans: mode === 'preview',
+		activeSlideId: activeSlide?.id,
 	});
 
 	// Read here (not only inside `PowerPointViewer`) so the headless
@@ -129,7 +148,7 @@ export function useViewerBuildingBlocksCore(
 	// presentation setup. Moved above `history`'s construction (originally
 	// declared just before `usePresentationSetup`) so both consumers share
 	// this one `useViewerOptions()` call/store instance.
-	const { options: viewerOptions } = useViewerOptions();
+	const { options: viewerOptions, optionsStore } = useViewerOptions();
 	const { setIsDirty } = state;
 	const markDocumentDirty = useCallback(() => {
 		setIsDirty(true);
@@ -160,17 +179,18 @@ export function useViewerBuildingBlocksCore(
 		setHeaderFooter: state.setHeaderFooter,
 	});
 
-	const { gridSpacingPx, visibleSlideIndexes, masterPseudoSlide } = useDerivedSlideState({
-		slides,
-		sections: state.sections,
-		customShows: state.customShows,
-		activeCustomShowId: state.activeCustomShowId,
-		presentationProperties: state.presentationProperties,
-		mode,
-		activeLayout: state.activeLayout,
-		activeMaster: state.activeMaster,
-		documentGridSpacing: state.viewProperties?.gridSpacing,
-	});
+	const { gridSpacingPx, visibleSlideIndexes, masterPseudoSlide, slideSectionGroups } =
+		useDerivedSlideState({
+			slides,
+			sections: state.sections,
+			customShows: state.customShows,
+			activeCustomShowId: state.activeCustomShowId,
+			presentationProperties: state.presentationProperties,
+			mode,
+			activeLayout: state.activeLayout,
+			activeMaster: state.activeMaster,
+			documentGridSpacing: state.viewProperties?.gridSpacing,
+		});
 
 	// Threaded into `useAnimationPlayback` so a `p:anim` formula that needs the
 	// animated shape's REAL box (Grow And Turn's `-#ppt_w/2` fly-in) and a
@@ -228,10 +248,13 @@ export function useViewerBuildingBlocksCore(
 		setExitModeHandler,
 		masterPseudoSlide,
 		gridSpacingPx,
+		slideSectionGroups,
 		// Multiplied against the pre-existing 2x baseline; see the matching
 		// comment in `PowerPointViewer.tsx`.
 		imageExportScale: 2 * resolveImageResolutionScale(viewerOptions),
 		imageResolutionScale: resolveImageResolutionScale(viewerOptions),
+		pdfExportSettings: resolvePdfExportSettings(viewerOptions),
 		viewerOptions,
+		optionsStore,
 	};
 }

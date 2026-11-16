@@ -46,10 +46,10 @@
 	import {
 		buildStrokeOutline,
 		buildSubpathFillOverlay,
+		getSilhouetteFillLayer,
 		getBevelLightingSvgFilter,
 		getComputedEffectStyle,
-		getEffectStyleSource,
-		getSoftEdgeSvgFilter,
+		getShapeEffectFilterDefs,
 		buildHollowHitOutline,
 		strokeOutlineViewBox,
 	} from 'ooxml-ui/pptx';
@@ -76,6 +76,7 @@
 	 * Per-sub-path fill overlay for a multi-sub-path preset or custom geometry,
 	 * or `undefined` when a single merged fill is correct (the ordinary case).
 	 */
+	const fillLayer = $derived(getSilhouetteFillLayer(element));
 	const subpathFill = $derived(buildSubpathFillOverlay(element));
 
 	/** `viewBox` for the sub-path fill overlay, in its own coordinate space. */
@@ -94,7 +95,7 @@
 	);
 
 	/** Soft-edge `<filter>` definition for this element, when a soft edge applies. */
-	const softEdge = $derived(getSoftEdgeSvgFilter(getEffectStyleSource(element), element.id));
+	const softEdge = $derived(getShapeEffectFilterDefs(element));
 
 	/**
 	 * `a:sp3d` bevel lighting `<filter>` definition for this element, when it
@@ -140,8 +141,12 @@
 	);
 </script>
 
+{#if fillLayer}
+	<div class="pptx-svelte-silhouette-fill" aria-hidden="true" style={fillLayer.cssText}></div>
+{/if}
 {#if subpathFill}
 	<svg
+		data-pptx-silhouette-fill={subpathFill.silhouette ? "" : undefined}
 		class="pptx-svelte-subpath-fill"
 		aria-hidden="true"
 		viewBox={subpathFillViewBox}
@@ -164,6 +169,9 @@
 	</svg>
 {/if}
 
+{#if hollowHit?.textCss}
+	{@html `<style>${hollowHit.textCss}</style>`}
+{/if}
 {#if hollowHit}
 	<svg
 		aria-hidden="true"
@@ -173,10 +181,10 @@
 	>
 		<path
 			d={hollowHit.d}
-			fill="none"
-			stroke="transparent"
+			fill={hollowHit.fill}
+			stroke={hollowHit.stroke}
 			stroke-width={hollowHit.strokeWidth}
-			style="pointer-events:stroke"
+			style="pointer-events:{hollowHit.pointerEvents}"
 		/>
 	</svg>
 {/if}
@@ -186,6 +194,7 @@
 {#if strokeOutline}
 	<svg
 		class="pptx-svelte-gradient-outline"
+		data-pptx-outline=""
 		aria-hidden="true"
 		viewBox={outlineViewBox}
 		preserveAspectRatio="none"
@@ -207,7 +216,7 @@
 						/>
 					</pattern>
 				{:else if strokeOutline.paint.kind === 'rectPath'}
-					<pattern id={strokeOutline.paint.id} patternUnits="objectBoundingBox" width="1" height="1">
+					<pattern id={strokeOutline.paint.id} patternUnits="objectBoundingBox" patternContentUnits="objectBoundingBox" width="1" height="1">
 						<image href={strokeOutline.paint.href} x="0" y="0" width="1" height="1" preserveAspectRatio="none" />
 					</pattern>
 				{:else if strokeOutline.paint.kind === 'radial'}
@@ -239,7 +248,7 @@
 		{#if strokeOutline.markers}<defs>{@html strokeOutline.markers.markup}</defs>{/if}
 		{#each strokeOutline.strands as strand, idx (idx)}
 			<path
-				d={strokeOutline.d}
+				d={strand.d ?? strokeOutline.d}
 				marker-start={idx === 0 ? strokeOutline.markers?.start : undefined}
 				marker-end={idx === 0 ? strokeOutline.markers?.end : undefined}
 				fill="none"
@@ -249,7 +258,11 @@
 				stroke-dasharray={strokeOutline.dashArray}
 				stroke-linecap={strokeOutline.lineCap}
 				stroke-linejoin={strokeOutline.lineJoin}
-				style={strand.offset !== 0 ? `transform:translate(0, ${strand.offset}px)` : undefined}
+				style={strand.cssTransform
+					? `transform:${strand.cssTransform}`
+					: strand.offset !== 0
+						? `transform:translate(0, ${strand.offset}px)`
+						: undefined}
 			/>
 		{/each}
 	</svg>

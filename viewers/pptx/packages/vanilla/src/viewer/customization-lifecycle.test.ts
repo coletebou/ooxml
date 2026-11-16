@@ -1,4 +1,9 @@
-import { createViewerOptionsStore, resolveCustomization, THEME_CATALOG } from 'ooxml-ui/pptx';
+import {
+	createViewerOptionsStore,
+	resolveCustomization,
+	ribbonTabButtons,
+	THEME_CATALOG,
+} from 'ooxml-ui/pptx';
 import type { ViewerCustomization, ViewerOptionsStore } from 'ooxml-ui/pptx';
 import { LOCALE_CATALOG } from 'ooxml-ui/pptx/i18n';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,9 +39,7 @@ afterEach(() => {
 });
 
 function ribbonTabLabels(container: HTMLElement): string[] {
-	return Array.from(container.querySelectorAll('.pptxv-ribbon-tab')).map((tab) =>
-		(tab.textContent ?? '').trim(),
-	);
+	return Array.from(ribbonTabButtons(container)).map((tab) => (tab.textContent ?? '').trim());
 }
 
 /** The viewer's File > Options store (private on the class; read for assertions only). */
@@ -200,5 +203,55 @@ describe('canvas context menu customisation', () => {
 		stage.dispatchEvent(event);
 		expect(event.defaultPrevented).toBeFalsy();
 		expect(document.querySelector('[data-pptx-context-menu]')).toBeNull();
+	});
+});
+
+describe('allowExternalContent host option', () => {
+	afterEach(() => localStorage.clear());
+
+	it('locks the Trust Center setting off for false', () => {
+		const { viewer } = mount({ allowExternalContent: false });
+		const store = optionsStoreOf(viewer);
+		expect(store.getOptions().trust.allowExternalContent).toBe(false);
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+		store.setValue('trust', 'allowExternalContent', true);
+		expect(store.getOptions().trust.allowExternalContent).toBe(false);
+	});
+
+	it('locks it on for true', () => {
+		const { viewer } = mount({ allowExternalContent: true });
+		const store = optionsStoreOf(viewer);
+		expect(store.getOptions().trust.allowExternalContent).toBe(true);
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+	});
+
+	it('leaves the setting to the user when the option is omitted', () => {
+		const { viewer } = mount();
+		expect(optionsStoreOf(viewer).isLocked('trust', 'allowExternalContent')).toBe(false);
+	});
+});
+
+describe('googleFonts host option', () => {
+	afterEach(() => localStorage.clear());
+
+	it('locks Trust Center > Download fonts off for false', () => {
+		const { viewer } = mount({ googleFonts: false });
+		const store = optionsStoreOf(viewer);
+		expect(store.getOptions().trust.allowFontDownloads).toBe(false);
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(true);
+		store.setValue('trust', 'allowFontDownloads', true);
+		expect(store.getOptions().trust.allowFontDownloads).toBe(false);
+	});
+
+	it('locks it on for a valid mirror', () => {
+		const { viewer } = mount({ googleFonts: { baseUrl: 'https://fonts.example.test/css2' } });
+		const store = optionsStoreOf(viewer);
+		expect(store.getOptions().trust.allowFontDownloads).toBe(true);
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(true);
+	});
+
+	it('leaves the setting to the user when the option is omitted', () => {
+		const { viewer } = mount();
+		expect(optionsStoreOf(viewer).isLocked('trust', 'allowFontDownloads')).toBe(false);
 	});
 });

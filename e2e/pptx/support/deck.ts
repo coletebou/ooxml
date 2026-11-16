@@ -155,6 +155,11 @@ async function uploadDeck(page: Page, fixturePath: string, timeout?: number): Pr
  * Thumbnails carry the same roledescription, so the first match is the contract
  * for "the slide the user is editing" - the bindings all render the main canvas
  * ahead of the thumbnail rail in DOM order.
+ *
+ * Not a probe for the running show's slide: some bindings present on a separate
+ * show stage and keep this canvas mounted under it, hidden and drawing no slide.
+ * Read the shown slide through `presentingStageText` (`./slide-text`) or the
+ * `[data-pptx-presenting]` stage instead.
  */
 export function slideStage(page: Page): Locator {
 	return page.locator('[aria-roledescription="slide"]').first();
@@ -163,11 +168,10 @@ export function slideStage(page: Page): Locator {
 /**
  * Every rendered element on the current slide.
  *
- * Scoped to the canvas viewport on purpose. Thumbnails carry the same
- * `data-pptx-element` marker, and React and Vue strip `data-element-id` from
- * their thumbnail stages while Angular, Vanilla and Svelte leave it on, so an
- * unscoped count is a different number in each binding for reasons that have
- * nothing to do with the slide.
+ * Scoped to the canvas viewport on purpose. Thumbnails, previews and transition
+ * layers render the same elements; every binding now draws its static stages
+ * without `data-element-id` (`slide-thumbnail-strip.spec.ts` pins it), but a
+ * page-wide count would still pick up any other surface that marks elements.
  */
 export function slideElements(page: Page): Locator {
 	return page.locator('[data-pptx-viewport] [data-pptx-element="true"]');
@@ -224,10 +228,7 @@ export function ribbonTab(page: Page, name: string): Locator {
 }
 
 /** Switch the ribbon to `name` and wait for the content row to settle. */
-export async function openRibbonTab(page: Page, name: string): Promise<void> {
-	await ribbonTab(page, name).click();
-	await page.waitForTimeout(150);
-}
+export { selectRibbonTab as openRibbonTab } from './render-ready';
 
 /** The properties inspector, when it is on screen. */
 export function inspector(page: Page): Locator {

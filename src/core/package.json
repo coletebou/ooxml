@@ -1,6 +1,6 @@
 {
 	"name": "ooxml-core",
-	"version": "1.23.0",
+	"version": "1.52.0",
 	"description": "Shared OOXML logic for the Word, PowerPoint and Excel viewers: everything except the UI",
 	"keywords": [
 		"charts",
@@ -89,10 +89,20 @@
 			"import": "./dist/embedding/index.mjs",
 			"require": "./dist/embedding/index.cjs"
 		},
+		"./embedding/onedrive": {
+			"types": "./dist/embedding/onedrive/index.d.ts",
+			"import": "./dist/embedding/onedrive/index.mjs",
+			"require": "./dist/embedding/onedrive/index.cjs"
+		},
 		"./diagram": {
 			"types": "./dist/diagram/index.d.ts",
 			"import": "./dist/diagram/index.mjs",
 			"require": "./dist/diagram/index.cjs"
+		},
+		"./diagram/builtin": {
+			"types": "./dist/diagram/builtin/index.d.ts",
+			"import": "./dist/diagram/builtin/index.mjs",
+			"require": "./dist/diagram/builtin/index.cjs"
 		},
 		"./drawingml": {
 			"types": "./dist/drawingml/index.d.ts",
@@ -194,6 +204,11 @@
 			"import": "./dist/pptx/signature-node/index.mjs",
 			"require": "./dist/pptx/signature-node/index.cjs"
 		},
+		"./pptx/node": {
+			"types": "./dist/pptx/node/index.d.ts",
+			"import": "./dist/pptx/node/index.mjs",
+			"require": "./dist/pptx/node/index.cjs"
+		},
 		"./pptx/smartart-layouts": {
 			"types": "./dist/pptx/smartart-layouts/index.d.ts",
 			"import": "./dist/pptx/smartart-layouts/index.mjs",
@@ -253,6 +268,11 @@
 			"types": "./dist/pptx/automation/schemas/*.d.ts",
 			"import": "./dist/pptx/automation/schemas/*.mjs",
 			"require": "./dist/pptx/automation/schemas/*.cjs"
+		},
+		"./chart/region-map": {
+			"types": "./dist/chart/region-map/index.d.ts",
+			"import": "./dist/chart/region-map/index.mjs",
+			"require": "./dist/chart/region-map/index.cjs"
 		}
 	},
 	"publishConfig": {
@@ -271,39 +291,40 @@
 	},
 	"dependencies": {
 		"@xmldom/xmldom": "^0.9.12",
-		"emf-converter": "^4.21.0",
-		"fast-xml-parser": "^5.11.2",
+		"emf-converter": "^4.28.1",
+		"fast-xml-parser": "^5.12.0",
 		"fflate": "^0.8.3",
 		"jszip": "^3.10.2",
-		"lib0": "^0.2.119",
-		"mtx-decompressor": "^1.8.0",
+		"lib0": "^0.2.120",
+		"mtx-decompressor": "^1.8.1",
 		"prosemirror-collab": "^1.3.1",
 		"prosemirror-commands": "^1.7.2",
 		"prosemirror-history": "^1.5.1",
 		"prosemirror-keymap": "^1.2.3",
-		"prosemirror-model": "^1.25.12",
+		"prosemirror-model": "^1.25.13",
 		"prosemirror-state": "^1.4.4",
-		"prosemirror-transform": "^1.12.2",
-		"prosemirror-view": "^1.42.6",
+		"prosemirror-transform": "^1.12.5",
+		"prosemirror-view": "^1.42.8",
 		"utif": "3.1.0",
+		"xpath": "0.0.36",
 		"y-prosemirror": "^1.3.7",
 		"y-protocols": "^1.0.7",
 		"yjs": "^13.6.33"
 	},
 	"devDependencies": {
-		"@christophervr/ole2": "0.13.0",
-		"@modelcontextprotocol/sdk": "^1.32.1",
-		"@napi-rs/canvas": "^1.0.11",
-		"@types/node": "^26.6.5",
+		"@christophervr/ole2": "0.14.0",
+		"@modelcontextprotocol/sdk": "^1.32.2",
+		"@napi-rs/canvas": "^1.1.1",
+		"@types/node": "^26.6.6",
 		"@types/node-forge": "^1.3.14",
 		"@types/utif": "3.0.6",
 		"fast-check": "^4.10.2",
-		"node-forge": "^1.4.0",
-		"tsdown": "^0.23.1",
+		"node-forge": "^1.4.3",
+		"tsdown": "^0.23.5",
 		"tsup": "^9.0.0",
 		"typescript": "^7.0.2",
 		"unrun": "^0.3.1",
-		"vitest": "^5.0.5",
+		"vitest": "^5.1.0",
 		"xml-crypto": "^6.4.0",
 		"xmllint-wasm": "5.3.0",
 		"zod": "^4.6.7"

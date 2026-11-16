@@ -1,17 +1,25 @@
-import { XMLParser } from 'fast-xml-parser';
-import JSZip from 'jszip';
 import type {
 	DeckSaveIntent,
 	DeckSavePurpose,
+	DeckWebfontProgress,
+	GoogleFontsOption,
+	InlineTextDraft,
+	LoadLimitTranslate,
 	PendingInlineTextEdit,
+	PptxLoadLimits,
 	SlideSizeEmu,
 } from 'ooxml-ui/pptx';
 import {
+	applyInlineTextDraft,
 	createPresentationLoadResources,
 	applyImagePathPatches,
 	buildDeckSaveOptions,
 	overlayInlineTextSnapshot,
 	overlayMasterViewInlineSnapshot,
+	pptxLoadErrorMessage,
+	prefetchDeckWebfonts,
+	prepareDeckWebfonts,
+	resolveGoogleFontsCss2Base,
 	resolveSlideSizeSelection,
 	resolveTableCellImageUrls,
 	resolveTableStyleImageUrls,
@@ -45,13 +53,11 @@ import type {
 	PptxTheme,
 	PptxThemeOption,
 	PptxViewProperties,
-	XmlObject,
 } from 'pptx-viewer-core';
 import {
 	PptxHandler,
 	EncryptedFileError,
-	decodeXmlEntities,
-	parseSignatureXml,
+	parseSignaturesFromBuffer as parseCoreSignatures,
 } from 'pptx-viewer-core';
 import { onScopeDispose, ref, shallowRef, toValue, watch } from 'vue';
 import type { MaybeRefOrGetter, Ref, ShallowRef } from 'vue';
@@ -66,59 +72,14 @@ import {
 } from './load-content-helpers';
 import type { TemplateElementMap } from './template-editing';
 import { buildSaveSlides, partitionTemplateElements } from './template-editing';
+import { VUE_GOOGLE_FONTS_LINK_ID } from './useGoogleWebfonts';
 
-/**
- * Parse digital signatures from a `.pptx` ZIP buffer (best-effort; returns an
- * empty array when there are none or parsing fails).
- *
- * `jszip`/`fast-xml-parser` are imported statically on purpose: `PptxHandler`
- * (imported above) already pulls both into the same chunk, so a dynamic import
- * here cannot move them anywhere. It only made bundlers emit
- * INEFFECTIVE_DYNAMIC_IMPORT.
- *
- * The parser options mirror core's loader parser rather than taking
- * fast-xml-parser's defaults, and `packages/angular` carries the identical
- * copy of this function (see the note there). Two reasons, one cosmetic and
- * one structural:
- *
- * - fast-xml-parser decodes the five predefined entities but NOT numeric
- *   character references, so a certificate DN written
- *   `CN=M&#xFC;ller CA` was rendered verbatim in the signatures panel instead
- *   of `CN=Müller CA`. Non-ASCII signer names are exactly the ones a producer
- *   is most likely to escape that way, so the panel garbled the names it most
- *   needed to get right. `decodeXmlEntities` is the same helper core's parser
- *   uses, so both now agree on what a DN says.
- * - `processEntities: false` removes DTD handling from a path that reads
- *   attacker-supplied bytes. fast-xml-parser 5.9.2 expands no entities and
- *   rejects external ones outright, so nothing here was exploitable; this is
- *   forward-stability, and it also stops a package with a large DTD entity
- *   (which the default rejects with a size-cap throw) from silently
- *   collapsing every signature to "none found" via the catch below.
- */
-export async function parseSignaturesFromBuffer(buffer: ArrayBuffer): Promise<ParsedSignature[]> {
-	try {
-		const zip = await JSZip.loadAsync(buffer);
-		const parser = new XMLParser({
-			ignoreAttributes: false,
-			attributeNamePrefix: '@_',
-			parseAttributeValue: false,
-			parseTagValue: false,
-			processEntities: false,
-			tagValueProcessor: (_tagName: string, tagValue: string) => decodeXmlEntities(tagValue),
-			attributeValueProcessor: (_attrName: string, attrValue: string) =>
-				decodeXmlEntities(attrValue),
-		});
-		const result: ParsedSignature[] = [];
-		for (const path of Object.keys(zip.files)) {
-			if (path.startsWith('_xmlsignatures/') && path.endsWith('.xml')) {
-				const xml = await zip.files[path].async('string');
-				result.push(parseSignatureXml(parser.parse(xml) as XmlObject, path));
-			}
-		}
-		return result;
-	} catch {
-		return [];
-	}
+// Signature parsing is shared in the core (`ooxml-core/pptx`); kept exported here for callers and tests.
+// A local function, not a re-export: re-exporting an external binding breaks the CommonJS bundle.
+export function parseSignaturesFromBuffer(
+	buffer: Parameters<typeof parseCoreSignatures>[0],
+): ReturnType<typeof parseCoreSignatures> {
+	return parseCoreSignatures(buffer);
 }
 
 /**
@@ -173,6 +134,8 @@ export interface UseLoadContentResult {
 	mediaDataUrls: ShallowRef<Map<string, string>>;
 	/** True while a load is in flight. */
 	loading: Ref<boolean>;
+	/** Webfont download progress while a load waits for the deck's fonts (after a short delay). */
+	fontProgress: ShallowRef<DeckWebfontProgress | null>;
 	/** Error message from the last failed load, or null. */
 	error: Ref<string | null>;
 	/** True when the file is password-protected and could not be opened. */
@@ -263,7 +226,7 @@ export interface UseLoadContentResult {
 	 * `deck-save-encryption` in `pptx-viewer-shared` for the rationale and the
 	 * privacy tradeoff it accepts).
 	 */
-	getRecoverySnapshot: () => Promise<Uint8Array>;
+	getRecoverySnapshot: (draft?: InlineTextDraft | null) => Promise<Uint8Array>;
 	/** Serialise to a specific OpenXML format (pptx / ppsx / pptm). */
 	saveAs: (format: PptxSaveFormat) => Promise<Uint8Array>;
 }
@@ -307,6 +270,21 @@ export interface UseLoadContentOptions {
 	 * {@link getSaveIntent} and {@link getEmbedFonts}.
 	 */
 	getAllowExternalImages?: () => boolean;
+	/**
+	 * The host `limits` prop, read at load time and passed to
+	 * `PptxHandler.load`; omitted or `undefined` keeps the core defaults.
+	 */
+	getLimits?: () => PptxLoadLimits | undefined;
+	/**
+	 * The host `googleFonts` prop, read at load time: the load waits (bounded)
+	 * for the Google Fonts faces the deck draws before showing it.
+	 */
+	getGoogleFonts?: () => GoogleFontsOption | undefined;
+	/**
+	 * Translates the load-error text for a deck over a load limit (the
+	 * viewer's `t`). Omitted, the error keeps the core's English message.
+	 */
+	translate?: LoadLimitTranslate;
 }
 
 export function useLoadContent(
@@ -326,6 +304,7 @@ export function useLoadContent(
 	const layoutOptions = shallowRef<PptxLayoutOption[]>([]);
 	const mediaDataUrls = shallowRef<Map<string, string>>(new Map());
 	const loading = ref(false);
+	const fontProgress = shallowRef<DeckWebfontProgress | null>(null);
 	const error = ref<string | null>(null);
 	const isEncrypted = ref(false);
 	const handler = shallowRef<PptxHandler | null>(null);
@@ -379,6 +358,7 @@ export function useLoadContent(
 
 		try {
 			loading.value = true;
+			fontProgress.value = null;
 			error.value = null;
 			isEncrypted.value = false;
 
@@ -402,11 +382,54 @@ export function useLoadContent(
 			// in-flight Blob URLs aren't yanked mid-paint.
 			const previousHandler = handler.value;
 
+			// ── The deck's Google Fonts webfonts ─────
+			// Started as soon as core has parsed the slides (`onSlidesParsed`), so the
+			// download runs while the rest of the deck loads and media resolves;
+			// awaited before the deck is shown, which it holds back only briefly (see
+			// deck-webfont-readiness.ts). Nothing after that point changes slide text,
+			// so these slides name the same faces (and stylesheet) as the committed ones.
+			let webfonts: Promise<unknown> | undefined;
+			const startWebfonts = (
+				deckSlides: PptxSlide[],
+				deckEmbeddedFonts: PptxEmbeddedFont[],
+			): void => {
+				if (typeof document === 'undefined' || token !== renderToken) {
+					return;
+				}
+				webfonts = prepareDeckWebfonts({
+					document,
+					linkId: VUE_GOOGLE_FONTS_LINK_ID,
+					slides: partitionTemplateElements(deckSlides).slides,
+					embeddedFonts: deckEmbeddedFonts,
+					googleFontsBase: resolveGoogleFontsCss2Base(options?.getGoogleFonts?.()),
+					onProgress: (progress) => {
+						if (token === renderToken) {
+							fontProgress.value = progress;
+						}
+					},
+				});
+			};
+			// Start the stylesheet for the fonts the deck declares from its bytes, before parsing even
+			// reaches the slides (`prefetchDeckWebfonts`); `startWebfonts` then adds the exact one.
+			if (typeof document !== 'undefined') {
+				prefetchDeckWebfonts({
+					document,
+					linkId: VUE_GOOGLE_FONTS_LINK_ID,
+					bytes: buffer as ArrayBuffer,
+					googleFontsBase: resolveGoogleFontsCss2Base(options?.getGoogleFonts?.()),
+				});
+			}
 			const parsed = await newHandler.load(buffer as ArrayBuffer, {
 				allowExternalImages: options?.getAllowExternalImages?.(),
+				limits: options?.getLimits?.(),
+				onSlidesParsed: (deck) => startWebfonts([...deck.slides], [...deck.embeddedFonts]),
 			});
 			if (token !== renderToken) {
 				return;
+			}
+			// A JSON document is imported without the slide hook.
+			if (!webfonts) {
+				startWebfonts(parsed.slides, parsed.embeddedFonts ?? []);
 			}
 
 			// ── Resolve media Blob URLs (audio/video + poster frames) ──
@@ -496,7 +519,7 @@ export function useLoadContent(
 
 			const nextSignatures =
 				parsed.hasDigitalSignatures && signatureBuffer instanceof ArrayBuffer
-					? await parseSignaturesFromBuffer(signatureBuffer)
+					? await parseCoreSignatures(signatureBuffer)
 					: [];
 			if (token !== renderToken) {
 				return;
@@ -505,6 +528,13 @@ export function useLoadContent(
 			// Pull master/layout (template) elements out of each slide into their own
 			// store so the editor can gate / route / merge them back independently.
 			const partitioned = partitionTemplateElements(nextSlides);
+
+			if (webfonts) {
+				await webfonts;
+				if (token !== renderToken) {
+					return;
+				}
+			}
 
 			// Commit reactive state.
 			previousHandler?.dispose();
@@ -576,12 +606,18 @@ export function useLoadContent(
 				if (err instanceof EncryptedFileError) {
 					isEncrypted.value = true;
 				} else {
-					error.value = err instanceof Error ? err.message : String(err);
+					const translate = options?.translate;
+					error.value = translate
+						? pptxLoadErrorMessage(err, translate)
+						: err instanceof Error
+							? err.message
+							: String(err);
 				}
 			}
 		} finally {
 			resources.releaseIfUncommitted();
 			if (token === renderToken) {
+				fontProgress.value = null;
 				loading.value = false;
 			}
 		}
@@ -590,6 +626,7 @@ export function useLoadContent(
 	const serialize = async (
 		format: PptxSaveFormat,
 		purpose: DeckSavePurpose,
+		draft: InlineTextDraft | null = null,
 	): Promise<Uint8Array> => {
 		if (!handler.value) {
 			throw new Error('No presentation is loaded.');
@@ -610,7 +647,13 @@ export function useLoadContent(
 					)
 				: null;
 		const saveSlides = buildSaveSlides(
-			options?.getHeldDeck?.()?.slides ?? slides.value,
+			// A plain inline editor has no rich snapshot: its autosave draft stands in.
+			[
+				...applyInlineTextDraft(
+					options?.getHeldDeck?.()?.slides ?? slides.value,
+					pending ? null : draft,
+				),
+			],
 			options?.getHeldDeck?.()?.templateElementsBySlideId ?? templateElementsBySlideId.value,
 		).map((slide) =>
 			pending && 'slideId' in pending.target && slide.id === pending.target.slideId
@@ -677,7 +720,8 @@ export function useLoadContent(
 	// Autosave used to call `getContent()`, so protecting a deck wrote an
 	// ENCRYPTED recovery snapshot that nothing could reopen. Recovery gets its
 	// own serialisation now, and the decision lives in shared.
-	const getRecoverySnapshot = (): Promise<Uint8Array> => serialize('pptx', 'recovery-snapshot');
+	const getRecoverySnapshot = (draft?: InlineTextDraft | null): Promise<Uint8Array> =>
+		serialize('pptx', 'recovery-snapshot', draft ?? null);
 
 	watch(
 		() => toValue(content),
@@ -708,6 +752,7 @@ export function useLoadContent(
 		slideMasters,
 		mediaDataUrls,
 		loading,
+		fontProgress,
 		error,
 		isEncrypted,
 		handler,

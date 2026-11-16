@@ -68,7 +68,7 @@ has the bytes you handed the editor; if a document must not be copied or exporte
 the browser.
 
 ```ts
-import type { WordCustomization } from 'docx-core';
+import type { WordCustomization } from 'ooxml-ui/docx';
 
 editor.customization = {
 	capabilities: { print: false, export: false, copy: false },
@@ -346,14 +346,30 @@ await host.call('xlsx_set_cells', {
 
 For a headless backend with no editor on screen, use the tools on bytes directly (`docs/mcp.md`).
 
+## Framework handles
+
+Every framework adapter exposes the same imperative handle as its product's contract, built by the
+binding kit (`ooxml-ui/bindings`, see `src/ui/src/bindings/README.md`): a React `ref`, a Vue template
+ref, a Solid `editorRef` callback, an Angular component instance or a Svelte component instance. The
+members are listed per product in its contract (Word: `EDITOR_CONTRACT.handle` in
+`viewers/docx/packages/bindings/src/contract.ts`). Before the editor is mounted, a property read or
+a method call throws the product's "not mounted" error, an async method rejects, `markClean()` does
+nothing and `dirty` reads `false`. Call handle methods from event handlers or after the first mount.
+
 ## Building blocks vs the full editor
 
 The full editors (`<docx-editor>`, `<xlsx-editor>`, `<visio-viewer>`, the PowerPoint viewer) bring the
 chrome, and `customization` trims it. To compose your own layout, each product also exports its
 toolbar, canvas and panes separately (React: `useViewerBuildingBlocks` plus the element components).
 Building blocks are read-only until the host passes `canEdit: true`, and take no `readOnly`,
-`customization` or `storage`: you own the chrome, so you own those decisions. See
-`viewers/<product>/docs/building-blocks.md`.
+`customization` or `storage`: you own the chrome, so you own those decisions. React's PowerPoint
+building blocks also return `actions` (host-owned image, media, hyperlink, SmartArt, chart, equation,
+Find / Replace and layout operations, the password protection, document properties, font
+embedding and digital signature state and operations, Set Up Slide Show, Custom Shows and the
+shortcut catalogue (Broadcast is reported unsupported: it needs a collaboration service), and which
+toolbar actions need UI you render; see
+`viewers/pptx/docs/react/hooks.md`). See
+`viewers/<product>/docs/building-blocks.md` (Word, Excel and Visio; PowerPoint's chrome is described in `viewers/pptx/docs/guide/customization.md`).
 
 ## Known limits
 

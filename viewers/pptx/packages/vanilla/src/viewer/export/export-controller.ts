@@ -1,5 +1,12 @@
+import type {
+	CompatibilityWarningToast,
+	PdfExportSettings,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import {
+	downloadBlob,
 	downloadDataUrl,
+	runPdfExport,
 	exportAbortError,
 	exportDeckJson,
 	placeTileOnPage,
@@ -23,6 +30,7 @@ import type {
 } from './export-types';
 import type { ExportVideoOptions } from './export-video';
 import { runVideoExport } from './export-video';
+import type { MountedCaptureSlide } from './rasterize-slide';
 
 // Re-exported so existing `./export-controller` importers keep working after
 // the type moved to `./export-types` (shared with the per-format runners).
@@ -39,6 +47,17 @@ export interface ExportPdfOptions {
 	onProgress?: ExportProgress;
 	/** Abort the export early; the loop checks this between slides. */
 	signal?: AbortSignal;
+	/** Include hidden slides (vector export; default from Options > Advanced > Save as PDF). */
+	includeHiddenSlides?: boolean;
+	/** 1-based slide range (vector export). */
+	from?: number;
+	to?: number;
+	/** Explicit 0-based slides (the current slide); overrides `from`/`to` (vector export). */
+	slideIndexes?: readonly number[];
+	/** `pictures` writes one image per slide (the compatibility export); default from the options. */
+	mode?: PdfExportSettings['mode'];
+	/** Told what the vector PDF approximated (effects drawn as pictures, substituted fonts). */
+	onReport?: (result: VectorPdfExportResult) => void;
 }
 
 export interface ExportControllerDeps {
@@ -50,12 +69,29 @@ export interface ExportControllerDeps {
 	rasterizeSlideToTiles?: RasterizeSlideToTiles;
 	/** Base file name (without extension) for downloads. Defaults to `presentation`. */
 	fileName?: string;
+	/**
+	 * The open document's name, read on every export so a file opened from a cloud place names
+	 * its downloads (wins over {@link fileName}).
+	 */
+	getFileName?: () => string | undefined;
 	/** Live translator (host-supplied), for the print path's own UI text. */
 	getTranslator?: ExportCaptureDeps['getTranslator'];
 	/** Options > Advanced > "Print hidden slides". */
 	getIncludeHiddenSlides?: ExportCaptureDeps['getIncludeHiddenSlides'];
 	/** Options > Advanced > "High quality" raster scale for the print fallback path. */
 	getPrintHighQuality?: ExportCaptureDeps['getPrintHighQuality'];
+	/** The document the capture stage is mounted in. */
+	doc?: Document;
+	/** Mount a slide on the capture stage, for the vector PDF export. */
+	mountSlide?: (index: number) => Promise<MountedCaptureSlide>;
+	/** Options > Advanced > Save as PDF. Defaults to vector pages without hidden slides. */
+	getPdfExportSettings?: () => PdfExportSettings;
+	/** Options > Advanced image resolution multiplier, for effects drawn as pictures. */
+	getImageResolutionScale?: () => number;
+	/** The viewer-level `onPdfExportReport`, told what every vector PDF approximated. */
+	onPdfExportReport?: (result: VectorPdfExportResult) => void;
+	/** Show the PDF approximation notice in the compatibility toast stack. */
+	notify?: (toast: CompatibilityWarningToast) => void;
 }
 
 export interface ExportController {
@@ -129,12 +165,16 @@ function deckDataFromState(state: ViewerState): PptxData {
  */
 export function createExportController(deps: ExportControllerDeps): ExportController {
 	let exporting = false;
+	const fileName = (): string | undefined =>
+		deps.getFileName ? deps.getFileName() : deps.fileName;
 
 	const capture: ExportCaptureDeps = {
 		store: deps.store,
 		rasterizeSlide: deps.rasterizeSlide,
 		rasterizeSlideToRaster: deps.rasterizeSlideToRaster,
-		baseName: resolveExportBaseName(deps.fileName),
+		get baseName() {
+			return resolveExportBaseName(fileName());
+		},
 		getTranslator: deps.getTranslator,
 		getIncludeHiddenSlides: deps.getIncludeHiddenSlides,
 		getPrintHighQuality: deps.getPrintHighQuality,
@@ -213,6 +253,43 @@ export function createExportController(deps: ExportControllerDeps): ExportContro
 		}
 		// eslint-disable-next-line one-var -- separated from `state` above by a guard clause
 		const { onProgress, signal } = options;
+		const defaults = deps.getPdfExportSettings?.() ?? {
+			mode: 'vector',
+			includeHiddenSlides: false,
+		};
+		const settings: PdfExportSettings = {
+			mode: deps.mountSlide ? (options.mode ?? defaults.mode) : 'pictures',
+			includeHiddenSlides: options.includeHiddenSlides ?? defaults.includeHiddenSlides,
+		};
+		if (settings.mode === 'vector' && deps.mountSlide) {
+			const mountSlide = deps.mountSlide;
+			return guarded(undefined, async () => {
+				await runPdfExport({
+					settings,
+					vector: {
+						document: deps.doc ?? document,
+						slides: state.slides,
+						canvasSize: state.canvasSize,
+						...(state.slideSize ? { slideSize: state.slideSize } : {}),
+						...(options.from !== undefined ? { from: options.from } : {}),
+						...(options.to !== undefined ? { to: options.to } : {}),
+						...(options.slideIndexes ? { slideIndexes: options.slideIndexes } : {}),
+						mountSlide,
+						rasterScale: 2 * (deps.getImageResolutionScale?.() ?? 1),
+						title: capture.baseName,
+						...(signal ? { signal } : {}),
+						...(onProgress ? { onProgress } : {}),
+					},
+					pictures: () => Promise.resolve(),
+					save: (blob) => downloadBlob(blob, `${capture.baseName}.pdf`),
+					onApproximated: (result) => {
+						options.onReport?.(result);
+						deps.onPdfExportReport?.(result);
+					},
+					...(deps.notify ? { notify: deps.notify } : {}),
+				});
+			});
+		}
 		return guarded(undefined, async () => {
 			const { jsPDF } = await import('jspdf'),
 				{ width, height } = state.canvasSize,
@@ -265,7 +342,7 @@ export function createExportController(deps: ExportControllerDeps): ExportContro
 	 * The shared helper derives `deck.json` from the raw source file name.
 	 */
 	function exportJson(): void {
-		exportDeckJson(deckDataFromState(deps.store.get()), deps.fileName);
+		exportDeckJson(deckDataFromState(deps.store.get()), fileName());
 	}
 
 	return {

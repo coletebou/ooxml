@@ -155,38 +155,38 @@ describe('getSvgStrokeDasharray', () => {
 
 	it('should return dot pattern for dot type', () => {
 		const result = getSvgStrokeDasharray('dot', 2);
-		expect(result).toBe('2 4');
+		expect(result).toBe('2 6');
 	});
 
 	it('should return dash pattern for dash type', () => {
 		const result = getSvgStrokeDasharray('dash', 2);
-		expect(result).toBe('8 4');
+		expect(result).toBe('8 6');
 	});
 
 	it('should return long dash pattern for lgDash', () => {
 		const result = getSvgStrokeDasharray('lgDash', 2);
-		expect(result).toBe('14 5');
+		expect(result).toBe('16 6');
 	});
 
 	it('should return dashDot pattern', () => {
 		const result = getSvgStrokeDasharray('dashDot', 2);
-		expect(result).toBe('8 4 2 4');
+		expect(result).toBe('8 6 2 6');
 	});
 
 	it('should return lgDashDot pattern', () => {
 		const result = getSvgStrokeDasharray('lgDashDot', 2);
-		expect(result).toBe('14 5 2 5');
+		expect(result).toBe('16 6 2 6');
 	});
 
 	it('should return lgDashDotDot pattern', () => {
 		const result = getSvgStrokeDasharray('lgDashDotDot', 2);
-		expect(result).toBe('14 5 2 4 2 4');
+		expect(result).toBe('16 6 2 6 2 6');
 	});
 
 	it('should handle custom dash with segments', () => {
-		const segments = [{ dash: 3000, space: 1500 }];
+		const segments = [{ dash: 300000, space: 150000 }];
 		const result = getSvgStrokeDasharray('custom', 2, segments);
-		// dash: (3000/1000)*2=6, space: (1500/1000)*2=3
+		// 1000ths of a percent of the pen: 300% of 2 = 6, 150% = 3
 		expect(result).toBe('6 3');
 	});
 
@@ -197,7 +197,7 @@ describe('getSvgStrokeDasharray', () => {
 
 	it('should enforce minimum stroke width of 1', () => {
 		const result = getSvgStrokeDasharray('dot', 0.5);
-		expect(result).toBe('1 2');
+		expect(result).toBe('1 3');
 	});
 });
 
@@ -336,7 +336,7 @@ describe('getTextCompensationTransform', () => {
 		expect(getTextCompensationTransform(element)).toBe('scaleX(-1)');
 	});
 
-	it('should compensate vertical flip', () => {
+	it('should turn vertically flipped text upside down (PowerPoint never mirrors it)', () => {
 		const element = {
 			id: '1',
 			type: 'shape',
@@ -346,10 +346,11 @@ describe('getTextCompensationTransform', () => {
 			height: 100,
 			flipVertical: true,
 		} as PptxElement;
-		expect(getTextCompensationTransform(element)).toBe('scaleY(-1)');
+		// The container's scaleY(-1) and this scaleX(-1) make a half turn.
+		expect(getTextCompensationTransform(element)).toBe('scaleX(-1)');
 	});
 
-	it('should compensate both flips', () => {
+	it('should leave both flips alone: the shape is a half turn and its text turns with it', () => {
 		const element = {
 			id: '1',
 			type: 'shape',
@@ -360,7 +361,7 @@ describe('getTextCompensationTransform', () => {
 			flipHorizontal: true,
 			flipVertical: true,
 		} as PptxElement;
-		expect(getTextCompensationTransform(element)).toBe('scaleX(-1) scaleY(-1)');
+		expect(getTextCompensationTransform(element)).toBeUndefined();
 	});
 
 	it('should not include rotation (only flips are compensated)', () => {

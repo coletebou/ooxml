@@ -23,12 +23,19 @@ export function renderDocument(core: EditorCore): void {
 			doc: yjs?.doc ?? modelToDoc(core.model),
 			plugins: bodyPlugins({
 				model: () => core.model,
+				pictureUrl: (partName, contentType) => core.imageMedia.urlFor(partName, contentType),
 				reviewAuthor: () => core.reviewAuthor,
+				highlightEditableRegions: () => core.highlightEditableRegions,
 				reviewDisplayMode: () => core.reviewDisplayMode,
 				insertNote: (kind) => core.parts.insertNote(kind, canvas, paper),
 				// ProseMirror's Mod-f reaches here before the shortcut registry: honour `find: false`.
 				showSearch: () => {
 					if (!core.viewOptions.customization.shortcuts.has('find')) core.shell.searchPanel?.open();
+				},
+				pasteSpecial: () => core.formatDialogs.open('pasteSpecial'),
+				pasteOptions: {
+					container: () => core.shell.canvas?.closest<HTMLElement>('.dve-frame') ?? undefined,
+					locale: () => core.locale,
 				},
 				extraPlugins: core.inserts.plugins(),
 				yjs: Boolean(yjs),
@@ -81,8 +88,10 @@ export function renderDocument(core: EditorCore): void {
 		nodeViews: {
 			image: imageNodeView(core.imageMedia, {
 				editPicture: (pos) => core.inserts.pictureDialog.open(pos),
+				editChart: () => core.formatDialogs.open('chartData'),
 				maxWidth: () => core.contentWidth(),
 				theme: () => core.model.theme,
+				locale: () => core.locale,
 			}),
 		},
 		handleClick: (view, pos, event) => core.inserts.handleClick(view, pos, event),

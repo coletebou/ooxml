@@ -1,11 +1,22 @@
 // Contextual Table Design and Chart Design commands. A table is "selected" when the active cell is
 // inside it; a chart when it is the selected drawing (`selection.drawing`, set by clicking it).
-import { type ChartObject, type ChartPatch, type ChartType, type Table } from '../../index';
+import {
+	type ChartObject,
+	type ChartPatch,
+	type ChartType,
+	type SmartArtObject,
+	type Table,
+} from '../../index';
 import type { Command } from '../commands';
 import type { EditorContext } from '../context';
 import { icon } from './icons';
 import { editing, tableAt, target } from './util';
 import { chartColorPalettePatch } from '../../edit/chart-colors';
+import {
+	chartQuickLayoutPatch,
+	chartStylePresetPatch,
+	chartTakesQuickLayout,
+} from '../../edit/chart-design';
 
 export const activeTable = (ctx: EditorContext): Table | undefined => {
 	const t = target(ctx);
@@ -19,6 +30,17 @@ export function activeChart(ctx: EditorContext): { chart: ChartObject; index: nu
 	if (!t || index === undefined) return undefined;
 	const picked = t.ws.drawings[index];
 	return picked?.kind === 'chart' ? { chart: picked, index } : undefined;
+}
+
+/** The selected SmartArt graphic, which Excel's SmartArt Design tab and text pane follow. */
+export function activeSmartArt(
+	ctx: EditorContext,
+): { smartArt: SmartArtObject; index: number } | undefined {
+	const t = target(ctx);
+	const index = ctx.selection.get().drawing;
+	if (!t || index === undefined) return undefined;
+	const picked = t.ws.drawings[index];
+	return picked?.kind === 'smartArt' ? { smartArt: picked, index } : undefined;
 }
 
 /** Edits the active chart (a chart read from a file keeps its part; the core patches it on save). */
@@ -60,7 +82,11 @@ export function contextualCommands(): Command[] {
 		editing({
 			...command,
 			lock: 'objects',
-			enabled: (ctx) => !!activeChart(ctx) && (command.enabled?.(ctx) ?? true),
+			// A chart whose part holds content the model lacks is shown and saved, never edited.
+			enabled: (ctx) => {
+				const found = activeChart(ctx);
+				return !!found && !found.chart.editBlocked && (command.enabled?.(ctx) ?? true);
+			},
 		});
 	return [
 		chartCmd({
@@ -74,6 +100,35 @@ export function contextualCommands(): Command[] {
 				if (!t || !found) return;
 				const patch = chartColorPalettePatch(found.chart, id);
 				if (patch) t.session.updateChart(t.sheet, found.index, patch);
+			},
+		}),
+		chartCmd({
+			id: 'chart.styles',
+			label: 'Chart Styles',
+			icon: icon('chartStyles'),
+			run: (ctx, arg) => {
+				if (typeof arg !== 'string') return;
+				const t = target(ctx);
+				const found = activeChart(ctx);
+				const patch = found && chartStylePresetPatch(found.chart, arg);
+				if (t && found && patch) t.session.updateChart(t.sheet, found.index, patch);
+			},
+		}),
+		chartCmd({
+			id: 'chart.quick-layout',
+			label: 'Quick Layout',
+			icon: icon('quickLayout'),
+			enabled: (ctx) => {
+				const found = activeChart(ctx);
+				return !!found && chartTakesQuickLayout(found.chart);
+			},
+			run: (ctx, arg) => {
+				const n = typeof arg === 'string' ? Number(/^layout(\d+)$/u.exec(arg)?.[1]) : Number(arg);
+				const t = target(ctx);
+				const found = activeChart(ctx);
+				const patch =
+					found && Number.isInteger(n) ? chartQuickLayoutPatch(found.chart, n) : undefined;
+				if (t && found && patch) t.session.updateChart(t.sheet, found.index, patch);
 			},
 		}),
 		tableCmd({

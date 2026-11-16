@@ -5,6 +5,7 @@ import { visioStyleFormattingShape } from './formatting';
 import { visioPageEditToDrawing } from './page-edit';
 import { visioMovableGroup } from './shape-group';
 import { visioWithContainerMembers } from './diagram-parts';
+import { visioSelectionShapes } from './selection-connectors';
 
 export interface VisioPagePoint {
 	x: number;
@@ -16,7 +17,7 @@ function layeredShape(page: VisioPage, id: string): VisioShape | undefined {
 	const shape = matches.length === 1 ? matches[0]! : undefined;
 	if (!shape?.layerIds?.length) return undefined;
 	const unlayered = { ...page, shapes: [{ ...shape, layerIds: [] }] };
-	const plain = visioStyleFormattingShape(unlayered, id) ?? visioMovableGroup(unlayered, id);
+	const plain = visioStyleFormattingShape(unlayered, id) ?? visioMovableGroup(unlayered, id, true);
 	const locked = shape.layerIds.some(
 		(layer) => page.layers?.find((entry) => entry.id === layer)?.locked !== false,
 	);
@@ -25,7 +26,9 @@ function layeredShape(page: VisioPage, id: string): VisioShape | undefined {
 /** Source admission remains authoritative for locks, formulas, geometry and dependencies. */
 export function visioMovementShape(page: VisioPage, id: string): VisioShape | undefined {
 	const shape =
-		visioStyleFormattingShape(page, id) ?? visioMovableGroup(page, id) ?? layeredShape(page, id);
+		visioStyleFormattingShape(page, id) ??
+		visioMovableGroup(page, id, true) ??
+		layeredShape(page, id);
 	if (
 		!shape ||
 		(shape.kind !== 'shape' && !(shape.kind === 'group' && shape.children.length)) ||
@@ -45,8 +48,15 @@ export function visioMovementShape(page: VisioPage, id: string): VisioShape | un
 	return shape;
 }
 /** Client points have been converted to physical SVG page inches; commands use upward y. */
-export function visioPageDragDelta(start: VisioPagePoint, end: VisioPagePoint): VisioPagePoint {
-	return { x: end.x - start.x, y: start.y - end.y };
+export function visioPageDragDelta(
+	start: VisioPagePoint,
+	end: VisioPagePoint,
+	constrain = false,
+): VisioPagePoint {
+	const x = end.x - start.x,
+		y = start.y - end.y;
+	if (!constrain || !Number.isFinite(x) || !Number.isFinite(y)) return { x, y };
+	return Math.abs(x) >= Math.abs(y) ? { x, y: 0 } : { x: 0, y };
 }
 export function visioMovePreviewTransform(
 	shape: VisioShape,
@@ -69,7 +79,9 @@ export function visioMoveCommands(
 	selection: readonly string[],
 	delta: VisioPagePoint,
 ): VisioEdit[] | undefined {
-	const ids = visioMoveTargets(page, selection);
+	// Connectors fully inside the selection follow their shapes (core reroutes them).
+	const shapesOnly = visioSelectionShapes(page, selection);
+	const ids = shapesOnly ? visioMoveTargets(page, shapesOnly) : [];
 	if (
 		!ids.length ||
 		ids.length > 1000 ||

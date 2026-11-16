@@ -2,14 +2,21 @@ import type {
 	AutosaveDisabledReason,
 	AutosaveRecord,
 	CanvasSize,
+	CloudDocumentController,
+	SaveProgressController,
+	CloudFileProvider,
 	CollaborationConfig,
 	CollaborationShellState,
 	CollaborationState,
 	DocumentStorage,
 	ConnectionStatus,
 	FieldSubstitutionContext,
+	GoogleFontsOption,
+	ListConversionScope,
 	MobileSheetKey,
+	PptxLoadLimits,
 	ResolvedCustomization,
+	VectorPdfExportResult,
 	ViewerAutosaveStatus,
 	ViewerMode,
 	ViewportFitPadding,
@@ -66,11 +73,37 @@ export interface CreateViewerStateOptions {
 	getAutosave: () => boolean | undefined;
 	autosaveIntervalMs?: number;
 	getFilePath: () => string | undefined;
-	/** Host `storage` prop: Save goes to `storage.save()`; recovery copies to its recovery methods. */
+	/**
+	 * The document's storage: Save goes to `storage.save()`; recovery copies to its recovery
+	 * methods. The host `storage` prop, or the open cloud file's own (see `cloudDocument`).
+	 */
 	getStorage?: () => DocumentStorage | undefined;
+	/**
+	 * The host `storage` prop itself, which File > Open > Recent and the recovery-cache
+	 * maintenance keep using while a cloud file is open. Defaults to {@link getStorage}.
+	 */
+	getHostStorage?: () => DocumentStorage | undefined;
+	/** Host `fileProviders` prop: the cloud places of File > Open. */
+	getFileProviders?: () => readonly CloudFileProvider[] | undefined;
+	/**
+	 * The File > Open cloud file now open (shared `render/cloud-open`). `getStorage`,
+	 * `getFilePath`, `getFileName` and `getEditable` already resolve through it; the factory opens
+	 * and clears it. Omitted, the factory makes its own.
+	 */
+	cloudDocument?: CloudDocumentController;
+	/** The progress of a save to the storage, shown by the status bar. Omitted, the factory makes its own. */
+	saveProgress?: SaveProgressController;
 	/** Host `authorName` prop: comment/reply author and the broadcast presenter name. */
 	getAuthorName?: () => string | undefined;
 	getInitialSlide: () => number;
+	/** Host `googleFonts` prop: the Google Fonts fallback policy. */
+	getGoogleFonts?: () => GoogleFontsOption | undefined;
+	/** Host `listConversionScope` prop: how far a bare caret's Bullets / Numbering reach. */
+	getListConversionScope?: () => ListConversionScope | undefined;
+	/** Host `allowExternalContent` prop: overrides the Trust Center setting for every load when set. */
+	getAllowExternalContent?: () => boolean | undefined;
+	/** Host `limits` prop: the load limits passed to every load (unset keeps the core defaults). */
+	getLimits?: () => PptxLoadLimits | undefined;
 	/** Already locale-bound translator; propagated to descendants via context. */
 	t: Translator;
 	getSmartArt3D: () => boolean;
@@ -114,6 +147,7 @@ export interface CreateViewerStateOptions {
 	onpropertieschange?: (updates: Partial<PptxCoreProperties>) => void;
 	onpresentationchange?: (presenting: boolean) => void;
 	oncollaborationstatus?: (status: ConnectionStatus) => void;
+	onpdfexportreport?: (result: VectorPdfExportResult) => void;
 	onstartcollaboration?: (config: CollaborationConfig) => void;
 	oncollaborationchange?: (state: CollaborationState) => void;
 	onstopcollaboration?: () => void;
@@ -237,6 +271,10 @@ export interface ViewerStateBag {
 	closeSignatureWarning(): void;
 	/** File > Open > "Browse this device" (host override, else the native picker). */
 	openFile(): void;
+	/** The File > Open cloud file now open; cleared when another document is loaded. */
+	cloudDocument: CloudDocumentController;
+	/** Progress of a save to the host's storage (upload, merge), read by the status bar. */
+	saveProgress: SaveProgressController;
 	/** Run a Quick Access Toolbar command by catalog id (unknown ids no-op). */
 	runQuickAccessCommand(id: string): void;
 	/**

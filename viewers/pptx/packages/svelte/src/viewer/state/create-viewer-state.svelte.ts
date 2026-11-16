@@ -2,17 +2,22 @@ import {
 	EMPTY_RESOLVED_CUSTOMIZATION,
 	isEditingAllowed,
 	buildFieldSubstitutionContext,
+	createCloudDocumentController,
+	createSaveProgressController,
 	deleteAutosaveSnapshot,
 	isFeatureEnabled,
 	resolve3DRenderingFlags,
+	resolveAllowExternalContent,
 	resolveImageResolutionScale,
+	resolvePdfExportSettings,
 	resolveSlideSizeSelection,
 	SAVE_FAILED_TOAST,
 	saveFailureMessage,
 	tableStyleSaveOptions,
 } from 'ooxml-ui/pptx';
-import type { FieldSubstitutionContext } from 'ooxml-ui/pptx';
+import type { CloudOpenedFile, FieldSubstitutionContext } from 'ooxml-ui/pptx';
 import type { PptxSaveFormat } from 'pptx-viewer-core';
+import { untrack } from 'svelte';
 
 import { provideTranslator } from '../../i18n/context';
 import { provideChartFormat } from '../editor/chart-format-state.svelte';
@@ -39,6 +44,7 @@ import { runQuickAccessCommand } from './quick-access-commands';
 import { provideRenderContext, renderContextSourceFor } from './render-context';
 import { provideRendering3DFlags } from './rendering-3d-flags-context';
 import { provideTableCellSelection } from './table-cell-selection-context';
+import { provideViewerCloudFiles } from './viewer-cloud-files-context';
 import { ViewerState } from './viewer-state.svelte';
 import { provideViewerStorage } from './viewer-storage-context';
 
@@ -121,6 +127,7 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 	const editor = new EditorState({
 		getCurrent: () => viewer.current,
 		getAuthorName: () => options.getAuthorName?.(),
+		getListConversionScope: () => options.getListConversionScope?.(),
 		getHandler: () => loader.handler,
 		setHandler: (handler, keepPrevious, data) => loader.adoptHandler(handler, keepPrevious, data),
 		// Design > Slide Size. The EMU state wins wherever it still agrees with
@@ -140,6 +147,13 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 				tableStylesToDelete: loader.tableStylesToDelete,
 			}),
 		onCorePropertiesChange: (updates) => options.onpropertieschange?.(updates),
+		// Undo and Redo of a theme pick: the primary theme part's loaded name, and the theme put back
+		// published to the loader the way a gallery pick's theme is (`onthemechange`).
+		getThemeOptions: () => loader.themeOptions,
+		onThemeRestored: (theme) => {
+			loader.presentationTheme = theme;
+			loader.colorScheme = theme.colorScheme;
+		},
 		onChange: () => {
 			viewer.setSlideCount(editor.slides.length);
 			options.onchange?.();
@@ -169,6 +183,8 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 		// Forward reference (like `getScale` below): the options cluster is built
 		// after this one, and the cadence is only read when a save is scheduled.
 		getOptionsIntervalSeconds: () => editorUi.optionsState.autosaveIntervalSeconds,
+		// Forward reference too: read only when a snapshot is written.
+		getInlineEditingId: () => editorUi.controller.editingId,
 	});
 	// `.current` is filled in once `deck` is constructed below. The keyboard
 	// shortcut that needs it (Ctrl+M) is only ever invoked on a real key press,
@@ -188,6 +204,7 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 		editor,
 		viewer,
 		collab: collabCluster.collab,
+		autosave: collabCluster.autosaveCtl,
 		options,
 		getScale: () => derived.scale,
 		getEditable: () => collabCluster.shellState.canEdit,
@@ -201,7 +218,9 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 		// must not rewrite that choice for every other host.
 		getAutosaveEnabled: () => collabCluster.autosavePreference,
 		setAutosaveEnabled: collabCluster.setAutosaveFlag,
-		newSlide: () => deckApi.current?.addSlide(),
+		// Ctrl+M inserts after the slide on screen and shows the new one, as the ribbon's New Slide
+		// does (the API's own default is the end of the deck).
+		newSlide: () => deckApi.current?.addSlide(deckApi.current.getActiveSlideIndex()),
 		getPresentation: () => presentationApi.current,
 	});
 
@@ -209,8 +228,15 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 	// snapshotted once, so a user who flips the option keeps it in effect for
 	// the very next file they open.
 	loader.getLoadOptions = () => ({
-		allowExternalImages: editorUi.optionsState.options.trust.allowExternalContent,
+		allowExternalImages: resolveAllowExternalContent(
+			options.getAllowExternalContent?.(),
+			editorUi.optionsState.options,
+		),
+		// Host load limits, also read per load (unset keeps the core defaults).
+		limits: options.getLimits?.(),
 	});
+	loader.translate = (key, params) => options.t(key, params);
+	loader.getGoogleFonts = () => editorUi.getGoogleFonts();
 
 	// Each 3D opt-in flag ANDs the host's own prop with Options > Advanced >
 	// "Disable 3D rendering" (see `resolve3DRenderingFlags`), so a viewer user
@@ -301,15 +327,51 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 		getImageResolutionScale: () => resolveImageResolutionScale(editorUi.optionsState.options),
 		getIncludeHiddenSlides: () => editorUi.optionsState.options.advanced.printHiddenSlides,
 		getPrintHighQuality: () => editorUi.optionsState.options.advanced.printHighQuality,
+		getPdfExportSettings: () => resolvePdfExportSettings(editorUi.optionsState.options),
 		getRootEl: options.getRootEl,
 		getEditable,
 		getFieldContext: fieldContext,
 		getFileName: () => options.getFileName?.(),
 		onnotesupdate: options.onnotesupdate,
+		notify: (toast) => editorUi.compatToasts.notify(toast),
+		onpdfexportreport: (result) => options.onpdfexportreport?.(result),
 	});
 
-	provideViewerStorage(() => options.getStorage?.());
-	const rawEditingApi = createEditingApi(editor, () => options.getStorage?.());
+	// File > Open > Recent and the cache sweep list the HOST's store even while a cloud file
+	// (with its own storage) is open.
+	const getHostStorage = () => (options.getHostStorage ?? options.getStorage)?.();
+	provideViewerStorage(getHostStorage);
+	// File > Open > a cloud place: the file's storage, name and edit right apply from now on (the
+	// option getters resolve through `cloudDocument`), and its bytes load like any open.
+	const cloudDocument = options.cloudDocument ?? createCloudDocumentController();
+	const saveProgress = options.saveProgress ?? createSaveProgressController();
+	const openCloudFile = (file: CloudOpenedFile): void => {
+		cloudDocument.open(file);
+		void loader.load(file.bytes);
+	};
+	provideViewerCloudFiles(() => ({
+		providers: options.getFileProviders?.() ?? [],
+		open: openCloudFile,
+		clear: cloudDocument.clear,
+	}));
+	// A host content change replaces the cloud document (the first read is a no-op clear).
+	$effect(() => {
+		options.getSource();
+		untrack(() => cloudDocument.clear());
+	});
+	const rawEditingApi = createEditingApi(
+		editor,
+		() => options.getStorage?.(),
+		() => collabCluster.autosaveCtl.markSaved(),
+		() => {
+			const filePath = options.getFilePath();
+			if (filePath && editorUi.optionsState.shouldDiscardAutosaveOnSave) {
+				void deleteAutosaveSnapshot(filePath, options.getStorage?.()).catch(() => {
+					// The host save succeeded; recovery cleanup is best-effort here.
+				});
+			}
+		},
+	);
 	// Options > Accessibility > "feedback with sound", and Options > Save >
 	// "keep the last AutoRecover version": once a `.pptx` Save/Save-As download
 	// actually lands, play the completion cue and, unless the user asked to
@@ -376,7 +438,7 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 	// File > Options > Save > "cache retention": a one-time sweep per mount is
 	// enough, since a fresh snapshot only ever lands with a fresh timestamp.
 	// With a host recovery store it sweeps that store, only when it lists its copies.
-	editorUi.optionsState.bindStorage(() => options.getStorage?.());
+	editorUi.optionsState.bindStorage(getHostStorage);
 	void editorUi.optionsState.pruneExpiredCache().catch(() => {
 		// Best-effort background maintenance; a blocked store skips it.
 	});
@@ -520,11 +582,14 @@ export function createViewerState(options: CreateViewerStateOptions): ViewerStat
 		},
 		enterPresenterView: presenter.enterPresenterView,
 		closeSignatureWarning: collabCluster.closeSignatureWarning,
-		openFile: createOpenFile(loader, () => options.onopenfile),
+		openFile: createOpenFile(loader, () => options.onopenfile, cloudDocument.clear),
+		cloudDocument,
+		saveProgress,
 		runQuickAccessCommand: (id) =>
 			runQuickAccessCommand(id, {
 				deck,
 				exportingApi,
+				runPdf: () => exportNotes.exportUi.runPdf(),
 				parityUi: editorUi.parityUi,
 				customization: getCustomization(),
 			}),

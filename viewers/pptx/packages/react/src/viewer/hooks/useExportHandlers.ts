@@ -6,6 +6,7 @@
  * Save-as logic lives in ./useExportSaveAs.ts.
  */
 import {
+	choosePdfExportSelection,
 	EXPORT_ASSEMBLING_PERCENT,
 	EXPORT_DONE_PERCENT,
 	isExportAbortError,
@@ -14,7 +15,9 @@ import {
 } from 'ooxml-ui/pptx';
 import { useState, useRef, useCallback } from 'react';
 
-import { exportSlideAsPng, exportAllSlidesAsPdf, copySlideToClipboard } from '../utils/export';
+import { useTranslation } from '../i18n/use-translation';
+import { exportSlideAsPng, copySlideToClipboard } from '../utils/export';
+import { exportPresentationPdf } from '../utils/export-pdf-vector';
 import type { UseExportHandlersInput, ExportHandlersResult } from './export-handler-types';
 import { useExportMediaHandlers } from './useExportMediaHandlers';
 import { useExportNotesPdf } from './useExportNotesPdf';
@@ -51,9 +54,9 @@ export function useExportHandlers(input: UseExportHandlersInput): ExportHandlers
 		slideSizeEmu,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
 	} = input;
-	// Stable callbacks must not capture a previous deck just to read a scalar.
-	const slideCount = slides.length;
+	const { t } = useTranslation();
 	const backgroundColor = activeSlide?.backgroundColor;
 
 	const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -132,8 +135,36 @@ export function useExportHandlers(input: UseExportHandlersInput): ExportHandlers
 		}
 	}, [canvasStageRef, activeSlideIndex, backgroundColor, imageExportScale]);
 
+	// Read at invocation, so the callback stays stable and never holds a previous deck.
+	const pdfInputRef = useRef({
+		settings: pdfExportSettings ?? { mode: 'vector' as const, includeHiddenSlides: false },
+		slides,
+		canvasSize,
+		slideSize: slideSizeEmu,
+	});
+	pdfInputRef.current = {
+		settings: pdfExportSettings ?? { mode: 'vector', includeHiddenSlides: false },
+		slides,
+		canvasSize,
+		slideSize: slideSizeEmu,
+	};
+	// The host callbacks and translator, read at invocation like the deck above.
+	const pdfHostRef = useRef({ input, t });
+	pdfHostRef.current = { input, t };
+
 	const handleExportPdf = useCallback(async () => {
 		if (!canvasStageRef.current) {
+			return;
+		}
+		const host = pdfHostRef.current;
+		// File > Export > PDF asks for the range first (vector pages only); Cancel exports nothing.
+		const selection = await choosePdfExportSelection(host.input.pdfExportContainerRef?.current, {
+			settings: pdfInputRef.current.settings,
+			slides: pdfInputRef.current.slides,
+			currentSlide: activeSlideIndex,
+			translate: host.t,
+		});
+		if (!selection) {
 			return;
 		}
 		const abortCtrl = new AbortController();
@@ -143,13 +174,16 @@ export function useExportHandlers(input: UseExportHandlersInput): ExportHandlers
 		setExportProgress(0);
 		setExportModalOpen(true);
 		try {
-			await exportAllSlidesAsPdf(
+			await exportPresentationPdf(
 				canvasStageRef,
-				slideCount,
 				setActiveSlideIndex,
 				activeSlideIndex,
 				'presentation.pdf',
 				{
+					...pdfInputRef.current,
+					selection,
+					notify: host.input.notifyPdfExport,
+					onApproximated: host.input.onPdfExportReport,
 					scale: imageExportScale,
 					onProgress: (current, total) => {
 						setExportProgress(slideProgressPercent(current, total));
@@ -173,7 +207,7 @@ export function useExportHandlers(input: UseExportHandlersInput): ExportHandlers
 			exportAbortRef.current = null;
 			setExportModalOpen(false);
 		}
-	}, [canvasStageRef, slideCount, setActiveSlideIndex, activeSlideIndex, imageExportScale]);
+	}, [canvasStageRef, setActiveSlideIndex, activeSlideIndex, imageExportScale]);
 
 	const handleCopySlideAsImage = useCallback(async () => {
 		const stageEl = canvasStageRef.current;

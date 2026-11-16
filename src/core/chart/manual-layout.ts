@@ -105,3 +105,30 @@ export function resolveManualLayoutRect(
 				: layout.height * frame.height;
 	return { x, y, width: Math.max(width, 1), height: Math.max(height, 1) };
 }
+
+/** Resolve a plot rectangle, applying host axis bands only to an outer target. */
+export function resolveManualPlotRect(
+	layout: ChartManualLayout | null | undefined,
+	frame: ChartFrameSize,
+	auto: ChartLayoutRect,
+	bands: { left: number; top: number; right: number; bottom: number },
+): ChartLayoutRect | undefined {
+	const rect = resolveManualLayoutRect(layout, frame, auto);
+	if (!rect || layout?.layoutTarget === 'inner') return rect;
+	return {
+		x: rect.x + bands.left,
+		y: rect.y + bands.top,
+		width: Math.max(1, rect.width - bands.left - bands.right),
+		height: Math.max(1, rect.height - bands.top - bands.bottom),
+	};
+}
+
+/** Apply an authored data-label drag in chart frame coordinates. */
+export function applyLabelManualLayout(
+	layout: ChartManualLayout | null | undefined,
+	frame: ChartFrameSize,
+	point: { x: number; y: number },
+): { x: number; y: number } {
+	const rect = resolveManualLayoutRect(layout, frame, { ...point, width: 1, height: 1 });
+	return rect ? { x: rect.x, y: rect.y } : point;
+}

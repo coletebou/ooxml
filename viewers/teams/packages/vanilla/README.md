@@ -29,6 +29,7 @@ const teams = mountTeams(document.querySelector('#teams')!, {
 		mode: 'server',
 		syncUrl: 'wss://teams.example.com/sync',
 		signalingUrl: 'wss://teams.example.com/signal',
+		iceServers: [{ urls: 'stun:stun.example.com:3478' }],
 	},
 });
 teams.update({ workspaceId: 'acme', userName: 'Ada Lovelace' });
@@ -48,3 +49,16 @@ encryption**: your server can read chat. Mesh calls scale to about a dozen peopl
 authorization is the server's job.
 
 Licence: Apache-2.0.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#sharing-and-openteams)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.
+
+## Privacy and network use
+
+Chat, presence and session data go only to the `syncUrl` and `signalingUrl` you configure; local mode stays in the browser. Calls use Google's public STUN server (`stun:stun.l.google.com:19302`) unless you set `iceServers` to your own STUN/TURN servers (or `[]`), and website tabs load the URL a member added. Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).

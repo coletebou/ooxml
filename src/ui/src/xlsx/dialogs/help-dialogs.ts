@@ -43,23 +43,26 @@ export const SUPPORTED_FEATURES = [
 	'Sparklines (create, format and clear)',
 	'Worksheet-range PivotTables (up to two row fields and sixteen values, one optional column field and one cached report filter)',
 	'Comments and notes',
+	'Editing threaded comment replies',
+	'Resolving and reopening comments',
 	'Hyperlinks',
 	'Data validation',
 	'Sort and filter',
+	'AutoFilter drop-down: value checklist with search, Text, Number and Date filters, Top 10, Above and Below Average, colour and custom criteria',
 	'Freeze panes',
+	'Formula auditing: Trace Precedents and Dependents, Remove Arrows, Evaluate Formula, Error Checking and Watch Window',
 ] as const;
 
 export const UNSUPPORTED_FEATURES = [
 	'Unmodeled PivotTable layouts, grouping, slicers and external data sources (preserved)',
 	'Multiple/dynamic report filters and repeated column captions (preserved)',
-	'Show Formulas',
-	'Manual calculation',
-	'Outline (grouping) for columns',
-	'Password protection hashes',
-	'Editing threaded comment replies',
+	'AutoFilter on table headers, the date-hierarchy checklist and icon filters from the menu',
+	'Flash Fill, Subtotal and Consolidate',
+	'Opening .xlsb binary workbooks',
+	'External formula services: CUBE*, WEBSERVICE, STOCKHISTORY, RTD, IMAGE, COPILOT, TRANSLATE and DETECTLANGUAGE',
+	'Creating @mentions',
 	'Macros (VBA is kept in the file but never run)',
 	'Changing the workbook theme',
-	'Page Layout view',
 ] as const;
 
 function bullets(ctx: EditorContext, items: readonly string[]): HTMLUListElement {

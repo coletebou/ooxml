@@ -7,6 +7,14 @@ import {
 	buildProcessPanel,
 	buildReviewPanel,
 } from './ribbon-other-tabs';
+import { buildShapeFormatPanel } from './ribbon-shape-format';
+import {
+	buildChartDesignPanel,
+	buildContainerFormatPanel,
+	buildPictureFormatPanel,
+} from './ribbon-contextual-formats';
+import { buildOrgChartPanel } from './ribbon-org-chart';
+import { buildSwimlanePanel } from './ribbon-swimlane';
 import { buildViewPanel } from './ribbon-view';
 import { createTellMe } from './viewer-tell-me';
 
@@ -22,6 +30,15 @@ export const RIBBON_TABS = [
 	['review', 'Review', buildReviewPanel],
 	['view', 'View', buildViewPanel],
 	['help', 'Help', buildHelpPanel],
+	// Contextual: shown only for a matching selection (viewer-contextual-tabs.ts).
+	['shape-format', 'Shape Format', buildShapeFormatPanel],
+	['picture-format', 'Picture Format', buildPictureFormatPanel],
+	['container-format', 'Container Format', buildContainerFormatPanel],
+	['chart-design', 'Chart Design', buildChartDesignPanel],
+	// Contextual: shown while a cross-functional flowchart is selected.
+	['cross-functional', 'Cross-Functional Flowchart', buildSwimlanePanel],
+	// Contextual: shown while an org chart position is selected.
+	['org-chart', 'Org Chart', buildOrgChartPanel],
 ] as const;
 export type RibbonTab = (typeof RIBBON_TABS)[number][0];
 
@@ -48,6 +65,10 @@ export function createRibbon(doc: Document): HTMLElement {
 		panel.dataset.ribbonTab = key;
 		panel.dataset.label = name;
 		build(doc, panel);
+		if (panel.dataset.contextual !== undefined) {
+			panel.dataset.tabHiddenBy = 'contextual';
+			panel.setAttribute('data-tab-hidden', '');
+		}
 		ribbon.append(panel);
 	}
 	return ribbon;

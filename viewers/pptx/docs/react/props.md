@@ -23,14 +23,16 @@ import type { PowerPointViewerProps } from 'pptx-react-viewer';
 
 ## Content
 
-| Prop                 | Type              | Default                | Description                                                                                                                                      |
-| -------------------- | ----------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `content`            | `Uint8Array`      | (required)             | Raw `.pptx` file bytes. Wrap an `ArrayBuffer` with `new Uint8Array(buf)`.                                                                        |
-| `filePath`           | `string`          | -                      | Original file path or name. Used as the key for autosave recovery and display in the title bar.                                                  |
-| `fileName`           | `string`          | generic label          | Display name of the open document, shown in the title bar (for example `quarterly-review.pptx`).                                                 |
-| `autosave`           | `boolean`         | `true`                 | Recovery autosave. A policy ceiling over the title-bar toggle; see [Autosave & Recovery](#autosave-policy).                                      |
-| `autosaveIntervalMs` | `number`          | File > Options cadence | Recovery cadence. An explicit value outranks the user's AutoRecover setting.                                                                     |
-| `storage`            | `DocumentStorage` | none                   | Host-owned storage: Save goes to `storage.save()`, recovery copies to its recovery methods. See [Host-owned storage](/guide/host-owned-storage). |
+| Prop                 | Type                           | Default                | Description                                                                                                                                      |
+| -------------------- | ------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `content`            | `Uint8Array`                   | (required)             | Raw `.pptx` file bytes. Wrap an `ArrayBuffer` with `new Uint8Array(buf)`.                                                                        |
+| `filePath`           | `string`                       | -                      | Original file path or name. Used as the key for autosave recovery and display in the title bar.                                                  |
+| `fileName`           | `string`                       | generic label          | Display name of the open document, shown in the title bar (for example `quarterly-review.pptx`).                                                 |
+| `autosave`           | `boolean`                      | `true`                 | Recovery autosave. A policy ceiling over the title-bar toggle; see [Autosave & Recovery](#autosave-policy).                                      |
+| `autosaveIntervalMs` | `number`                       | File > Options cadence | Recovery cadence. An explicit value outranks the user's AutoRecover setting.                                                                     |
+| `storage`            | `DocumentStorage`              | none                   | Host-owned storage: Save goes to `storage.save()`, recovery copies to its recovery methods. See [Host-owned storage](/guide/host-owned-storage). |
+| `readOnly`           | `boolean`                      | `false`                | Makes the deck read-only. `true` wins over `canEdit`; `false` only lifts this restriction.                                                       |
+| `fileProviders`      | `readonly CloudFileProvider[]` | -                      | Cloud places for File > Open (for example OneDrive). A file opened from one saves back to that place instead of `storage`.                       |
 
 ::: warning `content` type
 The prop is a `Uint8Array`, not an `ArrayBuffer`. See [Getting Started](/react/getting-started) for
@@ -38,7 +40,7 @@ conversion from a `fetch`/file `ArrayBuffer`.
 :::
 
 ::: tip Autosave recovery requires `filePath`
-The viewer's built-in autosave timer periodically serializes the document to IndexedDB keyed by
+The viewer's built-in autosave serializes the document to IndexedDB keyed by
 `filePath`. On page reload, recovery detection checks for a recent snapshot matching the same
 `filePath`. If you don't persist and re-supply `filePath` across reloads, recovery won't trigger.
 See [Autosave & Recovery](#autosave-recovery) below.
@@ -52,14 +54,19 @@ See [Autosave & Recovery](#autosave-recovery) below.
 
 ## Display {#display}
 
-These four match the Svelte and vanilla bindings; the defaults and clamping are shared.
+These match the Svelte and vanilla bindings; the defaults and clamping are shared.
 
-| Prop                      | Type      | Default | Description                                                                                                                                                                                       |
-| ------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `initialSlide`            | `number`  | `0`     | Zero-based slide shown after each load, clamped into the deck. Changing it later applies to the next load, not the current slide.                                                                 |
-| `showToolbar`             | `boolean` | `true`  | Show the editor chrome: title bar, ribbon and toolbar, protected-view and read-only banners, the mobile toolbar and the status bar. `false` leaves the canvas (and the thumbnail pane, if shown). |
-| `showThumbnails`          | `boolean` | `true`  | Show the slide thumbnail pane. It still follows the user's own collapse toggle and the `slidesPane` customisation panel.                                                                          |
-| `showCompatibilityToasts` | `boolean` | `true`  | Show the compatibility warning toast stack after a load. `false` hides the stack only; the warnings are still collected. Independent of `showToolbar`.                                            |
+| Prop                      | Type                                 | Default       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | ------------------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `initialSlide`            | `number`                             | `0`           | Zero-based slide shown after each load, clamped into the deck. Changing it later applies to the next load, not the current slide.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `googleFonts`             | `false \| { baseUrl: string }`       | unset         | Google Fonts fallback for deck fonts that are neither installed nor embedded. Unset leaves it to File > Options > Trust Center > "Download fonts that are not installed or embedded" (on by default: loads them from `fonts.googleapis.com`); `false` sends no request to Google (text uses installed, embedded or fallback fonts) and locks that option off; `{ baseUrl }` sends the CSS2 request to a self-hosted mirror instead and locks it on (an invalid `baseUrl` turns the fallback off and locks it off). See [Fonts and privacy](../guide/runtime-environments.md#fonts-and-privacy). |
+| `allowExternalContent`    | `boolean`                            | unset         | Host switch for content a deck links from another server (http(s) targets): pictures, picture fills and bullets, video, audio and poster frames. `false` fetches none of it, `true` allows it; either value locks File > Options > Trust Center > "Allow external content" to match. Unset keeps the user's choice there. A change applies from the next load. Google Fonts requests are separate (`googleFonts`). See [External content and privacy](../guide/runtime-environments.md#external-content-and-privacy).                                                                           |
+| `listConversionScope`     | `'paragraph' \| 'list'`              | `'paragraph'` | How far Bullets / Numbering reach from a bare caret. `'paragraph'` converts only the caret's paragraph, as in PowerPoint. `'list'` makes a caret that switches a list paragraph between bullets and numbering convert the whole list around it (adjacent items at its level and the deeper items nested between them), as in Word and Google Docs. Turning a list off, listing a plain paragraph and range selections are the same in both modes.                                                                                                                                               |
+| `limits`                  | `PptxLoadLimits`                     | unset         | Bounds on loading a deck, for hosts that show untrusted decks: `maxInputBytes`, `maxUncompressedBytes`, `maxEntries`, `maxSlides`, `maxShapes`. Unset keeps the core defaults (500 MiB inflated, 65,536 ZIP entries, nothing else bounded). A deck over a limit shows the load-error screen with the limit and the deck's value. A change applies from the next load. See [Load limits](../guide/runtime-environments.md#load-limits).                                                                                                                                                          |
+| `showToolbar`             | `boolean`                            | `true`        | Show the editor chrome: title bar, ribbon and toolbar, protected-view and read-only banners, the mobile toolbar and the status bar. `false` leaves the canvas (and the thumbnail pane, if shown).                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ribbonDisplay`           | `'always' \| 'tabs' \| 'fullScreen'` | `'always'`    | PowerPoint's Ribbon Display Options: `'always'` docks tabs and commands, `'tabs'` shows the tab row and lays a tab's commands over the slide when it is chosen, `'fullScreen'` hides the title bar and the ribbon behind a strip at the top. The user changes it from the menu at the right end of the tab row, with Ctrl+F1 or a double click on a tab; changing the value from the host switches the mode.                                                                                                                                                                                    |
+| `showThumbnails`          | `boolean`                            | `true`        | Show the slide thumbnail pane. It still follows the user's own collapse toggle and the `slidesPane` customisation panel.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `showCompatibilityToasts` | `boolean`                            | `true`        | Show the compatibility warning toast stack after a load. `false` hides the stack only; the warnings are still collected. Independent of `showToolbar`.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ```tsx
 <PowerPointViewer content={bytes} initialSlide={2} showToolbar={false} showThumbnails={false} />
@@ -67,25 +74,26 @@ These four match the Svelte and vanilla bindings; the defaults and clamping are 
 
 ## Callbacks
 
-| Prop                    | Type                                                         | Default | Description                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `onDirtyChange`         | `(isDirty: boolean) => void`                                 | -       | Called when the unsaved-changes flag flips.                                                                                         |
-| `onContentChange`       | `(content: Uint8Array) => void`                              | -       | Called with the re-serialized document bytes when content changes.                                                                  |
-| `onActiveSlideChange`   | `(slideIndex: number) => void`                               | -       | Called when the active slide changes.                                                                                               |
-| `onModeChange`          | `(mode: ViewerMode) => void`                                 | -       | Called when the viewer mode changes (e.g. edit to present).                                                                         |
-| `onZoomChange`          | `(zoom: number) => void`                                     | -       | Called when the zoom level changes.                                                                                                 |
-| `onSelectionChange`     | `(elementIds: string[]) => void`                             | -       | Called when element selection changes.                                                                                              |
-| `onSlideCountChange`    | `(count: number) => void`                                    | -       | Called when the total slide count changes (slide added/deleted).                                                                    |
-| `onChange`              | `() => void`                                                 | -       | Called after any committed document edit (move, resize, text, undo, redo, ...).                                                     |
-| `onAutosave`            | `(content: Uint8Array) => void`                              | -       | Called with the serialised deck each time a recovery autosave snapshot is written.                                                  |
-| `onAutosaveToggle`      | `(enabled: boolean) => void`                                 | -       | Called when the user enables or disables autosave (title bar or File > Options).                                                    |
-| `onAutosaveStatus`      | `(status: 'idle' \| 'saving' \| 'saved' \| 'error') => void` | -       | Called on every autosave lifecycle transition.                                                                                      |
-| `onAutosaveRecovery`    | `(record: AutosaveRecord) => void`                           | -       | Called when a recovery snapshot left by a previous session is found. The built-in recovery prompt is shown as well.                 |
-| `onPropertiesChange`    | `(updates: Partial<PptxCoreProperties>) => void`             | -       | Called when the user (or the AI assistant) changes the document properties.                                                         |
-| `onNotesUpdate`         | `(notes: string) => void`                                    | -       | Called with the new speaker-notes text after a notes edit.                                                                          |
-| `onPresentationChange`  | `(presenting: boolean) => void`                              | -       | Called when presentation (slide show) mode is entered or left.                                                                      |
-| `onCollaborationStatus` | `(status: ConnectionStatus) => void`                         | -       | Called on every collaboration connection-status transition.                                                                         |
-| `onOpenFile`            | `() => void`                                                 | -       | Host override for the File > Open action: bypasses the built-in file picker; the host then supplies a new `content` buffer instead. |
+| Prop                    | Type                                                         | Default | Description                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onDirtyChange`         | `(isDirty: boolean) => void`                                 | -       | Called when the unsaved-changes flag flips.                                                                                                                                                              |
+| `onContentChange`       | `(content: Uint8Array) => void`                              | -       | Called with the re-serialized document bytes when content changes.                                                                                                                                       |
+| `onActiveSlideChange`   | `(slideIndex: number) => void`                               | -       | Called when the active slide changes.                                                                                                                                                                    |
+| `onModeChange`          | `(mode: ViewerMode) => void`                                 | -       | Called when the viewer mode changes (e.g. edit to present).                                                                                                                                              |
+| `onZoomChange`          | `(zoom: number) => void`                                     | -       | Called when the zoom level changes.                                                                                                                                                                      |
+| `onRibbonDisplayChange` | `(mode: 'always' \| 'tabs' \| 'fullScreen') => void`         | -       | Called when the user picks a Ribbon Display Options mode. Not fired when the host changes the value. The viewer keeps the choice for its own lifetime only; store it to bring it back on the next visit. |
+| `onSelectionChange`     | `(elementIds: string[]) => void`                             | -       | Called when element selection changes.                                                                                                                                                                   |
+| `onSlideCountChange`    | `(count: number) => void`                                    | -       | Called when the total slide count changes (slide added/deleted).                                                                                                                                         |
+| `onChange`              | `() => void`                                                 | -       | Called after any committed document edit (move, resize, text, undo, redo, ...).                                                                                                                          |
+| `onAutosave`            | `(content: Uint8Array) => void`                              | -       | Called with the serialised deck each time a recovery autosave snapshot is written.                                                                                                                       |
+| `onAutosaveToggle`      | `(enabled: boolean) => void`                                 | -       | Called when the user enables or disables autosave (title bar or File > Options).                                                                                                                         |
+| `onAutosaveStatus`      | `(status: 'idle' \| 'saving' \| 'saved' \| 'error') => void` | -       | Called on every autosave lifecycle transition.                                                                                                                                                           |
+| `onAutosaveRecovery`    | `(record: AutosaveRecord) => void`                           | -       | Called when a recovery snapshot left by a previous session is found. The built-in recovery prompt is shown as well.                                                                                      |
+| `onPropertiesChange`    | `(updates: Partial<PptxCoreProperties>) => void`             | -       | Called when the user (or the AI assistant) changes the document properties.                                                                                                                              |
+| `onNotesUpdate`         | `(notes: string) => void`                                    | -       | Called with the new speaker-notes text after a notes edit.                                                                                                                                               |
+| `onPresentationChange`  | `(presenting: boolean) => void`                              | -       | Called when presentation (slide show) mode is entered or left.                                                                                                                                           |
+| `onCollaborationStatus` | `(status: ConnectionStatus) => void`                         | -       | Called on every collaboration connection-status transition.                                                                                                                                              |
+| `onOpenFile`            | `() => void`                                                 | -       | Host override for the File > Open action: bypasses the built-in file picker; the host then supplies a new `content` buffer instead.                                                                      |
 
 ::: info
 `onContentChange` delivers a `Uint8Array` (the serialized document), not a boolean. To pull content
@@ -94,13 +102,13 @@ on demand instead, use the handle's [`getContent()`](/react/handle).
 
 ## Presentation / authoring
 
-| Prop                                                                       | Type           | Default | Description                                                                                                                                                                                               |
-| -------------------------------------------------------------------------- | -------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authorName`                                                               | `string`       | -       | Display name used as the author for comments and annotations. Falls back to `collaboration.userName` when collaborating, otherwise `'You'`.                                                               |
-| `className`                                                                | `string`       | -       | Optional class name applied to the viewer root element.                                                                                                                                                   |
-| `smartArt3D`                                                               | `boolean`      | `false` | Opt in to the Three.js SmartArt renderer (extruded 3D blocks on WebGL). Requires the optional `three` peer; falls back to SVG without it.                                                                 |
-| `surfaceChart3D`, `barChart3D`, `lineChart3D`, `areaChart3D`, `pieChart3D` | `boolean`      | `false` | Independently opt in to interactive Three.js renderers for the matching 3D chart kinds. Each falls back to its SVG renderer when `three` is unavailable or the chart cannot be rendered as a WebGL scene. |
-| `ai`                                                                       | `PptxAiConfig` | -       | Enables the optional AI assistant. Its SDK peers load only when the panel is opened; omit this prop to leave the assistant unavailable.                                                                   |
+| Prop                                                                       | Type                              | Default | Description                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | --------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authorName`                                                               | `string`                          | -       | Display name used as the author for comments and annotations. Falls back to `collaboration.userName` when collaborating, otherwise `'You'`.                                                                                      |
+| `className`                                                                | `string`                          | -       | Optional class name applied to the viewer root element.                                                                                                                                                                          |
+| `smartArt3D`                                                               | `boolean`                         | `false` | Opt in to the Three.js SmartArt renderer (extruded 3D blocks on WebGL). Requires the optional `three` peer; falls back to SVG without it.                                                                                        |
+| `surfaceChart3D`, `barChart3D`, `lineChart3D`, `areaChart3D`, `pieChart3D` | `boolean`                         | `false` | Independently opt in to interactive Three.js renderers for the matching 3D chart kinds. Each falls back to its SVG renderer when `three` is unavailable or the chart cannot be rendered as a WebGL scene.                        |
+| `ai`                                                                       | `PptxAiAssistant \| PptxAiConfig` | -       | Enables the optional AI assistant: pass `createAiAssistant(config)` from `pptx-react-viewer/ai`, or a plain `PptxAiConfig`. Its SDK peers load only when the panel is opened; omit this prop to leave the assistant unavailable. |
 
 ## Theming
 
@@ -117,6 +125,16 @@ on demand instead, use the handle's [`getContent()`](/react/handle).
 	}}
 />
 ```
+
+## Language {#language}
+
+| Prop               | Type                     | Default                          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | ------------------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultLocale`    | `string`                 | stored choice, then `'en'`       | Initial locale code for File > Options > Language. Falls back to a persisted `localStorage` choice, then `'en'`. Ignored inside a `PptxI18nProvider`, whose `locale` is the language, and outside one when no react-i18next instance is configured (always so with `pptx-react-viewer/no-i18next` alone): the viewer then shows its built-in English text.                                                                                                |
+| `availableLocales` | `LocaleCatalogEntry[]`   | registered `react-i18next` codes | Locale choices offered by File > Options > Language. Defaults to the codes registered on the host's `react-i18next` instance. Inside a `PptxI18nProvider` there is no default: pass two or more, together with `onLocaleChange`, to show the Language category. No effect outside a provider when no react-i18next instance is configured (see `defaultLocale`).                                                                                          |
+| `onLocaleChange`   | `(code: string) => void` | -                                | Called when the user picks a language from File > Options > Language. When provided, the host owns applying and persisting the choice; otherwise the viewer applies and persists it itself. Inside a `PptxI18nProvider` the host always owns the language: without this callback the Language category is left out. Outside a provider with no configured react-i18next instance (see `defaultLocale`) the category is left out and this is never called. |
+
+To translate the viewer with your own i18n library instead of react-i18next, wrap it in `PptxI18nProvider` (React only); see [Use your own i18n library](/guide/localization#use-your-own-i18n-library). To build without react-i18next, import from `pptx-react-viewer/no-i18next`; see [Without react-i18next](/guide/localization#without-react-i18next).
 
 ## UI customization {#ui-customization}
 
@@ -157,23 +175,23 @@ the full flow and the `CollaborationConfig` shape.
 
 ## Events, hooks and host extensions
 
-| Prop                     | Type                                 | Description                                                                                                                                             |
-| ------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onLoad`                 | `(detail: ViewerLoadDetail) => void` | Fired each time a presentation finishes loading without an error, with the slide count and canvas size.                                                 |
-| `onError`                | `(message: string) => void`          | Fired once per distinct load failure, with a human-readable message.                                                                                    |
-| `onHyperlinkClick`       | `HyperlinkClickHandler`              | Fired before following a link; return `false` to cancel the default action.                                                                             |
-| `ribbonAddIns`           | `readonly RibbonAddInTab[]`          | Ribbon tabs the host adds after Help. Each command runs its `run` callback and dispatches a bubbling `office-ribbon-add-in` event. Desktop ribbon only. |
-| `inspectorInitiallyOpen` | `boolean`                            | Initial inspector visibility; omitted keeps the desktop/mobile default.                                                                                 |
+| Prop                     | Type                                                         | Description                                                                                                                                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `onLoad`                 | `(detail: ViewerLoadDetail) => void`                         | Fired each time a presentation finishes loading without an error, with the slide count and canvas size.                                                                                                                                                                                                      |
+| `onError`                | `(message: string) => void`                                  | Fired once per distinct load failure, with a human-readable message.                                                                                                                                                                                                                                         |
+| `onElementRenderError`   | `(error: Error, context: ElementRenderErrorContext) => void` | A slide element was omitted because its renderer threw; `context` is `{ elementId, elementType, slideId }`. Only that element is left out, on every surface. Defaults to `console.error(error, context)`, also used when the callback throws. See [Element render errors](./hooks.md#element-render-errors). |
+| `onHyperlinkClick`       | `HyperlinkClickHandler`                                      | Fired before following a link; return `false` to cancel the default action.                                                                                                                                                                                                                                  |
+| `ribbonAddIns`           | `readonly RibbonAddInTab[]`                                  | Ribbon tabs the host adds after Help. Each command runs its `run` callback and dispatches a bubbling `office-ribbon-add-in` event. Desktop ribbon only.                                                                                                                                                      |
+| `inspectorInitiallyOpen` | `boolean`                                                    | Initial inspector visibility; omitted keeps the desktop/mobile default.                                                                                                                                                                                                                                      |
 
 ## Interface sketch
 
 ::: info Abridged
 This block shows the commonly used members, not the whole type. `PowerPointViewerProps`
 also carries `ai`, `accountAuth`, `hiddenActions`, `fonts`, `availableThemes`,
-`defaultThemeKey`, `onThemeChange`, `availableLocales`, `defaultLocale`, `onLocaleChange`,
-`onModeChange`, `onSelectionChange`, `onSlideCountChange` and `onZoomChange`; the tables above
-cover `fileName`, `onLoad`, `onError`, `onHyperlinkClick`, `ribbonAddIns` and
-`inspectorInitiallyOpen`. Read the
+`defaultThemeKey`, `onThemeChange`, `onModeChange`, `onSelectionChange`, `onSlideCountChange` and
+`onZoomChange`; the tables above cover `fileName`, `onLoad`, `onError`, `onHyperlinkClick`,
+`ribbonAddIns`, `inspectorInitiallyOpen`, `defaultLocale`, `availableLocales` and `onLocaleChange`. Read the
 shipped `.d.ts` (or `packages/react/src/viewer/types-ui.ts`) for the authoritative list.
 :::
 
@@ -198,13 +216,19 @@ interface PowerPointViewerProps {
 	onOpenFile?: () => void;
 	onLoad?: (detail: ViewerLoadDetail) => void;
 	onError?: (message: string) => void;
+	onElementRenderError?: ElementRenderErrorHandler;
 	onHyperlinkClick?: HyperlinkClickHandler;
 	ribbonAddIns?: readonly RibbonAddInTab[];
 	inspectorInitiallyOpen?: boolean;
 
 	canEdit?: boolean;
 	initialSlide?: number;
+	googleFonts?: false | { baseUrl: string };
+	allowExternalContent?: boolean;
+	listConversionScope?: 'paragraph' | 'list';
+	limits?: PptxLoadLimits;
 	showToolbar?: boolean;
+	ribbonDisplay?: 'always' | 'tabs' | 'fullScreen';
 	showThumbnails?: boolean;
 	showCompatibilityToasts?: boolean;
 	className?: string;
@@ -241,13 +265,13 @@ See [Export](/react/export) for details on document export.
 ## Autosave & Recovery {#autosave-recovery}
 
 When `canEdit` is true and a `filePath` is supplied, the viewer automatically saves recovery
-snapshots to **IndexedDB** on a timer (default every 120 seconds). If the page is closed or crashes,
+snapshots to **IndexedDB** while there are unsaved edits (by default one snapshot two minutes after the first unsaved edit). If the page is closed or crashes,
 the data persists in the browser.
 
 ### How it works
 
-1. Every 120 s (configurable) the viewer checks if the document is dirty.
-2. If dirty, it serializes the current state to a `Uint8Array` and stores it in an IndexedDB
+1. The first unsaved edit starts the interval (two minutes by default, see the cadence rule below). Later edits do not push it out, and nothing is written while the document is unchanged.
+2. When the interval ends, it serializes the current state to a `Uint8Array` and stores it in an IndexedDB
    database (`pptx-viewer-autosave`) keyed by `filePath`.
 3. On next load, if the viewer receives the same `filePath` and slides are loaded, it checks
    IndexedDB for a recent snapshot (within 24 hours) and opens the version-history panel.
@@ -293,12 +317,12 @@ await deleteAutosaveSnapshot('report.pptx');
 ### Reopening the deck after a refresh {#session-restore}
 
 Recovery snapshots answer "the tab crashed, can I get my edits back?". A plain **refresh** is the
-more common case, and it has its own helpers. Every binding re-exports `rememberSessionDeck` /
-`restoreSessionDeck` (also available from `ooxml-ui/pptx`), which remember the open deck **per
-browser tab** and hand it back on the next load:
+more common case, and it has its own helpers. `rememberSessionDeck` / `restoreSessionDeck` come
+from `ooxml-ui/pptx` (the React package does not re-export them; the other bindings do), and they
+remember the open deck **per browser tab** and hand it back on the next load:
 
 ```ts
-import { rememberSessionDeck, restoreSessionDeck } from 'pptx-react-viewer';
+import { rememberSessionDeck, restoreSessionDeck } from 'ooxml-ui/pptx';
 
 // After the host loads a deck:
 await rememberSessionDeck(file.name, bytes);

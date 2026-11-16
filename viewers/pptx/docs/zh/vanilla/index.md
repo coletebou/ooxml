@@ -59,25 +59,46 @@ await viewer.enterPresentation();
 
 与此 monorepo 中所有绑定一样，幻灯片渲染为 **CSS 定位的 HTML/SVG**，通过 CSS transform 缩放，不绘制到 Canvas 上。文本在任意缩放下都保持可选中且清晰，屏幕阅读器也可以正常工作。相关取舍请参见[已知限制](/zh/guide/limitations)。
 
+## 导入路径 {#import-paths}
+
+`package.json` 的 `exports` 提供以下入口：
+
+```ts
+// Root entry - createPptxViewer, the renderer registry, theme utilities
+import { createPptxViewer } from 'pptx-vanilla-viewer';
+// AI assistant entry - the recommended value for the `ai` option
+import { createAiAssistant } from 'pptx-vanilla-viewer/ai';
+```
+
+| 入口                                                                 | 导出内容                                                                                                                                              |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pptx-vanilla-viewer`                                                | `createPptxViewer`、元素渲染器注册表、主题工具、会话辅助函数和公开类型（参见[主要导出](#key-exports)）。                                              |
+| `pptx-vanilla-viewer/ai`                                             | `createAiAssistant`、句柄类型 `PptxAiAssistant` 和 `PptxAi*` 配置类型，是传入 `ai` 的推荐方式（参见 [`/ai` 入口](/zh/guide/ai-assistant#ai-entry)）。 |
+| `pptx-vanilla-viewer/i18n/fr`、`/i18n/es`、`/i18n/de`、`/i18n/zh-CN` | 随包提供的语言字典（`translationsFr` 等）。                                                                                                           |
+| `pptx-vanilla-viewer/internals`                                      | 幻灯片切换辅助函数和 `playTransitionOverlay`，供自定义放映界面使用（参见 [API](/zh/vanilla/api)），不受语义化版本兼容承诺保障。                       |
+| `pptx-vanilla-viewer/styles.css`                                     | 查看器原本在运行时注入的样式表，供启用严格 CSP 的宿主使用（参见[主题](/zh/vanilla/theming)）。                                                        |
+
 ## 主要导出 {#key-exports}
 
-| 导出项                                                           | 类型 | 用途                                                                        |
-| ---------------------------------------------------------------- | ---- | --------------------------------------------------------------------------- |
-| `createPptxViewer`                                               | 函数 | 工厂函数，将查看器挂载到容器。参见[快速上手](/zh/vanilla/getting-started)。 |
-| `PptxViewerOptions`, `PptxViewerCallbacks`                       | 类型 | 选项和事件回调。参见[选项与回调](/zh/vanilla/options)。                     |
-| `PptxViewerInstance`                                             | 类型 | 返回的句柄。参见[查看器实例 API](/zh/vanilla/api)。                         |
-| `PptxViewerSource`                                               | 类型 | `ArrayBuffer \| Uint8Array \| Blob \| string`（URL）。                      |
-| `ElementRenderer`, `ElementRendererRegistry`                     | 类型 | 渲染器扩展接口。参见[元素渲染器](/zh/vanilla/renderers)。                   |
-| `createDefaultRegistry`                                          | 函数 | 默认渲染器注册表，预先注册全部内置渲染器。                                  |
-| `getViewerCss`                                                   | 函数 | 以字符串形式提供完整样式表，适用于严格 CSP 宿主。                           |
-| `ViewerTheme`, `ViewerThemeColors`                               | 类型 | 主题配置类型。参见[主题](/zh/vanilla/theming)。                             |
-| `vermilionLightTheme`, `vermilionDarkTheme`                      | 常量 | 内置的朱红色亮色和深色预设。                                                |
-| `themeToCssVars`, `defaultCssVars`                               | 函数 | 将主题转换为 `--pptx-*` CSS 变量。                                          |
-| `PptxHandler`, `PptxSlide`, `PptxElement`                        | 类型 | 为 `getHandler()` 高级入口重新导出的核心类型。                              |
-| `AccountAuthConfig`, `ToolbarActionId`                           | 类型 | `accountAuth` 和 `hiddenActions` 选项的类型。                               |
-| `rememberSessionDeck`, `restoreSessionDeck`, `forgetSessionDeck` | 函数 | 刷新后重新打开演示文稿。                                                    |
-| `renderToCanvas`                                                 | 函数 | 内置导出使用的 `html2canvas-pro` 封装。                                     |
-| `PptxAiConfig`, `PptxAiConnection`, ...                          | 类型 | 可选 `ai` 选项的类型。                                                      |
+| 导出项                                                           | 类型 | 用途                                                                                 |
+| ---------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------ |
+| `createPptxViewer`                                               | 函数 | 工厂函数，将查看器挂载到容器。参见[快速上手](/zh/vanilla/getting-started)。          |
+| `PptxViewerOptions`, `PptxViewerCallbacks`                       | 类型 | 选项和事件回调。参见[选项与回调](/zh/vanilla/options)。                              |
+| `PptxViewerInstance`                                             | 类型 | 返回的句柄。参见[查看器实例 API](/zh/vanilla/api)。                                  |
+| `PptxViewerSource`                                               | 类型 | `ArrayBuffer \| Uint8Array \| Blob \| string`（URL）。                               |
+| `ElementRenderer`, `ElementRendererRegistry`                     | 类型 | 渲染器扩展接口。参见[元素渲染器](/zh/vanilla/renderers)。                            |
+| `createDefaultRegistry`                                          | 函数 | 默认渲染器注册表，预先注册全部内置渲染器。                                           |
+| `createSlidesPane`                                               | 函数 | 供自定义外壳使用的幻灯片缩略图栏，详见 [API](/zh/vanilla/api#slide-thumbnail-rail)。 |
+| `renderSlideThumbnail`                                           | 函数 | 按缩略图栏的方式绘制单张幻灯片，详见 [API](/zh/vanilla/api#slide-thumbnail)。        |
+| `getViewerCss`                                                   | 函数 | 以字符串形式提供完整样式表，适用于严格 CSP 宿主。                                    |
+| `ViewerTheme`, `ViewerThemeColors`                               | 类型 | 主题配置类型。参见[主题](/zh/vanilla/theming)。                                      |
+| `vermilionLightTheme`, `vermilionDarkTheme`                      | 常量 | 内置的朱红色亮色和深色预设。                                                         |
+| `themeToCssVars`, `defaultCssVars`                               | 函数 | 将主题转换为 `--pptx-*` CSS 变量。                                                   |
+| `PptxHandler`, `PptxSlide`, `PptxElement`                        | 类型 | 为 `getHandler()` 高级入口重新导出的核心类型。                                       |
+| `AccountAuthConfig`, `ToolbarActionId`                           | 类型 | `accountAuth` 和 `hiddenActions` 选项的类型。                                        |
+| `rememberSessionDeck`, `restoreSessionDeck`, `forgetSessionDeck` | 函数 | 刷新后重新打开演示文稿。                                                             |
+| `renderToCanvas`                                                 | 函数 | 内置导出使用的 `html2canvas-pro` 封装。                                              |
+| `PptxAiConfig`, `PptxAiConnection`, ...                          | 类型 | 可选 `ai` 选项的类型。                                                               |
 
 ## 下一步 {#next-steps}
 

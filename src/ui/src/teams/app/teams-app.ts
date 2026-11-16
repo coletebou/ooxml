@@ -31,6 +31,7 @@ import { definePresence } from '../../presence';
 import { installOfficeUiTheme, THEME_CSS } from '../../theme';
 import { registerTeams } from '../index';
 import { TeamsController } from './controller';
+import { confirmTeams, promptTeamsName, type TeamsDialogContext } from './dialogs';
 import { defineTeamsContentPreview, type FileEmbeds, type SaveFileCopy } from './content-preview';
 import { defineTeamsChannelTab } from './channel-tab';
 import { defineTeamsFilesPanel } from './files-panel';
@@ -371,6 +372,7 @@ export class TeamsApp extends TeamsLitElement {
 			workspaceId,
 			user: named,
 			config: this.signIn.apply(base),
+			moderator: account?.role === 'moderator',
 			storage: safeStorage,
 			...(this.uploadFile ? { uploadFile: this.uploadFile } : {}),
 		});
@@ -428,7 +430,7 @@ export class TeamsApp extends TeamsLitElement {
 		a: OpenFileDetail['attachment'],
 		mode?: 'teams' | 'browser',
 	): Promise<void> {
-		if (!this.canLeaveContent()) return;
+		if (!this.canLeaveContent(() => void this.openFile(a, mode))) return;
 		const browser =
 			mode === 'browser' ||
 			(!mode && a.kind !== 'other' && a.kind !== 'vsdx' && this.fileOpenPreference === 'browser');
@@ -442,7 +444,7 @@ export class TeamsApp extends TeamsLitElement {
 			popout?.close();
 			return;
 		}
-		if (!this.canLeaveContent()) {
+		if (!this.canLeaveContent(() => void this.openFile(a, mode))) {
 			popout?.close();
 			return;
 		}
@@ -482,23 +484,34 @@ export class TeamsApp extends TeamsLitElement {
 
 	/** Preview a host-provided website or file without changing shared conversation state. */
 	previewContent(detail: OpenFileDetail): void {
-		if (!this.canLeaveContent()) return;
+		if (!this.canLeaveContent(() => this.previewContent(detail))) return;
 		this.openRequest++;
 		this.preview = detail;
 	}
 
-	private canLeaveContent(): boolean {
-		const direct = this.shadowRoot?.querySelector<HTMLElement & { canLeave(): boolean }>(
-			'teams-content-preview',
-		);
-		const nested = this.shadowRoot
-			?.querySelector('teams-channel-tab')
-			?.shadowRoot?.querySelector<HTMLElement & { canLeave(): boolean }>('teams-content-preview');
-		return (direct ?? nested)?.canLeave() ?? true;
+	/** Context for the in-app confirm and prompt dialogs; they mount inside the app's theme. */
+	private get dialogs(): TeamsDialogContext {
+		return { t: (key, params) => this.t(key, params), host: this };
 	}
 
-	private closePreview(): boolean {
-		if (!this.canLeaveContent()) return false;
+	private canLeaveContent(retry?: () => void): boolean {
+		const direct = this.shadowRoot?.querySelector<
+			HTMLElement & { canLeave(retry?: () => void): boolean }
+		>('teams-content-preview');
+		const nested = this.shadowRoot
+			?.querySelector('teams-channel-tab')
+			?.shadowRoot?.querySelector<HTMLElement & { canLeave(retry?: () => void): boolean }>(
+				'teams-content-preview',
+			);
+		return (direct ?? nested)?.canLeave(retry) ?? true;
+	}
+
+	/**
+	 * Close the content preview. When it holds unsaved edits the user is asked in a dialog and this
+	 * returns false; if they discard, `retry` (the navigation that was held back) runs.
+	 */
+	private closePreview(retry?: () => void): boolean {
+		if (!this.canLeaveContent(retry)) return false;
 		this.openRequest++;
 		this.preview = null;
 		return true;
@@ -518,6 +531,7 @@ export class TeamsApp extends TeamsLitElement {
 	}
 
 	private createChannel(): void {
+		if (this.teams.state && this.isLocked(this.teams.state)) return;
 		this.creatingChannel = true;
 	}
 
@@ -557,8 +571,31 @@ export class TeamsApp extends TeamsLitElement {
 		else if (action === 'hand') c.toggleHand();
 	}
 
+	private applySettings(config: TeamsServerConfig): void {
+		if (!this.closePreview(() => this.applySettings(config))) return;
+		saveConfig(config);
+		this.config = config;
+		this.settingsOpen = false;
+		this.dispatchEvent(
+			new CustomEvent('teams-config-change', {
+				detail: { config },
+				bubbles: true,
+				composed: true,
+			}),
+		);
+	}
+
+	private selectRail(id: RailView): void {
+		if (!this.closePreview(() => this.selectRail(id))) return;
+		this.settingsOpen = false;
+		if (id === 'teams') this.leaveChatSelection();
+		this.rail = id;
+		this.meeting = false;
+		this.mobileView = 'list';
+	}
+
 	private startMeeting(channelId?: string): void {
-		if (!this.closePreview()) return;
+		if (!this.closePreview(() => this.startMeeting(channelId))) return;
 		void this.teams.client?.openCall(channelId);
 		this.mobileView = 'conversation';
 		this.meeting = true;
@@ -567,7 +604,7 @@ export class TeamsApp extends TeamsLitElement {
 	}
 
 	private selectChannel(id: string): boolean {
-		if (!this.closePreview()) return false;
+		if (!this.closePreview(() => this.selectChannel(id))) return false;
 		this.settingsOpen = false;
 		this.addingTab = false;
 		this.creatingChannel = false;
@@ -629,20 +666,13 @@ export class TeamsApp extends TeamsLitElement {
 					else this.notify(this.t('app.tabGone'));
 				}}
 			>
-				${this.topbar(s)}
+				${this.topbar(s)} ${this.schemaBanner(s)}
 				<div class="body">
 					<office-ui-app-rail
 						.hideLabels=${!this.showAppNames}
 						.items=${RAIL.map((i) => ({ ...i, label: this.t(i.label), ...('shortLabel' in i ? { shortLabel: this.t(i.shortLabel) } : {}), ...(i.id === 'calls' && s.channels.some((c) => c.live) ? { badge: s.channels.filter((c) => c.live).length } : {}), ...(i.id === 'activity' && s.activityUnread ? { badge: s.activityUnread } : {}), ...(i.id === 'chat' && s.chats.some((c) => c.unread) ? { badge: s.chats.reduce((n, c) => n + c.unread, 0) } : {}) }))}
 						selected=${this.rail}
-						@office-rail-select=${(e: CustomEvent<{ id: RailView }>) => {
-							if (!this.closePreview()) return;
-							this.settingsOpen = false;
-							if (e.detail.id === 'teams') this.leaveChatSelection();
-							this.rail = e.detail.id;
-							this.meeting = false;
-							this.mobileView = 'list';
-						}}
+						@office-rail-select=${(e: CustomEvent<{ id: RailView }>) => this.selectRail(e.detail.id)}
 					></office-ui-app-rail>
 					<aside class="side" ?inert=${this.settingsOpen}>${this.sidebar(s)}</aside>
 					<main class="main" ?inert=${this.settingsOpen}>${this.main(s)}</main>
@@ -692,19 +722,7 @@ export class TeamsApp extends TeamsLitElement {
 						}}
 						@teams-settings-follow=${(event: CustomEvent<Partial<typeof s.threadFollowSettings>>) => this.teams.client?.setThreadFollowSettings(event.detail)}
 						@teams-settings-close=${() => void this.closeSettings()}
-						@teams-settings-apply=${(e: CustomEvent<{ config: TeamsServerConfig }>) => {
-							if (!this.closePreview()) return;
-							saveConfig(e.detail.config);
-							this.config = e.detail.config;
-							this.settingsOpen = false;
-							this.dispatchEvent(
-								new CustomEvent('teams-config-change', {
-									detail: e.detail,
-									bubbles: true,
-									composed: true,
-								}),
-							);
-						}}
+						@teams-settings-apply=${(e: CustomEvent<{ config: TeamsServerConfig }>) => this.applySettings(e.detail.config)}
 					></teams-settings>
 				</div>
 				<teams-create-channel-dialog
@@ -788,6 +806,19 @@ export class TeamsApp extends TeamsLitElement {
 				</form>
 			</div>
 		`;
+	}
+
+	/** A workspace written by a newer release is read-only here: say why instead of failing quietly. */
+	private isLocked(s: TeamsState): boolean {
+		return s.schema.state === 'unsupported-schema';
+	}
+
+	private schemaBanner(s: TeamsState) {
+		return this.isLocked(s)
+			? html`<div class="schema-banner" role="alert" data-schema-banner>
+					${this.t('app.schemaTooNew')}
+				</div>`
+			: nothing;
 	}
 
 	private topbar(s: TeamsState) {
@@ -915,7 +946,7 @@ export class TeamsApp extends TeamsLitElement {
 				.chats=${s.chats}
 				selected-id=${s.selectedChannelId}
 				@office-chat-select=${(e: CustomEvent<{ id: string }>) => this.selectChannel(e.detail.id)}
-				@office-chat-new=${() => (this.newChat = true)}
+				@office-chat-new=${() => (this.newChat = !this.isLocked(s))}
 			></office-ui-chat-sidebar>`;
 		if (this.rail === 'calendar')
 			return html`<office-ui-calendar-agenda
@@ -986,7 +1017,7 @@ export class TeamsApp extends TeamsLitElement {
 				.detail=${this.preview}
 				.embeds=${this.embeds}
 				.saveCopy=${this.saveCopyFor(this.preview, s)}
-				@teams-preview-close=${this.closePreview}
+				@teams-preview-close=${() => void this.closePreview(() => void this.closePreview())}
 			></teams-content-preview>`;
 		if (this.rail === 'files') return this.allFiles(s);
 		if (this.rail === 'followed' && this.teams.client)
@@ -1015,7 +1046,8 @@ export class TeamsApp extends TeamsLitElement {
 								type="button"
 								@click=${() => {
 									if (s.call!.kind === 'meeting') {
-										if (this.closePreview()) [this.rail, this.meeting] = ['calendar', true];
+										if (this.closePreview(() => ([this.rail, this.meeting] = ['calendar', true])))
+											[this.rail, this.meeting] = ['calendar', true];
 									} else if (this.selectChannel(s.call!.channelId)) this.meeting = true;
 								}}
 							>
@@ -1032,6 +1064,8 @@ export class TeamsApp extends TeamsLitElement {
 		const channel = s.channel;
 		const chat = s.chats.find((x) => x.id === s.selectedChannelId);
 		const c = this.teams.client;
+		// Writes go through `w`: none while the workspace is read-only (a newer release wrote it).
+		const w = this.isLocked(s) ? null : c;
 		const compose = s.editing ?? s.replyingTo;
 		const sharedTab = s.tabs.find((t) => t.id === this.tab);
 		if (sharedTab) this.retainedTab = sharedTab;
@@ -1084,7 +1118,7 @@ export class TeamsApp extends TeamsLitElement {
 									aria-label=${this.t('app.addTab')}
 									title=${this.t('app.addTab')}
 									?disabled=${!channel}
-									@click=${() => (this.addingTab = !this.addingTab)}
+									@click=${() => (this.addingTab = !this.addingTab && !this.isLocked(s))}
 								>
 									+
 								</button>
@@ -1117,29 +1151,33 @@ export class TeamsApp extends TeamsLitElement {
 										: nothing
 								}
 								${
-									sharedTab?.createdBy === s.user.id
+									sharedTab && (sharedTab.createdBy === s.user.id || s.moderator)
 										? html`<office-ui-menu-button
 												label=${this.t('app.tabOptions')}
 												icon="more"
 												icon-only
 												@office-command=${(event: CustomEvent<{ command: string }>) => {
 													if (event.detail.command === 'rename-tab') {
-														const name = globalThis
-															.prompt?.(this.t('app.tabNamePrompt'), sharedTab.name)
-															?.trim();
-														if (name) c?.renameTab(sharedTab.id, name);
+														void promptTeamsName(
+															this.dialogs,
+															this.t('app.tabNamePrompt'),
+															sharedTab.name,
+														).then((name) => {
+															if (name) c?.renameTab(sharedTab.id, name);
+														});
 													} else if (event.detail.command === 'remove-tab') {
 														if (!this.canLeaveContent()) return;
-														if (
-															globalThis.confirm?.(
-																this.t('app.confirmRemoveTab', { name: sharedTab.name }),
-															) === true &&
-															c?.removeTab(sharedTab.id)
-														) {
-															this.openRequest++;
-															this.preview = null;
-															this.tab = 'posts';
-														}
+														void confirmTeams(
+															this.dialogs,
+															this.t('app.confirmRemoveTab', { name: sharedTab.name }),
+															{ danger: true },
+														).then((ok) => {
+															if (ok && c?.removeTab(sharedTab.id)) {
+																this.openRequest++;
+																this.preview = null;
+																this.tab = 'posts';
+															}
+														});
 													}
 												}}
 												><office-ui-menu-item
@@ -1149,6 +1187,46 @@ export class TeamsApp extends TeamsLitElement {
 												><office-ui-menu-item
 													label=${this.t('app.removeTab')}
 													command="remove-tab"
+												></office-ui-menu-item
+											></office-ui-menu-button>`
+										: nothing
+								}
+								${
+									channel &&
+									channel.kind === 'channel' &&
+									(channel.createdBy === s.user.id || s.moderator)
+										? html`<office-ui-menu-button
+												data-channel-options
+												label=${this.t('app.channelOptions')}
+												icon="more"
+												icon-only
+												@office-command=${(event: CustomEvent<{ command: string }>) => {
+													if (event.detail.command === 'rename-channel') {
+														void promptTeamsName(
+															this.dialogs,
+															this.t('app.channelNamePrompt'),
+															channel.name,
+														).then((name) => {
+															if (name) c?.renameChannel(channel.id, name);
+														});
+													} else if (event.detail.command === 'archive-channel') {
+														if (!this.canLeaveContent()) return;
+														void confirmTeams(
+															this.dialogs,
+															this.t('app.confirmArchiveChannel', { name: channel.name }),
+															{ danger: true },
+														).then((ok) => {
+															if (ok) c?.archiveChannel(channel.id);
+														});
+													}
+												}}
+												><office-ui-menu-item
+													label=${this.t('app.renameChannel')}
+													command="rename-channel"
+												></office-ui-menu-item
+												><office-ui-menu-item
+													label=${this.t('app.archiveChannel')}
+													command="archive-channel"
 												></office-ui-menu-item
 											></office-ui-menu-button>`
 										: nothing
@@ -1208,7 +1286,7 @@ export class TeamsApp extends TeamsLitElement {
 											: html`<teams-pinned-bar
 													.pinned=${s.pinned}
 													@teams-pinned-open=${(e: CustomEvent<{ messageId: string }>) => void this.revealMessage(e.detail.messageId)}
-													@teams-pinned-unpin=${(e: CustomEvent<{ messageId: string }>) => c?.unpinMessage(e.detail.messageId)}
+													@teams-pinned-unpin=${(e: CustomEvent<{ messageId: string }>) => w?.unpinMessage(e.detail.messageId)}
 												></teams-pinned-bar>`
 									}
 									<office-ui-chat-list
@@ -1216,16 +1294,17 @@ export class TeamsApp extends TeamsLitElement {
 										.replyCounts=${compact ? {} : s.replyCounts}
 										.pinnedIds=${s.pinned.map((p) => p.message.id)}
 										self-id=${s.user.id}
+										?moderator=${s.moderator}
 										.highlightId=${this.highlightId}
 										.meetings=${meetingCards(s.meetings, Date.now())}
 										@office-chat-meeting=${(e: CustomEvent<{ meetingId: string; action: 'join' | 'open' }>) => (e.detail.action === 'join' ? void this.joinMeeting(e.detail.meetingId) : this.openMeeting(e.detail.meetingId))}
-										@office-chat-pin=${(e: CustomEvent<{ messageId: string }>) => c?.pinMessage(e.detail.messageId)}
-										@office-chat-unpin=${(e: CustomEvent<{ messageId: string }>) => c?.unpinMessage(e.detail.messageId)}
-										@office-chat-react=${(e: CustomEvent<{ messageId: string; emoji: string }>) => c?.toggleReaction(e.detail.messageId, e.detail.emoji)}
+										@office-chat-pin=${(e: CustomEvent<{ messageId: string }>) => w?.pinMessage(e.detail.messageId)}
+										@office-chat-unpin=${(e: CustomEvent<{ messageId: string }>) => w?.unpinMessage(e.detail.messageId)}
+										@office-chat-react=${(e: CustomEvent<{ messageId: string; emoji: string }>) => w?.toggleReaction(e.detail.messageId, e.detail.emoji)}
 										@office-chat-thread=${(e: CustomEvent<{ messageId: string }>) => void this.openThread(e.detail.messageId)}
-										@office-chat-reply=${(e: CustomEvent<{ messageId: string }>) => (compact ? c?.startReply(e.detail.messageId) : void this.openThread(e.detail.messageId, 'reply'))}
-										@office-chat-edit=${(e: CustomEvent<{ messageId: string }>) => (compact ? c?.startEdit(e.detail.messageId) : void this.openThread(e.detail.messageId, 'edit'))}
-										@office-chat-delete=${(e: CustomEvent<{ messageId: string }>) => globalThis.confirm?.(this.t('chat.confirmDelete')) !== false && c?.deleteMessage(e.detail.messageId)}
+										@office-chat-reply=${(e: CustomEvent<{ messageId: string }>) => (compact ? w?.startReply(e.detail.messageId) : w ? void this.openThread(e.detail.messageId, 'reply') : undefined)}
+										@office-chat-edit=${(e: CustomEvent<{ messageId: string }>) => (compact ? w?.startEdit(e.detail.messageId) : w ? void this.openThread(e.detail.messageId, 'edit') : undefined)}
+										@office-chat-delete=${(e: CustomEvent<{ messageId: string; moderation?: boolean }>) => void confirmTeams(this.dialogs, this.t(e.detail.moderation ? 'chat.confirmHide' : 'chat.confirmDelete'), { confirmKey: 'chat.delete', danger: true }).then((ok) => ok && w?.deleteMessage(e.detail.messageId))}
 										@office-chat-open-file=${(e: CustomEvent<{ attachment: OpenFileDetail['attachment'] & { kind: OfficeKind } }>) => this.openFile(e.detail.attachment)}
 									></office-ui-chat-list>
 									${
@@ -1240,7 +1319,7 @@ export class TeamsApp extends TeamsLitElement {
 													.missingFiles=${s.draft.missingFiles}
 													.mentionTargets=${s.mentionTargets}
 													@office-chat-draft=${(e: CustomEvent<TeamsState['draft']>) => c?.setDraft(e.detail)}
-													?disabled=${!channel}
+													?disabled=${!channel || !w}
 													placeholder=${chat ? this.t('app.messageTo', { name: chat.title }) : channel ? this.t('app.messageTo', { name: `# ${channel.name}` }) : this.t('app.createChannelFirst')}
 													@office-chat-typing=${() => c?.notifyTyping()}
 													@office-chat-cancel=${() => c?.cancelCompose()}
@@ -1267,7 +1346,7 @@ export class TeamsApp extends TeamsLitElement {
 	}
 
 	private selectTab(id: string): void {
-		if (!this.closePreview()) return;
+		if (!this.closePreview(() => this.selectTab(id))) return;
 		this.teams.client?.closeThread();
 		this.tab = id;
 		this.addingTab = false;
@@ -1298,7 +1377,7 @@ export class TeamsApp extends TeamsLitElement {
 	private async openActivity(id: string): Promise<void> {
 		const c = this.teams.client;
 		const item = c?.getState().activity.find((entry) => entry.id === id);
-		if (!c || !item || !this.closePreview()) return;
+		if (!c || !item || !this.closePreview(() => void this.openActivity(id))) return;
 		c.markActivityRead(id);
 		this.settingsOpen = false;
 		this.addingTab = false;
@@ -1373,16 +1452,19 @@ export class TeamsApp extends TeamsLitElement {
 				?open=${this.chatPeople && chat !== null}
 				.chat=${chat}
 				.contacts=${s.contacts}
+				?moderator=${s.moderator}
 				@teams-chat-rename=${(e: CustomEvent<{ id: string; name: string }>) => c?.renameChat(e.detail.id, e.detail.name)}
 				@teams-chat-add=${(e: CustomEvent<{ id: string; userIds: string[] }>) => c?.addToChat(e.detail.id, e.detail.userIds)}
 				@teams-chat-remove=${(e: CustomEvent<{ id: string; userId: string }>) => c?.removeFromChat(e.detail.id, e.detail.userId)}
-				@teams-chat-leave=${(e: CustomEvent<{ id: string }>) => {
-					if (globalThis.confirm?.(this.t('chatPeople.confirmLeave')) === false) return;
-					if (c?.leaveChat(e.detail.id)) {
-						this.chatPeople = false;
-						this.mobileView = 'list';
-					}
-				}}
+				@teams-chat-leave=${(e: CustomEvent<{ id: string }>) =>
+					void confirmTeams(this.dialogs, this.t('chatPeople.confirmLeave'), { danger: true }).then(
+						(ok) => {
+							if (ok && c?.leaveChat(e.detail.id)) {
+								this.chatPeople = false;
+								this.mobileView = 'list';
+							}
+						},
+					)}
 				@teams-dialog-close=${() => (this.chatPeople = false)}
 			></teams-chat-people-dialog>
 		`;
@@ -1407,7 +1489,7 @@ export class TeamsApp extends TeamsLitElement {
 
 	/** Open the calendar on a meeting's details, for example from its reminder. */
 	private openMeeting(meetingId: string, start = 0): void {
-		if (!this.closePreview()) return;
+		if (!this.closePreview(() => this.openMeeting(meetingId, start))) return;
 		this.settingsOpen = false;
 		this.meeting = false;
 		this.rail = 'calendar';
@@ -1416,7 +1498,7 @@ export class TeamsApp extends TeamsLitElement {
 	}
 
 	private async joinMeeting(meetingId: string): Promise<void> {
-		if (!this.closePreview()) return;
+		if (!this.closePreview(() => void this.joinMeeting(meetingId))) return;
 		this.meetingDetails = null;
 		this.settingsOpen = false;
 		if (await this.teams.client?.joinMeeting(meetingId)) {
@@ -1496,8 +1578,9 @@ export class TeamsApp extends TeamsLitElement {
 						details?.repeat === 'none'
 							? this.t('details.confirmCancel')
 							: this.t('details.confirmCancelSeries');
-					if (globalThis.confirm?.(ask) === false) return;
-					if (c?.cancelMeeting(meetingId)) this.meetingDetails = null;
+					void confirmTeams(this.dialogs, ask, { danger: true }).then((ok) => {
+						if (ok && c?.cancelMeeting(meetingId)) this.meetingDetails = null;
+					});
 				}}
 				@teams-meeting-ics=${(e: CustomEvent<{ meetingId: string }>) => {
 					const file = c?.meetingIcs(e.detail.meetingId);
@@ -1510,7 +1593,11 @@ export class TeamsApp extends TeamsLitElement {
 	}
 
 	private async resumeDraft(context: DraftContext): Promise<void> {
-		if (!this.closePreview() || !this.teams.client?.openDraft(context)) return;
+		if (
+			!this.closePreview(() => void this.resumeDraft(context)) ||
+			!this.teams.client?.openDraft(context)
+		)
+			return;
 		this.rail = 'teams';
 		this.tab = 'posts';
 		this.meeting = false;

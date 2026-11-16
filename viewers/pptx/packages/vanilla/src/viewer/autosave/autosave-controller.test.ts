@@ -460,4 +460,60 @@ describe('createAutosaveController with host-owned storage', () => {
 		);
 		controller.destroy();
 	});
+
+	it('reads the one shared engine: an unchanged dirty deck is never rewritten', async () => {
+		vi.useFakeTimers();
+		saveAutosaveSnapshot.mockReset().mockResolvedValue(true);
+		const store = createStore(createInitialViewerState());
+		const { handler, save } = makeHandler();
+		const controller = createAutosaveController({
+			store,
+			getHandler: () => handler,
+			filePath: 'deck.pptx',
+			getIntervalMs: () => 2000,
+		});
+		store.set({ slides: [makeSlide('a')], dirty: true });
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(save).toHaveBeenCalledOnce();
+		// Still dirty in the editor (no real save) and an unrelated store change: no rewrite.
+		store.set({ loading: false });
+		await vi.advanceTimersByTimeAsync(6000);
+		expect(save).toHaveBeenCalledOnce();
+		expect(controller.getRecovery().getSnapshot().prompt).toBeNull();
+		controller.destroy();
+		vi.useRealTimers();
+	});
+});
+
+describe('createAutosaveController inline drafts', () => {
+	it('snapshots uncommitted inline typing, with the typed text in the saved slides', async () => {
+		vi.useFakeTimers();
+		saveAutosaveSnapshot.mockReset().mockResolvedValue(true);
+		const store = createStore(createInitialViewerState());
+		store.set({
+			slides: [
+				{
+					id: 's1',
+					elements: [{ id: 't', type: 'text', text: 'Old', x: 0, y: 0, width: 1, height: 1 }],
+				} as unknown as PptxSlide,
+			],
+		});
+		const { handler, save } = makeHandler();
+		const controller = createAutosaveController({
+			store,
+			getHandler: () => handler,
+			filePath: 'deck.pptx',
+			getIntervalMs: () => 2000,
+		});
+		controller.noteInlineDraft({ slideId: 's1', elementId: 't', text: 'Typed' });
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(save).toHaveBeenCalledOnce();
+		expect((save.mock.calls[0]![0] as PptxSlide[])[0]!.elements[0]).toMatchObject({
+			text: 'Typed',
+		});
+		// The editor closed (commit or cancel): the draft no longer goes into snapshots.
+		controller.noteInlineDraft(null);
+		controller.destroy();
+		vi.useRealTimers();
+	});
 });

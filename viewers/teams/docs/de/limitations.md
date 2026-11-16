@@ -1,6 +1,6 @@
 # Einschränkungen
 
-OpenTeams ist eine frühe Implementierung. Diese Seite listet auf, was es nicht kann, damit Sie
+OpenTeams befindet sich in der Beta-Phase. Diese Seite listet auf, was es nicht kann, damit Sie
 vor dem Einsatz entscheiden können.
 
 ## Nicht Microsoft Teams
@@ -24,15 +24,17 @@ Es implementiert **nicht** Aufzeichnung, Hintergrundunschärfe, Live-Untertitel,
 
 Word zeigt eine schreibgeschützte Vorschau; Excel bietet lokales Bearbeiten und das Speichern neuer Kanalkopien,
 wenn Speicher konfiguriert ist; Visio nutzt den vorhandenen Viewer.
-Es gibt kein gemeinsames Bearbeiten, kein Überschreiben und kein versioniertes Zurückspeichern. PowerPoint benötigt eine
-vom Host konfigurierte eingebettete Viewer-Seite. Fehlende Integrationen werden im Bereich gemeldet.
+Es gibt kein gemeinsames Bearbeiten, kein Überschreiben und kein versioniertes Zurückspeichern. PowerPoint öffnet sich in einer
+nativen Vorschau; ein Host kann stattdessen eine eingebettete Viewer-Seite bereitstellen. Fehlende Integrationen werden im Bereich gemeldet.
 Textlesevorgänge sind auf 2 MiB und native Office-Lesevorgänge auf 32 MiB begrenzt. Die Oberfläche gibt es auf Englisch, Deutsch, Spanisch, Französisch und in vereinfachtem Chinesisch (Eigenschaft `locale`); von Personen geschriebener Text wird nie übersetzt.
 
 Die Dateiansichten unterstützen direktes Hochladen, das Anlegen leerer Excel-Dateien und die Metadatensuche, wenn
-Speicher konfiguriert ist. Uploads zeigen einen Beschäftigt-Zustand und erlauben Wiederholen, ohne Byte-
-Fortschritt oder Abbruch. Fehlgeschlagene Stapel können nicht referenzierte Speicherobjekte hinterlassen;
-der Referenzserver hat keinen Bereinigungsvertrag für diese Objekte. Ordner, Indizierung des Dokument-
-inhalts, Dateiversionsverlauf und authentifizierte Dateiberechtigungen sind
+Speicher konfiguriert ist. Uploads zeigen einen Beschäftigt-Zustand und erlauben Abbruch und Wiederholen, ohne Byte-
+Fortschritt. Ein fehlgeschlagener Stapel kann Dateien hinterlassen, die vor dem Fehler hochgeladen wurden und an keiner Nachricht
+hängen; der Referenzserver entfernt seine unvollständigen Uploads und lässt die hochladende Person oder einen
+Moderator den Rest löschen (`DELETE /files/<scope>/<name>`), tut das aber nicht von selbst. Der Referenzserver
+beschränkt Dateien privater Chats auf deren Mitglieder und zählt den Speicher pro Workspace; Kanaldateien kann jede
+angemeldete Person des Servers lesen. Ordner, Indizierung des Dokumentinhalts und Dateiversionsverlauf sind
 nicht implementiert.
 
 Markdown unterstützt Überschriften, Aufzählungen, Zitate, umzäunten Code, einfache Hervorhebung, Web-Links, flache Aufgabenlisten, Tabellen auf oberster Ebene und dateirelative Web-Links. Es implementiert nicht das vollständige
@@ -52,7 +54,7 @@ im Client und benötigen eine Serverautorisierung, um durchsetzbar zu werden.
   TURN-Relay kann sie nicht entschlüsseln).
 - **Autorisierung ist Aufgabe des Servers.** Autor- und Rollenprüfungen laufen im Client; ein feindlicher
   Client kann alles schreiben, was der Server akzeptiert.
-- **Konten sind optional.** Der Referenzserver kann Sitzungen für konfigurierte Benutzer (oder Ihre `authenticate`-Funktion) signieren und die Benutzer-ID aus der Sitzung übernehmen; `authorizeSync` kann den Zugriff pro Raum entscheiden. Ohne sie ist sein Token ein gemeinsames Geheimnis im Browser, keine Authentifizierung pro Benutzer, und Benutzer-IDs sind Behauptungen. Es gibt kein SSO, kein Zurücksetzen von Passwörtern und keine Zugriffssteuerung für Teams und Kanäle. Siehe [was der Referenzserver nicht kann](/de/server#was-der-referenzserver-nicht-kann).
+- **Authentifizierung ist standardmäßig Pflicht.** Der Referenzserver startet nur mit Konten, einem `authenticate`-Hook oder `authorizeSync`; `--insecure-dev` wählt einen offenen Entwicklungsmodus mit Warnung. Mit Konten signiert er Sitzungen für konfigurierte Benutzer (oder Ihre `authenticate`-Funktion) und übernimmt die Benutzer-ID aus der Sitzung; `authorizeSync` kann den Zugriff pro Raum entscheiden. Ein gemeinsames `TEAMS_TOKEN` allein ist ein Geheimnis im Browser, keine Authentifizierung pro Benutzer, und Benutzer-IDs sind Behauptungen. Es gibt kein SSO, kein Zurücksetzen von Passwörtern und keine Zugriffssteuerung für Teams und Kanäle. Siehe [was der Referenzserver nicht kann](/de/server#was-der-referenzserver-nicht-kann).
 - **Präsenz ist beratend und nicht authentifiziert**, wie jede Yjs-Awareness: Ein Client kann jeden
   Namen angeben.
 - Alles, was ein Teilnehmer sendet, wird beim Zurücklesen erneut validiert und als Text dargestellt, nie als Markup.
@@ -61,7 +63,7 @@ im Client und benötigen eine Serverautorisierung, um durchsetzbar zu werden.
 
 - **Mesh-Anrufe** verbinden jeden Teilnehmer mit jedem anderen. Das braucht keinen Medienserver und
   funktioniert für eine Handvoll Personen (die Obergrenze ist standardmäßig 12), nicht für ein Webinar.
-- **Der Verlauf wächst.** Der Referenzserver hält einen Snapshot pro Raum und verdichtet ihn nie.
+- **Der Verlauf wächst.** Der Referenzserver hält einen Snapshot pro Raum und verdichtet ihn beim Laden des Raums und standardmäßig alle 6 Stunden (`TEAMS_COMPACT_INTERVAL_MIN`).
 - **Ein Serverprozess.** Der Referenzserver hält Räume im Arbeitsspeicher und skaliert nicht
   horizontal.
 

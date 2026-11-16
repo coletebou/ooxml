@@ -1,10 +1,12 @@
 import type {
 	CanvasSize,
+	DeckWebfontProgress,
 	Guide,
 	PresentationBlackout,
 	RemoteCursor,
 	RulerUnit,
 	SanitizedPresence,
+	SlideFindHighlights,
 } from 'ooxml-ui/pptx';
 import type { AiChangeBatch } from 'ooxml-ui/pptx/ai';
 import type { PptxHandler, PptxSlide, PptxTheme, TextSegment } from 'pptx-viewer-core';
@@ -53,6 +55,8 @@ export interface ViewerBodyProps {
 	current: number;
 	onselect: (index: number) => void;
 	loading: boolean;
+	/** Webfont download progress while a load waits for the deck's fonts (after a short delay). */
+	fontProgress?: DeckWebfontProgress | null;
 	isEncrypted: boolean;
 	error: string | null;
 	activeSlide: PptxSlide | undefined;
@@ -92,10 +96,12 @@ export interface ViewerBodyProps {
 	controller: EditorController;
 	onstageresize: (width: number, height: number) => void;
 	onstageholder: (el: HTMLDivElement | null) => void;
-	/** Current manual zoom scale (0.2-5); the baseline a pinch gesture scales from. */
+	/** Current manual zoom scale (0.1-5); the baseline a pinch gesture scales from. */
 	getzoomscale: () => number;
 	/** Two-finger pinch on the viewport: commit the new manual zoom scale. */
 	onpinchzoom: (scale: number) => void;
+	/** True when a plain drag on the slide has nothing to select and should pan (read-only view). */
+	dragpans?: boolean;
 	notesExpanded: boolean;
 	onNotesCommit?: (notes: string, segments?: TextSegment[]) => void;
 	onNotesToggle: () => void;
@@ -133,6 +139,8 @@ export interface ViewerBodyProps {
 	aiActive?: boolean;
 	/** Rings the AI focus overlay should draw on the active slide. */
 	aiHighlights?: readonly AiCanvasHighlight[];
+	/** The Find bar's matches the canvas marks in the text (`findTextHighlightsByElement`). */
+	findHighlights?: SlideFindHighlights;
 	/** Just-applied AI change batch the canvas should animate (glide/fade/glow). */
 	aiChangeBatch?: AiChangeBatch | null;
 	/** Route a picked canvas element to the AI focus (pick mode). */
@@ -157,6 +165,7 @@ export type ViewerStageProps = Pick<
 	| 'mediaDataUrls'
 	| 'current'
 	| 'loading'
+	| 'fontProgress'
 	| 'isEncrypted'
 	| 'error'
 	| 'activeSlide'
@@ -193,6 +202,7 @@ export type ViewerStageProps = Pick<
 	| 'onaipickelement'
 	| 'onaskai'
 	| 'onfixai'
+	| 'findHighlights'
 >;
 
 /**

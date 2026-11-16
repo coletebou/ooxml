@@ -1,3 +1,4 @@
+import { at } from '../../../geometry/indexed';
 export const ECMA_NAMESPACES = {
 	strictP: 'http://purl.oclc.org/ooxml/presentationml/main',
 	strictA: 'http://purl.oclc.org/ooxml/drawingml/main',
@@ -25,7 +26,7 @@ export function namespaces(xml: string): Map<string, string> {
 	for (const match of rootAttributes(xml).matchAll(
 		/xmlns(?::([\w.-]+))?\s*=\s*["']([^"']+)["']/g,
 	)) {
-		result.set(match[1] ?? '', match[2]);
+		result.set(match[1] ?? '', match[2] ?? '');
 	}
 	return result;
 }
@@ -33,7 +34,7 @@ export function namespaces(xml: string): Map<string, string> {
 export function allNamespaceDeclarations(xml: string): Map<string, string> {
 	const result = new Map<string, string>();
 	for (const match of xml.matchAll(/xmlns(?::([\w.-]+))?\s*=\s*["']([^"']+)["']/g)) {
-		result.set(match[1] ?? '', match[2]);
+		result.set(match[1] ?? '', match[2] ?? '');
 	}
 	return result;
 }
@@ -48,7 +49,7 @@ export function directChildren(xml: string): string[] {
 			depth--;
 		} else {
 			if (depth === 1) {
-				children.push(match[1].split(':').pop()!);
+				children.push(at(match, 1).split(':').pop()!);
 			}
 			if (!/\/\s*>$/.test(token)) {
 				depth++;

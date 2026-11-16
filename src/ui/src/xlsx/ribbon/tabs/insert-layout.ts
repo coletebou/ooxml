@@ -35,7 +35,10 @@ export function insertTab(): RibbonTab {
 			{
 				id: 'illustrations',
 				label: 'Illustrations',
-				controls: [{ kind: 'button', command: 'insert.pictures', size: 'large' }],
+				controls: [
+					{ kind: 'button', command: 'insert.pictures', size: 'large' },
+					{ kind: 'button', command: 'insert.smartart', size: 'large' },
+				],
 			},
 			{
 				id: 'charts',
@@ -84,6 +87,8 @@ export function insertTab(): RibbonTab {
 						kind: 'stack',
 						controls: [
 							{ kind: 'button', command: 'sparkline.settings' },
+							{ kind: 'button', command: 'sparkline.group' },
+							{ kind: 'button', command: 'sparkline.ungroup' },
 							{
 								kind: 'menu',
 								label: 'Clear Sparklines',

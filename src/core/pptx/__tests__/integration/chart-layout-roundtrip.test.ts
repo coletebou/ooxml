@@ -21,8 +21,15 @@ function chartOf(data: Loaded): ChartPptxElement {
 	return data.slides[0].elements.find((element) => element.type === 'chart') as ChartPptxElement;
 }
 
+/**
+ * Empty elements in their long form, the shape the object-tree writer saves: the shared chart
+ * writer (`writeChartSpace`) closes them instead, and these assertions compare markup as text.
+ */
+const longForm = (xml: string): string =>
+	xml.replace(/<([\w:.-]+)((?:\s[^<>]*?)?)\s*\/>/gu, '<$1$2></$1>');
+
 async function readPart(bytes: Uint8Array): Promise<string> {
-	return (await JSZip.loadAsync(bytes)).file(CHART_PART)!.async('string');
+	return longForm(await (await JSZip.loadAsync(bytes)).file(CHART_PART)!.async('string'));
 }
 
 async function writePart(bytes: Uint8Array, xml: string): Promise<Uint8Array> {
@@ -91,7 +98,7 @@ describe('chart layout: new charts', () => {
 		const saved = await createDeck('bar', reportLike);
 		const xml = await readPart(saved);
 		expect(xml).toMatch(
-			/<c:chartSpace[^>]*><c:roundedCorners val="0"><\/c:roundedCorners><c:chart>/u,
+			/<c:chartSpace[^>]*><c:date1904 val="0"><\/c:date1904><c:roundedCorners val="0"><\/c:roundedCorners><c:chart>/u,
 		);
 		expect(xml).toMatch(
 			/<c:gapWidth val="35"><\/c:gapWidth><c:overlap val="10"><\/c:overlap><c:axId /u,

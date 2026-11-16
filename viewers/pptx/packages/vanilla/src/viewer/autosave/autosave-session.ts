@@ -3,12 +3,10 @@ import type {
 	AutosaveRecord,
 	AutosaveRecoveryOffer,
 	DeckSaveIntent,
+	InlineTextDraft,
 	DocumentStorage,
 } from 'ooxml-ui/pptx';
 import {
-	acceptAutosaveRecovery,
-	acknowledgeAutosaveRecovery,
-	clearAutosaveRecoveryAcknowledgement,
 	discardAutosaveRecovery,
 	resolveAutosaveActivation,
 	resolveAutosaveIntervalMs,
@@ -56,6 +54,11 @@ export interface AutosaveSessionDeps {
 	filePath: string;
 	/** Public document name rendered in the recovery message. */
 	fileName?: string;
+	/**
+	 * The live key and name, read at every snapshot and recovery probe so a file opened from a
+	 * File > Open cloud place gets its own (win over {@link filePath} and {@link fileName}).
+	 */
+	getDocument?: () => { filePath: string; fileName: string | undefined };
 	/** Host `storage` option: recovery snapshots go to its recovery methods when it has them. */
 	getStorage?: () => DocumentStorage | undefined;
 	/** Protect-Presentation state, forwarded to the shared save decision. */
@@ -72,6 +75,8 @@ export interface AutosaveSessionDeps {
 export interface AutosaveSession {
 	/** Force an immediate snapshot (no-op when autosave is not active). */
 	saveNow(): Promise<void>;
+	/** In-progress inline text: a changed draft is an edit and goes into the snapshot. */
+	noteInlineDraft(draft: InlineTextDraft | null): void;
 	/** What actually runs right now (the shared verdict's `active`). */
 	isEnabled(): boolean;
 	/** The user's AutoSave preference, i.e. what the title-bar switch shows. */
@@ -100,7 +105,7 @@ export function createAutosaveSession(deps: AutosaveSessionDeps): AutosaveSessio
 			hostAutosave: deps.hostAutosave,
 			userEnabled,
 			canEdit: deps.store.get().editable,
-			filePath: deps.filePath,
+			filePath: deps.getDocument?.().filePath ?? deps.filePath,
 		});
 
 	// A running slide show has no editor chrome, and this prompt is modal: left
@@ -114,7 +119,9 @@ export function createAutosaveSession(deps: AutosaveSessionDeps): AutosaveSessio
 
 	const offerRecovery = async (offer: AutosaveRecoveryOffer): Promise<void> => {
 		dialogOpen = true;
+		const recovery = controller.getRecovery();
 		try {
+			// The dialog owns the discard retry (it stays open when the delete fails).
 			const choice = await openAutosaveRecoveryDialog(
 				deps.doc,
 				deps.getTranslator(),
@@ -122,13 +129,9 @@ export function createAutosaveSession(deps: AutosaveSessionDeps): AutosaveSessio
 				() => discardAutosaveRecovery(offer.record, deps.getStorage?.()),
 			);
 			if (choice === 'restore') {
-				acknowledgeAutosaveRecovery(offer.record);
-				try {
-					await deps.loadFile(acceptAutosaveRecovery(offer.record));
-				} catch (error) {
-					clearAutosaveRecoveryAcknowledgement(offer.record);
-					throw error;
-				}
+				await recovery.restore();
+			} else {
+				recovery.dismiss();
 			}
 		} finally {
 			dialogOpen = false;
@@ -166,6 +169,7 @@ export function createAutosaveSession(deps: AutosaveSessionDeps): AutosaveSessio
 		getHandler: deps.getHandler,
 		filePath: deps.filePath,
 		fileName: deps.fileName,
+		...(deps.getDocument ? { getDocument: deps.getDocument } : {}),
 		...(deps.getStorage ? { getStorage: deps.getStorage } : {}),
 		getIntervalMs: () =>
 			resolveAutosaveIntervalMs({
@@ -180,6 +184,7 @@ export function createAutosaveSession(deps: AutosaveSessionDeps): AutosaveSessio
 		// still be asked about work a crash left behind.
 		isRecoveryAllowed: () => deps.hostAutosave !== false,
 		onRecovery: deps.onRecovery,
+		loadFile: (bytes) => deps.loadFile(bytes),
 		onRecoveryOffer: (offer) => {
 			pendingOffer = offer;
 			flushRecoveryOffer();
@@ -188,6 +193,7 @@ export function createAutosaveSession(deps: AutosaveSessionDeps): AutosaveSessio
 
 	return {
 		saveNow: () => controller.saveNow(),
+		noteInlineDraft: (draft) => controller.noteInlineDraft(draft),
 		isEnabled: () => controller.isEnabled(),
 		isPreferred: () => activation().toggleAvailable && userEnabled,
 		getActivation: activation,

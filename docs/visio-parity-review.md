@@ -1,5 +1,114 @@
 # Visio parity review, 2026-10-07
 
+## Editing and reuse review, 2026-10-28
+
+Reviewed source: `a4707a6e694d26e32af0375ee06d600541a1236a`. This section is a
+current code review; the dated measurements below are historical evidence, not a
+fresh native Visio acceptance run. Full 1:1 parity has not been established.
+The open gaps, re-checked against the code on 2026-10-30, are listed with the other products in
+the [Office parity checklist](parity-checklist.md).
+
+The most visible editing limitation is the gap between commands existing and
+commands working on an ordinary mixed drawing. Core deliberately rejects edits
+whose dependencies it cannot preserve. Removing those guards without implementing
+recalculation would trade an editing refusal for a damaged drawing.
+
+The second increment adds bounded multi-selection resizing. Generated source
+round-trips cover every handle, drawing scales, reflected shapes and off-center
+pins. Browser save/reopen workflows pass in all six demos. Native Visio 16.0
+comparison was recorded on 2026-10-29 (Visio.InvisibleApp is registered on the
+review machine): multi-selection and group resize open without repair and agree
+with Visio's recalculation (`viewers/visio/docs/evidence/native-edit-families-*-2026-10-29.json`).
+
+The next increment enables single-selection anchored resizing for flat local
+groups with axis-aligned members. Parent rotation/reflection, off-center pins,
+member locks and local ResizeMode are included. Source formulas are projected
+before the edit is committed, including implicit child writes and dependencies
+outside the page. Nested groups, rotated members, glue and stencil members remain
+outside this resize subset. The group-resize comparison is no longer pending: it
+passes natively on a Visio-authored group (anchored resize, 191 cells, reopen drift 4.4e-16).
+Refusals are scoped to the formulas an edit reaches; a formula the core cannot follow
+no longer refuses every edit of a document.
+
+### Native findings, 2026-10-29
+
+- Deleting a shape that other cells read: Visio replaces such a cell's formula by its last
+  result as a constant and does not recompute it (`native-delete-freeze-2026-10-29.json`:
+  `Sheet.1!PinX+(1 in)` becomes `5 in`). The core freezes the cell the same way. A cell
+  holding an error cache after the deleted reference is recorded in
+  `native-delete-error-2026-10-29.json`; protected, error-valued or unanalysable readers still refuse.
+- Duplicating a glued connector keeps its end points and drops the glue; duplicating a glue
+  target leaves its connectors with the original (`native-duplicate-glue-2026-10-29.json`). Implemented.
+- Master instances move, resize, format and reorder natively without repair. Dynamic glue to a
+  shape without connection points floats along the shared extent (a straight run through the
+  middle of the overlap); the core now does the same for the horizontal case and leaves the
+  vertical case unverified.
+- A connector copy that meets another dynamic connector makes Visio route both again; the core
+  refuses that placement.
+
+### Implemented in this increment
+
+- Alt bypasses snapping while moving one or multiple shapes, including when the
+  modifier changes during the drag. Snap hints disappear during the bypass.
+- Shift constrains movement to the dominant page axis. Shape, guide and grid snaps
+  can adjust that axis, but cannot move the perpendicular axis or display a false
+  alignment hint for it. Alt+Shift combines both behaviors.
+- View > Grid controls visibility independently of Snap & Glue > Grid. Saved grid
+  origins, per-axis spacing and global snap disablement still apply.
+- Preview and release use the same modifier-aware path. The existing source-backed
+  batch, selection history, cancellation and protection checks remain authoritative.
+- PowerPoint's remaining pure `lockResizeAspect` and `isCornerHandle` helpers moved
+  from UI to `src/core/geometry/resize-aspect.ts`, with their regression tests.
+  Existing PowerPoint imports re-export them, preserving binding behavior.
+- Multiple selected local, axis-aligned shapes now share eight resize handles.
+  The gesture scales members and gaps together, including reflected shapes and
+  off-center pins, and saves one atomic history entry. Source protection or a
+  final pose mismatch rejects the entire edit. Core owns the plan and pose check;
+  all six bindings consume the same UI implementation.
+- Selection resizing reuses `geometry/element-transform.ts`, already shared with
+  PowerPoint. Its minimum-size options now permit separate width and height
+  limits, so the smallest selection member retains its physical minimum without
+  forcing the other axis to use the same limit. Existing defaults are unchanged.
+- Flat local groups reuse the same anchored writer and dependency evaluator as
+  individual shapes. Their members scale or reposition according to constant
+  local ResizeMode values. Authored dependencies remain intact if they produce
+  the requested pose; incompatible formulas or locks reject the transaction.
+  Core owns this behavior, so every binding receives the same resize handles.
+
+Microsoft documents Alt's snap bypass and Alt+Shift movement in its
+[Visio interaction guide](https://www.microsoft.com/en-us/copilot/blog/2012/09/25/10-ways-to-be-more-efficient-in-the-new-visio/).
+The separate visibility and snap controls are described in
+[the grid guide](https://support.microsoft.com/en-us/visio/show-hide-or-change-the-grid-in-visio).
+These references guide the interaction contract; they do not establish pixel or
+native ShapeSheet equivalence for this implementation.
+
+### Next editing work, in priority order
+
+| Priority | Concrete gap and source evidence                                                                                                                                                                                                                                                                                                                                                                                                 | Completion gate                                                                                                                                                                  |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Local group resizing excludes nested groups, rotated or stencil members and glue; flips and unanchored resizing remain unsupported. Multi-selection excludes groups, rotation, layers and glue.                                                                                                                                                                                                                                  | Native group/multi-selection fixtures, child transforms and glue preserved, atomic source edits, history and six-demo save/reopen.                                               |
+| 2        | 2026-10-30: corners keep the proportions and Shift keeps them on every handle (`ui/shape-resize.ts`). Ctrl and Alt during a resize are not verified.                                                                                                                                                                                                                                                                             | Record native corner/edge behavior with modifiers, rotation, reflection, local pins and size/aspect locks; adapt the shared geometry to Visio's y-up coordinates and inch units. |
+| 3        | Dependency recalculation remains bounded; STRSAMEEX, ANGLETOLOC/LOCTOPAR (own sheet, unflipped), FORMAT (numeric pictures), DATE, INDIRECT and EVALCELL now evaluate; 2026-10-30: recalculation resolves computed INDIRECT/EVALCELL per evaluation and keeps the cache of a function it cannot run (reported `FORMULA_STALE`), but the static admission guards still refuse dynamic cells and master-defined cells are not read. | Native formula fixtures proving kept caches match Visio's recalculation, plus master-inheritance reads and the admission guards.                                                 |
+| 4        | Snapping still uses bounded shape/guide geometry. Resize alignment/size-match hints and a complete saved snap-settings implementation are missing.                                                                                                                                                                                                                                                                               | Native snapping matrix for zoom, units, layers, group members, ruler subdivisions, resize and connectors; prevent snapping a container to members moving with it.                |
+| 5        | Size & Position uses fixed inch labels; field rendering and editing state are scattered between product panes.                                                                                                                                                                                                                                                                                                                   | Unit-aware UI with mixed selections, accessible validation, stable focus and one undo step; keep conversion and source edits in core.                                            |
+
+Native rendering, editing interaction and saved-package compatibility need separate
+acceptance gates. Existing connector, stencil, chart, text and collaboration subsets
+are useful foundations, but their existence is not evidence of general parity.
+
+### Reuse inventory and extraction decisions
+
+| Area                        | Current owner and reuse opportunity                                                                                                                                                                                                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Geometry already shared     | `src/core/geometry` owns alignment/distribution, shape snapping, orthogonal routing, rotations and move/resize geometry. Visio already consumes the snap/router/arrangement helpers. Extend these rather than importing a PowerPoint binding.                                                                 |
+| Extracted now               | `resize-aspect.ts` removes a remaining DOM-free PowerPoint algorithm from UI. Its current consumers retain their exports; Visio can use it when native resize semantics are recorded.                                                                                                                         |
+| Next core candidates        | `src/ui/src/pptx/render/element-interaction.ts` still contains `snapBoxToGrid`, marquee intersection and additive-selection helpers. Extract the geometric parts with explicit coordinate and minimum-size contracts. Visio marquee uses enclosure, while PowerPoint uses overlap: preserve that distinction. |
+| Shared UI already available | Ribbon, menus, task pane, dialogs, color controls, chart data/formatting and SmartArt controls live in `src/ui`. Visio's six bindings share the same product custom element. No additional framework-specific controls are needed for these edits.                                                            |
+| Next UI candidate           | Compare `visio/format-pane-view.ts`, `visio/viewer-size-position.ts` and `chart/format-pane-fields.ts`: extract neutral labeled numeric/choice field rendering and focus-preserving draft handling into shared form controls. Keep Visio cells, chart descriptors and product command routing separate.       |
+| Keep product-specific       | ShapeSheet/master inheritance, Visio glue, page units and source admission stay in `src/core/visio`. PowerPoint slide semantics and document history integration are not drop-in replacements for Visio's package-backed transactions.                                                                        |
+
+Verification for this increment is recorded in the current capability-ledger entry.
+
 Reviewed baseline: `f6e9b730a` (ooxml-core 0.23.0, ooxml-ui 0.30.1). The Findings section was
 re-checked against the tree on 2026-10-22; the dated round sections below describe the state at
 their dates.
@@ -9,6 +118,10 @@ VSDX semantics in `src/core/visio`, browser rendering and controls in
 `src/ui/src/visio`, and six bindings, demos and browser tests in the viewer areas.
 The capability ledger remains `viewers/visio/docs/parity.md`.
 
+The chart capability summary was reconciled 2026-10-26 with the
+[shared delivery ledger](office-shared-parity-delivery.md). These are embedded Excel chart
+objects; shared diagram primitives do not constitute native Visio SmartArt support.
+
 ## Findings
 
 The viewer is a substantial beta, with local VSDX loading, master/style inheritance,
@@ -17,15 +130,20 @@ page navigation, zoom, source-backed history and bounded editing/save operations
 These are implemented subsets. The Home tab's clipboard, font, paragraph, Shape Styles,
 Change Shape, Arrange and connector commands are enabled (`src/ui/src/visio/ribbon-home.ts`,
 ledger in `viewers/visio/docs/parity.md`). Insert > Chart (`viewer-insert-chart.ts`,
-`core/visio/edit-chart-object.ts`) and the data-link and data-source dialogs
+`core/visio/edit-chart-object.ts`), with Edit Data and Format Chart on a chart object's shortcut
+menu (`viewer-chart-editor.ts`: the shared chart data sheet and Format pane over an eligible embedded
+workbook chart, re-embedded with a fresh metafile preview; shared effects, shape 3D, text,
+pattern fills, analysis and marker controls are admitted by chart capability), and the data-link and data-source dialogs
 (`viewer-data-links.ts`, `viewer-data-sources.ts`) are implemented; the commands that stay
 disabled (for example the 3-D effects in Shape Styles) carry their reason in the tooltip, and the
 ledger lists which ones. Six bindings share one controller and renderer.
 
 The broad blockers are formula/master recalculation, live connector routing and
 glue, accurate text measurement, complete line/fill/theme/foreign-object support,
-general editing and native round-trip validation. Containers and swimlanes and
-legacy formats (`.vsd` is preview only) still have substantial gaps; stencils (Open Stencil in the
+general editing and native round-trip validation. Swimlanes, lists and
+legacy formats (`.vsd` is preview only) still have substantial gaps (containers now keep Visio-form
+membership, move their members, take dropped shapes and grow, but are not yet confirmed against a
+Visio build); stencils (Open Stencil in the
 Shapes pane, `stencil-catalog.ts`), printing (`print-snapshot.ts`) and collaboration
 (`src/core/visio/collab`, per-shape merge with cursors) exist as bounded implementations. There is
 no defensible overall parity percentage or full native visual-equivalence claim.
@@ -63,10 +181,18 @@ by Visio when opened and remains a live-routing gap. See
   glued-end cases only).
 - Recalculation: ROUND, INT, TRUNC, POW, EXP, LN, LOG10, ASIN, ACOS, ATAN and the TRUE/FALSE
   constants are evaluated, so formulas that use them no longer refuse a resize or move. Still
-  refused: SUM, DEG, RAD, string and document-property functions, INDIRECT and the other
+  refused when this round landed: SUM, DEG, RAD, string and document-property functions, INDIRECT and the other
   reference-building functions, `ThePage!` / `TheDoc!` references, and dependencies on inherited
   or grouped cells. ROUND's two-argument form is read as decimal places, which is not yet checked
-  against Visio.
+  against Visio. Update 2026-10-30: SUM, DEG, RAD and the string functions (LEFT, MID, LEN,
+  TRIM and others) now evaluate (`formula-*-functions.ts`). Update 2026-10-30 (later): recalculation
+  no longer refuses what it cannot follow. A computed INDIRECT and EVALCELL are resolved per
+  evaluation with cycle protection, DEPENDSON names its dependencies, an unknown or unevaluable
+  function keeps its cached value and is reported as `FORMULA_STALE` (Visio would recompute it, so
+  it may be out of date until it does), and cells of grouped, instanced or connected shapes are read
+  as inputs when the edit does not reach them. Polyline/NURBS data, unparseable formulas, cells
+  that only a master defines and edits that themselves reach a grouped cell still refuse; see
+  priority 3 of the 2026-10-28 review.
 
 ## Round four: straight stencil connectors, string, angle and point functions (2026-10-15)
 
@@ -93,9 +219,9 @@ by Visio when opened and remains a live-routing gap. See
   returns -1, INDEX out of range is empty, DEG only labels its argument as an angle) was recorded
   from Visio 16 with `scripts/record-visio-formula-functions.ps1`.
 - Still refused: a cell's own text (`TheText`, `Prop.x` strings), so LEN(Prop.Name) refuses;
-  string results at the top of a formula; STRSAMEEX, ANGLETOLOC, LOCTOPAR, LOCTOLOC, ANGLETOPAR,
-  PATHLENGTH and the other path functions, FORMAT and the date and time functions, point results
-  and arithmetic on points, INDIRECT and the other reference-building functions. MAGNITUDE is not a
+  string results at the top of a formula; LOCTOLOC, ANGLETOPAR,
+  PATHLENGTH and the other path functions, non-numeric FORMAT pictures and the other date and time functions, point results
+  and arithmetic on points, and the other reference-building functions (INDIRECT evaluates; edit guards still refuse it). MAGNITUDE is not a
   ShapeSheet function (Visio reports a formula error for it).
 
 ## Implementation order toward parity
@@ -251,7 +377,9 @@ system/document, rather than an implicit ShapeSheet cell lookup:
 https://learn.microsoft.com/en-us/office/client-developer/visio/font-function.
 The dependency analyzer now admits its explicit AST references while retaining
 unsupported evaluation. An affected FONT formula still rejects recalculation, and
-an INDIRECT argument still rejects dependency proof. Independent font formulas and
+an INDIRECT argument still rejects static dependency proof (since 2026-10-30 a recalculation
+resolves it, and an affected FONT formula keeps its cache with a `FORMULA_STALE` diagnostic).
+Independent font formulas and
 cached identifiers are preserved during geometry editing.
 
 A native acceptance probe resized page ID 6, shape ID 2 to 8 by 4 drawing inches and

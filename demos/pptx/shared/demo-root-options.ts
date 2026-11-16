@@ -8,7 +8,19 @@
  * - `?showToolbar=0` / `?showThumbnails=0` turn the chrome or the slide pane off
  *   (`1` / `true` turn them on; any other value is ignored),
  * - `?initialSlide=<n>` opens the deck on zero-based slide `n` (any finite
- *   number; the viewer clamps it into the deck).
+ *   number; the viewer clamps it into the deck),
+ * - `?fitPadding=<px>` sets the per-side fit padding (any finite number of at
+ *   least 0), so a spec can fit the slide flush against the viewport,
+ * - `?googleFonts=0` turns the Google Fonts fallback off, and
+ *   `?googleFontsBaseUrl=<url>` points it at a self-hosted CSS2 mirror,
+ * - `?allowExternalContent=0` / `?allowExternalContent=1` set the host
+ *   external-content switch (absent leaves it to the Trust Center option),
+ * - `?listConversionScope=list` / `?listConversionScope=paragraph` set how far
+ *   a bare caret's Bullets / Numbering reaches (absent keeps the PowerPoint
+ *   default, `'paragraph'`),
+ * - `?maxInputBytes=`, `?maxUncompressedBytes=`, `?maxEntries=`,
+ *   `?maxSlides=` and `?maxShapes=` set the matching field of the host
+ *   `limits` option (a positive number; any other value is ignored).
  *
  * Only the options present in the query string are returned, so a demo opened
  * without them keeps the binding's own defaults. Kept binding-agnostic on
@@ -22,6 +34,42 @@ export interface DemoRootOptions {
 	showToolbar?: boolean;
 	showThumbnails?: boolean;
 	initialSlide?: number;
+	fitPadding?: number;
+	googleFonts?: false | { baseUrl: string };
+	allowExternalContent?: boolean;
+	listConversionScope?: 'paragraph' | 'list';
+	limits?: DemoLoadLimits;
+}
+
+/** The `limits` fields a demo URL can set (structurally the core's `PptxLoadLimits`). */
+export interface DemoLoadLimits {
+	maxInputBytes?: number;
+	maxUncompressedBytes?: number;
+	maxEntries?: number;
+	maxSlides?: number;
+	maxShapes?: number;
+}
+
+const LIMIT_PARAMS = [
+	'maxInputBytes',
+	'maxUncompressedBytes',
+	'maxEntries',
+	'maxSlides',
+	'maxShapes',
+] as const satisfies readonly (keyof DemoLoadLimits)[];
+
+function parseLimits(params: URLSearchParams): DemoLoadLimits | undefined {
+	const limits: DemoLoadLimits = {};
+	let found = false;
+	for (const name of LIMIT_PARAMS) {
+		const raw = params.get(name);
+		const value = raw === null || raw.trim() === '' ? Number.NaN : Number(raw);
+		if (Number.isFinite(value) && value > 0) {
+			limits[name] = value;
+			found = true;
+		}
+	}
+	return found ? limits : undefined;
 }
 
 function parseFlag(raw: string | null): boolean | undefined {
@@ -52,6 +100,30 @@ export function parseDemoRootOptions(search: string): DemoRootOptions {
 	const initialSlide = rawSlide === null || rawSlide.trim() === '' ? Number.NaN : Number(rawSlide);
 	if (Number.isFinite(initialSlide)) {
 		options.initialSlide = initialSlide;
+	}
+	const rawPadding = params.get('fitPadding');
+	const fitPadding =
+		rawPadding === null || rawPadding.trim() === '' ? Number.NaN : Number(rawPadding);
+	if (Number.isFinite(fitPadding) && fitPadding >= 0) {
+		options.fitPadding = fitPadding;
+	}
+	const googleFontsBaseUrl = params.get('googleFontsBaseUrl');
+	if (googleFontsBaseUrl) {
+		options.googleFonts = { baseUrl: googleFontsBaseUrl };
+	} else if (parseFlag(params.get('googleFonts')) === false) {
+		options.googleFonts = false;
+	}
+	const allowExternalContent = parseFlag(params.get('allowExternalContent'));
+	if (allowExternalContent !== undefined) {
+		options.allowExternalContent = allowExternalContent;
+	}
+	const listConversionScope = params.get('listConversionScope');
+	if (listConversionScope === 'paragraph' || listConversionScope === 'list') {
+		options.listConversionScope = listConversionScope;
+	}
+	const limits = parseLimits(params);
+	if (limits) {
+		options.limits = limits;
 	}
 	return options;
 }

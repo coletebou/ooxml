@@ -11,8 +11,17 @@ export {
 import { defineRibbonToggle } from './ribbon/ribbon-toggle';
 import { defineSearchField } from './form/search-field';
 import { defineBackstage } from './chrome/backstage';
+import { defineCloudFiles } from './files/cloud-files';
+import { defineOpenPlaces } from './files/open-places';
+import { defineConnectedServices } from './files/connected-services';
+export {
+	saveProgressLabel,
+	saveProgressStepChanged,
+	SAVE_PROGRESS_TEXT,
+} from './files/save-progress-label';
 import { defineFindBar } from './chrome/find-bar';
 import { defineCommentsPane } from './comments/comments-pane';
+import { defineChartFormatPane } from './chart/format-pane';
 import { definePrintPreview } from './chrome/print-preview';
 import { defineRibbon } from './ribbon/ribbon-tabs';
 import { defineRibbonActions } from './ribbon/ribbon-actions';
@@ -39,6 +48,7 @@ import { defineStatusBar } from './chrome/status-bar';
 import { defineStatusItem } from './chrome/status-item';
 import { defineTabStrip } from './chrome/tab-strip';
 import { defineTaskPane } from './chrome/task-pane';
+import { defineFormatSection } from './chrome/format-section';
 import { defineTitleBar } from './chrome/title-bar';
 import { defineZoomSlider } from './form/zoom-slider';
 import { defineSymbolPicker } from './form/symbol-picker';
@@ -50,6 +60,10 @@ export type {
 } from './form/color-custom';
 import { defineColorCustom } from './form/color-custom';
 import { defineChartPicker } from './dialog/chart-picker';
+import { defineChartDataSheet } from './chart/data-sheet';
+import { defineProgressDialog } from './dialog/progress-dialog';
+import { defineMessageDialog } from './dialog/message-dialog';
+import { defineShareDialog } from './dialog/share-dialog';
 
 export {
 	defineAccount,
@@ -62,6 +76,7 @@ export {
 	defineToasts,
 	defineBackstage,
 	defineCommentsPane,
+	defineChartFormatPane,
 	defineFindBar,
 	defineGallery,
 	definePrintPreview,
@@ -87,6 +102,7 @@ export {
 	defineSwitch,
 	defineTabStrip,
 	defineTaskPane,
+	defineFormatSection,
 	defineTitleBar,
 	defineToolbar,
 	defineZoomSlider,
@@ -94,6 +110,13 @@ export {
 	defineColorGrid,
 	defineColorCustom,
 	defineChartPicker,
+	defineChartDataSheet,
+	defineProgressDialog,
+	defineMessageDialog,
+	defineShareDialog,
+	defineCloudFiles,
+	defineOpenPlaces,
+	defineConnectedServices,
 };
 export { OFFICE_SYMBOLS, parseOfficeSymbolCode } from './form/symbol-picker';
 export type {
@@ -105,6 +128,28 @@ export type {
 } from './form/color-grid';
 export type { OfficeCommandEvent } from './ribbon/button';
 export type { OfficeDialogCloseEvent, OfficeDialogCloseReason } from './dialog/dialog';
+export type { OfficeProgressDialogState } from './dialog/progress-dialog';
+export { OfficeUiFormatSection } from './chrome/format-section';
+export { OfficeUiMessageDialog } from './dialog/message-dialog';
+export type {
+	OfficeMessageDialogKind,
+	OfficeMessageDialogResult,
+	OfficeMessageDialogTone,
+} from './dialog/message-dialog';
+export { alertDialog, confirmDialog, promptDialog } from './dialog/message-dialogs';
+export { OfficeUiShareDialog, type OfficeShareStartEvent } from './dialog/share-dialog';
+export {
+	SHARE_DIALOG_LABELS,
+	SHARE_DIALOG_LOCALES,
+	shareDialogLabels,
+	type OfficeShareDialogLabels,
+	type ShareDialogLocale,
+} from './dialog/share-dialog-locales';
+export type {
+	MessageDialogHost,
+	MessageDialogOptions,
+	PromptDialogOptions,
+} from './dialog/message-dialogs';
 export type { OfficeSelectOption } from './form/select';
 export type {
 	OfficeStatusActivateEvent,
@@ -112,7 +157,7 @@ export type {
 	OfficeStatusButton,
 	OfficeStatusText,
 } from './chrome/status-bar';
-export type { OfficeTab, OfficeTabSelectEvent } from './chrome/tab-strip';
+export type { OfficeTab, OfficeTabReorderEvent, OfficeTabSelectEvent } from './chrome/tab-strip';
 export type { OfficeSearchCommand } from './menu/command-search';
 export {
 	OFFICE_TITLE_BAR_SEARCH_LIMIT,
@@ -126,6 +171,26 @@ export {
 	type OfficeTitleBarTone,
 } from './chrome/title-bar';
 export { attachKeyTips, type KeyTipsHandle } from './keytips';
+export {
+	OfficeUiCloudFiles,
+	DEFAULT_CLOUD_FILES_LABELS,
+	type OfficeCloudFileOpenDetail,
+	type OfficeCloudFileOpenEvent,
+	type OfficeCloudFilesLabels,
+} from './files/cloud-files';
+export {
+	OfficeUiOpenPlaces,
+	DEFAULT_OPEN_PLACES_LABELS,
+	DEVICE_PLACE,
+	type OfficeOpenPlacesLabels,
+	type OfficeOpenPlaceChangeEvent,
+} from './files/open-places';
+export {
+	OfficeUiConnectedServices,
+	DEFAULT_CONNECTED_SERVICES_LABELS,
+	type OfficeConnectedServicesLabels,
+	type OfficeConnectedServiceChangeEvent,
+} from './files/connected-services';
 export type {
 	OfficeBackstageCloseEvent,
 	OfficeBackstageItem,
@@ -227,6 +292,13 @@ export {
 	type OfficeChartValue,
 } from './dialog/chart-picker';
 export {
+	type OfficeChartDataChange,
+	type OfficeChartDataChangeEvent,
+	type OfficeChartDataSheetHighlight,
+	type OfficeChartDataSheetLabels,
+	type OfficeUiChartDataSheet,
+} from './chart/data-sheet';
+export {
 	optionsLabels,
 	optionText,
 	personalizeSection,
@@ -258,6 +330,7 @@ export const CONTROL_DEFINERS = [
 	defineZoomSlider,
 	defineTabStrip,
 	defineTaskPane,
+	defineFormatSection,
 	defineOptionsDialog,
 	defineAccount,
 	defineRibbon,
@@ -277,13 +350,34 @@ export const CONTROL_DEFINERS = [
 	defineRibbonSection,
 	defineGallery,
 	defineCommentsPane,
+	defineChartFormatPane,
 	defineSymbolPicker,
 	defineColorGrid,
 	defineColorCustom,
 	defineChartPicker,
+	defineChartDataSheet,
+	defineProgressDialog,
+	defineMessageDialog,
+	defineShareDialog,
+	defineCloudFiles,
+	defineOpenPlaces,
+	defineConnectedServices,
 ] as const;
 
 /** Idempotent, SSR-safe (no-op without a DOM). */
 export function registerControls(registry?: CustomElementRegistry): void {
 	for (const define of CONTROL_DEFINERS) define(registry);
 }
+export {
+	OfficeUiChartFormatPane,
+	type ChartFormatEditDetail,
+	type ChartFormatEditEvent,
+	type ChartFormatTargetEvent,
+} from './chart/format-pane';
+export * from './chart/format-pane-api';
+export * from './form/color-input/live-color-input';
+export * from './fonts/catalog';
+export * from './fonts/availability';
+export * from './fonts/custom-fonts';
+export * from './dialog/dialog-session';
+export * from './form/color-input/live-color-leaves';

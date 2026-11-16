@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { EditorState } from '../../../editor/editor-state.svelte';
+import { commentsPanelFor } from './comments-panel';
 import ReviewCommentsPanel from './ReviewCommentsPanel.svelte';
 
 let cleanup: (() => void) | undefined;
@@ -123,6 +124,35 @@ describe('reviewCommentsPanel', () => {
 		expect(saved?.mentions?.[0]).toMatchObject({ personId: 'a1', authorName: 'Alice' });
 	});
 
+	it('keeps a mention on its text when the comment is trimmed', () => {
+		const target = document.createElement('div');
+		const editor = createEditor();
+		editor.modernCommentAuthors = [{ id: 'a1', name: 'Alice', userId: 'u1', providerId: 'p1' }];
+		const instance = mount(ReviewCommentsPanel, { target, props: { editor } });
+		cleanup = () => unmount(instance);
+
+		const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
+		textarea.value = '  hey @al';
+		textarea.selectionStart = 9;
+		textarea.selectionEnd = 9;
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		const option = target.querySelector(
+			'[data-testid="pptx-comment-mention-option"]',
+		) as HTMLButtonElement;
+		option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+		flushSync();
+		(target.querySelector('.pptx-svelte-comments-compose button') as HTMLButtonElement).click();
+		flushSync();
+
+		const saved = editor.slides[0]?.comments?.[0];
+		const mention = saved?.mentions?.[0];
+		expect(saved?.text).toBe('hey @Alice');
+		expect(saved?.text.slice(mention!.startIndex, mention!.startIndex + mention!.length)).toBe(
+			'@Alice',
+		);
+	});
+
 	it('authors comments as the host authorName prop', () => {
 		const target = document.createElement('div');
 		const editor = new EditorState({
@@ -143,5 +173,55 @@ describe('reviewCommentsPanel', () => {
 		flushSync();
 
 		expect(editor.slides[0]?.comments?.[0]?.author).toBe('Dana Host');
+	});
+
+	it('keeps a half-typed comment with its slide when the panel closes and reopens', () => {
+		const editor = createEditor();
+		const open = () => {
+			const target = document.createElement('div');
+			const instance = mount(ReviewCommentsPanel, { target, props: { editor } });
+			return { target, close: () => unmount(instance) };
+		};
+		const first = open();
+		const textarea = first.target.querySelector('textarea') as HTMLTextAreaElement;
+		textarea.value = 'Half typed';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		first.close();
+		const second = open();
+		cleanup = second.close;
+		expect((second.target.querySelector('textarea') as HTMLTextAreaElement).value).toBe(
+			'Half typed',
+		);
+		expect(commentsPanelFor(editor, () => 'You').getSnapshot().draftBySlideId).toStrictEqual({
+			'slide-1': 'Half typed',
+		});
+	});
+
+	it('edits a comment in place, and offers no edit on a read-only deck', () => {
+		const target = document.createElement('div');
+		const editor = createEditor();
+		editor.setSlides([
+			{
+				id: 'slide-1',
+				elements: [],
+				comments: [{ id: 'c1', text: 'Parent comment', author: 'Alice' }],
+			} as PptxSlide,
+		]);
+		const instance = mount(ReviewCommentsPanel, { target, props: { editor } });
+		cleanup = () => unmount(instance);
+		(target.querySelector('.pptx-svelte-comment-edit-button') as HTMLButtonElement).click();
+		flushSync();
+		const field = target.querySelector('.pptx-svelte-comment-edit') as HTMLTextAreaElement;
+		expect(field.value).toBe('Parent comment');
+		field.value = 'Rewritten';
+		field.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		(target.querySelector('.pptx-svelte-comment-reply-submit') as HTMLButtonElement).click();
+		flushSync();
+		expect(editor.slides[0]?.comments?.[0]?.text).toBe('Rewritten');
+		editor.editable = false;
+		flushSync();
+		expect(target.querySelector('.pptx-svelte-comment-edit-button')).toBeNull();
 	});
 });

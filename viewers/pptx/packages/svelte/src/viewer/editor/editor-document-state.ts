@@ -1,8 +1,14 @@
-import type { DeckSaveIntent, TableStyleSaveOptions, TemplateElementMap } from 'ooxml-ui/pptx';
+import type {
+	DeckSaveIntent,
+	HistoryTheme,
+	TableStyleSaveOptions,
+	TemplateElementMap,
+} from 'ooxml-ui/pptx';
 import {
 	buildDeckSaveOptions,
 	cloneSlides,
 	cloneTemplateElementsBySlideId,
+	historyTheme,
 	saveDeckWithPassword,
 } from 'ooxml-ui/pptx';
 import type {
@@ -39,6 +45,8 @@ export interface EditorSnapshot {
 	customProperties: PptxCustomProperty[];
 	/** `ppt/tags/*.xml` name/value metadata, editable in the inspector. */
 	tagCollections: PptxTagCollection[];
+	/** The theme's schemes, name and masters' theme parts, so Undo takes a theme change back too. */
+	theme?: HistoryTheme | undefined;
 }
 
 export function createEditorSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
@@ -56,6 +64,8 @@ export function createEditorSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
 		appProperties: structuredClone(snapshot.appProperties),
 		customProperties: structuredClone(snapshot.customProperties),
 		tagCollections: structuredClone(snapshot.tagCollections),
+		// With each master's theme part, so Undo of a theme applied by path points them back.
+		theme: historyTheme(snapshot.theme, snapshot.slideMasters),
 	};
 }
 

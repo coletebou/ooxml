@@ -119,6 +119,23 @@ describe('show toolbar adapter', () => {
 		expect(annotations.tool()).toBe('pen');
 	});
 
+	it('enables Erase All Ink on Slide only for the slide on screen', () => {
+		const { fixture, control, annotations } = open();
+		expect(control('clear')?.disabled).toBe(true);
+		annotations.setActiveSlide(0);
+		annotations.selectTool('pen');
+		annotations.beginStroke(10, 10);
+		annotations.extendStroke(20, 20);
+		annotations.endStroke();
+		fixture.detectChanges();
+		expect(control('clear')?.disabled).toBe(false);
+		annotations.setActiveSlide(1);
+		fixture.detectChanges();
+		// The show still has ink (the exit prompt counts it), but none on this slide.
+		expect(annotations.hasAnyAnnotations()).toBe(true);
+		expect(control('clear')?.disabled).toBe(true);
+	});
+
 	it('reflects the presenter-view state as pressed', () => {
 		expect(
 			open({ presenterMode: true }).control('presenter-view')?.getAttribute('aria-pressed'),

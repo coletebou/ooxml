@@ -3,17 +3,25 @@ import type {
 	MasterViewCrudAction,
 	MasterViewCrudActionId,
 	MasterViewTarget,
+	SlideMasterHistoryStep,
 } from 'ooxml-ui/pptx';
 import {
 	applyMasterViewCrudAction,
+	forgetStepsUsingRemovedParts,
 	masterViewCrudActions,
 	masterViewCrudFailureKey,
+	promptNameDialog,
 } from 'ooxml-ui/pptx';
-import type { PptxData, PptxHandler, PptxSlide, PptxSlideMaster } from 'pptx-viewer-core';
+import type {
+	PptxData,
+	PptxHandler,
+	PptxLayoutOption,
+	PptxSlide,
+	PptxSlideMaster,
+} from 'pptx-viewer-core';
 import { useCallback, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
 
-import { safePrompt } from '../utils/dom-helpers';
+import { useTranslation } from '../i18n/use-translation';
 
 /**
  * useMasterViewCrud: Slide Master view sidebar CRUD (Insert/Duplicate/
@@ -33,11 +41,14 @@ export interface UseMasterViewCrudInput {
 	slides: PptxSlide[];
 	slideMasters: PptxSlideMaster[];
 	target: MasterViewTarget | null;
-	setSlides: React.Dispatch<React.SetStateAction<PptxSlide[]>>;
 	setSlideMasters: React.Dispatch<React.SetStateAction<PptxSlideMaster[]>>;
+	/** The Home > Layout list, which this binding keeps apart from the masters it comes from. */
+	setLayoutOptions: (layoutOptions: PptxLayoutOption[]) => void;
 	setActiveMasterIndex: React.Dispatch<React.SetStateAction<number>>;
 	setActiveLayoutIndex: React.Dispatch<React.SetStateAction<number | null>>;
 	markDirty: () => void;
+	/** Drops the undo and redo steps that would bring back a part a command removed. */
+	forgetHistory: (reaches: (step: SlideMasterHistoryStep) => boolean) => void;
 	/** Surfaces a failure reason through the existing compat-toast stack. */
 	pushToast: (toast: CompatibilityWarningToast) => void;
 }
@@ -55,11 +66,12 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 		slides,
 		slideMasters,
 		target,
-		setSlides,
 		setSlideMasters,
+		setLayoutOptions,
 		setActiveMasterIndex,
 		setActiveLayoutIndex,
 		markDirty,
+		forgetHistory,
 		pushToast,
 	} = input;
 	const { t } = useTranslation();
@@ -91,7 +103,9 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 					id === 'renameLayout'
 						? (master?.layouts?.[target.layoutIndex ?? -1]?.name ?? '')
 						: (master?.name ?? '');
-				const next = safePrompt(t('pptx.masterView.renamePrompt'), current)?.trim();
+				const next = (
+					await promptNameDialog(t('pptx.masterView.renamePrompt'), current, { t })
+				)?.trim();
 				if (!next) {
 					return;
 				}
@@ -116,13 +130,19 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 				return;
 			}
 
-			// Adopt the helper's fresh handler/data wholesale (it does not mutate
-			// the ones it was given) through React's normal per-field state slots.
+			// Adopt the helper's fresh handler and masters (it does not mutate the
+			// ones it was given), and the layout list built from them, or Home >
+			// Layout keeps offering a deleted layout and misses an inserted one.
+			// The slides stay as they are: the reloaded ones carry no loaded
+			// pictures (each shows as a placeholder), and they hold nothing the
+			// command changed. The previous handler stays alive: the slides on
+			// screen and the undo stack still show its pictures.
 			handlerRef.current = result.handler;
-			setSlides(result.data.slides);
 			setSlideMasters(result.data.slideMasters ?? []);
+			setLayoutOptions(result.data.layoutOptions ?? []);
 			setActiveMasterIndex(result.target.masterIndex);
 			setActiveLayoutIndex(result.target.layoutIndex);
+			forgetStepsUsingRemovedParts(forgetHistory, data, result.data);
 			markDirty();
 		},
 		[
@@ -133,10 +153,11 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 			t,
 			data,
 			pushToast,
-			setSlides,
 			setSlideMasters,
+			setLayoutOptions,
 			setActiveMasterIndex,
 			setActiveLayoutIndex,
+			forgetHistory,
 			markDirty,
 		],
 	);

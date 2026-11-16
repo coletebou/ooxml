@@ -27,11 +27,14 @@ import { ShieldAlert } from 'lucide-vue-next';
 import {
 	autosaveStatusKind,
 	createCollaborationStateReporter,
+	createSaveProgressController,
 	createSlidePackageClipboard,
+	resolveCloudDocumentView,
 	resolveCollaborationConfig,
+	confirmExternalHyperlinkDialog,
 } from 'ooxml-ui/pptx';
 import {
-	applyAutoCorrect,
+	applyAutoCorrectToEdit,
 	attachViewerHyperlinks,
 	buildDeckSaveOptions,
 	buildFieldSubstitutionContext,
@@ -39,6 +42,7 @@ import {
 	canInteractWithElement,
 	computeGridSpacingPx,
 	createBackstagePresentation,
+	createCloudDocumentController,
 	clearAutosaveSnapshots,
 	INSPECTOR_PANEL_DEFAULT_WIDTH,
 	pruneExpiredAutosaveSnapshots,
@@ -49,6 +53,9 @@ import {
 	overlayInlineTextSnapshot,
 	resolve3DRenderingFlags,
 	isEditingAllowed,
+	loadedThemeName,
+	resolveAllowExternalContent,
+	resolveEffectiveGoogleFonts,
 	resolveAutosaveIntervalSeconds,
 	saveFailureMessage,
 	SAVE_FAILED_TOAST,
@@ -65,7 +72,14 @@ import {
 	shouldConfirmExternalHyperlink,
 	shouldShowAutosaveRecoveryPrompt,
 } from 'ooxml-ui/pptx';
-import type { ViewerAddinStatus } from 'ooxml-ui/pptx';
+import type { CloudFileProvider, CloudOpenedFile, ViewerAddinStatus } from 'ooxml-ui/pptx';
+import {
+	createFormatPaneController,
+	createRibbonDisplayController,
+	findTextHighlightsByElement,
+	installSvgIdScope,
+} from 'ooxml-ui/pptx';
+import type { RibbonDisplayMode } from 'ooxml-ui/pptx';
 import { hasShapeProperties, PptxHandler } from 'pptx-viewer-core';
 import type {
 	PptxElement,
@@ -77,6 +91,7 @@ import type {
 } from 'pptx-viewer-core';
 import {
 	computed,
+	inject,
 	onBeforeUnmount,
 	onMounted,
 	provide,
@@ -87,6 +102,8 @@ import {
 } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import { BuildingBlocksBridgeKey } from '../building-blocks/bridge';
+import { useBuildingBlocksEngine } from '../building-blocks/engine';
 import { provideViewerTheme, useThemeStyle } from '../theme';
 import AutosaveRecoveryDialog from './components/AutosaveRecoveryDialog.vue';
 import CollaborationStatusIndicator from './components/CollaborationStatusIndicator.vue';
@@ -98,6 +115,7 @@ import MasterViewOverlay from './components/MasterViewOverlay.vue';
 import MobileToolbar from './components/MobileToolbar.vue';
 import NotesPanel from './components/NotesPanel.vue';
 import ReadOnlyBanner from './components/ReadOnlyBanner.vue';
+import RibbonRevealStrip from './components/ribbon/RibbonRevealStrip.vue';
 import RibbonToolbar from './components/ribbon/RibbonToolbar.vue';
 import TitleBar from './components/ribbon/TitleBar.vue';
 import SlideCanvas from './components/SlideCanvas.vue';
@@ -118,7 +136,10 @@ import { useChartFormatPane } from './composables/chart-format-pane';
 import { useChartCanvasEditContext } from './composables/chart-part-selection';
 import { useCustomizedRibbonProps } from './composables/customization-ribbon-gates';
 import { readDeckData } from './composables/deck-data';
+import { provideElementRenderErrorReporter } from './composables/element-render-errors';
 import { FieldContextKey } from './composables/field-context';
+import { FormatPaneKey } from './composables/format-pane-context';
+import { InspectorPreviewKey } from './composables/inspector-preview-context';
 import { MergeCropKey } from './composables/merge-crop-context';
 import { RecentColorsKey } from './composables/recent-colors-context';
 import { Rendering3DFlagsKey } from './composables/rendering-3d-flags';
@@ -138,6 +159,7 @@ import { useCommentsWiring } from './composables/useCommentsWiring';
 import { useCompatibilityToasts } from './composables/useCompatibilityToasts';
 import { useContentSource } from './composables/useContentSource';
 import { useContextMenu } from './composables/useContextMenu';
+import { useController } from './composables/useController';
 import { useCustomShowsWiring } from './composables/useCustomShowsWiring';
 import { useDeckStyleHost } from './composables/useDeckStyleHost';
 import { useDeckViewPreferencesSync } from './composables/useDeckViewPreferencesSync';
@@ -159,6 +181,7 @@ import { useHeaderFooterDialog } from './composables/useHeaderFooterDialog';
 import { useHyperlinkDialog } from './composables/useHyperlinkDialog';
 import { useInkDrawing } from './composables/useInkDrawing';
 import { useInlineEditing } from './composables/useInlineEditing';
+import { useInlineRichTextPaste } from './composables/useInlineRichTextPaste';
 import { useInsertElementDialogs } from './composables/useInsertElementDialogs';
 import { useInspectorDeckActions } from './composables/useInspectorDeckActions';
 import { useInspectorWiring } from './composables/useInspectorWiring';
@@ -173,7 +196,7 @@ import { useMobileChrome } from './composables/useMobileChrome';
 import { useMultiSelectOps } from './composables/useMultiSelectOps';
 import { provideOutlineAuthoring } from './composables/useOutlineAuthoring';
 import { usePasswordProtection } from './composables/usePasswordProtection';
-import { usePasteSpecial } from './composables/usePasteSpecial';
+import { rasterizePastedNode, usePasteSpecial } from './composables/usePasteSpecial';
 import { usePictureCrop } from './composables/usePictureCrop';
 import { usePresentationControls } from './composables/usePresentationControls';
 import { usePrint } from './composables/usePrint';
@@ -184,12 +207,15 @@ import {
 	RibbonCustomizationStyle,
 	useRibbonCustomizationStyle,
 } from './composables/useRibbonCustomizationStyle';
+import { useRibbonDisplayListeners } from './composables/useRibbonDisplayListeners';
 import { provideRibbonGalleryHost } from './composables/useRibbonGalleryHost';
 import { useRibbonUiState } from './composables/useRibbonUiState';
+import { useSaveRevision } from './composables/useSaveRevision';
 import { useSectionOperations } from './composables/useSectionOperations';
 import { useSelectionModel } from './composables/useSelectionModel';
 import { useSelectionPaneWiring } from './composables/useSelectionPaneWiring';
 import { useSignatureWorkflow } from './composables/useSignatureWorkflow';
+import { useSlideChangeSelection } from './composables/useSlideChangeSelection';
 import { useSlideMutations } from './composables/useSlideMutations';
 import { useSlideNavigation } from './composables/useSlideNavigation';
 import { useSlideOperations } from './composables/useSlideOperations';
@@ -211,6 +237,8 @@ import type { ViewerRegionBase } from './composables/useViewerRegions';
 import { useViewerRibbonProps } from './composables/useViewerRibbonProps';
 import { useViewerSettingsDialog } from './composables/useViewerSettingsDialog';
 import { useViewerZoom } from './composables/useViewerZoom';
+import { useViewportNavigation } from './composables/useViewportNavigation';
+import { ViewerCloudFilesKey } from './composables/viewer-cloud-files';
 import { ViewerStorageKey } from './composables/viewer-storage';
 import { provideZoomTargetLookup, toZoomTargetInfo } from './composables/zoom-target';
 import type { PowerPointViewerEmits, PowerPointViewerExpose, PowerPointViewerProps } from './types';
@@ -222,6 +250,12 @@ const props = withDefaults(defineProps<PowerPointViewerProps>(), {
 	// vetoes it), but Vue would cast the absent boolean to `false` and veto it for every host that
 	// said nothing.
 	autosave: undefined,
+	// Left undefined on purpose too: an omitted `googleFonts` keeps the Google Fonts fallback, but
+	// Vue would cast the absent prop (its type includes `false`) to `false` and turn it off.
+	googleFonts: undefined,
+	// Left undefined on purpose too: an omitted `allowExternalContent` keeps the user's Trust
+	// Center choice, but Vue would cast the absent Boolean prop to `false` and block it.
+	allowExternalContent: undefined,
 	smartArt3D: false,
 	surfaceChart3D: false,
 	barChart3D: false,
@@ -256,13 +290,47 @@ provide(AccountAuthKey, props.accountAuth);
 // The host's ribbon tabs reach the ribbon the same way, as a getter so it follows the prop.
 provide(RibbonAddInsKey, () => props.ribbonAddIns);
 
+// -- File > Open cloud places -----------------------------------------
+// A file opened from a place brings its own storage, name and edit right until
+// another document is loaded (shared `render/cloud-open`). `cloudView` is what
+// the save, autosave, recovery and edit paths below read instead of the props.
+const cloudDocument = createCloudDocumentController();
+const cloudState = useController(cloudDocument);
+// Saves to the host's storage report their steps (upload, merge) to the status bar.
+const saveProgress = createSaveProgressController();
+const saveProgressState = useController(saveProgress);
+const cloudView = computed(() => {
+	const view = resolveCloudDocumentView(cloudState.value.file, {
+		storage: props.storage,
+		// `readOnly` takes editing away from a host that also allows it.
+		canEdit: props.canEdit && !props.readOnly,
+		fileName: props.fileName,
+		filePath: props.filePath,
+	});
+	return view.storage ? { ...view, storage: saveProgress.wrap(view.storage) } : view;
+});
+const documentPath = () =>
+	cloudView.value.filePath ?? cloudView.value.fileName ?? 'Untitled Presentation';
+
 // -- Load + parse content ----------------------------------------------
 const source = useContentSource({
 	content: () => props.content,
 	onOpenFile: () => props.onOpenFile,
+	// File > Recent lists the host's recovery store, so it reads from it too.
 	storage: () => props.storage,
+	onDocumentReplaced: cloudDocument.clear,
 });
 provide(ViewerStorageKey, () => props.storage);
+const NO_FILE_PROVIDERS: readonly CloudFileProvider[] = [];
+provide(ViewerCloudFilesKey, {
+	providers: () => props.fileProviders ?? NO_FILE_PROVIDERS,
+	// Load the bytes like any open, then let the file's storage, name and edit right apply.
+	open: (file: CloudOpenedFile) => {
+		source.openBytes(file.bytes);
+		cloudDocument.open(file);
+	},
+	clear: cloudDocument.clear,
+});
 const activeContent = source.activeContent;
 
 // Bumped each time the load pipeline finishes applying a parsed deck; the
@@ -282,7 +350,12 @@ const password = usePasswordProtection();
 const { optionsStore, viewerOptions } = useViewerOptionsStore();
 // Host UI customisation (`customization` prop + handle helpers); locks `optionsStore`.
 const customization = useViewerCustomization({ props, optionsStore });
-const { panelVisible, dialogAvailable, effectiveHiddenActions, aiEnabled, aiConfig } =
+// Host `googleFonts` first, else Trust Center > "Download fonts". A computed, so the webfont
+// effects re-run only when the policy changes, and a load reads the current value.
+const effectiveGoogleFonts = computed(() =>
+	resolveEffectiveGoogleFonts(props.googleFonts, viewerOptions.value),
+);
+const { panelVisible, dialogAvailable, effectiveHiddenActions, aiEnabled, aiConfig, aiChatPanel } =
 	customization;
 // Ribbon group/control hiding: a scoped stylesheet from the shared rules.
 const ribbonScope = useRibbonCustomizationStyle(customization.resolved);
@@ -317,7 +390,11 @@ const deck = useLoadContent(() => activeContent.value, {
 		return snapshot && activeSlide.value
 			? {
 					snapshot,
-					text: applyAutoCorrect(snapshot.text, viewerOptions.value.proofing),
+					text: applyAutoCorrectToEdit(
+						snapshot.text,
+						inlineEdit.readInlineStartText(),
+						viewerOptions.value.proofing,
+					),
 					target: { slideId: activeSlide.value.id },
 				}
 			: undefined;
@@ -336,7 +413,12 @@ const deck = useLoadContent(() => activeContent.value, {
 	// Off (the option's non-default) makes core drop any http(s) image URL
 	// instead of fetching it (SSRF/privacy gate); every binding used to skip
 	// this entirely, so the toggle changed nothing regardless of its value.
-	getAllowExternalImages: () => viewerOptions.value.trust.allowExternalContent,
+	getAllowExternalImages: () =>
+		resolveAllowExternalContent(props.allowExternalContent, viewerOptions.value),
+	// Host load limits: read per load, so changing the prop never reloads the deck.
+	getLimits: () => props.limits,
+	getGoogleFonts: () => effectiveGoogleFonts.value,
+	translate: (key, params) => t(key, params),
 	// File > Fonts. `fontEmbedding` is declared further down (it needs the
 	// loaded deck's embedded fonts), so this getter reads it lazily at save
 	// time, exactly like `getSaveIntent` reads the password.
@@ -348,6 +430,7 @@ const {
 	canvasSize,
 	mediaDataUrls,
 	loading,
+	fontProgress,
 	error,
 	isEncrypted,
 	coreProperties,
@@ -389,15 +472,14 @@ const protectedViewActive = computed(
 // A deck's own `p:modifyVerifier` / "Mark as Final" recommends read-only the
 // same way Protected View does, so its lock feeds the SAME gate rather than a
 // second mechanism.
-const readOnlyRec = useReadOnlyRecommendation({ modifyVerifier, customProperties });
+const readOnlyRec = useReadOnlyRecommendation({ modifyVerifier, customProperties, loadVersion });
 // A requested preview disables interaction without changing host permission or the live deck.
 const editingRequested = ref(true);
 const collaborationReadOnly = ref(false);
 const canEditEffective = computed(
 	() =>
 		editingRequested.value &&
-		props.canEdit &&
-		!props.readOnly &&
+		cloudView.value.canEdit &&
 		isEditingAllowed(customization.resolved.value) &&
 		!collaborationReadOnly.value &&
 		!protectedViewActive.value &&
@@ -422,6 +504,9 @@ function createPresentation(templateId: string): void {
 // provide/inject, avoiding theme prop-threading through the hot
 // SlideStage -> ElementRenderer chain.
 provide(TableThemeKey, () => tableThemeContextFor(pptxTheme.value, tableStyleMap.value));
+
+// The host's element render error reporter, read by every `ElementBoundary` on every surface.
+provideElementRenderErrorReporter(() => props.onElementRenderError);
 
 // "Recent colours" (`p:clrMru`): one shared list every colour-picking panel
 // in the inspector reads and pushes to, so a colour picked in Fill shows up
@@ -462,6 +547,7 @@ const { tableSelection } = useTableCellEditingContext({
 	updateElement: (id, patch) => ops.updateElement(id, patch),
 	commitTableCell: (elementId, rowIndex, colIndex, text) =>
 		inlineEdit.commitTableCell(elementId, rowIndex, colIndex, text),
+	transformText: (text, previous) => inlineEdit.autoCorrect(text, previous),
 });
 
 // Inline SmartArt node-text and per-node fill editing context. Mirrors the
@@ -478,7 +564,7 @@ useEmbeddedFonts(deck.embeddedFonts);
 // Fetch Google-hosted webfonts for referenced families that are neither
 // installed nor embedded (Microsoft 365 "cloud fonts" have no browser
 // equivalent); auto-cleaned on unmount.
-useGoogleWebfonts(slides, deck.embeddedFonts);
+useGoogleWebfonts(slides, deck.embeddedFonts, effectiveGoogleFonts);
 watchEffect((onCleanup) => {
 	const css = buildUserFontFaceStyles(props.fonts ?? []);
 	if (!css || typeof document === 'undefined') {
@@ -494,7 +580,15 @@ watchEffect((onCleanup) => {
 // -- Navigation + zoom -------------------------------------------------
 const { activeSlideIndex, slideCount, activeSlide, goTo, goPrev, goNext } =
 	useSlideNavigation(slides);
-const { zoom, fitScale, effectiveZoom, zoomIn, zoomOut, zoomReset } = useViewerZoom();
+const {
+	zoom,
+	fitScale,
+	effectiveZoom,
+	zoomIn,
+	zoomOut,
+	zoomReset,
+	store: zoomStore,
+} = useViewerZoom();
 
 // Reset view state only when a NEW document is loaded, keyed off the `content`
 // input, not `slides`. Editing reassigns `slides.value` (so watching it here
@@ -510,9 +604,10 @@ watch(activeContent, () => {
 	readOnlyRec.reset();
 	compatToasts.reset();
 });
+// The slide change itself also drops the selection, unless it was made for that slide (Find's):
+// see `slideSelection` below.
 watch(activeSlideIndex, (index) => {
 	emit('active-slide-change', index);
-	selection.selectedElementIds.value = [];
 });
 
 // On touch devices a horizontal swipe across the slide area changes slides
@@ -524,6 +619,11 @@ const swipe = useSwipeNavigation({ canEdit: () => canEditEffective.value, goPrev
 // `props.canEdit` is true. `slides` is the writable `ShallowRef` from
 // `useLoadContent`, and `getContent` serialises it, so edits flow to export.
 const selection = useSelectionModel({ slides, templateElementsBySlideId, activeSlide });
+const slideSelection = useSlideChangeSelection({
+	activeSlideIndex,
+	goTo,
+	selectedElementIds: selection.selectedElementIds,
+});
 const {
 	selectedElementIds,
 	editTemplateMode,
@@ -533,10 +633,15 @@ const {
 	mergedSlides,
 	clearSelection,
 } = selection;
+// The primary theme part's loaded name (the parsed theme carries none), for an undo back to it.
+const deckThemeName = (): string | undefined =>
+	loadedThemeName(deck.themeOptions.value, slideMasters.value);
 const history = useEditorHistory(slides, templateElementsBySlideId, {
 	maxDepth: resolveHistoryDepth(viewerOptions.value),
 	activeSlideIndex,
 	onChange: () => emit('change'),
+	// Undo and Redo of a theme pick put the theme back in the viewer and in the theme part.
+	theme: { theme: pptxTheme, themeColorMap, handler, loadedThemeName: deckThemeName, slideMasters },
 });
 // File > Options > Advanced > "Maximum number of undos", re-applied whenever
 // it changes mid-session (not just at construction).
@@ -628,6 +733,8 @@ const inlineEdit = useInlineEditing({
 	// typing before the editor commits. `collaboration` is declared further down;
 	// the accessor is only invoked from user input, long after setup.
 	livePatcher: () => collaboration.collab.livePatcher,
+	// `autosave` is declared further down, like `collaboration`.
+	autosave: () => autosave.engine,
 	activeSlide: () => activeSlide.value,
 	onConnectedSuspend: (snapshot) => {
 		const id = activeSlide.value?.id;
@@ -735,7 +842,11 @@ const inspector = useInspectorWiring({
 	selectedElements,
 	pushHistory: history.pushHistory,
 	updateElement: (id, patch) => ops.updateElement(id, patch),
+	previewElement: (id, patch) => ops.previewElement(id, patch),
+	findActiveElement,
 });
+// A colour picker drag's live shades reach the slide without an undo step.
+provide(InspectorPreviewKey, inspector.inspectorPreview);
 
 // -- Slide operations (add / duplicate / delete / reorder) -------------
 const slideOps = useSlideOperations({
@@ -750,6 +861,7 @@ const clipboard = useElementClipboard({
 	addElement: (element) => ops.addElement(element),
 	removeElement: (id) => ops.removeElement(id),
 	selectedElementIds,
+	rasterize: (_node, id) => rasterizePastedNode(id).catch(() => null),
 });
 
 // -- Paste Special (Ctrl+Alt+V) + the post-paste Paste Options toolbar ---
@@ -779,6 +891,19 @@ const presentation = usePresentationControls({
 	authoredRange: () => presentationAuthoredRange.value,
 	pushHistory: history.pushHistory,
 });
+
+// The editing canvas stays mounted (hidden) while a show runs, so it draws no
+// slide then: the show stage is the one surface the user acts on, and it keeps
+// the `data-element-id` markers. A hidden copy kept a second marked node per
+// element (and a second media player) through the whole show. The canvas
+// redraws the active slide when the show ends.
+const NO_ELEMENTS: PptxElement[] = [];
+const editingCanvasSlide = computed(() =>
+	presentation.presenting.value ? undefined : activeSlide.value,
+);
+const editingCanvasTemplateElements = computed(() =>
+	presentation.presenting.value ? NO_ELEMENTS : activeTemplateElements.value,
+);
 
 // Direct on-canvas chart editing context (mirrors the SmartArt node-edit
 // context above): gates mark interactivity to the selected chart in edit
@@ -823,7 +948,16 @@ function updateSelectedShapeStyle(updates: Partial<ShapeStyle>): void {
 
 // -- Find & replace ----------------------------------------------------
 const findOpen = ref(false);
-const find = useFindReplace({ slides, activeSlideIndex, pushHistory: history.pushHistory });
+const find = useFindReplace({
+	slides,
+	showMatch: slideSelection.showSlideSelection,
+	pushHistory: history.pushHistory,
+	open: findOpen,
+});
+/** The matches the editing canvas marks in the text (shared `find-text-highlight`). */
+const findHighlights = computed(() =>
+	findTextHighlightsByElement(find.matches.value, find.currentMatch.value, activeSlideIndex.value),
+);
 
 // -- Export (PNG / PDF) + print ----------------------------------------
 const exporter = useExportWiring({
@@ -833,7 +967,7 @@ const exporter = useExportWiring({
 	canvasSize,
 	activeSlideIndex,
 	saveAs: deck.saveAs,
-	fileName: () => props.fileName,
+	fileName: () => cloudView.value.fileName,
 	getDeckData: () => readDeckData(deck),
 	// `viewerOptions` is declared further down (see file-level forward-reference
 	// note); the getter is only invoked once an export actually runs. The raw
@@ -843,13 +977,24 @@ const exporter = useExportWiring({
 	// Same forward-reference pattern as `imageExportScale` above: only invoked
 	// once a Save-As download actually completes.
 	getOptions: () => viewerOptions.value,
-	filePath: () => props.filePath ?? props.fileName ?? 'Untitled Presentation',
-	storage: () => props.storage,
+	filePath: documentPath,
+	storage: () => cloudView.value.storage,
 	// A failed Save / Save As: the host's `error` event, and the save-failed notice for the user.
 	onSaveError: (saveError) => {
 		emit('error', saveFailureMessage(saveError));
 		compatToasts.notify(SAVE_FAILED_TOAST);
 	},
+	// The stores autosave watches; `autosave` is declared further down and only read once a save runs.
+	changeSources: () => [slides.value, templateElementsBySlideId.value],
+	onSavedClean: () => {
+		autosave.isDirty.value = false;
+	},
+	// What a vector PDF approximated: the host's event, and one notice in the toast stack.
+	onPdfExportReport: (result) => emit('pdf-export-report', result),
+	notify: (toast) => compatToasts.notify(toast),
+	// File > Export > PDF's options dialog mounts in the viewer root (declared further down).
+	dialogContainer: () => viewerRootRef.value,
+	translate: (key, params) => (params ? t(key, params) : t(key)),
 });
 const { exportStageRef, exportSlide, rasterizeSlide, exportProgressCtl, onExportPdf } = exporter;
 
@@ -948,6 +1093,16 @@ const {
 	themeEditorOpen,
 } = ribbonUi;
 
+// -- Format pane (open sections, launcher requests): one per viewer ------
+// A launcher (Format Shape..., a ribbon dialog launcher) opens the inspector;
+// the slide inspector switches itself to Properties on the request.
+const formatPane = createFormatPaneController({
+	showPane: () => {
+		inspectorOpen.value = true;
+	},
+});
+provide(FormatPaneKey, formatPane);
+
 // -- Empty-canvas context menu (right-click with no element under the
 // cursor) -- a sibling of the element menu below, kept in its own composable.
 const layoutGalleryAnchor = ref<{ x: number; y: number } | null>(null);
@@ -968,7 +1123,7 @@ const canvasMenu = useCanvasContextMenu({
 	},
 	onOpenFormatBackground: () => {
 		selectedElementIds.value = [];
-		inspectorOpen.value = true;
+		formatPane.requestFormatPane('slide', { focus: true });
 	},
 	customization: () => customization.resolved.value,
 });
@@ -1013,6 +1168,7 @@ const { contextMenu, contextItems, onCanvasContextMenu, onContextSelect } = useC
 	selectedElementIds,
 	inlineEditingElementId: inlineEdit.inlineEditingElementId,
 	inspectorOpen,
+	formatPane,
 	enterInlineEdit: inlineEdit.enterInlineEdit,
 	ops,
 	cutElement: clipboard.cutElement,
@@ -1067,9 +1223,10 @@ const {
 	// File > Options > Save > "Save AutoRecover information every N minutes",
 	// used whenever the host did not state a cadence of its own.
 	optionsIntervalSeconds: () => resolveAutosaveIntervalSeconds(viewerOptions.value),
-	snapshotName: () => props.filePath ?? props.fileName ?? 'Untitled Presentation',
-	storage: () => props.storage,
+	snapshotName: documentPath,
+	storage: () => cloudView.value.storage,
 	getRecoverySnapshot,
+	getInlineEditingId: () => inlineEdit.inlineEditingElementId.value,
 	emitAutosave: (bytes) => emit('autosave', bytes),
 	captureVersion: (label, at) => versionHistoryWiring.versionHistory.capture(label, at),
 });
@@ -1078,9 +1235,9 @@ const {
 // Vue wrote snapshots and never offered one back; the decision and the copy are
 // the shared ones every binding now renders.
 const autosaveRecovery = useAutosaveRecovery({
-	filePath: () => props.filePath ?? props.fileName ?? 'Untitled Presentation',
-	fileName: () => props.fileName,
-	storage: () => props.storage,
+	filePath: documentPath,
+	fileName: () => cloudView.value.fileName,
+	storage: () => cloudView.value.storage,
 	loading,
 	error,
 	slideCount: () => slides.value.length,
@@ -1099,6 +1256,9 @@ const deckActions = useInspectorDeckActions({
 	canvasSize,
 	slideSize: deck.slideSize,
 	slides,
+	templateElementsBySlideId,
+	pptxTheme,
+	themeColorMap,
 	coreProperties,
 	appProperties,
 	customProperties,
@@ -1108,13 +1268,6 @@ const deckActions = useInspectorDeckActions({
 	},
 	onCorePropertiesChanged: (updates) => emit('properties-change', updates),
 	pushHistory: history.pushHistory,
-	// Mirror React's refreshContentAfterThemeChange: re-serialise and reload so
-	// slide colours re-resolve against the newly-applied theme. These bytes go
-	// straight back into our own loader, which has no password, so they use the
-	// plaintext recovery serialisation rather than `getContent`.
-	refreshContent: async () => {
-		source.internalContent.value = await getRecoverySnapshot();
-	},
 });
 
 // -- Table style DEFINITION editor ("Edit style...") persistence: threads
@@ -1141,11 +1294,14 @@ const comments = useCommentsWiring({
 	slides,
 	authorName: authorNameRef,
 	pushHistory: history.pushHistory,
+	canEdit: () => canEditEffective.value,
+	selectedElementId: () => selectedElementIds.value[0],
 });
 
 // -- Collaboration (Yjs) + broadcast -----------------------------------
 const collaboration = useCollaborationWiring({
 	slides,
+	history,
 	slidesPaused: () => deckStyleHeld.value,
 	loadVersion,
 	// A room may replace the host's own deck (a late joiner's bootstrap load),
@@ -1267,6 +1423,7 @@ const customShowsWiring = useCustomShowsWiring({
 	// now plays that show instead of the whole deck.
 	presentationProperties,
 	pushHistory: history.pushHistory,
+	startShow: () => presentation.presentFromBeginning(),
 });
 
 // Honours `p:showPr/p:sldRg`: a deck authored to open into a custom slide
@@ -1288,11 +1445,12 @@ const masterView = useMasterViewWiring({
 
 // Slide Master view sidebar CRUD (Insert/Duplicate/Delete/Rename Layout and
 // Slide Master). Real ZIP surgery (`pptx-viewer-core`) that hands back a new
-// `handler` + `data`, adopted the same way `refreshContent` above adopts a
-// re-serialised deck: the mutation is not an in-place edit.
+// `handler` + `data`, adopted as a whole new deck: the mutation is not an
+// in-place edit.
 const masterViewCrud = useMasterViewCrud({
 	handler,
 	slideMasters,
+	layoutOptions: deck.layoutOptions,
 	deckData: () => readDeckData(deck),
 	target: () => ({
 		tab: masterView.masterViewTab.value,
@@ -1305,6 +1463,7 @@ const masterViewCrud = useMasterViewCrud({
 		autosave.isDirty.value = true;
 	},
 	pushHistory: history.pushHistory,
+	forgetHistory: history.forgetHistory,
 });
 
 // -- Sections (group the slide rail) -----------------------------------
@@ -1322,7 +1481,10 @@ async function compareWithPresentation(): Promise<void> {
 		return;
 	}
 	const incoming = await new PptxHandler().load(picked.buffer, {
-		allowExternalImages: viewerOptions.value.trust.allowExternalContent,
+		allowExternalImages: resolveAllowExternalContent(
+			props.allowExternalContent,
+			viewerOptions.value,
+		),
 	});
 	if (incoming) {
 		versionHistoryWiring.compareWithSlides(incoming.slides);
@@ -1339,6 +1501,26 @@ async function compareWithPresentation(): Promise<void> {
 // in pptx-viewer-shared). `viewerRootRef` stays bound to the template for
 // other consumers; it just is not fed into breakpoint derivation any more.
 const viewerRootRef = ref<HTMLElement | null>(null);
+
+// -- Ribbon Display Options (one controller per viewer) ----------------
+// It outlives the ribbon: the host's `ribbonDisplay` prop sets the starting mode, a later
+// change goes through `setMode` (no `ribbon-display-change`), and only a pick by the user
+// (menu, Ctrl+F1, double click on a tab) is emitted.
+const ribbonDisplay = createRibbonDisplayController({
+	initial: props.ribbonDisplay,
+	onChange: (mode: RibbonDisplayMode) => emit('ribbon-display-change', mode),
+});
+const ribbonDisplayState = useController(ribbonDisplay);
+watch(
+	() => props.ribbonDisplay,
+	(mode) => ribbonDisplay.setMode(mode),
+);
+watch(
+	() => viewerOptions.value.general.collapseRibbonAutomatically,
+	(enabled) => ribbonDisplay.setAutoCollapse(enabled),
+	{ immediate: true },
+);
+useRibbonDisplayListeners(ribbonDisplay, () => viewerRootRef.value);
 
 watchEffect(
 	(onCleanup) => {
@@ -1361,7 +1543,7 @@ watchEffect(
 				onHyperlinkClick: (link) => props.onHyperlinkClick?.(link),
 				confirmExternalHyperlink: (url) =>
 					!shouldConfirmExternalHyperlink(viewerOptions.value, url) ||
-					window.confirm(`${t('pptx.options.trust.confirmHyperlinks')}\n\n${url}`),
+					confirmExternalHyperlinkDialog(url, { t, host: root }),
 			}),
 		);
 	},
@@ -1413,6 +1595,7 @@ const ribbonActions = useRibbonActions({
 	readInlineSnapshot: inlineEdit.readInlineSnapshot,
 	formatInlineSnapshot: inlineEdit.formatInlineSnapshot,
 	endInlineListSession: inlineEdit.endInlineListSession,
+	listConversionScope: () => props.listConversionScope,
 	canEdit: () => canEditEffective.value,
 	presenting: presentation.presenting,
 	showMasterView: masterView.showMasterView,
@@ -1426,6 +1609,23 @@ const ribbonActions = useRibbonActions({
 	ops,
 });
 const { ribbonMode, ribbonUpdateTextStyle, ribbonMoveToEdge } = ribbonActions;
+// What the chrome shows. A viewer that may not edit (host, cloud file, Protected View) keeps the
+// editing chrome with its commands disabled, like the other bindings, so File stays reachable to
+// open an editable document. Only a requested preview (`setMode('preview')`) hides the ribbon.
+const chromeMode = computed(() =>
+	ribbonMode.value === 'preview' && editingRequested.value ? 'edit' : ribbonMode.value,
+);
+// Ctrl+wheel and pinch zoom at the pointer, and drag to pan, shared with the
+// other bindings. `<main>` is the element that scrolls the slide here. A plain
+// drag pans only in a read-only view, where it has nothing to select.
+useViewportNavigation({
+	viewport: mainRef,
+	store: zoomStore,
+	dragPans: computed(() => ribbonMode.value === 'preview'),
+	active: computed(() => !presentation.presenting.value),
+	// The zoom is kept across slides; another slide is shown from its top-left.
+	slideId: computed(() => activeSlide.value?.id),
+});
 
 watch(ribbonMode, (mode) => {
 	emit('mode-change', mode);
@@ -1447,6 +1647,7 @@ const { showShortcuts, onEditorKeydown, copySelected, cutSelected, selectAllElem
 		hasSelection: selection.hasSelection,
 		presenting: presentation.presenting,
 		findOpen,
+		toggleFind: find.toggle,
 		selectedElementIds,
 		activeSlide,
 		activeSlideIndex,
@@ -1607,15 +1808,22 @@ watch(
 /** File > Options > Save > "Delete cached files". */
 function onOptionsClearCache(): void {
 	// With a host recovery store this sweeps it only when it lists its copies.
-	void clearAutosaveSnapshots(props.storage).catch(() => {
+	void clearAutosaveSnapshots(cloudView.value.storage).catch(() => {
 		// Browser lifecycle cleanup cannot report a storage failure.
 	});
 }
 
+// One id scheme for every painted copy of a slide: see `installSvgIdScope`.
+let releaseSvgIdScope: (() => void) | undefined;
+onMounted(() => {
+	releaseSvgIdScope = installSvgIdScope();
+});
+onBeforeUnmount(() => releaseSvgIdScope?.());
+
 // File > Options > Save > "cache retention": a one-time sweep per mount is
 // enough, since a fresh snapshot only ever lands with a fresh timestamp.
 onMounted(() => {
-	void pruneExpiredAutosaveSnapshots(viewerOptions.value, props.storage).catch(() => {
+	void pruneExpiredAutosaveSnapshots(viewerOptions.value, cloudView.value.storage).catch(() => {
 		// Best-effort background maintenance; a blocked store skips it.
 	});
 });
@@ -1655,6 +1863,7 @@ const themeEditing = useThemeEditing({
 	themeGalleryOpen,
 	themeEditorOpen,
 	templateElementsBySlideId,
+	loadedThemeName: deckThemeName,
 });
 
 // -- AI assistant ------------------------------------------------------
@@ -1665,16 +1874,7 @@ const themeEditing = useThemeEditing({
 // Ctrl+Z. The panel (and its `@ai-sdk/vue` peer) loads lazily on first open.
 /** Map a partial AI theme update onto the deck-wide theme editor (mirrors React's applyAiTheme). */
 function applyAiTheme(updates: Partial<PptxTheme>): void {
-	const current = pptxTheme.value;
-	const colorScheme = updates.colorScheme ?? current?.colorScheme;
-	if (!colorScheme) {
-		return;
-	}
-	themeEditing.applyTheme(
-		colorScheme,
-		updates.fontScheme ?? current?.fontScheme,
-		updates.name ?? current?.name ?? 'Theme',
-	);
+	void themeEditing.applyThemeUpdates(updates);
 }
 // Ribbon style galleries: context from the deck, picks through the same
 // history-tracked element update / theme paths the inspector uses.
@@ -1709,6 +1909,7 @@ const aiBridge = useAiBridge({
 	theme: pptxTheme,
 	handler,
 	sections,
+	customShows,
 	presentationProperties,
 	customProperties,
 	coreProperties,
@@ -1717,7 +1918,7 @@ const aiBridge = useAiBridge({
 	tableStyleMap,
 	tableStylesDefaultId: deck.tableStylesDefaultId,
 	tagCollections,
-	fileName: () => props.fileName,
+	fileName: () => cloudView.value.fileName,
 	pushHistory: history.pushHistory,
 	markDirty: () => {
 		autosave.isDirty.value = true;
@@ -1792,6 +1993,7 @@ const baseRibbonProps = useViewerRibbonProps({
 	},
 	presentationProperties,
 	ribbonActions,
+	chromeMode,
 	drag,
 	insertion,
 	templateInsertion,
@@ -1876,9 +2078,31 @@ useCanvasImagePaste(viewerRootRef, {
 	},
 	insertElement: ops.addElement,
 });
+useInlineRichTextPaste(viewerRootRef, {
+	editingElement: () => inlineEdit.inlineEditingElement.value,
+	cancelInlineEdit: inlineEdit.cancelInlineEdit,
+	enterInlineEdit: inlineEdit.enterInlineEdit,
+	updateElement: (id, patch) => ops.updateElement(id, patch),
+});
+
+// Host-persisted Save: revision token + acknowledgement (shared controller).
+const saveRevision = useSaveRevision({
+	changeSources: () => [slides.value, templateElementsBySlideId.value],
+	getContent,
+	markClean: () => {
+		autosave.isDirty.value = false;
+	},
+	markDirty: () => {
+		autosave.isDirty.value = true;
+	},
+	filePath: documentPath,
+	storage: () => cloudView.value.storage,
+	getOptions: () => viewerOptions.value,
+});
 
 const exposedHandle: PowerPointViewerExpose = {
 	...useViewerApi({
+		saveRevision,
 		slides,
 		activeSlide,
 		activeSlideIndex,
@@ -1917,6 +2141,75 @@ const exposedHandle: PowerPointViewerExpose = {
 	...customization.api,
 };
 defineExpose<PowerPointViewerExpose>(exposedHandle);
+// Inside a building-blocks canvas the viewer's dialogs become host requests (see `building-blocks`).
+const blocksBridge = inject(BuildingBlocksBridgeKey, null);
+if (blocksBridge) {
+	useBuildingBlocksEngine(blocksBridge, {
+		t: (key) => t(key),
+		slides,
+		mergedSlides,
+		activeSlide,
+		activeSlideIndex,
+		slideCount,
+		canvasSize,
+		mediaDataUrls,
+		loading,
+		error,
+		handler,
+		layoutOptions: deck.layoutOptions,
+		selectedElements,
+		ops,
+		insertion,
+		insertDialogs,
+		hyperlink,
+		find,
+		findOpen,
+		mode: ribbonMode,
+		canEdit: canEditEffective,
+		canEditBase: () =>
+			cloudView.value.canEdit &&
+			editingRequested.value &&
+			isEditingAllowed(customization.resolved.value) &&
+			!collaborationReadOnly.value,
+		canInsert: () => !protectedViewActive.value && !readOnlyRec.locked.value,
+		presenting: presentation.presenting,
+		showMasterView: masterView.showMasterView,
+		history,
+		isDirty: autosave.isDirty,
+		goPrev,
+		goNext,
+		zoomIn,
+		zoomOut,
+		zoomReset,
+		password,
+		readOnlyRecommendation: readOnlyRec.recommendation,
+		modifyVerifier,
+		customProperties,
+		coreProperties,
+		appProperties,
+		documentProperties,
+		deckActions,
+		fontEmbedding,
+		signatureWorkflow,
+		signatures,
+		activeContent,
+		slideShow,
+		presentationProperties,
+		customShows,
+		customShowsWiring,
+		broadcastOpen: collaboration.broadcastOpen,
+		collab: collaboration.collab,
+		showShortcuts,
+		slideOps,
+		sectionOps,
+		hasSections,
+		toggleSlideHidden,
+		headerFooter,
+		firstSlideNumber: deck.firstSlideNumber,
+		theme: pptxTheme,
+		tableStyleMap,
+	});
+}
 // Host region renderers (`customization.regions`) read this base context.
 provide(
 	ViewerRegionBaseKey,
@@ -1937,7 +2230,10 @@ const slidePackageClipboard = createSlidePackageClipboard({
 					handler: handler.value,
 					slides: slides.value,
 					templateElementsBySlideId: templateElementsBySlideId.value,
-					allowExternalImages: viewerOptions.value.trust.allowExternalContent,
+					allowExternalImages: resolveAllowExternalContent(
+						props.allowExternalContent,
+						viewerOptions.value,
+					),
 					editable: canEditEffective.value,
 				}
 			: null,
@@ -1976,7 +2272,16 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 		<!-- Loading -->
 		<div v-if="loading" class="pptx-vue-state pptx-vue-loading" role="status" aria-live="polite">
 			<div class="pptx-vue-spinner" aria-hidden="true" />
-			<p>{{ t('pptx.viewer.loading') }}</p>
+			<p>
+				{{
+					fontProgress
+						? t('pptx.viewer.loadingFonts', {
+								loaded: fontProgress.loaded,
+								total: fontProgress.total,
+							})
+						: t('pptx.viewer.loading')
+				}}
+			</p>
 		</div>
 
 		<!-- Encrypted -->
@@ -2007,7 +2312,9 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 				     opened read-only never shows this (there is nothing to enable). -->
 				<div
 					v-if="
-						props.canEdit && isEditingAllowed(customization.resolved.value) && protectedViewActive
+						cloudView.canEdit &&
+						isEditingAllowed(customization.resolved.value) &&
+						protectedViewActive
 					"
 					class="pptx-vue-protected-view-banner flex items-center gap-3 border-b border-amber-700/30 bg-amber-900/20 px-4 py-2"
 					role="status"
@@ -2047,10 +2354,10 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 				     role="toolbar" ribbon element (which e2e measures for height
 				     parity), gated like React on desktop + non-present. -->
 				<TitleBar
-					v-if="!isMobile && panelVisible('titleBar')"
-					:mode="ribbonMode"
+					v-if="!isMobile && panelVisible('titleBar') && ribbonDisplayState.layout.titleBar"
+					:mode="chromeMode"
 					:can-edit="canEditEffective"
-					:file-name="props.fileName"
+					:file-name="cloudView.fileName"
 					:is-dirty="autosave.isDirty.value"
 					:autosave-status="autosaveDisabledReason ? 'disabled' : autosave.status.value"
 					:autosave-enabled="autosaveActive"
@@ -2080,8 +2387,16 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 				     configured (the default), covering the ribbon and swallowing
 				     clicks meant for it. -->
 				<template v-if="!isMobile">
+					<!-- Ribbon Display Options, full-screen mode: the strip that brings the ribbon back.
+					     It stays in the layout while the ribbon is peeked, so nothing jumps. -->
+					<RibbonRevealStrip
+						v-if="ribbonDisplayState.effectiveMode === 'fullScreen'"
+						:controller="ribbonDisplay"
+					/>
 					<RibbonToolbar
 						v-bind="ribbonProps"
+						:ribbon-display="ribbonDisplayState"
+						:ribbon-display-controller="ribbonDisplay"
 						:hidden-actions="effectiveHiddenActions"
 						:recent-presentations-count="viewerOptions.advanced.recentPresentationsCount"
 						:ai-enabled="aiEnabled"
@@ -2090,8 +2405,9 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 					/>
 					<!-- Options > Quick Access Toolbar > "below the Ribbon" -->
 					<TitleBar
+						v-if="ribbonDisplayState.layout.tabs"
 						placement="belowRibbon"
-						:mode="ribbonMode"
+						:mode="chromeMode"
 						:can-edit="canEditEffective"
 						:is-dirty="autosave.isDirty.value"
 						:autosave-enabled="autosaveActive"
@@ -2136,7 +2452,7 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 
 			<!-- Find & replace bar -->
 			<FindReplaceBar
-				v-if="canEditEffective && findOpen && panelVisible('findReplace')"
+				v-if="canEditEffective && findOpen && panelVisible('findReplace') && !blocksBridge"
 				v-model:query="find.query.value"
 				v-model:replacement="find.replacement.value"
 				v-model:match-case="find.matchCase.value"
@@ -2174,7 +2490,6 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 						panelVisible('slidesPane')
 					"
 					:merged-slides="mergedSlides"
-					:merged-slide-by-id="selection.mergedSlideById.value"
 					:active-slide-index="activeSlideIndex"
 					:canvas-size="canvasSize"
 					:media-data-urls="mediaDataUrls"
@@ -2184,6 +2499,11 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 					:slide-ops="slideOps"
 					:go-to="goTo"
 					:toggle-slide-hidden="toggleSlideHidden"
+					:header-footer="headerFooter"
+					:custom-properties="customProperties"
+					:first-slide-number="deck.firstSlideNumber.value"
+					:theme="pptxTheme"
+					:table-style-map="tableStyleMap"
 					:on-open-layout-for-slide="
 						(index, x, y) => {
 							goTo(index);
@@ -2205,7 +2525,7 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 					@touchend="swipe.onTouchEnd"
 				>
 					<SlideCanvas
-						:slide="activeSlide"
+						:slide="editingCanvasSlide"
 						:canvas-size="canvasSize"
 						:media-data-urls="mediaDataUrls"
 						:zoom="effectiveZoom"
@@ -2214,9 +2534,11 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 						:show-rulers="showRulers && !presentation.presenting.value"
 						:ruler-selected-bounds="selection.rulerSelectedBounds.value"
 						:can-drag-guides="canEditEffective && !presentation.presenting.value"
-						:template-elements="activeTemplateElements"
+						:template-elements="editingCanvasTemplateElements"
 						:edit-template-mode="editTemplateMode && !presentation.presenting.value"
 						:inline-editing-element-id="inlineEdit.inlineEditingElementId.value"
+						:selected-element-ids="selection.selectedElementIds.value"
+						:find-highlights="findHighlights"
 						@update:fit-scale="fitScale = $event"
 						@create-guide="drag.addGuide"
 					>
@@ -2279,11 +2601,12 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 					:collaboration="collaboration"
 					:custom-shows="customShowsWiring"
 					:ai="aiConfig"
+					:ai-chat-panel="aiChatPanel"
 					:ai-panel-open="aiPanelOpen"
 					:on-close-ai-panel="() => (aiPanelOpen = false)"
 					:ai-panel="aiPanel"
 					:ai-bridge="aiBridge"
-					:ribbon-mode="ribbonMode"
+					:ribbon-mode="chromeMode"
 					:go-to="goTo"
 					:on-inspector-update="inspector.onInspectorUpdate"
 					:on-update-slide-animations="inspector.writeSlideAnimations"
@@ -2331,8 +2654,10 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 					autosaveDisabledReason ? 'disabled' : autosaveEnabled ? autosave.status.value : undefined
 				"
 				:last-saved-at="autosave.lastSavedAt.value"
+				:save-progress="saveProgressState"
+				:font-progress="fontProgress"
 				:scale="zoom"
-				:mode="ribbonMode"
+				:mode="chromeMode"
 				:is-notes-expanded="notesExpanded"
 				:show-notes="canEditEffective && panelVisible('notes')"
 				:hidden-actions="effectiveHiddenActions"
@@ -2418,7 +2743,7 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 				:version-history="versionHistoryWiring"
 				:printer="printer"
 				:header-footer-dialog="headerFooterDialog"
-				:show-shortcuts="showShortcuts"
+				:show-shortcuts="showShortcuts && !blocksBridge"
 				:on-close-shortcuts="() => (showShortcuts = false)"
 				:show-settings="showSettings && dialogAvailable('options')"
 				:on-close-settings="() => (showSettings = false)"
@@ -2448,6 +2773,7 @@ onBeforeUnmount(() => slidePackageClipboard.dispose());
 				:notes-canvas-size="deck.notesCanvasSize.value"
 				:handout-master="handoutMaster"
 				:can-edit="canEditEffective"
+				:list-conversion-scope="props.listConversionScope"
 			/>
 
 			<ViewerDeckDialogs

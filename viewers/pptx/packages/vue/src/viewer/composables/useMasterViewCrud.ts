@@ -1,9 +1,16 @@
 import {
 	applyMasterViewCrudAction,
+	forgetStepsUsingRemovedParts,
 	masterViewCrudActions,
 	masterViewCrudFailureKey,
+	promptNameDialog,
 } from 'ooxml-ui/pptx';
-import type { MasterViewCrudAction, MasterViewCrudActionId, MasterViewTarget } from 'ooxml-ui/pptx';
+import type {
+	MasterViewCrudAction,
+	MasterViewCrudActionId,
+	MasterViewTarget,
+	SlideMasterHistoryStep,
+} from 'ooxml-ui/pptx';
 /**
  * useMasterViewCrud: the Slide Master view sidebar's
  * Insert/Duplicate/Delete/Rename Layout and Slide Master commands.
@@ -20,7 +27,7 @@ import type { MasterViewCrudAction, MasterViewCrudActionId, MasterViewTarget } f
  * result actually changed, and move the sidebar selection to the returned
  * target.
  */
-import type { PptxData, PptxHandler, PptxSlideMaster } from 'pptx-viewer-core';
+import type { PptxData, PptxHandler, PptxLayoutOption, PptxSlideMaster } from 'pptx-viewer-core';
 import { computed, ref } from 'vue';
 import type { ComputedRef, Ref, ShallowRef } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -28,6 +35,8 @@ import { useI18n } from 'vue-i18n';
 export interface UseMasterViewCrudInput {
 	handler: ShallowRef<PptxHandler | null>;
 	slideMasters: ShallowRef<PptxSlideMaster[]>;
+	/** The Home > Layout list, which this binding keeps apart from the masters it comes from. */
+	layoutOptions: ShallowRef<PptxLayoutOption[]>;
 	/** Snapshot the presentation-level `PptxData` the CRUD action reads/validates against. */
 	deckData: () => PptxData;
 	/** The sidebar's current selection, as the shared rule sees it. */
@@ -37,6 +46,8 @@ export interface UseMasterViewCrudInput {
 	markDirty: () => void;
 	/** Snapshot `slides` onto the undo stack before adopting the CRUD result. */
 	pushHistory: () => void;
+	/** Drop the undo and redo steps that would bring back a part a command removed. */
+	forgetHistory: (reaches: (step: SlideMasterHistoryStep) => boolean) => void;
 }
 
 export interface UseMasterViewCrudResult {
@@ -76,8 +87,10 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 		let name: string | undefined;
 		if (RENAME_ACTIONS.has(id)) {
 			// Mirrors the Custom Shows rename flow (`useCustomShowsWiring`), the
-			// only other rename affordance in this binding: `window.prompt`.
-			const next = window.prompt(t('pptx.masterView.renamePrompt'), currentName())?.trim();
+			// only other rename affordance in this binding: an in-app name dialog.
+			const next = (
+				await promptNameDialog(t('pptx.masterView.renamePrompt'), currentName(), { t })
+			)?.trim();
 			if (!next) {
 				return;
 			}
@@ -85,9 +98,10 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 		}
 
 		input.pushHistory();
+		const deck = input.deckData();
 		const result = await applyMasterViewCrudAction(
 			handler,
-			input.deckData(),
+			deck,
 			id,
 			input.target(),
 			name === undefined ? undefined : { name },
@@ -99,6 +113,9 @@ export function useMasterViewCrud(input: UseMasterViewCrudInput): UseMasterViewC
 
 		input.handler.value = result.handler;
 		input.slideMasters.value = result.data.slideMasters ?? [];
+		// Or Home > Layout keeps offering a deleted layout and misses an inserted one.
+		input.layoutOptions.value = result.data.layoutOptions ?? [];
+		forgetStepsUsingRemovedParts(input.forgetHistory, deck, result.data);
 		if (result.target.layoutIndex === null) {
 			input.onSelectMaster(result.target.masterIndex);
 		} else {

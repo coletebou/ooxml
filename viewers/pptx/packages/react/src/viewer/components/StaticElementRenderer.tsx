@@ -4,6 +4,7 @@ import {
 	getGroupChildParentFill,
 	getShapeEffectLayerPlacement,
 	isElementRendered,
+	probeElementRenderFault,
 } from 'ooxml-ui/pptx';
 import type { GroupPptxElement } from 'pptx-viewer-core';
 import { hasTextProperties } from 'pptx-viewer-core';
@@ -18,6 +19,7 @@ import {
 	renderVectorShape,
 } from '../utils';
 import { withDisplayName } from '../utils/display-name';
+import { ElementErrorBoundary } from './ElementErrorBoundary';
 import { renderBody } from './elements/ElementBody';
 import { ShapeEffectOverlay } from './elements/ShapeEffectOverlay';
 import type { StaticElementRendererProps } from './static-element-renderer-types';
@@ -50,6 +52,8 @@ function StaticElementRendererImpl({
 	exposeElementId = false,
 	suppressReflection = false,
 }: StaticElementRendererProps): React.ReactElement | null {
+	// Test-only fault hook (inert unless a test page sets it); inside the element boundary.
+	probeElementRenderFault(element);
 	// Selection-Pane-hidden elements are not drawn on any surface, so the static
 	// path (thumbnails, presenter previews, transition ghosts, export rasters)
 	// skips them too. This function holds no hooks, so the guard can lead.
@@ -242,6 +246,20 @@ function StaticElementRendererImpl({
  * this memoized export so nested group children stay memoized too.
  */
 export const StaticElementRenderer = /* @__PURE__ */ withDisplayName(
-	/* @__PURE__ */ React.memo(StaticElementRendererImpl),
+	/* @__PURE__ */ React.memo(
+		// oxlint-disable-next-line prefer-arrow-callback -- keep the wrapper named in React stacks
+		function StaticElementRendererBoundary(props: StaticElementRendererProps) {
+			return (
+				<ElementErrorBoundary
+					key={props.element.id}
+					element={props.element}
+					slideId={props.activeSlide?.id}
+					onElementRenderError={props.onElementRenderError}
+				>
+					<StaticElementRendererImpl {...props} />
+				</ElementErrorBoundary>
+			);
+		},
+	),
 	'StaticElementRenderer',
 );

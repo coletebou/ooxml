@@ -14,17 +14,17 @@ A live [Svelte demo](https://christophervr.github.io/ooxml/pptx/demo-svelte/) is
 
 ## What it provides
 
-| Capability          | Summary                                                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Slide rendering** | Text, shapes, images, groups, connectors, tables, charts, SmartArt (2D and opt-in 3D), media, ink, OLE, and the rest of the element model. |
-| **Editing**         | Behind `editable`: insert, format, group, arrange, drag/resize/rotate, rich text/notes, master view, undo/redo, and save/download.         |
-| **Navigation**      | Responsive desktop/mobile chrome, thumbnail rail, keyboard navigation, and a speaker-notes panel.                                          |
-| **Presentation**    | Fullscreen presentation mode via the real Fullscreen API, with transition/animation playback and a presenter view (audience window).       |
-| **Export**          | PNG, PDF, GIF, WebM video, SVG, print (slides / handouts / notes / outline), and `.pptx` / `.ppsx` / `.pptm` save-as.                      |
-| **Collaboration**   | Optional real-time co-editing over Yjs (y-websocket or serverless y-webrtc), with presence, remote cursors, and Share/Broadcast dialogs.   |
-| **Autosave**        | Debounced crash-recovery snapshots in IndexedDB when editing has a `filePath`; the host can disable them with `autosave={false}`.          |
-| **Theming**         | The shared `ViewerTheme` system (`--pptx-*` CSS custom properties), including the vermilion presets. See [Theming](/svelte/theming).       |
-| **i18n**            | English built in; register more locales via `pptx-svelte-viewer/i18n`. See [Localization](/svelte/i18n).                                   |
+| Capability          | Summary                                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Slide rendering** | Text, shapes, images, groups, connectors, tables, charts, SmartArt (2D and opt-in 3D), media, ink, OLE, and the rest of the element model.                      |
+| **Editing**         | Behind `editable`: insert, format, group, arrange, drag/resize/rotate, rich text/notes, master view, undo/redo, and save/download.                              |
+| **Navigation**      | Responsive desktop/mobile chrome, thumbnail rail, keyboard navigation, and a speaker-notes panel.                                                               |
+| **Presentation**    | Fullscreen presentation mode via the real Fullscreen API, with transition/animation playback and a presenter view (audience window).                            |
+| **Export**          | PNG, PDF, GIF, WebM video, SVG, print (slides / handouts / notes / outline), and `.pptx` / `.ppsx` / `.pptm` save-as.                                           |
+| **Collaboration**   | Optional real-time co-editing over Yjs (y-websocket or serverless y-webrtc), with presence, remote cursors, and Share/Broadcast dialogs.                        |
+| **Autosave**        | Crash-recovery snapshots in IndexedDB, written while there are unsaved edits, when editing has a `filePath`; the host can disable them with `autosave={false}`. |
+| **Theming**         | The shared `ViewerTheme` system (`--pptx-*` CSS custom properties), including the vermilion presets. See [Theming](/svelte/theming).                            |
+| **i18n**            | English built in; register more locales via `pptx-svelte-viewer/i18n`. See [Localization](/svelte/i18n).                                                        |
 
 ::: info Element coverage
 For a precise list of what the underlying parser supports, and what is approximated, see
@@ -84,6 +84,27 @@ could never be `require()`d successfully anyway.
 	<PowerPointViewer source={bytes} onload={({ slideCount }) => console.log(slideCount)} />
 {/if}
 ```
+
+## Import paths
+
+The package exposes these entry points (from `package.json` `exports`), ESM only:
+
+```ts
+// Root entry - viewer, theme utilities, export helpers
+import { PowerPointViewer } from 'pptx-svelte-viewer';
+// AI assistant entry - the recommended value for the `ai` prop
+import { createAiAssistant } from 'pptx-svelte-viewer/ai';
+```
+
+| Entry                                                               | What it exports                                                                                                                                                            |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pptx-svelte-viewer`                                                | `PowerPointViewer`, theme utilities, the export and session helpers, and the public types (see [Key exports](#key-exports)).                                               |
+| `pptx-svelte-viewer/viewer`                                         | The same component plus `SlideCanvas`, `EditorLayer`, the collaboration overlays and the framework-free state helpers ([Instance API](/svelte/api)).                       |
+| `pptx-svelte-viewer/ai`                                             | `createAiAssistant`, the `PptxAiAssistant` handle type and the `PptxAi*` config types: the recommended way to pass `ai` ([The `/ai` entry](/guide/ai-assistant#ai-entry)). |
+| `pptx-svelte-viewer/i18n`                                           | The English dictionary and the translator helpers (`registerTranslations`, `translate`, ...) ([Localization](/svelte/i18n)).                                               |
+| `pptx-svelte-viewer/i18n/fr`, `/i18n/es`, `/i18n/de`, `/i18n/zh-CN` | The bundled locale dictionaries (`translationsFr` and so on).                                                                                                              |
+| `pptx-svelte-viewer/internals`                                      | The slide-transition helpers and the transition overlay, for a custom presentation stage. Not covered by semver.                                                           |
+| `pptx-svelte-viewer/styles` (or `/styles.css`)                      | The extracted stylesheet.                                                                                                                                                  |
 
 ## Key exports
 

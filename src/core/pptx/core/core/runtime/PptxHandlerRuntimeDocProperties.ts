@@ -39,14 +39,22 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		return [...upSegments, ...toParts].join('/');
 	}
 
-	protected async setMasterThemeRelationship(masterPath: string, themePath: string): Promise<void> {
+	/**
+	 * Point a slide master's theme relationship at `themePath`.
+	 *
+	 * @returns whether the master had a theme relationship to rewrite
+	 */
+	protected async setMasterThemeRelationship(
+		masterPath: string,
+		themePath: string,
+	): Promise<boolean> {
 		const relsPath = masterPath.replace(
 			/ppt\/slideMasters\/(slideMaster\d+)\.xml/,
 			'ppt/slideMasters/_rels/$1.xml.rels',
 		);
 		const relsFile = this.zip.file(relsPath);
 		if (!relsFile) {
-			return;
+			return false;
 		}
 
 		const relsXml = await relsFile.async('string');
@@ -55,36 +63,14 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const relationships = this.ensureArray(relRoot['Relationship']) as XmlObject[];
 		const themeRel = relationships.find((rel) => String(rel['@_Type'] || '').includes('/theme'));
 		if (!themeRel) {
-			return;
+			return false;
 		}
 
 		themeRel['@_Target'] = this.buildRelativeTargetPath(masterPath, themePath);
 		relRoot['Relationship'] = relationships;
 		relsData['Relationships'] = relRoot;
 		this.zip.file(relsPath, this.builder.build(relsData));
-	}
-
-	public async setPresentationTheme(themePath: string, applyToAllMasters = true): Promise<void> {
-		const normalizedThemePath = themePath.trim().replace(/\\/g, '/');
-		if (!normalizedThemePath.startsWith('ppt/theme/')) {
-			return;
-		}
-		const masterFiles = this.zip.file(/^ppt\/slideMasters\/slideMaster\d+\.xml$/);
-		if (!masterFiles || masterFiles.length === 0) {
-			return;
-		}
-
-		const targetMasters = applyToAllMasters ? masterFiles : [masterFiles[0]];
-		await Promise.all(
-			targetMasters.map(async (masterFile) => {
-				await this.setMasterThemeRelationship(masterFile.name, normalizedThemePath);
-			}),
-		);
-	}
-
-	/** The text of a package part, or `undefined` when the package has no such part. */
-	private async readPartText(path: string): Promise<string | undefined> {
-		return this.zip.file(path)?.async('string');
+		return true;
 	}
 
 	/**
@@ -158,8 +144,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			return [];
 		}
 
-		const relsXml = await relsFile.async('string');
-		const relsData = this.parser.parse(relsXml) as XmlObject;
+		const relsData = await this.readPartXml(relsPath);
+		if (!relsData) {
+			return [];
+		}
 		const relRoot = (relsData['Relationships'] || {}) as XmlObject;
 		const relationships = this.ensureArray(relRoot['Relationship']) as XmlObject[];
 
@@ -195,7 +183,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			try {
 				const file = this.zip.file(resolvedPath);
 				if (file) {
-					data = await file.async('string');
+					data = await this.readPartText(resolvedPath);
 				}
 			} catch {
 				// Non-critical — data may not be resolvable
@@ -287,9 +275,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	 */
 	protected async parseTags(): Promise<PptxTagCollection[]> {
 		try {
-			return await discoverTagCollections(this.zip, {
-				parse: (xml) => this.parser.parse(xml) as XmlObject,
-			});
+			return await discoverTagCollections(this.zip, this.parser);
 		} catch (e) {
 			console.warn('Failed to parse tags:', e);
 			return [];

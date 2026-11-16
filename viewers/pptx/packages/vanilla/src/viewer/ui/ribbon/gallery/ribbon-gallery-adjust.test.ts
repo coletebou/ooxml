@@ -1,7 +1,7 @@
 import type { RibbonGalleryContext, RibbonGalleryPlacement } from 'ooxml-ui/pptx';
 import { CONTEXTUAL_TAB_GROUPS } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxImageEffects, PptxSlide } from 'pptx-viewer-core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createGalleryActions } from '../../../editor/editor-gallery-actions';
 import { createTranslator } from '../../../i18n';
@@ -34,6 +34,8 @@ function context(element: PptxElement | null): RibbonGalleryContext {
 	return { element, themeColorMap: { accent1: '#156082' } };
 }
 
+afterEach(() => document.body.replaceChildren());
+
 describe('picture adjust galleries (vanilla)', () => {
 	it('places three dropdown galleries in the Adjust group', () => {
 		expect(ADJUST?.galleries.map((p) => [p.gallery, p.mode])).toStrictEqual([
@@ -60,9 +62,11 @@ describe('picture adjust galleries (vanilla)', () => {
 				selectedElementIds: ['p1'],
 			});
 			const ops = { pushHistory: vi.fn(), commitChange: vi.fn() };
-			const actions = createGalleryActions({ store, ops, deck: { applyThemeEdit: vi.fn() } });
+			const actions = createGalleryActions({ store, ops });
 			const hub = createRibbonGalleryHub((result) => actions.applyRibbonGalleryResult(result));
 			const control = createRibbonGallery(document, createTranslator(), placementFor(gallery), hub);
+			// In the document, as in the ribbon: a gallery builds its tiles once it is shown.
+			document.body.append(control.el);
 			hub.sync(context(picture()), true);
 			expect(control.el.getAttribute('data-ribbon-control')).toBe(placementFor(gallery).control);
 			expect(control.trigger.disabled).toBeFalsy();

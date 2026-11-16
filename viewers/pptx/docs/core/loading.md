@@ -87,15 +87,62 @@ const data = await handler.load(buffer, {
 	password: 'secret', // decrypt an encrypted file (see below)
 	allowExternalImages: false, // default false - http(s) image URLs are dropped
 	maxUncompressedBytes: 500 * 1024 * 1024, // zip-bomb guard, 500 MiB default
+	limits: { maxSlides: 500, maxShapes: 50_000 }, // optional host limits, see below
 });
 ```
 
-| Option                 | Default   | Purpose                                                                                                                                                              |
-| ---------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `password`             | -         | Decrypts an encrypted package before parsing.                                                                                                                        |
-| `allowExternalImages`  | `false`   | When `false`, relationship targets resolving to `http://`/`https://` are dropped from rendered slides (SSRF / privacy mitigation). Set `true` to allow them through. |
-| `maxUncompressedBytes` | `500 MiB` | Total uncompressed budget. Exceeding it (or 65,536 entries) rejects with `ZipBombError`.                                                                             |
-| `eagerDecodeImages`    | `false`   | Decode embedded images during load rather than lazily.                                                                                                               |
+| Option                     | Default   | Purpose                                                                                                                                                              |
+| -------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `password`                 | -         | Decrypts an encrypted package before parsing.                                                                                                                        |
+| `allowExternalImages`      | `false`   | When `false`, relationship targets resolving to `http://`/`https://` are dropped from rendered slides (SSRF / privacy mitigation). Set `true` to allow them through. |
+| `limits`                   | -         | Host limits: `maxInputBytes`, `maxUncompressedBytes` (wins over the option above), `maxEntries`, `maxSlides`, `maxShapes`. See [Load limits](#load-limits).          |
+| `maxUncompressedBytes`     | `500 MiB` | Total uncompressed budget. Exceeding it (or 65,536 entries) rejects with `ZipBombError`.                                                                             |
+| `eagerDecodeImages`        | `false`   | Decode embedded images during load rather than lazily.                                                                                                               |
+| `eagerDecodeEmbeddedFonts` | `false`   | Decode every embedded font variant during load, and omit the ones that fail, rather than on first use (see below).                                                   |
+
+### Load limits {#load-limits}
+
+`limits` bounds one load for hosts that open untrusted decks. Each field left out keeps its default, so omitting `limits` changes nothing: 500 MiB inflated, 65,536 ZIP entries, and no limit on input size, slides or shapes. Each check runs before the work it bounds: `maxInputBytes` before the input is sniffed, decrypted or unzipped, `maxEntries` and `maxUncompressedBytes` before any part is inflated (and again while parts are read), `maxSlides` right after `ppt/presentation.xml` is parsed, and `maxShapes` as each slide's shapes are parsed (layout and master shapes are not counted).
+
+A `pptx-viewer-json` document gets the same limits, whether it comes through `load()` or `handler.loadFromJson(text, { limits })`. For `loadFromJson`, `maxInputBytes` is the UTF-8 size of the text, checked before it is parsed. `maxSlides` and `maxShapes` are checked on the document's slides before any of it is used, with the same count as a `.pptx` package: every element, group members included at any depth, except the layout and master elements a loaded deck carries (ids starting `layout-` or `master-`). A deck loaded under a limit therefore loads under the same limit after a round trip through JSON.
+
+`maxInputBytes`, `maxSlides` and `maxShapes` reject with `PptxLoadLimitError` (code `PPTX_LOAD_LIMIT`, with `limit`, `maximum` and `actual`). `maxUncompressedBytes` and `maxEntries` keep rejecting with `ZipBombError` (code `ZIP_BOMB`), which now also carries `loadLimit` and `actual`. `getPptxLoadLimitViolation` reads either:
+
+```ts
+import { getPptxLoadLimitViolation, PptxHandler } from 'pptx-viewer-core';
+
+try {
+	await new PptxHandler().load(buffer, { limits: { maxSlides: 100 } });
+} catch (error) {
+	const violation = getPptxLoadLimitViolation(error);
+	if (violation) {
+		console.warn(`${violation.limit}: ${violation.actual} > ${violation.maximum}`);
+	}
+}
+```
+
+A value that is not a positive finite number, or a `maxEntries` above 65,536, throws `RangeError` before any work. When a slide or shape limit stops a load, the handler releases what it had parsed; it can still be disposed or load another deck.
+
+## Layout template images
+
+`await handler.getTemplateElementsForSlide(slideId)` resolves embedded pictures and their SVG variants for the requested layout and master elements, including a previously unused layout after inserting a slide or applying that layout. Unused layouts are not all decoded during the initial load. Resolution uses the handler's media cache and updates the existing template objects without replacing their `rawXml` references. Missing assets remain unresolved, and the `allowExternalImages` policy is unchanged.
+
+## Embedded fonts
+
+`data.embeddedFonts` lists one `PptxEmbeddedFont` per embedded family and style variant. By default `load()` reads each font part but does not decompress (EOT/MicroType Express) or de-obfuscate it: a variant's `dataUrl`, `format` and `rawFontData` are decoded the first time one of them is read, so existing synchronous code keeps working. Metadata (`name`, `bold`, `italic`, `partPath`, `fontGuid`, `originalRId`, `originalPartBytes`) never triggers decoding.
+
+```ts
+const data = await handler.load(buffer);
+const font = data.embeddedFonts?.find((f) => f.name === 'Lato' && !f.bold && !f.italic);
+const decoded = font?.load ? await font.load() : font; // null when the part cannot be decoded
+console.log(decoded?.dataUrl.slice(0, 32), font?.isLoaded);
+```
+
+- `load()` decodes once and caches the result; concurrent calls share one promise. Decoding still runs on the calling thread.
+- `load` and `isLoaded` are not enumerable, so spreading, `structuredClone` and `JSON.stringify` see the same fields as before (reading them decodes the variant).
+- A descriptor owns its bytes and stays usable after the handler is disposed or loads another file.
+- Saving writes a variant that was never decoded back from its original part bytes, the same bytes an eager load would write. An edited `rawFontData` is re-embedded as before.
+- A variant whose part only fails when decompressed (a corrupt EOT payload) stays in the list with an empty `dataUrl` and no `rawFontData`. Pass `eagerDecodeEmbeddedFonts: true` to decode up front and drop such variants, as earlier versions did.
 
 ## Accessing slides, theme, and metadata
 

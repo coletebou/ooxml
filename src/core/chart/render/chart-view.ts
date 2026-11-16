@@ -1,3 +1,5 @@
+import { resolveRegionValueColors } from '../region-map/value-colors';
+import { chartDataTableView, type ChartDataTableView } from './chart-view-data-table';
 import type { ChartMarkerSeriesView } from './chart-view-markers';
 import { applyChartAxes, type ChartAxesView } from './chart-view-axes';
 import { extentOf } from '../extent';
@@ -19,6 +21,7 @@ import { valueAxis } from './chart-value-axis';
 export { categoryTotals } from './chart-value-axis';
 import { chartAppearance, type ChartAppearance } from './chart-appearance';
 import type { ChartGradientFill } from '../gradient-definition';
+import type { ChartPicturePaint } from './chart-picture-paint';
 import type { DrawingSvgShadow } from '../../drawingml/drawing-shadow';
 import { chartTitleText, type ChartTitleText } from './chart-title-text';
 import type { ChartErrorBarsView, ChartTrendlineView } from './chart-view-analysis';
@@ -28,6 +31,7 @@ import {
 	chartExtraAxes,
 	chartExtraView,
 	histogramView,
+	paretoAxis,
 	waterfallView,
 	type WaterfallView,
 } from './chart-view-ex';
@@ -43,10 +47,22 @@ export type { ChartRefValue, ChartViewOptions, EvaluateRef } from './chart-view-
 export type { WaterfallView } from './chart-view-ex';
 
 export interface ChartSeriesView extends ChartMarkerSeriesView {
+	boxWhisker?: import('../ex/model').ChartExLayoutProperties;
+	boxCategories?: string[];
+	hidden?: boolean;
+	numberFormat?: string;
+	smooth?: boolean;
+	showLine?: boolean;
+	stroke?: import('./chart-view-analysis').ChartStrokeView;
+	/** Document-order position, retained when combination groups are painted together. */
+	sourceIndex?: number;
 	shadow?: DrawingSvgShadow;
 	shadowFilter?: string;
 	gradient?: ChartGradientFill;
 	pointGradients?: Record<number, ChartGradientFill>;
+	/** A picture fill (`a:blipFill`) of the series, and of individual points. */
+	picture?: ChartPicturePaint;
+	pointPictures?: Record<number, ChartPicturePaint>;
 	name: string;
 	values: (number | null)[];
 	/** Scatter and bubble X values (numeric categories, or 1..n when the categories are text). */
@@ -84,7 +100,14 @@ export interface ChartGroupView {
 
 /** Neutral data for a chart painter: series resolved, colours chosen, axes scaled. */
 export interface ChartViewModel {
+	funnelGapWidth?: number;
+	regionMap?: import('../region-map/types').RegionMapOptions;
+	dataTable?: ChartDataTableView;
+	dateCategories?: (number | null)[];
+	date1904?: boolean;
+	frameSize?: import('../manual-layout').ChartFrameSize;
 	axes?: ChartAxesView;
+	plotLayout?: ChartManualLayout;
 	legendLayout?: ChartManualLayout;
 	legendOverlay?: boolean;
 	titleLayout?: ChartManualLayout;
@@ -125,7 +148,9 @@ export interface ChartViewModel {
 	xAxis?: AxisScale;
 	/** Bars run horizontally (`bar`), not vertically (`column`). */
 	horizontal: boolean;
-	/** False for chart types this painter does not draw (surface). */
+	/** 3-D charts: the view the painter projects (bar3D, line3D, area3D, pie3D, surface3D). */
+	view3D?: import('./chart-3d-projection').Chart3DViewInput;
+	/** False for chart types this painter does not draw (a surface without a 3-D view). */
 	supported: boolean;
 }
 
@@ -144,6 +169,9 @@ const SUPPORTED: ReadonlySet<ChartSummaryType> = new Set([
 	'stock',
 	'treemap',
 	'sunburst',
+	'funnel',
+	'regionMap',
+	'boxWhisker',
 ]);
 
 /**
@@ -220,10 +248,23 @@ export function chartSummaryView<S extends ChartSummarySeries>(
 		showLegend: chart.showLegend,
 		legendPosition: chart.legendPosition ?? 'r',
 		categories,
-		series,
+		series: type === 'boxWhisker' ? series.filter((s) => !s.hidden) : series,
 		horizontal: type === 'bar',
-		supported: SUPPORTED.has(type),
+		supported: SUPPORTED.has(type) || (type === 'surface' && chart.view3D !== undefined),
 	};
+	if (chart.view3D) model.view3D = chart.view3D;
+	if (chart.funnelGapWidth !== undefined) model.funnelGapWidth = chart.funnelGapWidth;
+	if (chart.series[0]?.regionMap)
+		model.regionMap = resolveRegionValueColors(chart.series[0].regionMap, ctx.drawingColor);
+	if (model.regionMap && chart.series[0]?.fill?.kind === 'solid' && series[0])
+		model.regionMap.fixedColor = series[0].color;
+	const table = chartDataTableView(chart, theme, ctx.drawingColor);
+	if (table) model.dataTable = table;
+	if (chart.date1904 !== undefined) model.date1904 = chart.date1904;
+	if (chart.axes?.some((a) => a.kind === 'date')) model.dateCategories = firstCats.map(toNumber);
+	if (chart.plotLayout) model.plotLayout = chart.plotLayout;
+	if (type === 'boxWhisker')
+		model.categories = [...new Set(model.series.flatMap((s) => s.boxCategories ?? []))];
 	if (chart.title) model.title = chart.title;
 	const titleFormatting = chart.formatting?.entries.title;
 	if (titleFormatting?.layout) model.titleLayout = titleFormatting.layout;
@@ -233,7 +274,7 @@ export function chartSummaryView<S extends ChartSummarySeries>(
 	if (legendFormatting?.overlay !== undefined) model.legendOverlay = legendFormatting.overlay;
 	const titleText = chartTitleText(chart, theme);
 	if (titleText) model.titleText = titleText;
-	const appearance = chartAppearance(chart, theme);
+	const appearance = chartAppearance(chart, theme, (fill) => ctx.picture(fill));
 	if (appearance) model.appearance = appearance;
 
 	if (type === 'scatter' || type === 'bubble') {
@@ -246,16 +287,22 @@ export function chartSummaryView<S extends ChartSummarySeries>(
 		const range = extentOf(xs);
 		model.xAxis = xs.length ? niceScale(range.min, range.max) : niceScale(0, 1);
 	}
+	if (type === 'funnel' || type === 'boxWhisker')
+		series.forEach((s, i) => {
+			const points = chart.series[i]?.pointColors;
+			if (points) s.pointColors = s.values.map((_, j) => drawingColor(points[j]) ?? s.color);
+		});
 	if (type === 'stock') model.stock = stockView(chart.stock, ctx);
 	if (type === 'bubble') bubbleView(chart, model, ctx.evaluateRef);
 	if (type === 'treemap' || type === 'sunburst') hierarchyView(chart, model, ctx.evaluateRef);
-	if (type === 'histogram') histogramView(chart, model);
+	if (type === 'histogram') histogramView(chart, model, ctx);
 	if (extra.length && (type === 'column' || type === 'line' || type === 'area'))
 		chartExtraView(chart, model, ctx, total, collect);
 	if (type === 'waterfall') waterfallView(chart, model, ctx);
 	else if (!byPoint) model.valueAxis = valueAxis(model);
-	applyDataLabels(model, chart.series, extra);
+	applyDataLabels(model, chart.series, extra, ctx.drawingColor);
 	chartExtraAxes(model);
+	if (type === 'histogram' && chart.histogram?.pareto) paretoAxis(model);
 	applyChartAxes(model, chart, ctx.drawingColor);
 	return model;
 }

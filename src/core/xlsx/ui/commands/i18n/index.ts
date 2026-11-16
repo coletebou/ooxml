@@ -1,6 +1,8 @@
 // Every UI-COMMANDS translation table, flattened per locale for `locales/<lang>/commands.ts`.
+import { AUDIT_STRINGS } from './audit';
 import { CORE_FEATURE_STRINGS } from './core-features';
 import { CHART_SERIES_STRINGS } from './chart-series';
+import { FILTER_STRINGS } from './filters';
 import { FORMAT_CELLS_STRINGS } from './format-cells';
 import { MESSAGE_STRINGS } from './messages';
 import { NAVIGATION_STRINGS } from './navigation';
@@ -13,6 +15,7 @@ import { SPARKLINE_STRINGS } from './sparklines';
 import { PIVOT_STRINGS } from './pivots';
 import { SLICER_STRINGS } from './slicers';
 import { PRINT_LAYOUT_STRINGS } from './print-layout';
+import { SMARTART_STRINGS } from './smartart';
 import { type CommandLocale, type Translations, flatten } from './types';
 
 export const COMMAND_TABLES: readonly Translations[] = [
@@ -30,6 +33,9 @@ export const COMMAND_TABLES: readonly Translations[] = [
 	SLICER_STRINGS,
 	PRINT_LAYOUT_STRINGS,
 	WHAT_IF_STRINGS,
+	SMARTART_STRINGS,
+	FILTER_STRINGS,
+	AUDIT_STRINGS,
 ];
 
 export const commandStrings = (locale: CommandLocale): Record<string, string> =>

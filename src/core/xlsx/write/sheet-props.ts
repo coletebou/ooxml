@@ -1,7 +1,8 @@
-import { NS, elements, parseXml } from '../../xml/index';
-import { formatAddress, formatRange, type CellAddress } from '../address';
+import { elements, type XmlElement } from '../../xml/index';
+import { formatAddress, formatRange, rangeContains, type CellAddress } from '../address';
 import { usedRange } from '../cells';
-import type { AutoFilterColumn, ColumnInfo, Worksheet } from '../model';
+import type { ColumnInfo, Worksheet } from '../model';
+import { splitActivePane } from '../layout/split';
 import {
 	defaultSheetView,
 	readAutoFilter,
@@ -12,9 +13,12 @@ import {
 	readTabColor,
 } from '../read/sheet-props';
 import { outerXml } from '../read/xml-util';
+import { filterColumnXml, unresolvedFilter } from './filter-columns';
+import { sortStateXml } from './sort-state';
 import { mergedAttrs } from './attr-merge';
 import { modernHashValues } from './password-hash';
 import { sameModel, snapshotElement, snapshotXml } from './snapshot';
+import type { StyleWriter } from './styles';
 import { colorXml } from './style-xml';
 import { attrs, el, escapeAttr } from './xml-out';
 
@@ -58,6 +62,21 @@ export function dimensionXml(sheet: Worksheet): string {
 	return `<dimension ref="${used ? formatRange(used) : 'A1'}"/>`;
 }
 
+function selectionXml(
+	selection: NonNullable<Worksheet['view']['selection']>,
+	pane: string | undefined,
+): string {
+	const activeCellId = selection.ranges.findIndex((range) =>
+		rangeContains(range, selection.active),
+	);
+	return el('selection', {
+		pane,
+		activeCell: formatAddress(selection.active),
+		activeCellId: activeCellId > 0 ? activeCellId : undefined,
+		sqref: sqref(selection.ranges) || formatAddress(selection.active),
+	});
+}
+
 export function sheetViewsXml(sheet: Worksheet, tabSelected: boolean): string {
 	const source = snapshotElement(sheet, 'sheetViews');
 	if (source && sameModel(readSheetView(source), sheet.view)) {
@@ -87,20 +106,38 @@ export function sheetViewsXml(sheet: Worksheet, tabSelected: boolean): string {
 			state: 'frozen',
 		});
 	}
-	if (view.selection) {
-		inner += el('selection', {
-			pane,
-			activeCell: formatAddress(view.selection.active),
-			sqref: sqref(view.selection.ranges) || formatAddress(view.selection.active),
+	const split = view.split && (view.split.x > 0 || view.split.y > 0) ? view.split : undefined;
+	if (split && !pane) {
+		const { x, y } = split;
+		pane = splitActivePane(split);
+		inner += el('pane', {
+			xSplit: x || undefined,
+			ySplit: y || undefined,
+			topLeftCell: view.topLeft ? formatAddress(view.topLeft) : undefined,
+			activePane: pane,
+			state: 'split',
 		});
 	}
+	if (split) {
+		// One selection per pane, in the order Excel writes them.
+		for (const name of ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'] as const) {
+			const own = name === pane ? view.selection : split.paneSelections?.[name];
+			if (own) inner += selectionXml(own, name);
+		}
+	} else if (view.selection) inner += selectionXml(view.selection, pane);
 	const attributes = attrs({
 		tabSelected: tabSelected || undefined,
 		showGridLines: view.showGridLines ? undefined : false,
 		showRowColHeaders: view.showHeaders ? undefined : false,
 		showZeros: view.showZeros ? undefined : false,
 		rightToLeft: view.rightToLeft || undefined,
-		topLeftCell: !view.freeze && view.topLeft ? formatAddress(view.topLeft) : undefined,
+		topLeftCell: split
+			? split.topLeft
+				? formatAddress(split.topLeft)
+				: undefined
+			: !view.freeze && view.topLeft
+				? formatAddress(view.topLeft)
+				: undefined,
 		showFormulas: view.showFormulas || undefined,
 		view: view.mode,
 		zoomScale: view.zoom !== 100 ? view.zoom : undefined,
@@ -188,58 +225,30 @@ export function protectionXml(sheet: Worksheet): string {
 	return el('sheetProtection', values);
 }
 
-/** The modelled criteria of a kept `<filterColumn>`, to tell whether an edit replaced them. */
-function sourceCriteria(
-	xml: string,
-): { values: string[] | undefined; blank: boolean | undefined } | undefined {
-	try {
-		const wrapped = `<autoFilter xmlns="${NS.x}" ref="A1">${xml}</autoFilter>`;
-		const column = readAutoFilter(parseXml(wrapped).documentElement)?.columns?.[0];
-		return column ? { values: column.values, blank: column.blank } : undefined;
-	} catch {
-		return undefined;
-	}
-}
+const extLstOf = (source: XmlElement | undefined): string =>
+	source
+		? elements(source)
+				.filter((node) => node.localName === 'extLst')
+				.map((node) => outerXml(node))
+				.join('')
+		: '';
 
-function filterColumnXml(column: AutoFilterColumn): string {
-	if (
-		column.sourceXml &&
-		sameModel(sourceCriteria(column.sourceXml), { values: column.values, blank: column.blank })
-	) {
-		const head = /^<filterColumn\b[^>]*?>/.exec(column.sourceXml)?.[0];
-		if (head) {
-			const colId = ` colId="${column.offset}"`;
-			const patched = /\scolId="[^"]*"/.test(head)
-				? head.replace(/\scolId="[^"]*"/, colId)
-				: head.replace(/^<filterColumn\b/, `<filterColumn${colId}`);
-			return patched + column.sourceXml.slice(head.length);
-		}
-	}
-	// Criteria the model does not hold are never written as an empty `<filterColumn>`.
-	if (!column.values?.length && !column.blank) return '';
-	const values = (column.values ?? []).map((value) => el('filter', { val: value })).join('');
-	return el(
-		'filterColumn',
-		{ colId: column.offset },
-		el('filters', { blank: column.blank || undefined }, values) || '<filters/>',
-	);
-}
-
-export function autoFilterXml(sheet: Worksheet): string {
+export function autoFilterXml(sheet: Worksheet, styles?: StyleWriter): string {
 	const filter = sheet.autoFilter;
 	if (!filter) return '';
 	const source = snapshotElement(sheet, 'autoFilter');
-	if (source && sameModel(readAutoFilter(source), filter))
+	if (source && sameModel(unresolvedFilter(readAutoFilter(source)), unresolvedFilter(filter)))
 		return snapshotXml(sheet, 'autoFilter') ?? '';
 	const width = filter.range.end.col - filter.range.start.col + 1;
 	const columns = (filter.columns ?? [])
 		.filter((column) => column.offset >= 0 && column.offset < width)
 		.sort((a, b) => a.offset - b.offset)
-		.map(filterColumnXml)
+		.map((column) => filterColumnXml(column, styles))
 		.join('');
 	// A kept `sortState` (inside the filter) stays only while the range is unchanged.
-	const sort =
-		source && sameModel(readAutoFilter(source)?.range, filter.range)
+	const sort = filter.sortState
+		? sortStateXml(filter.sortState, styles) + extLstOf(source)
+		: source && sameModel(readAutoFilter(source)?.range, filter.range)
 			? elements(source)
 					.filter((node) => node.localName === 'sortState' || node.localName === 'extLst')
 					.map((node) => outerXml(node))

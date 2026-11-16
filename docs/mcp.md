@@ -40,6 +40,15 @@ It supports all four formats by default, or an explicit subset. A selected packa
 that is missing or incompatible fails startup with an installation message.
 Importing a package never starts a stdio transport; each CLI does so explicitly.
 
+## Schema versions
+
+Every tool has an integer `version` (`AutomationTool.version`, default 1), sent to MCP clients as
+`_meta.schemaVersion`. Raise it when a change is breaking (a renamed tool, a new required input, a
+changed input type, narrowed bounds, a changed result shape); optional additions leave it alone.
+`src/core/automation/tool-schemas.test.ts` snapshots every tool's name, kind, version and JSON
+input schema (docx, xlsx, visio; pptx has its own beside its catalogue) in `src/core/automation/__snapshots__/`, so a schema change
+is a visible diff. See [stability.md](stability.md).
+
 ## Coverage
 
 - Word: `docx_inspect` (blocks, stable paragraph ids, runs), `docx_list_form_fields`,
@@ -76,7 +85,7 @@ and totals rows, column names and cells (at most 10,000, as a range read).
 
 PowerPoint uses the same definitions: `pptxTools` in `ooxml-core/pptx/automation`
 (`src/core/pptx/automation/catalogue/`), registered by `pptx-viewer-mcp` with the same
-`registerAutomationTools` call. It keeps its established 73 tool names (`get_slide`, not
+`registerAutomationTools` call. It keeps its established 74 tool names (`get_slide`, not
 `pptx_get_slide`). Each wraps a core tool function (`(ctx, params) => ToolResult`): the deck is
 loaded from the bytes, the function runs, and an edit that marked the deck dirty returns the
 saved bytes; one that changed nothing (a list action) writes nothing. Reads accept `.pptx` and

@@ -20,15 +20,6 @@ export default defineConfig({
 	markdown: { theme: { light: 'vitesse-dark', dark: 'vitesse-dark' } },
 	head: [
 		['meta', { name: 'theme-color', content: '#107c41' }],
-		['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
-		['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
-		[
-			'link',
-			{
-				rel: 'stylesheet',
-				href: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap',
-			},
-		],
 		['meta', { property: 'og:type', content: 'website' }],
 		['meta', { property: 'og:title', content: 'xlsx-viewer documentation' }],
 		[
@@ -72,6 +63,7 @@ export default defineConfig({
 				text: 'Reference',
 				items: [
 					{ text: 'Element API', link: '/api' },
+					{ text: 'OneDrive integration', link: '/onedrive' },
 					{ text: 'Theming', link: '/theming' },
 					{ text: 'Localization', link: '/localization' },
 				],
@@ -91,6 +83,8 @@ export default defineConfig({
 				text: 'Project Status',
 				items: [
 					{ text: 'Features and limitations', link: '/features' },
+					{ text: 'Preservation guarantee', link: '/preservation' },
+					{ text: 'Supported functions', link: '/functions' },
 					{ text: 'Collaboration', link: '/collaboration' },
 					{ text: 'Package releases', link: '/releasing' },
 					{

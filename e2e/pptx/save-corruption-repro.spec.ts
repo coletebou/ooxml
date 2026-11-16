@@ -68,12 +68,14 @@ async function addSmartArt(page: Page): Promise<void> {
 	await switchToInsertTab(page);
 	await page.getByRole('button', { name: 'SmartArt' }).click();
 	const dialog = page.getByRole('dialog', { name: /Insert SmartArt/iu });
+	// The picker and its buttons are slotted into the shared dialog element, not the shadow box.
+	const smartArtDialog = page.locator('pptx-ui-insert-smartart-dialog');
 	await expect(dialog).toBeVisible();
-	const presetButton = dialog.getByRole('option').first();
+	const presetButton = smartArtDialog.getByRole('option').first();
 	await expect(presetButton).toBeVisible();
 	await presetButton.click();
 	await page.waitForTimeout(200);
-	await dialog.getByRole('button', { name: /^Insert$/iu }).click();
+	await smartArtDialog.getByRole('button', { name: /^Insert$/iu }).click();
 	await page.waitForTimeout(500);
 }
 
@@ -121,10 +123,10 @@ async function editTableCell(page: Page, text: string): Promise<void> {
 	await page.waitForTimeout(300);
 
 	// Type into the cell input
-	const input = page.locator('[data-pptx-viewport] td input[type="text"]');
+	const input = page.locator('[data-pptx-viewport] td [data-table-cell-editor]');
 	await expect(input).toBeVisible({ timeout: 3000 });
 	await input.fill(text);
-	await page.keyboard.press('Enter');
+	await page.keyboard.press('Escape');
 	await page.waitForTimeout(300);
 }
 

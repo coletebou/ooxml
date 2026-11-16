@@ -2,7 +2,20 @@ import type { LayoutDocumentInput, LayoutFloat } from './input';
 import type { LayoutColumnBox, LayoutFloatBox, LayoutPageBox } from './result';
 
 export const FLOAT_WRAP_NOTE =
-	'Text wraps around floating pictures on their largest side (square, tight and through wrapping use the picture’s rectangle, not its outline); lines continuing onto a later page keep their wrapped widths.';
+	'Text wraps around floating pictures on their largest side, or on both sides of a square, tight or through picture whose wrapText is bothSides (all use the picture’s rectangle, not its outline); lines continuing onto a later page keep their wrapped widths.';
+
+/** What placing a float needs: its size and its horizontal and vertical frame. */
+export type FloatFrame = Pick<
+	LayoutFloat,
+	| 'widthPx'
+	| 'heightPx'
+	| 'relativeFromH'
+	| 'alignH'
+	| 'offsetXPx'
+	| 'relativeFromV'
+	| 'alignV'
+	| 'offsetYPx'
+>;
 
 interface Span {
 	start: number;
@@ -10,7 +23,7 @@ interface Span {
 }
 
 function horizontalArea(
-	float: LayoutFloat,
+	float: FloatFrame,
 	page: LayoutPageBox,
 	column: Pick<LayoutColumnBox, 'xPx' | 'widthPx'>,
 ): Span {
@@ -33,7 +46,7 @@ function horizontalArea(
 }
 
 function verticalArea(
-	float: LayoutFloat,
+	float: FloatFrame,
 	page: LayoutPageBox,
 	paragraphTopPx: number,
 	paragraphHeightPx: number,
@@ -76,7 +89,7 @@ function place(
  * alignment and offset. `paragraph` is the anchor paragraph's page-relative top and height.
  */
 export function floatPosition(
-	float: LayoutFloat,
+	float: FloatFrame,
 	page: LayoutPageBox,
 	column: Pick<LayoutColumnBox, 'xPx' | 'widthPx'>,
 	paragraph: { topPx: number; heightPx: number },
@@ -135,10 +148,12 @@ export function positionFloats(input: LayoutDocumentInput, pages: LayoutPageBox[
 						widthPx: float.widthPx,
 						heightPx: float.heightPx,
 						partName: float.partName,
+						...(float.pictureFill ? { pictureFill: float.pictureFill } : {}),
 						contentType: float.contentType,
 						...(float.chart ? { chart: float.chart } : {}),
 						behindText: Boolean(float.behindText),
 						...(float.wrap ? { wrap: float.wrap } : {}),
+						...(float.wrapText ? { wrapText: float.wrapText } : {}),
 					});
 				}
 			}

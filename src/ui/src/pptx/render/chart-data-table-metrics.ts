@@ -1,3 +1,4 @@
+import { chartDataTableMetrics } from 'ooxml-core/chart';
 /**
  * Geometry shared by the chart data table (`c:dTable`) renderer and the plot
  * layout that reserves room for it, so the two can never disagree.
@@ -23,7 +24,7 @@ export interface DataTableMetrics {
 	fontSize: number;
 	/** Height of the header row and of each series row. */
 	rowH: number;
-	/** Width of the series-key column left of the plot (0 without keys). */
+	/** Width of the series-name column left of the plot, including optional legend keys. */
 	keyW: number;
 	/** Total table height: header plus one row per series. */
 	height: number;
@@ -38,11 +39,11 @@ export function resolveDataTableMetrics(chartData: PptxChartData): DataTableMetr
 	const sizePt = resolveChartTextStyle(chartData, table.txPr)?.fontSize;
 	const fontSize =
 		sizePt !== undefined ? chartFontPx(sizePt) : resolveChartStyleDefaults(chartData).bodyTextPx;
-	const rowH = Math.max(14, Math.round(fontSize * 1.45));
-	const longestName = chartData.series.reduce((m, s) => Math.max(m, (s.name ?? '').length), 0);
-	const keyW =
-		table.showKeys === false ? 0 : Math.min(160, Math.max(40, longestName * fontSize * 0.55 + 24));
-	return { fontSize, rowH, keyW, height: rowH * (1 + chartData.series.length) };
+	return chartDataTableMetrics(
+		fontSize,
+		chartData.series.map((s) => s.name ?? ''),
+		table.showKeys !== false,
+	);
 }
 
 /**

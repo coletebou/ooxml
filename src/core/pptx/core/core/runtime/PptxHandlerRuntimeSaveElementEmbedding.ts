@@ -16,7 +16,9 @@ import type {
 	ShapePptxElement,
 	ImagePptxElement,
 	PicturePptxElement,
+	PptxTableCell,
 	ShapeStyle,
+	TextStyle,
 } from '../../types';
 import { applyDiagramRelationshipIds } from '../../utils/diagram-relationship-ids';
 import {
@@ -26,8 +28,13 @@ import {
 import { ensureXmlChild } from '../../utils/xml-access';
 import type { PptxSaveState, IPptxSlideRelationshipRegistry } from '../builders';
 import type { GroupChildSpaceOwner } from './group-xfrm-preservation';
+import { addSvgBlipExtension } from './picture-svg-blip';
+import { withSegmentSlideJumpTargets } from './run-slide-jump-targets';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeSaveTextWriter';
 import { shouldWritePictureGeometry } from './save-picture-geometry-gate';
+import { applyNewPictureLayout, type PictureFillSaveContext } from './save-picture-fill';
+import { buildRichCellParagraphs, hasTableCellSource } from './table-cell-rich-xml';
+import { buildCellTextBody, tableCellSegmentsForSave } from './table-cell-segments-xml';
 
 /** Context passed to per-element save processing. */
 export interface SaveSlideContext {
@@ -40,6 +47,8 @@ export interface SaveSlideContext {
 		forceExternal?: boolean,
 	) => string | undefined;
 	readonly getSlideRelationshipMap: () => Map<string, string>;
+	/** The `Target`, from this part, of the deck's slide at `index`; slides only (a slide jump). */
+	readonly slideTargetAt?: ((index: number) => string | undefined) | undefined;
 	readonly resolvedMediaBytes: Map<string, { bytes: Uint8Array; extension: string }>;
 	readonly saveSession: PptxSaveState;
 	readonly slideImageRelationshipType: string;
@@ -53,7 +62,7 @@ export interface SaveSlideContext {
 	 * instead of the colour the load pass resolved onto the child. Absent for a
 	 * top-level element.
 	 */
-	readonly inheritedGroupFill?: ShapeStyle;
+	readonly inheritedGroupFill?: ShapeStyle | undefined;
 	/**
 	 * The ENCLOSING group itself (the immediate parent whose children are
 	 * currently being serialised), which already carries the
@@ -88,9 +97,16 @@ function getMediaReferenceContainer(shape: XmlObject | undefined): XmlObject | u
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	/** Serialize table, chart, and SmartArt data when applicable. */
-	protected applyDataSerialization(shape: XmlObject, el: PptxElement, slideId: string): void {
+	protected applyDataSerialization(
+		shape: XmlObject,
+		el: PptxElement,
+		slideId: string,
+		links?: Pick<SaveSlideContext, 'resolveHyperlinkRelationshipId' | 'slideTargetAt'>,
+	): void {
 		if (el.type === 'table' && 'tableData' in el && (el as TablePptxElement).tableData) {
-			this.serializeTableDataToXml(shape, (el as TablePptxElement).tableData!);
+			this.serializeTableDataToXml(shape, (el as TablePptxElement).tableData!, (xmlCell, cell) =>
+				this.writeTableCellSegments(xmlCell, cell, links, el.id),
+			);
 		}
 		if (el.type === 'chart' && 'chartData' in el && el.chartData) {
 			this.serializeChartDataToXml(el.chartData, slideId);
@@ -102,6 +118,46 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				this.serializeSmartArtDataToXml(saEl, slideId);
 			}
 		}
+	}
+
+	/**
+	 * Write a cell's `a:txBody` from its rich segments, through the same
+	 * paragraph and run writer as shape text. `false` when the cell has none
+	 * to write (every loaded cell), so the caller writes its flat text.
+	 */
+	private writeTableCellSegments(
+		xmlCell: XmlObject,
+		cell: PptxTableCell,
+		links: Pick<SaveSlideContext, 'resolveHyperlinkRelationshipId' | 'slideTargetAt'> | undefined,
+		elementId?: string,
+	): boolean {
+		const segments = tableCellSegmentsForSave(cell);
+		if (!segments) {
+			return false;
+		}
+		// An edited cell read from the deck keeps each run's own markup.
+		if (hasTableCellSource(segments)) {
+			xmlCell['a:txBody'] = buildCellTextBody(
+				xmlCell['a:txBody'] as XmlObject | undefined,
+				buildRichCellParagraphs(segments, (style) =>
+					this.createRunPropertiesFromTextStyle(style, links?.resolveHyperlinkRelationshipId),
+				),
+			);
+			return true;
+		}
+		const paragraphs = this.createParagraphsFromTextContent(
+			cell.text,
+			cell.style?.align ? ({ align: cell.style.align } as TextStyle) : undefined,
+			withSegmentSlideJumpTargets(segments, links?.slideTargetAt, (index) =>
+				this.reportMissingSlideJumpTarget(elementId, index),
+			),
+			links?.resolveHyperlinkRelationshipId,
+		);
+		xmlCell['a:txBody'] = buildCellTextBody(
+			xmlCell['a:txBody'] as XmlObject | undefined,
+			paragraphs,
+		);
+		return true;
 	}
 
 	/** Apply image crop, effects, and alt text for picture/image elements. */
@@ -204,15 +260,38 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (parsedImage) {
 			let targetImagePath = el.imagePath;
 			if (!targetImagePath) {
-				targetImagePath = ctx.saveSession.nextMediaPath(parsedImage.extension);
-				const relationshipId = ctx.slideRelationshipRegistry.nextRelationshipId();
+				// A new picture: identical bytes share one media part (and, on one
+				// slide, one relationship) instead of a copy per picture.
+				const media = ctx.saveSession.mediaPathForContent(parsedImage.bytes, parsedImage.extension);
+				targetImagePath = media.path;
 				const relativeMediaPath = targetImagePath.replace(/^ppt\//u, '../');
-				ctx.slideRelationships.push({
-					'@_Id': relationshipId,
-					'@_Type': ctx.slideImageRelationshipType,
-					'@_Target': relativeMediaPath,
-				});
+				const existingRelationshipId = media.reused
+					? ctx.slideRelationships.find(
+							(rel) =>
+								rel['@_Type'] === ctx.slideImageRelationshipType &&
+								rel['@_Target'] === relativeMediaPath,
+						)?.['@_Id']
+					: undefined;
+				const relationshipId =
+					typeof existingRelationshipId === 'string'
+						? existingRelationshipId
+						: ctx.slideRelationshipRegistry.nextRelationshipId();
+				if (relationshipId !== existingRelationshipId) {
+					ctx.slideRelationships.push({
+						'@_Id': relationshipId,
+						'@_Type': ctx.slideImageRelationshipType,
+						'@_Target': relativeMediaPath,
+					});
+				}
 				shape = this.createPictureXml(el, relationshipId);
+				this.embedNewSvgVariant(el, shape, ctx);
+				const blipFill = shape['p:blipFill'] as XmlObject | undefined;
+				if (blipFill) {
+					applyNewPictureLayout(blipFill, el, this.pictureFillSaveContext(el, ctx));
+				}
+				if (media.reused) {
+					return shape;
+				}
 			}
 			if (targetImagePath) {
 				// Never write bytes of one format into a file with a different
@@ -236,7 +315,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 					this.zip.file(targetImagePath, parsedImage.bytes);
 				}
 			}
-		} else {
+		} else if (!(el.imagePath && this.blobUrlCache.has(el.imageData!))) {
+			// In browsers a loaded image is shown through a blob: URL this handler minted for its
+			// own package part (`createImageUrl`). Its bytes are unchanged and already in the
+			// package at `imagePath`, so there is nothing to embed and nothing to warn about.
 			this.compatibilityService.reportWarning({
 				code: 'SAVE_IMAGE_PAYLOAD_UNSUPPORTED',
 				message:
@@ -247,6 +329,82 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			});
 		}
 		return shape;
+	}
+
+	/** Add an image relationship from the slide to `mediaPath`; its id. */
+	private addSlideImageRelationship(mediaPath: string, ctx: SaveSlideContext): string {
+		const relationshipId = ctx.slideRelationshipRegistry.nextRelationshipId();
+		ctx.slideRelationships.push({
+			'@_Id': relationshipId,
+			'@_Type': ctx.slideImageRelationshipType,
+			'@_Target': mediaPath.replace(/^ppt\//u, '../'),
+		});
+		return relationshipId;
+	}
+
+	/** What the picture-fill writers need, bound to `el` on the slide being saved. */
+	protected pictureFillSaveContext(el: PptxElement, ctx: SaveSlideContext): PictureFillSaveContext {
+		return {
+			emuPerPx: PptxHandlerRuntime.EMU_PER_PX,
+			parse: (xml) => this.parser.parse(xml) as XmlObject,
+			embed: (dataUrl) => {
+				const parsed = this.parseDataUrlToBytes(dataUrl);
+				if (!parsed) {
+					return undefined;
+				}
+				const mediaPath = ctx.saveSession.nextMediaPath(parsed.extension);
+				this.zip.file(mediaPath, parsed.bytes);
+				return this.addSlideImageRelationship(mediaPath, ctx);
+			},
+			warn: (code, message) =>
+				this.compatibilityService.reportWarning({
+					code,
+					message,
+					scope: 'element',
+					slideId: ctx.slide.id,
+					elementId: el.id,
+				}),
+		};
+	}
+
+	/**
+	 * For a new SVG picture (`svgData` without a part yet), write the SVG part
+	 * and point the blip's `asvg:svgBlip` extension at it; the blip itself
+	 * embeds the raster (`imageData`).
+	 */
+	private embedNewSvgVariant(
+		el: PptxImageLikeElement,
+		picture: XmlObject,
+		ctx: SaveSlideContext,
+	): void {
+		const svgData = (el as { svgData?: string; svgPath?: string }).svgData;
+		if (!svgData || (el as { svgPath?: string }).svgPath) {
+			return;
+		}
+		const parsed = this.parseDataUrlToBytes(svgData);
+		if (!parsed || parsed.extension.toLowerCase() !== 'svg') {
+			return;
+		}
+		const media = ctx.saveSession.mediaPathForContent(parsed.bytes, 'svg');
+		const target = media.path.replace(/^ppt\//u, '../');
+		const existing = media.reused
+			? ctx.slideRelationships.find(
+					(rel) => rel['@_Type'] === ctx.slideImageRelationshipType && rel['@_Target'] === target,
+				)?.['@_Id']
+			: undefined;
+		const relationshipId =
+			typeof existing === 'string' ? existing : ctx.slideRelationshipRegistry.nextRelationshipId();
+		if (relationshipId !== existing) {
+			ctx.slideRelationships.push({
+				'@_Id': relationshipId,
+				'@_Type': ctx.slideImageRelationshipType,
+				'@_Target': target,
+			});
+		}
+		if (!media.reused) {
+			this.zip.file(media.path, parsed.bytes);
+		}
+		addSvgBlipExtension(picture, relationshipId);
 	}
 
 	/** Embed media data and manage relationships for media elements. */

@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { calculateViewportFit, editorViewportFitFor, getSlideBackgroundStyle } from 'ooxml-ui/pptx';
-import type { ViewportFitPadding } from 'ooxml-ui/pptx';
+import {
+	calculateViewportFit,
+	editorViewportFitFor,
+	getSlideBackgroundStyle,
+	measureViewportClientSize,
+	observeViewportClientSize,
+} from 'ooxml-ui/pptx';
+import type { SlideFindHighlights, ViewportClientSize, ViewportFitPadding } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxSlide } from 'pptx-viewer-core';
 import type { CSSProperties } from 'vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import { provideFindHighlights } from '../composables/find-highlights';
 import { RULER_THICKNESS } from '../composables/ruler-utils';
 import type { RulerUnit } from '../composables/ruler-utils';
 import type { CanvasSize } from '../types';
@@ -60,7 +67,13 @@ const props = defineProps<{
 	 * static text render while the editor overlay draws it instead.
 	 */
 	inlineEditingElementId?: string | null;
+	/** The selection, whose boxes {@link SlideStage} keeps exact while it is edited. */
+	selectedElementIds?: readonly string[];
+	/** The Find bar's matches on this slide, marked in the text (`findTextHighlightsByElement`). */
+	findHighlights?: SlideFindHighlights;
 }>();
+
+provideFindHighlights(() => props.findHighlights);
 
 const emit = defineEmits<{
 	'update:fitScale': [number];
@@ -104,9 +117,10 @@ defineExpose({
 
 /**
  * Compute and emit fit using the host policy, retaining existing ruler gutters.
- * Emits 1 when the viewport is unmeasured.
+ * Emits 1 when the viewport is unmeasured. `measured` is the viewport's client
+ * size when the caller has just measured it.
  */
-function recomputeFit(): void {
+function recomputeFit(measured?: ViewportClientSize): void {
 	const el = viewportRef.value;
 	const { width, height } = props.canvasSize;
 	if (!el || !width || !height) {
@@ -123,10 +137,13 @@ function recomputeFit(): void {
 	// thickness horizontally, because `margin: auto` splits the slack evenly
 	// and only the left half is the gutter the strip needs.
 	const gutter = props.showRulers ? RULER_THICKNESS : 0;
+	// Fractional, not clientWidth: a whole-pixel size rounds up by up to half a pixel and the
+	// fitted slide would overflow the viewport by that much.
+	const client = measured ?? measureViewportClientSize(el);
 	const fit = calculateViewportFit(
 		{
-			viewportWidth: el.clientWidth,
-			viewportHeight: el.clientHeight,
+			viewportWidth: client.width,
+			viewportHeight: client.height,
 			canvasWidth: width,
 			canvasHeight: height,
 			fitPadding: props.fitPadding,
@@ -134,24 +151,25 @@ function recomputeFit(): void {
 			horizontalGutter: gutter * 2,
 			verticalGutter: gutter,
 		},
-		editorViewportFitFor(el.clientWidth),
+		editorViewportFitFor(client.width),
 	);
 	emit('update:fitScale', fit.scale);
 }
 
-let observer: ResizeObserver | null = null;
+let stopObserving: (() => void) | null = null;
 
 onMounted(() => {
-	recomputeFit();
-	if (typeof ResizeObserver !== 'undefined' && viewportRef.value) {
-		observer = new ResizeObserver(() => recomputeFit());
-		observer.observe(viewportRef.value);
+	if (!viewportRef.value) {
+		recomputeFit();
+		return;
 	}
+	// Measures now, then on every client-size change, padding-only ones included.
+	stopObserving = observeViewportClientSize(viewportRef.value, (client) => recomputeFit(client));
 });
 
 onBeforeUnmount(() => {
-	observer?.disconnect();
-	observer = null;
+	stopObserving?.();
+	stopObserving = null;
 });
 
 // Re-fit when the authored slide size changes (e.g. switching decks), and when
@@ -164,7 +182,7 @@ watch(
 		props.fitPadding,
 		props.maxFitScale,
 	],
-	recomputeFit,
+	() => recomputeFit(),
 	{ deep: true },
 );
 </script>
@@ -196,6 +214,7 @@ watch(
 				:template-elements="templateElements"
 				:edit-template-mode="editTemplateMode"
 				:inline-editing-element-id="inlineEditingElementId"
+				:selected-element-ids="selectedElementIds"
 				interactive
 			>
 				<slot />

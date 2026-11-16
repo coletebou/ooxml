@@ -1,4 +1,10 @@
-import type { PptxData, PptxSlide, PptxElement } from '../index';
+import type {
+	PptxCustomShow,
+	PptxData,
+	PptxSlide,
+	PptxElement,
+	PptxHandlerSaveOptions,
+} from '../index';
 import type { Doc as YDoc } from 'yjs';
 
 /**
@@ -9,26 +15,22 @@ export interface ToolContext {
 	/** Current presentation data (parsed PptxData from pptx-viewer-core). */
 	pptxData: PptxData;
 	/** Optional: resolve external image paths to binary data. */
-	resolveImage?: (path: string) => Promise<Uint8Array>;
+	resolveImage?: ((path: string) => Promise<Uint8Array>) | undefined;
 	/** Optional: resolve external media paths to binary data. */
-	resolveMedia?: (path: string) => Promise<Uint8Array>;
+	resolveMedia?: ((path: string) => Promise<Uint8Array>) | undefined;
 }
 
-/**
- * Save-time instructions that don't live on `pptxData` itself and so cannot
- * be expressed as a model mutation: today, only `ppt/tableStyles.xml`'s
- * archive-level "repoint the default style" / "delete a style" operations
- * (`set_default_table_style`, `delete_table_style`). Mirrors the same-named
- * fields on `pptx-viewer-core`'s save options structurally (not imported, so
- * a tool result stays independent of the core package's internal type
- * export surface).
- */
+/** Save options used by the table-style and custom-show tools. */
 export interface TableStyleSaveOptions {
 	/** GUID to set as `ppt/tableStyles.xml`'s `<a:tblStyleLst @def>`. */
-	tableStylesDefaultId?: string;
+	tableStylesDefaultId?: string | undefined;
 	/** GUIDs to remove from `ppt/tableStyles.xml` entirely. */
-	tableStylesToDelete?: string[];
+	tableStylesToDelete?: string[] | undefined;
+	/** Replacement `p:custShowLst` (set by `manage_custom_shows`); omitted keeps the deck's list. */
+	customShows?: PptxCustomShow[] | undefined;
 }
+
+type ToolSaveOptions = TableStyleSaveOptions & Pick<PptxHandlerSaveOptions, 'slideSize'>;
 
 /**
  * Every tool function returns this.
@@ -44,9 +46,9 @@ export interface ToolResult<T = unknown> {
 	/**
 	 * Extra `handler.save()` instructions this result requires beyond the
 	 * ordinary `pptxData` mutation, merged in by `savePresentation` /
-	 * `executeToolWithContext`. See {@link TableStyleSaveOptions}.
+	 * `executeToolWithContext`.
 	 */
-	saveOptions?: TableStyleSaveOptions;
+	saveOptions?: ToolSaveOptions | undefined;
 }
 
 export type { PptxData, PptxSlide, PptxElement };
@@ -87,7 +89,7 @@ export interface ViewerProvider {
 	replaceContent(
 		filePath: string,
 		bytes: Uint8Array,
-		options: { markDirty: boolean; mimeType?: string },
+		options: { markDirty: boolean; mimeType?: string | undefined },
 	): void;
 	openFile(filePath: string): Promise<void>;
 }
@@ -99,9 +101,9 @@ export interface ExecutionContext {
 	/** File system for reading/writing PPTX files. */
 	filesystem: FileSystemProvider;
 	/** Optional collaboration provider for Y.Doc routing. */
-	collaboration?: CollaborationProvider;
+	collaboration?: CollaborationProvider | undefined;
 	/** Optional viewer integration for live document updates. */
-	viewer?: ViewerProvider;
+	viewer?: ViewerProvider | undefined;
 	/** Agent name for collaboration origin tracking. */
-	agentName?: string;
+	agentName?: string | undefined;
 }

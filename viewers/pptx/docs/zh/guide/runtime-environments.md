@@ -23,6 +23,46 @@ description: 了解 pptx-viewer 在浏览器、Node.js 和 Web Worker 中的支�
 
 浏览器无法像桌面应用一样直接使用完整的系统字体目录，因此 `pptx-viewer` 按三个步骤解析演示文稿中的字体：优先使用阅读者设备上已安装的原字体；否则在排版前从 Google Fonts 加载经过验证、字形度量兼容的替代字体（Calibri -> Carlito、Cambria -> Caladea、Arial -> Arimo、Times New Roman -> Tinos、Courier New -> Cousine、Georgia -> Gelasio），使换行和文本尺寸尽量保持与 PowerPoint 一致；两者均不可用时，才通过 PANOSE 分类回退到同类通用字体，此时字形度量可能发生变化。
 
+加载演示文稿时，查看器会短暂等待（150 毫秒）幻灯片所用的 Google Fonts 字体，使已缓存的字体不会先以替代字体显示。首次下载在慢速网络上不会拖延演示文稿：超过 150 毫秒，或请求失败（离线、被拦截）时立即以度量兼容的替代字体显示演示文稿，下载期间状态栏显示“正在下载字体（1/2）”，迟到的字体在到达后重新排版。已安装和嵌入的字体无需等待。
+
+所有五种绑定的“开始”字体下拉框还会列出 Google Fonts 实际支持的字重，例如 `DM Sans Light`、`DM Sans Medium` 和 `DM Sans SemiBold`。常规字重保留原字体名；选择字重后，保存文件也保留该名称。内置元数据不会为未知、嵌入或自定义字体虚构字重。宿主可从不依赖 DOM 的运行时入口 `ooxml-ui/pptx/render/font-catalog` 导入 `buildFontCatalog`，并设置 `{ includeWeightVariants: true }` 获取相同的 `{ family, weight }` 变体，无需导入编辑器。省略该选项时，目录输出保持不变。参见[字体选择器 API 表](https://github.com/ChristopherVR/ooxml/blob/main/docs/font-loading.md#font-picker-weights)。
+
+### 字体与隐私 {#fonts-and-privacy}
+
+从 Google Fonts 获取替代字体时，读者的浏览器会访问 `fonts.googleapis.com` 和 `fonts.gstatic.com`，从而向 Google 暴露读者的 IP 地址。默认情况下由读者通过 文件 > 选项 > 信任中心 选项“下载未安装或未嵌入的字体（Google Fonts）”决定，该选项默认开启。关闭后立即作用于当前打开的演示文稿（查看器会移除其网络字体样式表）以及之后的每次加载，并与其他选项一起保存。宿主可以改用 `googleFonts` 选项来决定，所有绑定均支持：
+
+- 未设置（默认）：由信任中心选项决定；开启时按上文所述从 Google Fonts 加载替代字体；
+- `googleFonts: false`：不向 Google 发送任何请求；文字使用已安装字体、演示文稿中嵌入的字体或 PANOSE 回退字体，因此换行可能与 PowerPoint 不同。信任中心选项显示为关闭且只读；
+- `googleFonts: { baseUrl: 'https://fonts.example.com/css2' }`：改为向自托管镜像发送相同的 CSS2 请求，信任中心选项显示为开启且只读。镜像必须按 Google Fonts CSS2 查询格式（`?family=...&display=swap`）返回兼容的 `@font-face` CSS，字体文件也应自托管，才能确保没有请求到达 Google。若 `baseUrl` 不是绝对的 `http(s)` URL，则关闭回退（该选项随之显示为关闭且只读）并输出警告。
+
+WordArt 字形轮廓的获取以及幻灯片图片导出时内联的网络字体也遵循该选项，因为两者都复用查看器解析出的样式表 URL。两者都通过 `fetch()` 读取 CSS 和字体文件，因此镜像必须像 Google 自己的服务器一样发送 CORS 响应头（`Access-Control-Allow-Origin`）。
+
+### 外部内容与隐私 {#external-content-and-privacy}
+
+演示文稿可以将图片（包括图片填充和图片项目符号）、视频、音频和海报帧链接到其他服务器（`TargetMode="External"` 关系），而不是嵌入文件中。打开这样的演示文稿时，读者的浏览器会获取这些内容，从而让该服务器的运营者得知读者的 IP 地址以及演示文稿已被打开。默认情况下由信任中心选项“允许外部内容”决定，且该选项默认开启。宿主可以改用 `allowExternalContent` 选项来决定，所有绑定均支持：
+
+- 未设置（默认）：由信任中心选项决定；
+- `allowExternalContent: false`：不获取任何链接内容，幻灯片只显示嵌入的内容，信任中心选项显示为关闭且只读；
+- `allowExternalContent: true`：获取链接内容，该选项显示为开启且只读。
+
+该值适用于查看器打开的每个演示文稿，包括为“比较”打开的演示文稿以及从其他文件重用的幻灯片；更改从下一次加载起生效。超链接不受影响：只有读者点击时才会打开。字体单独控制：既未安装也未嵌入的演示文稿字体会从 Google Fonts 加载，除非通过信任中心选项“下载未安装或未嵌入的字体”或 `googleFonts` 选项关闭（参见[字体与隐私](#fonts-and-privacy)）。
+
+在协作会话中，来自其他参与者的幻灯片已经解析完毕，不会再次应用此开关：如果某位参与者的查看器允许外部内容，他共享的幻灯片可能引用链接的 URL。如果这一点很重要，请为所有参与者使用相同的 `allowExternalContent` 值。
+
+### 加载限制 {#load-limits}
+
+宿主若要打开不受信任的演示文稿（公开上传、附件等），可以用 `limits` 选项限制单个演示文稿能引起的工作量。所有绑定均支持该选项，并会原样传给 `PptxHandler.load`：
+
+| 字段                   | 默认值  | 限制对象                                                        |
+| ---------------------- | ------- | --------------------------------------------------------------- |
+| `maxInputBytes`        | 不限    | 交给查看器的文件本身，在打开之前检查。                          |
+| `maxUncompressedBytes` | 500 MiB | 解压后的压缩包，先按声明的大小检查，读取每个部件时再次检查。    |
+| `maxEntries`           | 65,536  | 压缩包中的部件（ZIP 条目）数量；65,536 也是允许的最大值。       |
+| `maxSlides`            | 不限    | `ppt/presentation.xml` 中列出的幻灯片，在解析任何幻灯片前检查。 |
+| `maxShapes`            | 不限    | 幻灯片上创作的元素（含组合内的成员），每解析一张幻灯片时计数。  |
+
+未设置或省略某个字段时保留默认值，因此不设置 `limits` 的查看器行为与以前相同。超出限制的演示文稿会在该检查处停止加载，查看器显示加载错误界面，并给出注明限制和演示文稿实际值的本地化消息，例如“此演示文稿有 120 张幻灯片，超过此查看器允许的 100 张。”不是正有限数的值会被作为错误拒绝，而不是被忽略。这些限制适用于查看器打开的演示文稿（`content` / `source` 演示文稿以及 文件 > 打开），不适用于用户为“比较”或“重用幻灯片”选择的文件；更改从下一次加载起生效。不使用查看器时，可以将同一对象作为 `handler.load(buffer, { limits })` 传入（参见[加载选项](../core/loading.md#load-options)）。
+
 ### 运行程序动作（`ppaction://program`） {#run-program-actions-ppaction-program}
 
 PowerPoint 的“运行程序”动作设置可以解析，并在加载和保存过程中完整保留原始程序路径或命令。编辑时，也可以像其他动作一样在“动作设置”对话框中查看和修改。浏览器无法执行的是桌面 PowerPoint 在放映时所做的事：启动本地可执行程序。Web 平台出于安全设计，没有提供让网页启动任意本地程序的 API。

@@ -1,0 +1,18 @@
+{
+	"name": "ooxml-demo-onedrive",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Demo-only OneDrive sign-in for the product demos: builds a CloudFileProvider from an app registration (MSAL) or a pasted Graph Explorer token. Never published; a real host owns sign-in.",
+	"type": "module",
+	"exports": {
+		".": "./index.ts"
+	},
+	"dependencies": {
+		"@azure/msal-browser": "5.29.1",
+		"ooxml-core": "workspace:*",
+		"ooxml-ui": "workspace:*"
+	},
+	"devDependencies": {
+		"vite": "^8.3.8"
+	}
+}

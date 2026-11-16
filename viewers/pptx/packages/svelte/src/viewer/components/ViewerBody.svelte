@@ -15,6 +15,8 @@
 	import { EDITOR_SLIDE_RAIL_WIDTH, MAX_ZOOM_SCALE, MIN_ZOOM_SCALE, observeElementHeight } from 'ooxml-ui/pptx';
 
 	import { canvasPinchZoom } from '../canvas-pinch-zoom';
+	import { viewportNavigation } from '../viewport-navigation';
+	import { viewportClientSize } from '../viewport-client-size';
 	import InspectorPanel from './inspector/InspectorPanel.svelte';
 	import NotesPanel from './NotesPanel.svelte';
 	import LayoutGalleryMenu from './ribbon/home/LayoutGalleryMenu.svelte';
@@ -40,6 +42,7 @@
 		current,
 		onselect,
 		loading,
+		fontProgress = null,
 		isEncrypted,
 		error,
 		activeSlide,
@@ -57,6 +60,7 @@
 		onstageholder,
 		getzoomscale,
 		onpinchzoom,
+		dragpans = false,
 		notesExpanded,
 		onNotesCommit,
 		onNotesToggle,
@@ -81,16 +85,19 @@
 		aiActive = false,
 		aiHighlights = [],
 		aiChangeBatch = null,
+		findHighlights,
 		onaipickelement,
 		onaskai,
 		onfixai,
 	}: ViewerBodyProps = $props();
 
-	// The template's bind:clientWidth/Height write these (invisible to the linter).
-	// eslint-disable-next-line prefer-const
+	// The fractional client size of the viewport, written by the `viewportClientSize` action.
 	let viewportWidth = $state(0);
-	// eslint-disable-next-line prefer-const
 	let viewportHeight = $state(0);
+	function setViewportSize(size: { width: number; height: number }): void {
+		viewportWidth = size.width;
+		viewportHeight = size.height;
+	}
 	$effect(() => {
 		onstageresize(viewportWidth, viewportHeight);
 	});
@@ -203,14 +210,20 @@
 	<div class="pptx-svelte-main">
 		<div
 			class="pptx-svelte-viewport"
-			bind:clientWidth={viewportWidth}
-			bind:clientHeight={viewportHeight}
+			use:viewportClientSize={setViewportSize}
 			data-pptx-viewport
 			use:canvasPinchZoom={{
 				getScale: getzoomscale,
 				minScale: MIN_ZOOM_SCALE,
 				maxScale: MAX_ZOOM_SCALE,
 				onPinchZoom: onpinchzoom,
+			}}
+			use:viewportNavigation={{
+				getScale: getzoomscale,
+				setScale: onpinchzoom,
+				dragPans: dragpans,
+				active: !presenting,
+				slideId: activeSlide?.id,
 			}}
 		>
 			<ViewerStage
@@ -221,6 +234,7 @@
 				{mediaDataUrls}
 				{current}
 				{loading}
+				{fontProgress}
 				{isEncrypted}
 				{error}
 				{activeSlide}
@@ -254,6 +268,7 @@
 				{aiActive}
 				{aiHighlights}
 				{aiChangeBatch}
+				{findHighlights}
 				{onaipickelement}
 				{onaskai}
 				{onfixai}

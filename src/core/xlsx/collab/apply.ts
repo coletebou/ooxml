@@ -12,6 +12,11 @@ import type { Dirty } from './dirty';
 import { applyColumns, applyMerges, applyRows } from './lines';
 import { readNames } from './names';
 import { type SharedWorkbook, childMap, jsonEqual } from './schema';
+import { applySheetParts } from './sheet-parts';
+import { partHost } from './write';
+
+/** Whether the room's writers share the object-list parts (see write.ts). */
+const sharesParts = (shared: SharedWorkbook): boolean => shared.meta.get('parts') === 1;
 import { type SheetEntry, type SheetKeys, sheetEntries } from './sheets';
 import { StyleBridge } from './styles';
 
@@ -64,6 +69,11 @@ export function applyShared(
 			applyMerges(sheet, merges);
 			sheetsTouched.add(index);
 		}
+		if (
+			sharesParts(shared) &&
+			applySheetParts(sheet, partHost(shared, keys, key), full ? undefined : part.parts)
+		)
+			sheetsTouched.add(index);
 		const cells = childMap(map, 'cells');
 		if (!cells) continue;
 		const put = (address: string): void => {
@@ -131,6 +141,9 @@ function applyList(workbook: Workbook, keys: SheetKeys, entries: SheetEntry[]): 
 		if (entry.defaultRowHeight !== undefined) sheet.defaultRowHeight = entry.defaultRowHeight;
 		if (entry.defaultColWidth !== undefined) sheet.defaultColWidth = entry.defaultColWidth;
 		else delete sheet.defaultColWidth;
+		if (entry.threadedCommentsXml !== undefined)
+			sheet.threadedCommentsXml = entry.threadedCommentsXml;
+		else delete sheet.threadedCommentsXml;
 		return sheet;
 	});
 	workbook.sheets.splice(0, workbook.sheets.length, ...next);

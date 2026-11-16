@@ -1,7 +1,10 @@
 import {
+	historyTheme,
+	loadedThemeName,
 	overlayInlineTextSnapshot,
 	overlayMasterViewInlineSnapshot,
 	partitionTemplateElements,
+	restoreCrossedTheme,
 } from 'ooxml-ui/pptx';
 import type {
 	PptxAppProperties,
@@ -148,6 +151,10 @@ export function applyRemoteEditorSlides(state: EditorState, slides: PptxSlide[])
 /**
  * Restore an undo/redo snapshot. The snapshot is re-cloned on the way in so the
  * stacked entry stays pristine and can be restored again (redo, then undo).
+ *
+ * A step that crosses a theme change puts the recorded theme back in the editor,
+ * hands it to the viewer (`onThemeRestored`), and writes the parts that differ
+ * into the handler's theme parts, so a save after it writes the theme it shows.
  */
 export function restoreEditorSnapshot(
 	state: EditorState,
@@ -156,6 +163,7 @@ export function restoreEditorSnapshot(
 	if (!snapshot) {
 		return;
 	}
+	restoreEditorTheme(state, historyTheme(state.theme, state.slideMasters), snapshot.theme);
 	const restored = createEditorSnapshot(snapshot);
 	state.slides = restored.slides;
 	state.templateElementsBySlideId = restored.templateElementsBySlideId;
@@ -175,6 +183,24 @@ export function restoreEditorSnapshot(
 	state.interactionActive = false;
 	state.selection.prune((id) => state.activeElements.some((element) => element.id === id));
 	state.commitChange();
+}
+
+function restoreEditorTheme(
+	state: EditorState,
+	current: EditorSnapshot['theme'],
+	target: EditorSnapshot['theme'],
+): void {
+	const theme = restoreCrossedTheme(
+		state.theme,
+		current,
+		target,
+		state.getHandler(),
+		loadedThemeName(state.themeOptions(), state.slideMasters),
+	);
+	if (theme) {
+		state.theme = theme;
+		state.onThemeRestored(theme);
+	}
 }
 
 /** Replace the document properties (File > Info) as one undoable edit. */

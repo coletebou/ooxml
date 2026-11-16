@@ -1,10 +1,11 @@
-import type { DocumentStorage } from 'ooxml-core/embedding';
+import type { CloudFileProvider, DocumentStorage } from 'ooxml-core/embedding';
 import type { SurfaceHostActions } from './building-blocks-actions';
 import type { RibbonAddInTab } from '../ribbon/add-in-tabs';
 import { FormatDialogs } from './format-dialogs';
 import type { EditorState, Transaction } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { DocumentModel } from 'ooxml-core/docx';
+import { inspectorActions } from './document-inspector-apply';
 import { createDocument } from 'ooxml-core/docx';
 import type { loadDocument } from 'ooxml-core/docx/load';
 import { refreshEditorControls } from './editor-controls';
@@ -34,11 +35,16 @@ import { DirtyState } from 'ooxml-core/docx/ui';
 import { PageTracker, syncPageState } from './page-sync';
 import type { PageNavigator } from './page-navigator';
 import type { HeadingNavigator } from './heading-navigator';
-import { HEADER_FOOTER_INPUT, isFormsProtected } from 'ooxml-core/docx/ui';
+import type { DocxChartFormatPane } from './chart-format-pane';
+import { HEADER_FOOTER_INPUT, locksStories } from 'ooxml-core/docx/ui';
 import { newPicturePartName } from './picture-commands';
+import { stageWatermarkPicture, watermarkPictureSize } from './watermark-picture';
 import { ViewOptions } from './view-options';
+import { ReadAloudSession } from './read-aloud-session';
+import { DocxWebfonts } from './docx-webfonts';
 import { currentSectionIndex } from './section-commands';
 import { syncHeaderFooterRibbon } from './header-footer-ribbon';
+import { syncSmartArtDesign } from './smartart-design-ribbon';
 
 export type LoadedDocument = Awaited<ReturnType<typeof loadDocument>>;
 
@@ -62,6 +68,8 @@ export interface ShellParts {
 	surfaceNavigation?: () => void;
 	navigator?: PageNavigator;
 	headings?: HeadingNavigator;
+	/** The docked Format pane of the selected chart. */
+	chartFormat?: DocxChartFormatPane;
 }
 
 /**
@@ -88,7 +96,12 @@ export class EditorCore {
 	 * the host's switch only, so nothing that assigns it can lift the other two.
 	 */
 	get readOnly(): boolean {
-		return this.hostReadOnly || this.roleLocked || !this.viewOptions.customization.canEdit;
+		return (
+			this.hostReadOnly ||
+			this.roleLocked ||
+			!this.viewOptions.customization.canEdit ||
+			this.cloudFile?.canEdit === false
+		);
 	}
 	set readOnly(value: boolean) {
 		this.hostReadOnly = value;
@@ -136,6 +149,19 @@ export class EditorCore {
 	surfaceActions: SurfaceHostActions = {};
 	/** Where File > Save and Open go instead of a download and the file picker (`storage`). */
 	storage: DocumentStorage | undefined = undefined;
+	/** Cloud places File > Open offers next to this device (`fileProviders`). */
+	fileProviders: readonly CloudFileProvider[] = [];
+	/**
+	 * The file opened from a cloud place: its storage replaces `storage` for this document and
+	 * `canEdit: false` locks the editor on top of the host's switch. Any other load clears it.
+	 */
+	cloudFile: { storage: DocumentStorage; canEdit: boolean } | undefined = undefined;
+	/** Ends the cloud file (a new document loaded), lifting the lock it held. */
+	endCloudFile(): void {
+		if (!this.cloudFile) return;
+		this.cloudFile = undefined;
+		this.reportReadOnly();
+	}
 	locale: EditorLocale = 'en';
 	reviewAuthor = 'Author';
 	theme: EditorThemeMode = 'auto';
@@ -155,6 +181,10 @@ export class EditorCore {
 	readonly parts: PartsController;
 	readonly pages: PageController;
 	readonly viewOptions = new ViewOptions();
+	/** This editor's Read Aloud playback; the browser's one voice is shared with other editors. */
+	readonly readAloud = new ReadAloudSession(this);
+	/** The `googleFonts` option and this editor's webfont `<link>`. */
+	readonly webfonts = new DocxWebfonts();
 	readonly dirtyState: DirtyState;
 	readonly pageTracker: PageTracker;
 	private wordText = '';
@@ -172,6 +202,7 @@ export class EditorCore {
 			paper: () => this.shell.paper,
 			toolbar: () => this.shell.toolbar,
 			reportError: (error) => emit(element, 'document-error', error),
+			refresh: () => this.refreshControls(),
 			newMediaPartName: (contentType) =>
 				this.collab.yjs?.media.partName(contentType) ?? newPicturePartName(contentType),
 			stageMedia: (name, part) => this.collab.yjs?.media.publish(name, part),
@@ -182,6 +213,7 @@ export class EditorCore {
 			historyView: () => (this.parts.usesBodyHistory() ? this.view : this.targetView()),
 			model: () => this.model,
 			canDefineList: () => !this.readOnly && !this.collab.active,
+			theme: () => this.model.theme,
 			zoom: {
 				percent: () => Math.round(this.pages.zoom * 100),
 				setPercent: (percent) => this.pages.setZoom(percent),
@@ -201,6 +233,35 @@ export class EditorCore {
 				current: () => this.pages.currentWatermark(),
 				canEdit: () => !this.readOnly && !this.collab.active,
 				apply: (spec) => this.pages.applyWatermark(spec),
+				stagePicture: (file) =>
+					stageWatermarkPicture(
+						file,
+						(contentType) =>
+							this.collab.yjs?.media.partName(contentType) ?? newPicturePartName(contentType),
+						(name, part) => {
+							this.inserts.pendingMedia.set(name, part);
+							this.collab.yjs?.media.publish(name, part);
+						},
+					),
+				pictureSize: (partName, contentType) =>
+					watermarkPictureSize(this.inserts.media(partName, this.loaded?.media), contentType),
+				textArea: () => {
+					const { width, height, marginLeft, marginRight, marginTop, marginBottom } =
+						this.model.page;
+					return {
+						widthPt: (width - marginLeft - marginRight) * 0.75,
+						heightPt: (height - marginTop - marginBottom) * 0.75,
+					};
+				},
+				reportError: (cause) => dispatchDocumentError(element, cause),
+			},
+			convertNotes: {
+				counts: () => ({
+					footnotes: this.model.footnotes?.length ?? 0,
+					endnotes: this.model.endnotes?.length ?? 0,
+				}),
+				canEdit: () => this.host.canEditOutsideBody(),
+				apply: (conversion) => this.parts.convertNotes(conversion),
 			},
 			pageBorders: {
 				section: () => this.pages.currentSection(),
@@ -211,6 +272,23 @@ export class EditorCore {
 				section: () => this.pages.currentSection(),
 				canEdit: () => !this.readOnly && !this.collab.active,
 				apply: (columns, footnoteColumns) => this.pages.applyColumns(columns, footnoteColumns),
+			},
+			inspector: inspectorActions({
+				view: () => this.view,
+				model: () => this.model,
+				canEdit: () =>
+					!this.readOnly && !this.collab.active && !locksStories(this.model.protection),
+				reportError: (cause) => dispatchDocumentError(this.element, cause),
+			}),
+			restrictEditing: {
+				protection: () => this.model.protection,
+				apply: (protection) => this.applyProtection(protection),
+				user: () => this.reviewAuthor,
+				highlight: () => this.highlightEditableRegions,
+				setHighlight: (on) => {
+					this.highlightEditableRegions = on;
+					this.view?.dispatch(this.view.state.tr.setMeta('docx-protection', true));
+				},
 			},
 		});
 		this.imageMedia = new ImageMediaCache(
@@ -228,21 +306,25 @@ export class EditorCore {
 			locale: () => this.locale,
 			// A document protected for forms lets only its body's fields change, as in Word.
 			canEditOutsideBody: () =>
-				!this.readOnly && !this.collab.active && !isFormsProtected(this.model.protection),
+				!this.readOnly && !this.collab.active && !locksStories(this.model.protection),
 			edited: () => this.markEditedOutsideBody(),
 			reportError: (cause) => dispatchDocumentError(element, cause),
 		};
 		this.parts = new PartsController({
 			...this.host,
 			reviewDisplayMode: () => this.reviewDisplayMode,
+			savedModel: () => this.loaded?.model,
 			images: () => this.imageMedia,
 			plugins: () => this.inserts.plugins(),
 			sectionIndex: () => (this.view ? currentSectionIndex(this.view, this.model) : 0),
 			refreshControls: () => this.refreshControls(),
 			keepOpenWithin: () => [
 				this.shell.toolbar,
+				this.shell.searchPanel?.element,
 				this.inserts.linkDialog.element,
 				this.inserts.pictureDialog.element,
+				this.inserts.smartArt.dialog.element,
+				this.inserts.smartArt.pane,
 				...this.formatDialogs.elements,
 			],
 		});
@@ -259,6 +341,21 @@ export class EditorCore {
 
 	contentWidth(): number {
 		return this.model.page.width - this.model.page.marginLeft - this.model.page.marginRight;
+	}
+
+	/** Review > Restrict Editing > Highlight the regions I can edit. */
+	highlightEditableRegions = true;
+
+	/** Starts or stops Review > Restrict Editing; saving writes it to settings.xml. */
+	applyProtection(protection: DocumentModel['protection']): void {
+		const { protection: _previous, ...rest } = this.model;
+		this.model = protection ? { ...rest, protection } : rest;
+		if (locksStories(protection) && this.parts.activeView())
+			this.parts.closeHeaderFooter(this.shell.canvas, this.shell.paper);
+		// Redraw the editable regions, and the ribbon's disabled commands.
+		this.view?.dispatch(this.view.state.tr.setMeta('docx-protection', true));
+		this.markEditedOutsideBody();
+		this.refreshControls();
 	}
 
 	canEditBody(): boolean {
@@ -327,6 +424,7 @@ export class EditorCore {
 					: assignMissingParagraphIds(applied);
 		view.updateState(repaired ? applied.apply(repaired) : applied);
 		if (docChanged) {
+			this.readAloud.documentEdited();
 			this.model = docToModel(view.state.doc, this.model, previousDoc);
 			if (previousComments !== view.state.doc.attrs.commentThreads)
 				this.shell.review?.commentsPanel.refresh();
@@ -357,6 +455,7 @@ export class EditorCore {
 			);
 		const { searchPanel, printLayout, review, chrome, toolbar } = this.shell;
 		searchPanel?.refresh();
+		this.shell.chartFormat?.refresh();
 		// The open pane follows the caret's thread and whether a selection can take a comment.
 		if (review?.commentsOpen) review.commentsPanel.refresh();
 		if (this.pages.viewMode === 'print') {
@@ -376,6 +475,15 @@ export class EditorCore {
 			Boolean(review?.commentsOpen),
 			this.canEditBody() && (!this.collab.active || Boolean(this.collab.yjs?.sharedComments)),
 		);
+		this.inserts.smartArt.sync();
+		const target = this.targetView();
+		if (toolbar && target)
+			syncSmartArtDesign(
+				toolbar,
+				target.state,
+				target.editable && this.canEditBody(),
+				this.inserts.smartArt.textPaneOpen,
+			);
 		if (status) {
 			this.wordText = status.wordText;
 			chrome?.refresh(status.pageText, status.wordText);

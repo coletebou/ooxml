@@ -20,6 +20,7 @@ import { localizeRibbon } from './ribbon-localize';
 import { applyScreenTips, restoreScreenTips } from './viewer-screen-tips';
 import { CUSTOMIZABLE_TABS, DEFAULT_BEHAVIOUR, type VisioBehaviour } from './viewer-behaviour';
 import { wireRibbonOverflow } from './ribbon-overflow';
+import { renderContextualTabs } from './viewer-contextual-tabs';
 import { wireRibbonTabCue } from './ribbon-tab-cue';
 import { createFindBar, renderFindBar, wireFindBar, type FindBar } from './viewer-search';
 import { ViewerReplace } from './viewer-replace';
@@ -27,10 +28,16 @@ import { fitZoom } from './viewer-fit';
 import { createShapesStrip, createShapesWindow } from './shapes-window';
 import { createBackstage, type BackstagePage } from './backstage';
 import type { CreateVsdxOptions } from 'ooxml-core/visio';
+import type { GoogleFontsOption } from 'ooxml-core/text';
+import { ViewerWebfonts } from './viewer-webfonts';
+import { fontDownloadLock } from '../fonts/font-download-policy';
+import type { VisioTemplateId } from 'ooxml-core/visio/ui';
 import { ViewerBackstage } from './viewer-backstage';
 import type { ViewerPointerGestures } from './viewer-pointer-gestures';
 import { createSizePosition, ViewerSizePosition } from './viewer-size-position';
+import { ViewerInlineSize } from './viewer-inline-size';
 import { createContextMenus, wireContextMenus } from './viewer-context-menu';
+import { syncShapeActions } from './viewer-shape-actions';
 import {
 	applyVisioCommandVisibility,
 	quickAccessShown,
@@ -46,7 +53,8 @@ import {
 	indexedDbRecoveryStore,
 	storageRecoveryStore,
 } from './viewer-autorecover';
-import type { DocumentStorage } from 'ooxml-core/embedding';
+import { normalizeVisioLocale, translateRibbonText } from './ribbon-locale';
+import type { CloudFileProvider, CloudOpenedFile, DocumentStorage } from 'ooxml-core/embedding';
 import { announceFileCommand } from './viewer-file-commands';
 import { RecoverDialog } from './viewer-recover-dialog';
 import { wireTellMe } from './viewer-tell-me';
@@ -58,6 +66,7 @@ import {
 	type StatusBarTheme,
 } from './viewer-options';
 import { ViewerShare } from './viewer-share';
+import { attachVisioShare, type VisioShareUi } from './viewer-share-ui';
 import type { VisioCollaborationOptions, VisioCollaborationState } from './collaboration-types';
 import { wireStencil } from './viewer-stencil';
 import { createRulers, type Rulers } from './viewer-ruler';
@@ -68,12 +77,16 @@ import { ViewerCanvas } from './viewer-canvas';
 import { ViewerCommands } from './viewer-commands';
 import { ViewerPresentation } from './viewer-presentation';
 import type { ViewerLineEndpoints } from './viewer-line-endpoints';
+import type { ViewerControlHandles } from './viewer-control-handles';
 import type { ViewerRotationHandle } from './viewer-rotation-handle';
 import type { ViewerResizeHandles } from './viewer-resize-handles';
 import { editErrorMessage } from 'ooxml-core/visio/ui';
 import { registerViewerControls } from './office-ui';
 import { exportPageSvg, type SvgExportOptions, type SvgExportResult } from './export-svg';
-import { exportDocumentPdf, exportPagePng } from './viewer-export';
+import { exportPagePng } from './viewer-export';
+import { exportDocumentPdfDetailed } from './viewer-pdf';
+import { pdfOptionsFor } from './viewer-pdf-options';
+import type { PdfFontFile } from '../export/pdf-embedded-font';
 import {
 	createPrintSnapshot,
 	type CurrentPagePrintSnapshotOptions,
@@ -111,9 +124,12 @@ export class VisioViewerElement extends BaseElement {
 			this.#fileName,
 			this.#profile.profile,
 			quickAccessShown(this.#behaviour, this.#custom.resolved),
+			this.#saveLabel,
 		);
 	}
 	readonly #custom = new ViewerCustomizationState();
+	/** The progress text of a save to host storage, shown in the title bar while it runs. */
+	#saveLabel: string | undefined;
 	/**
 	 * The inverse of `canEdit`: true makes the drawing read-only and wins over `canEdit`. A
 	 * collaboration `viewer` role also reads as read-only, and turning this off never lifts it.
@@ -147,6 +163,48 @@ export class VisioViewerElement extends BaseElement {
 	set storage(value: DocumentStorage | null | undefined) {
 		this.#storage = value ?? undefined;
 	}
+	/**
+	 * Cloud places for File > Open (`ooxml-core/embedding` `CloudFileProvider`, for example
+	 * OneDrive). When non-empty, Open shows This device and one place per provider that lists
+	 * `.vsdx` drawings. A drawing opened there loads like any other, is read-only when the file
+	 * is (or the host already made the viewer read-only), and saves through its own storage until
+	 * another drawing loads. An empty list restores the plain Open page.
+	 */
+	get fileProviders(): readonly CloudFileProvider[] {
+		return this.#fileProviders;
+	}
+	set fileProviders(value: readonly CloudFileProvider[] | null | undefined) {
+		this.#assertAlive();
+		this.#fileProviders = [...(value ?? [])];
+		this.#backstage.setFileProviders(this.#fileProviders);
+	}
+	/**
+	 * TrueType fonts File > Export > PDF embeds (as subsets) so text outside the standard fonts'
+	 * character set, or in a particular typeface, stays real text. The host supplies the bytes
+	 * (nothing is bundled); a font whose licence forbids embedding is reported and skipped.
+	 */
+	pdfFonts: readonly PdfFontFile[] = [];
+	/**
+	 * Webfont fallback for fonts the drawing uses that the reader has not installed (Calibri,
+	 * Cambria, Aptos and other Office fonts load as their metric-compatible clones Carlito,
+	 * Caladea and so on; other catalogue families load as themselves), so text wraps as saved.
+	 * This is the host's decision: unset leaves it to the reader's File > Options > Trust Center
+	 * toggle (off until the reader turns it on, then Google Fonts); a value set here shows that
+	 * toggle read-only. `false`: off, no request is made. `{ baseUrl }`: CSS2 requests go to that
+	 * mirror (an absolute http(s) URL without credentials, query or fragment; anything else warns
+	 * and stays off), for example `{ baseUrl: 'https://fonts.googleapis.com/css2' }` for Google
+	 * itself. Only public catalogue family names are sent, never text. Read when a drawing loads:
+	 * the first show waits briefly (150 ms, with the loading state up) for the faces, and a face that
+	 * arrives later redraws the page. Setting it applies to the open drawing at once.
+	 */
+	get googleFonts(): GoogleFontsOption | undefined {
+		return this.#webfonts.option;
+	}
+	set googleFonts(value: GoogleFontsOption | undefined) {
+		this.#webfonts.option = value;
+		this.#syncTrust();
+		void this.#refreshWebfonts();
+	}
 	/** What `collaboration-change` last reported. */
 	get collaborationState(): VisioCollaborationState {
 		return this.#share.state;
@@ -170,6 +228,7 @@ export class VisioViewerElement extends BaseElement {
 	#commands: ViewerCommands;
 	#presentation: ViewerPresentation;
 	#lineEndpoints: ViewerLineEndpoints;
+	#controlHandles: ViewerControlHandles;
 	#rotationHandle: ViewerRotationHandle;
 	#resizeHandles: ViewerResizeHandles;
 	#handleState: ViewerState | undefined;
@@ -178,11 +237,16 @@ export class VisioViewerElement extends BaseElement {
 	#panZoom: ViewerPanZoom;
 	#profile: ViewerProfile;
 	#share: ViewerShare;
+	#shareUi: VisioShareUi;
 	#backstage: ViewerBackstage;
 	#pointer: ViewerPointerGestures;
 	#sizePosition: ViewerSizePosition;
+	#inlineSize: ViewerInlineSize;
 	#fileName = '';
 	#storage: DocumentStorage | undefined;
+	#fileProviders: readonly CloudFileProvider[] = [];
+	/** The storage of the drawing opened from a cloud place; it wins over `storage` until another loads. */
+	#openedStorage: DocumentStorage | undefined;
 	#loadToken = 0;
 	#findBar: FindBar;
 	#replace: ViewerReplace;
@@ -204,6 +268,7 @@ export class VisioViewerElement extends BaseElement {
 	#preview: { document: VisioDocument; base: VisioDocument | null } | undefined;
 	#suspended = false;
 	#fontEvents: FontFaceSet | undefined;
+	#webfonts = new ViewerWebfonts(() => this.ownerDocument);
 	#fontsChanged = () => {
 		if (this.#disposed) return;
 		this.#canvas.invalidate();
@@ -270,13 +335,20 @@ export class VisioViewerElement extends BaseElement {
 		const editing = createCanvasEditing(this.#viewport, this.controller, {
 			pointerActive: () => this.#commands.tool === 'pointer',
 			announce,
-			snap: (page, ids, delta) =>
-				this.#commands.layoutCommands.guides.snap(page, ids, delta, this.#commands.gridStep),
+			snap: (page, ids, delta, axis) =>
+				this.#commands.layoutCommands.guides.snap(page, ids, delta, this.#commands.gridStep, axis),
 			clearSnap: () => this.#commands.layoutCommands.guides.clearHints(),
+			resizeSnap: {
+				settings: () => this.#commands.layoutCommands.guides.resizeSnapSettings(),
+				hint: (page, lines, matches) =>
+					this.#commands.layoutCommands.guides.resizeHints(page, lines, matches),
+				clear: () => this.#commands.layoutCommands.guides.clearHints(),
+			},
 		});
 		this.#edit = editing.edit;
 		this.#pointer = editing.pointer;
 		this.#lineEndpoints = editing.lineEndpoints;
+		this.#controlHandles = editing.controls;
 		this.#rotationHandle = editing.rotation;
 		this.#resizeHandles = editing.resize;
 		// Selecting text in the editor shows the Mini Toolbar over it; collapsing the selection hides it.
@@ -292,6 +364,7 @@ export class VisioViewerElement extends BaseElement {
 		this.#panZoom = new ViewerPanZoom(this.#root, this.#viewport, this.controller, (open) =>
 			this.#root.querySelector('[command="pan-zoom"]')?.setAttribute('checked', String(open)),
 		);
+		this.#inlineSize = new ViewerInlineSize(this.#root, this.controller);
 		this.#sizePosition = new ViewerSizePosition(this.#root, this.controller, (open) =>
 			this.#root.querySelector('[command="size-position"]')?.setAttribute('checked', String(open)),
 		);
@@ -308,6 +381,7 @@ export class VisioViewerElement extends BaseElement {
 			toolChanged: () => {
 				this.#pointer.render(this.controller.state);
 				this.#lineEndpoints.render(this.controller.state);
+				this.#controlHandles.render(this.controller.state);
 				this.#rotationHandle.render(this.controller.state);
 				this.#resizeHandles.render(this.controller.state);
 			},
@@ -339,6 +413,7 @@ export class VisioViewerElement extends BaseElement {
 				this.#fileName,
 				this.#profile.profile,
 				quickAccessShown(this.#behaviour, this.#custom.resolved),
+				this.#saveLabel,
 			);
 		this.#profile = new ViewerProfile(
 			this.#root,
@@ -357,10 +432,20 @@ export class VisioViewerElement extends BaseElement {
 			},
 		);
 		this.#share = new ViewerShare(this.#root, this.controller, () => this.#profile.profile);
-		this.#share.onChange = (detail) =>
+		this.#share.onChange = (detail) => {
+			this.#shareUi?.refresh();
 			this.dispatchEvent(
 				new CustomEvent('collaboration-change', { detail, bubbles: true, composed: true }),
 			);
+		};
+		this.#shareUi = attachVisioShare({
+			element: this,
+			root: this.#root,
+			ribbon: this.#toolbar,
+			share: this.#share,
+			profile: () => this.#profile.profile,
+			locale: () => this.#locale(),
+		});
 		this.#share.onError = (error) =>
 			this.dispatchEvent(
 				new CustomEvent('document-error', { detail: error, bubbles: true, composed: true }),
@@ -369,26 +454,29 @@ export class VisioViewerElement extends BaseElement {
 			root: this.#root,
 			viewport: this.#viewport,
 			fileName: () => this.#fileName,
+			locale: () => this.#locale(),
 			load: (source) => this.load(source),
 			createBlankDrawing: () => this.createBlankDrawing(),
+			createFromTemplate: (template) => this.createFromTemplate(template),
 			exportVsdx: () => this.controller.exportVsdx(),
 			// A downloaded copy exists as a file: the AutoRecover copy has done its job.
 			downloaded: () => this.#recover.saved(),
 			exportSvg: () => this.exportSvg(),
-			exportPicture: async (format) => {
+			exportPicture: async (format, choice) => {
 				const { document: model, pageIndex } = this.controller.state;
 				if (!model) throw new Error('Open a drawing before exporting.');
 				const doc = this.ownerDocument;
-				return {
-					blob:
-						format === 'pdf'
-							? await exportDocumentPdf(doc, model)
-							: await exportPagePng(doc, model, pageIndex),
-					pageIndex,
-				};
+				if (format === 'png')
+					return { blob: await exportPagePng(doc, model, pageIndex), pageIndex };
+				const result = await exportDocumentPdfDetailed(doc, model, {
+					...pdfOptionsFor(choice ?? { scope: 'all' }, pageIndex),
+					fonts: this.pdfFonts,
+				});
+				return { blob: result.blob, pageIndex, report: result };
 			},
 			closeDocument: () => {
 				this.#fileName = '';
+				this.#forgetOpenedFile();
 				this.controller.setDocument(null);
 			},
 			showOptions: () => this.#profile.showOptions(),
@@ -400,7 +488,8 @@ export class VisioViewerElement extends BaseElement {
 			pageSetup: () =>
 				this.#commands.run({ type: 'page-setup', command: { op: 'dialog', tab: 'print' } }),
 			fileCommand: (command) => announceFileCommand(this, command),
-			storage: () => this.#storage,
+			storage: () => this.#openedStorage ?? this.#storage,
+			openCloudFile: (file) => this.openCloudFile(file),
 			revision: () => this.controller.state.document,
 			savedToStorage: (name, revision) => {
 				this.#fileName = name;
@@ -410,6 +499,15 @@ export class VisioViewerElement extends BaseElement {
 				if (state.document === revision && !state.edit.busy && !state.loading) {
 					this.controller.markClean();
 					this.#recover.saved();
+				}
+				this.#render(this.controller.state);
+			},
+			saveProgress: (label, announce) => {
+				if (this.#disposed) return;
+				this.#saveLabel = label;
+				if (label !== undefined && announce) {
+					this.#announcement = label;
+					this.#status.textContent = label;
 				}
 				this.#render(this.controller.state);
 			},
@@ -429,6 +527,12 @@ export class VisioViewerElement extends BaseElement {
 			}),
 		});
 		this.#disposeInputs = this.#wireInputs();
+		// The first show of a loaded drawing waits (bounded) for its webfonts, so text is laid out
+		// once with the real metrics instead of swapping from a stand-in face.
+		this.controller.setBeforeParse((bytes) => this.#webfonts.prefetch(bytes));
+		this.controller.setBeforeShow((document) =>
+			this.#webfonts.base() === null ? undefined : this.#webfonts.load(document),
+		);
 		this.#unsubscribe = this.controller.subscribe((state) => this.#render(state));
 		this.#eventUnsubscribe = this.controller.onEvent((name, detail) => {
 			this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
@@ -440,7 +544,9 @@ export class VisioViewerElement extends BaseElement {
 	set document(value: VisioDocument | null) {
 		++this.#loadToken;
 		this.#fileName = '';
+		this.#forgetOpenedFile();
 		this.controller.setDocument(value);
+		void this.#refreshWebfonts();
 	}
 	get pageIndex(): number {
 		return this.controller.state.pageIndex;
@@ -515,6 +621,7 @@ export class VisioViewerElement extends BaseElement {
 	async load(source: VsdxSource): Promise<void> {
 		this.#assertAlive();
 		const token = ++this.#loadToken;
+		this.#forgetOpenedFile();
 		if (source instanceof Blob) {
 			await this.controller.loadSource(() => {
 				if (source.size > MAX_INPUT_BYTES)
@@ -529,12 +636,54 @@ export class VisioViewerElement extends BaseElement {
 		// Now the drawing has its name: offer back a copy kept from an earlier, unsaved session.
 		this.#recover.opened();
 	}
+	/** Load the open drawing's webfonts, then redraw it once they arrived (relayout, same view). */
+	async #refreshWebfonts(): Promise<void> {
+		const readiness = await this.#webfonts.load(this.controller.state.document);
+		if (!readiness || this.#disposed) return;
+		this.#canvas.invalidate();
+		this.#render(this.controller.state);
+	}
+	#forgetOpenedFile(): void {
+		this.#openedStorage = undefined;
+		this.controller.setFileReadOnly(false);
+	}
+	/**
+	 * Opens a file a host got from a `CloudFileProvider` (its own picker or a start page), exactly as
+	 * File > Open > OneDrive does: the drawing loads, is read-only when `file.canEdit` is false, and
+	 * Save routes to `file.storage` until another drawing loads. Rejects when the load fails.
+	 */
+	async openCloudFile(file: CloudOpenedFile): Promise<void> {
+		this.#assertAlive();
+		const FileType = this.ownerDocument.defaultView?.File ?? File;
+		const expected = this.#loadToken + 1;
+		await this.load(new FileType([new Uint8Array(file.bytes)], file.fileName));
+		// A destroyed viewer or a newer load owns the drawing now; this file is no longer open.
+		if (this.#disposed || this.#loadToken !== expected) return;
+		this.#openedStorage = file.storage;
+		this.controller.setFileReadOnly(!file.canEdit);
+		if (!file.canEdit) {
+			const message = translateRibbonText(
+				normalizeVisioLocale(this.#locale()),
+				`Opened ${file.fileName} read-only.`,
+			);
+			this.#announcement = message;
+			this.#status.textContent = message;
+		}
+	}
 	/** Create a source-backed drawing and name only the accepted request. */
 	async createBlankDrawing(options?: CreateVsdxOptions): Promise<void> {
+		return this.#createDrawing(() => this.controller.createBlankDrawing(options));
+	}
+	/** Create a drawing from a File > New template (Blank Drawing, flowcharts, org chart). */
+	async createFromTemplate(template: VisioTemplateId): Promise<void> {
+		return this.#createDrawing(() => this.controller.createFromTemplate(template));
+	}
+	async #createDrawing(create: () => Promise<void>): Promise<void> {
 		this.#assertAlive();
 		const token = ++this.#loadToken;
+		this.#forgetOpenedFile();
 		const generation = this.controller.documentGeneration;
-		await this.controller.createBlankDrawing(options);
+		await create();
 		if (
 			this.#disposed ||
 			token !== this.#loadToken ||
@@ -710,9 +859,11 @@ export class VisioViewerElement extends BaseElement {
 		if (this.#disposed) return;
 		this.#disposed = true;
 		this.#share.stop();
+		this.#shareUi.destroy();
 		this.#disposeInputs();
 		this.#fontEvents?.removeEventListener('loadingdone', this.#fontsChanged);
 		this.#fontEvents = undefined;
+		this.#webfonts.remove();
 		this.#canvas.dispose();
 		this.#unsubscribe();
 		this.#eventUnsubscribe();
@@ -722,9 +873,21 @@ export class VisioViewerElement extends BaseElement {
 	attributeChangedCallback(): void {
 		this.#localizeRibbon();
 	}
+	/** The Trust Center in the display language, locked while the host set `googleFonts`. */
+	#syncTrust(): void {
+		this.#profile?.setTrust(
+			normalizeVisioLocale(this.#locale()),
+			fontDownloadLock(this.#webfonts.option),
+		);
+	}
 	/** Put the File > Options behaviour settings to work on the pieces they govern. */
 	#applyBehaviour(): void {
 		const behaviour = this.#behaviour;
+		// Trust Center: turning downloads on loads the open drawing's fonts, off removes them.
+		if (this.#webfonts.readerAllows !== behaviour.allowFontDownloads) {
+			this.#webfonts.readerAllows = behaviour.allowFontDownloads;
+			void this.#refreshWebfonts();
+		}
 		this.controller.undoLevels = behaviour.undoLevels;
 		this.#edit.spellcheck = behaviour.checkSpelling;
 		this.#edit.autoSize = behaviour.autoSizeText;
@@ -750,6 +913,7 @@ export class VisioViewerElement extends BaseElement {
 				this.#fileName,
 				this.#profile.profile,
 				quickAccessShown(behaviour, this.#custom.resolved),
+				this.#saveLabel,
 			);
 	}
 	/**
@@ -770,6 +934,9 @@ export class VisioViewerElement extends BaseElement {
 		// Translation rewrites tooltips from their full text, so the style is applied afterwards.
 		restoreScreenTips(this.#toolbar);
 		localizeRibbon(this.#toolbar, this.#locale());
+		this.#backstage?.localize();
+		this.#syncTrust();
+		this.#shareUi.relocalize();
 		applyScreenTips(this.#toolbar, this.#behaviour.screenTips);
 		this.#overflow.refit();
 	}
@@ -803,6 +970,7 @@ export class VisioViewerElement extends BaseElement {
 		const disposePresentation = this.#presentation.wire();
 		const disposePointer = this.#pointer.wire();
 		const disposeLineEndpoints = this.#lineEndpoints.wire();
+		const disposeControls = this.#controlHandles.wire();
 		const disposeRotation = this.#rotationHandle.wire();
 		const disposeResize = this.#resizeHandles.wire();
 		const disposeBackstage = this.#backstage.wire();
@@ -814,13 +982,20 @@ export class VisioViewerElement extends BaseElement {
 			this.#viewport,
 			this.controller,
 			(x, y) => this.#mini.showAt(x, y),
-			(menu, target) => syncVisioHostMenu(menu, target, this.#custom.resolved, this.controller),
+			(menu, target) => {
+				syncVisioHostMenu(menu, target, this.#custom.resolved, this.controller);
+				syncShapeActions(menu, target, this.controller, (message) => {
+					this.#announcement = message;
+					this.#status.textContent = message;
+				});
+			},
 		);
 		const disposeTellMe = wireTellMe(this.#root);
 		const disposeGalleries = wireInlineGalleries(this, this.#root);
 		const keyTips = attachKeyTips(this.#root);
 		const disposePanZoom = this.#panZoom.wire();
 		const disposeSizePosition = this.#sizePosition.wire();
+		const disposeInlineSize = this.#inlineSize.wire();
 		const disposeProfile = this.#profile.wire();
 		// The title bar's Quick Access Toolbar: Save downloads a copy, Undo and Redo use the history.
 		const quickAccess = (event: Event): void => {
@@ -870,6 +1045,7 @@ export class VisioViewerElement extends BaseElement {
 			disposePresentation();
 			disposePointer();
 			disposeLineEndpoints();
+			disposeControls();
 			disposeRotation();
 			disposeResize();
 			disposeBackstage();
@@ -883,6 +1059,7 @@ export class VisioViewerElement extends BaseElement {
 			keyTips.dispose();
 			disposePanZoom();
 			disposeSizePosition();
+			disposeInlineSize();
 			disposeProfile();
 			this.#titleBar.removeEventListener('office-command', quickAccess);
 			disposeShare();
@@ -922,6 +1099,7 @@ export class VisioViewerElement extends BaseElement {
 			previous.edit.sourceAvailable !== state.edit.sourceAvailable
 		) {
 			this.#lineEndpoints.render(state);
+			this.#controlHandles.render(state);
 			this.#rotationHandle.render(state);
 			this.#resizeHandles.render(state);
 			this.#viewport.toggleAttribute(
@@ -939,6 +1117,7 @@ export class VisioViewerElement extends BaseElement {
 			this.#fileName,
 			this.#profile.profile,
 			quickAccessShown(this.#behaviour, this.#custom.resolved),
+			this.#saveLabel,
 		);
 		for (const button of this.#root.querySelectorAll<HTMLButtonElement>('[data-action]'))
 			button.disabled = !page;
@@ -947,12 +1126,14 @@ export class VisioViewerElement extends BaseElement {
 		this.#edit.render(state);
 		this.#chrome.render(state);
 		this.#commands.render(state);
+		renderContextualTabs(this.#toolbar, state);
 		if (this.#mini.visible) this.#mini.sync();
 		this.#presentation.render(state);
 		this.#backstage.render(state);
 		this.#pointer.render(state);
 		this.#panZoom.render();
 		this.#sizePosition.render(state);
+		this.#inlineSize.render(state);
 		this.#viewport.setAttribute('aria-busy', String(state.loading || state.edit.busy));
 		this.#status.textContent = state.loading
 			? 'Opening diagram…'

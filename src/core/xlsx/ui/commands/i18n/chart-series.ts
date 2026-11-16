@@ -1,6 +1,12 @@
 import type { Translations } from './types';
 
 export const CHART_SERIES_STRINGS: Translations = {
+	'This chart element cannot take that setting.': [
+		'Cet élément de graphique n’accepte pas ce paramètre.',
+		'Dieses Diagrammelement unterstützt diese Einstellung nicht.',
+		'Este elemento del gráfico no admite ese ajuste.',
+		'此图表元素不支持该设置。',
+	],
 	'Format Chart Title': [
 		'Format du titre du graphique',
 		'Diagrammtitel formatieren',
@@ -25,8 +31,6 @@ export const CHART_SERIES_STRINGS: Translations = {
 		'Formato del área de trazado',
 		'设置绘图区格式',
 	],
-	'Chart Area': ['Zone de graphique', 'Diagrammbereich', 'Área del gráfico', '图表区'],
-	'Plot Area': ['Zone de traçage', 'Zeichnungsfläche', 'Área de trazado', '绘图区'],
 	'Chart element': ['Élément de graphique', 'Diagrammelement', 'Elemento del gráfico', '图表元素'],
 	'Linear gradient': ['Linéaire', 'Linear', 'Lineal', '线性'],
 	Rectangular: ['Rectangulaire', 'Rechteckig', 'Rectangular', '矩形'],
@@ -198,6 +202,7 @@ export const CHART_SERIES_STRINGS: Translations = {
 		'Seleccione un gráfico de barras o columnas para dar formato a sus series.',
 		'选择条形图或柱形图以设置其系列格式。',
 	],
+	'Series "{name}"': ['Série « {name} »', 'Reihe „{name}“', 'Serie "{name}"', '系列“{name}”'],
 	'Enter a whole number from {min} to {max}.': [
 		'Entrez un nombre entier compris entre {min} et {max}.',
 		'Geben Sie eine ganze Zahl zwischen {min} und {max} ein.',

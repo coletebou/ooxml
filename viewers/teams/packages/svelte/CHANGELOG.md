@@ -7,6 +7,39 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-svelte-viewer@1.1.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-svelte-viewer@1.1.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+### Dependencies
+
+- **deps:** Bump the production-minor-and-patch group with 22 updates ([8e60b14](https://github.com/ChristopherVR/ooxml/commit/8e60b14e1d8ee3a1cb507670caa15a611632ef26))
+- **deps:** Merge production dependency updates ([#236](https://github.com/ChristopherVR/ooxml/issues/236)) ([7eb137b](https://github.com/ChristopherVR/ooxml/commit/7eb137b03906ded043ce0e4adf83e01fcdaa44a9))
+
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-svelte-viewer@1.0.0) - 2026-10-29
+
+### Features
+
+- **teams:** Release openteams 1.0 on the versioned sync protocol ([e035417](https://github.com/ChristopherVR/ooxml/commit/e035417be1285095f9bbe1b9655743dcd059b55a))
+
+## [0.2.1](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-svelte-viewer@0.2.1) - 2026-10-23
+
+### Other
+
+- Shared binding kit (wave6-1) ([98ab396](https://github.com/ChristopherVR/ooxml/commit/98ab396a11b31675c0266acd5242060412642bd3))
+
+### Refactor
+
+- **teams:** Move bindTeams into ooxml-ui/teams on the binding kit ([fd417a5](https://github.com/ChristopherVR/ooxml/commit/fd417a515f76b580af69acc5b1e319d15d41fee5))
+
 ## [0.2.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-svelte-viewer@0.2.0) - 2026-10-16
 
 ### Features

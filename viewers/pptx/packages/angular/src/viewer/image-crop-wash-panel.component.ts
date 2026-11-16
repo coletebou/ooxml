@@ -2,19 +2,17 @@ import {
 	ChangeDetectionStrategy,
 	Component,
 	computed,
-	inject,
 	input,
 	output,
 	CUSTOM_ELEMENTS_SCHEMA,
 } from '@angular/core';
 import { TranslatePipe } from '@ngx-translate/core';
-import { cropResetPatch, cropResetState } from 'ooxml-ui/pptx';
+import { cropResetPatch, cropResetState, PICTURE_CROP_SECTIONS } from 'ooxml-ui/pptx';
 import type { PptxCropShape, PptxElement, PptxImageEffects } from 'pptx-viewer-core';
 import { isImageLikeElement } from 'pptx-viewer-core';
 
-import { RecentColorsService } from './recent-colors.service';
+import { InspectorFieldsComponent } from './inspector-fields.component';
 
-const SIDES = ['Left', 'Top', 'Right', 'Bottom'] as const;
 const CROP_SHAPES: readonly { value: PptxCropShape; label: string; glyph: string }[] = [
 	{ value: 'none', label: 'None', glyph: '▭' },
 	{ value: 'ellipse', label: 'Ellipse', glyph: '●' },
@@ -25,12 +23,7 @@ const CROP_SHAPES: readonly { value: PptxCropShape; label: string; glyph: string
 	{ value: 'hexagon', label: 'Hexagon', glyph: '⬢' },
 	{ value: 'star', label: 'Star', glyph: '★' },
 ];
-type CropSide = (typeof SIDES)[number];
 type ImageElement = PptxElement & { imageEffects?: PptxImageEffects };
-
-export function clampImageCrop(value: number | undefined): number {
-	return Math.max(0, Math.min(0.8, Number.isFinite(value) ? (value as number) : 0));
-}
 
 export function replacementImagePatch(dataUrl: string): Partial<PptxElement> {
 	return {
@@ -45,28 +38,20 @@ export function replacementImagePatch(dataUrl: string): Partial<PptxElement> {
 	schemas: [CUSTOM_ELEMENTS_SCHEMA],
 	selector: 'pptx-image-crop-wash-panel',
 	standalone: true,
-	imports: [TranslatePipe],
+	imports: [TranslatePipe, InspectorFieldsComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<section class="panel" aria-label="Image crop and color wash">
+		<section class="panel">
 			<label class="replace">
-				<span>Replace image</span>
+				<span>{{ 'pptx.image.replaceImage' | translate }}</span>
 				<input type="file" accept="image/*" (change)="onReplaceImage($event)" />
 			</label>
-			<div class="crop-grid">
-				@for (side of sides; track side) {
-					<label
-						><span>Crop {{ side }}</span
-						><input
-							type="range"
-							min="0"
-							max="80"
-							[value]="crop(side) * 100"
-							[disabled]="!croppable()"
-							(input)="onCrop(side, $event)"
-					/></label>
-				}
-			</div>
+			<pptx-inspector-fields
+				[sections]="cropSections"
+				[target]="element()"
+				[disabled]="!croppable()"
+				(patch)="onCrop($event)"
+			/>
 			<button type="button" [disabled]="!croppable()" (click)="resetCrop()">
 				{{ 'pptx.image.resetCrop' | translate }}
 			</button>
@@ -84,27 +69,6 @@ export function replacementImagePatch(dataUrl: string): Partial<PptxElement> {
 					</button>
 				}
 			</div>
-			<label class="toggle"
-				><span>{{ 'pptx.image.colorWash' | translate }}</span
-				><pptx-ui-checkbox [checked]="!!wash()" (change)="toggleWash($event)"></pptx-ui-checkbox
-			></label>
-			@if (wash(); as value) {
-				<div class="wash">
-					<label
-						><span>{{ 'pptx.image.washColor' | translate }}</span
-						><input type="color" [value]="value.color || '#0066cc'" (change)="onWashColor($event)"
-					/></label>
-					<label
-						><span>{{ 'pptx.image.washOpacity' | translate }}</span
-						><input
-							type="range"
-							min="0"
-							max="100"
-							[value]="value.opacity"
-							(input)="onWashOpacity($event)"
-					/></label>
-				</div>
-			}
 		</section>
 	`,
 	styles: `
@@ -113,12 +77,6 @@ export function replacementImagePatch(dataUrl: string): Partial<PptxElement> {
 			gap: 8px;
 			padding-top: 4px;
 			font-size: 11px;
-		}
-		.crop-grid,
-		.wash {
-			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: 7px;
 		}
 		.replace input {
 			width: 100%;
@@ -166,12 +124,9 @@ export class ImageCropWashPanelComponent {
 	readonly element = input.required<PptxElement>();
 	readonly canEdit = input<boolean>(true);
 	readonly patch = output<Partial<PptxElement>>();
-	/** Optional: absent in a standalone unit test with no viewer-level DI tree. */
-	private readonly recentColors = inject(RecentColorsService, { optional: true });
-	protected readonly sides = SIDES;
+	protected readonly cropSections = PICTURE_CROP_SECTIONS;
 	protected readonly cropShapes = CROP_SHAPES;
 	protected readonly effects = computed(() => (this.element() as ImageElement).imageEffects ?? {});
-	protected readonly wash = computed(() => this.effects().colorWash);
 	protected readonly cropShape = computed(
 		() => (this.element() as ImageElement & { cropShape?: PptxCropShape }).cropShape ?? 'none',
 	);
@@ -194,16 +149,10 @@ export class ImageCropWashPanelComponent {
 		reader.readAsDataURL(file);
 	}
 
-	protected crop(side: CropSide): number {
-		return clampImageCrop(this.element()[`crop${side}` as keyof PptxElement] as number | undefined);
-	}
-	protected onCrop(side: CropSide, event: Event): void {
-		if (!isImageLikeElement(this.element()) || !this.croppable()) {
-			return;
+	protected onCrop(patch: Partial<PptxElement>): void {
+		if (isImageLikeElement(this.element()) && this.croppable()) {
+			this.patch.emit(patch);
 		}
-		this.patch.emit({
-			[`crop${side}`]: clampImageCrop(Number((event.target as HTMLInputElement).value) / 100),
-		} as Partial<PptxElement>);
 	}
 	protected resetCrop(): void {
 		if (!this.croppable()) {
@@ -216,31 +165,6 @@ export class ImageCropWashPanelComponent {
 			return;
 		}
 		this.patch.emit({ cropShape: value } as Partial<PptxElement>);
-	}
-	protected toggleWash(event: Event): void {
-		this.updateEffects({
-			colorWash: (event.target as HTMLInputElement).checked
-				? { color: '#0066cc', opacity: 40 }
-				: undefined,
-		});
-	}
-	protected onWashColor(event: Event): void {
-		const color = (event.target as HTMLInputElement).value;
-		this.updateEffects({
-			colorWash: {
-				color,
-				opacity: this.wash()?.opacity ?? 40,
-			},
-		});
-		this.recentColors?.push(color);
-	}
-	protected onWashOpacity(event: Event): void {
-		this.updateEffects({
-			colorWash: {
-				color: this.wash()?.color ?? '#0066cc',
-				opacity: Number((event.target as HTMLInputElement).value),
-			},
-		});
 	}
 	private updateEffects(update: Partial<PptxImageEffects>): void {
 		this.patch.emit({ imageEffects: { ...this.effects(), ...update } } as Partial<PptxElement>);

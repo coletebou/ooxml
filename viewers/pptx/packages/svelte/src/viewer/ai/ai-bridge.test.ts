@@ -40,6 +40,8 @@ function makeDeps(overrides: Partial<SvelteAiBridgeDeps> = {}): SvelteAiBridgeDe
 		commitSlides,
 		applyTheme: vi.fn(),
 		getSections: () => [],
+		getCustomShows: () => [],
+		setCustomShows: vi.fn(),
 		getPresentationProperties: () => ({}),
 		getCoreProperties: () => undefined,
 		getAppProperties: () => undefined,
@@ -163,6 +165,16 @@ describe('createSvelteAiBridge', () => {
 		expect(deps.commitSlides).not.toHaveBeenCalled();
 	});
 
+	it('applyDeckData commits changed custom shows to the setter', () => {
+		const setCustomShows = vi.fn();
+		const bridge = createSvelteAiBridge(makeDeps({ setCustomShows }));
+		bridge.applyDeckData?.((data) => {
+			data.customShows = [{ id: '0', name: 'Short', slideRIds: ['rId2'] }];
+			return data;
+		}, 'AI custom shows');
+		expect(setCustomShows).toHaveBeenCalledWith([{ id: '0', name: 'Short', slideRIds: ['rId2'] }]);
+	});
+
 	// viewProperties/tableStyleMap/tableStylesDefaultId/tags were missing from
 	// this seam entirely: the main Save/Export path (`saveEditorDocument`)
 	// persists them, but an MCP deck tool operating on
@@ -208,5 +220,14 @@ describe('createSvelteAiBridge', () => {
 		expect(setTagCollections).toHaveBeenCalledWith([
 			{ path: 'ppt/tags/tag1.xml', tags: [{ name: 'a', value: 'b' }] },
 		]);
+	});
+});
+
+describe('createSvelteAiBridge focus', () => {
+	it('scopes the assistant to the panel focus when the viewer wires it', () => {
+		expect(createSvelteAiBridge(makeDeps()).getFocusedTargets).toBeUndefined();
+		const focus = [{ kind: 'element' as const, slideIndex: 0, elementId: 'e1' }];
+		const bridge = createSvelteAiBridge(makeDeps({ getFocusedTargets: () => focus }));
+		expect(bridge.getFocusedTargets?.()).toEqual(focus);
 	});
 });

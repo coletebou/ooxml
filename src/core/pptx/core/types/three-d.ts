@@ -108,50 +108,7 @@ export interface Text3DStyle {
  * // => satisfies Pptx3DScene
  * ```
  */
-export interface Pptx3DScene {
-	/** Camera preset type, e.g. "orthographicFront", "perspectiveFront". */
-	cameraPreset?: string;
-	/** Camera field of view in 1/60000 degrees (`a:camera/@fov`). */
-	cameraFieldOfView?: number;
-	/** Camera zoom as an OOXML percentage fraction (`a:camera/@zoom`, 1 = 100%). */
-	cameraZoom?: number;
-	/** Camera rotation around X axis in 1/60000 degrees. */
-	cameraRotX?: number;
-	/** Camera rotation around Y axis in 1/60000 degrees. */
-	cameraRotY?: number;
-	/** Camera rotation around Z axis in 1/60000 degrees. */
-	cameraRotZ?: number;
-	/** Light rig type, e.g. "threePt", "balanced", "harsh". */
-	lightRigType?: string;
-	/** Light rig direction, e.g. "t", "b", "l", "r", "tl". */
-	lightRigDirection?: string;
-	/** Light-rig rotation latitude in 1/60000 degrees. */
-	lightRigRotX?: number;
-	/** Light-rig rotation longitude in 1/60000 degrees. */
-	lightRigRotY?: number;
-	/** Light-rig rotation revolution in 1/60000 degrees. */
-	lightRigRotZ?: number;
-	/** Whether a 3D backdrop plane is present (`a:backdrop`). */
-	hasBackdrop?: boolean;
-	/** Backdrop plane anchor X in EMU. */
-	backdropAnchorX?: number;
-	/** Backdrop plane anchor Y in EMU. */
-	backdropAnchorY?: number;
-	/** Backdrop plane anchor Z in EMU. */
-	backdropAnchorZ?: number;
-	/** Backdrop normal vector X component. */
-	backdropNormalX?: number;
-	/** Backdrop normal vector Y component. */
-	backdropNormalY?: number;
-	/** Backdrop normal vector Z component. */
-	backdropNormalZ?: number;
-	/** Backdrop up vector X component. */
-	backdropUpX?: number;
-	/** Backdrop up vector Y component. */
-	backdropUpY?: number;
-	/** Backdrop up vector Z component. */
-	backdropUpZ?: number;
-}
+export type { DrawingScene3D as Pptx3DScene } from '../../../drawingml/text-3d-model';
 
 /**
  * 3D shape extrusion/bevel from `a:sp3d`.
@@ -176,29 +133,29 @@ export interface Pptx3DShape {
 	 * or back in 3D space rather than adding depth to it, most commonly used to
 	 * stack several shapes at different depths under one `a:scene3d` camera.
 	 */
-	positionZ?: number;
+	positionZ?: number | undefined;
 	/** Extrusion height in EMU. */
-	extrusionHeight?: number;
+	extrusionHeight?: number | undefined;
 	/** Extrusion colour. */
-	extrusionColor?: string;
+	extrusionColor?: string | undefined;
 	/** Contour width in EMU. */
-	contourWidth?: number;
+	contourWidth?: number | undefined;
 	/** Contour colour. */
-	contourColor?: string;
+	contourColor?: string | undefined;
 	/** Preset material, e.g. "matte", "warmMatte", "metal". */
-	presetMaterial?: string;
+	presetMaterial?: string | undefined;
 	/** Top bevel type, e.g. "circle", "relaxedInset". */
-	bevelTopType?: string;
+	bevelTopType?: string | undefined;
 	/** Top bevel width in EMU. */
-	bevelTopWidth?: number;
+	bevelTopWidth?: number | undefined;
 	/** Top bevel height in EMU. */
-	bevelTopHeight?: number;
+	bevelTopHeight?: number | undefined;
 	/** Bottom bevel type, e.g. "circle", "relaxedInset". */
-	bevelBottomType?: string;
+	bevelBottomType?: string | undefined;
 	/** Bottom bevel width in EMU. */
-	bevelBottomWidth?: number;
+	bevelBottomWidth?: number | undefined;
 	/** Bottom bevel height in EMU. */
-	bevelBottomHeight?: number;
+	bevelBottomHeight?: number | undefined;
 }
 
 // ==========================================================================

@@ -21,8 +21,13 @@ declare module 'react' {
 	namespace JSX {
 		interface IntrinsicElements {
 			'pptx-ui-search': WebControlProps;
+			'pptx-ui-open-places': WebControlProps;
+			'pptx-ui-connected-services': WebControlProps;
 			'pptx-ui-options-dialog': WebControlProps;
+			'pptx-ui-insert-chart-dialog': WebControlProps;
+			'pptx-ui-insert-smartart-dialog': WebControlProps;
 			'pptx-ui-select': WebControlProps;
+			'pptx-ui-format-section': WebControlProps;
 			'pptx-ui-checkbox': WebControlProps;
 			'pptx-ui-radio': WebControlProps;
 			'pptx-ui-switch': WebControlProps;
@@ -35,6 +40,7 @@ declare module 'react' {
 			'pptx-ui-present-toolbar': WebControlProps;
 			'pptx-ui-presenter-console': WebControlProps;
 			'pptx-ui-read-only-banner': WebControlProps;
+			'pptx-ui-export-progress': WebControlProps;
 			'pptx-ui-ribbon-command': WebControlProps;
 			'pptx-ui-ribbon-animations': WebControlProps;
 			'pptx-ui-ribbon-draw': WebControlProps;
@@ -61,6 +67,8 @@ declare module 'react' {
 			'pptx-ui-ribbon-group': WebControlProps;
 			'pptx-ui-ribbon-section': WebControlProps;
 			'pptx-ui-color-grid': WebControlProps;
+			'pptx-ui-chart-data-sheet': WebControlProps;
+			'pptx-ui-smartart-text-pane': WebControlProps;
 			'pptx-ui-ribbon-add-in': WebControlProps;
 			'pptx-ui-ribbon-gallery': WebControlProps;
 			'pptx-ui-ribbon-toggle': WebControlProps;
@@ -73,6 +81,7 @@ declare module 'react' {
 			'pptx-ui-ribbon-home-chart-selection': WebControlProps;
 			'pptx-ui-title-bar': WebControlProps;
 			'pptx-ui-ribbon-actions': WebControlProps;
+			'pptx-ui-ribbon-tabs': WebControlProps;
 		}
 	}
 }

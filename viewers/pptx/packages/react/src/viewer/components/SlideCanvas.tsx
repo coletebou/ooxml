@@ -3,11 +3,12 @@ import {
 	isGroupMember,
 	motionPathFor,
 	parentSelection,
+	resolveStageEdgeBleeds,
 	setMotionPath,
 	shouldShowElementHandles,
 	slideSpaceElement,
 } from 'ooxml-ui/pptx';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useContext, useMemo, useRef } from 'react';
 
 import type { ShapeAdjustmentHandleDescriptor } from '../types';
 import { getShapeAdjustmentHandleDescriptors, isConnectorOrLineElement } from '../utils';
@@ -32,6 +33,7 @@ import { useConnectorCreation } from './canvas/useConnectorCreation';
 import { useDrawingOverlay } from './canvas/useDrawingOverlay';
 import { useSlideCanvasImagePaste } from './canvas/useSlideCanvasImagePaste';
 import { useStableCallbacks } from './canvas/useStableCallbacks';
+import { ElementRenderErrorReportingContext } from './ElementErrorBoundary';
 import { ElementRenderer } from './ElementRenderer';
 import { ActiveXControlOverlay } from './elements/ActiveXControlOverlay';
 import { InlineCollaborationContext } from './elements/InlineCollaborationContext';
@@ -80,10 +82,17 @@ export function SlideCanvas(props: SlideCanvasProps) {
 			props.registerInlineEditReader,
 		],
 	);
+	// A viewer-level reporter (PowerPointViewer's `onElementRenderError`) applies unless the
+	// canvas is given its own.
+	const inherited = useContext(ElementRenderErrorReportingContext);
+	const reporter = props.onElementRenderError ?? inherited?.onElementRenderError;
+	const errorReporting = useMemo(() => ({ onElementRenderError: reporter }), [reporter]);
 	return (
-		<InlineCollaborationContext.Provider value={value}>
-			<SlideCanvasContent {...props} />
-		</InlineCollaborationContext.Provider>
+		<ElementRenderErrorReportingContext.Provider value={errorReporting}>
+			<InlineCollaborationContext.Provider value={value}>
+				<SlideCanvasContent {...props} />
+			</InlineCollaborationContext.Provider>
+		</ElementRenderErrorReportingContext.Provider>
 	);
 }
 
@@ -246,6 +255,12 @@ function SlideCanvasContent({
 	// dashed frame, and a member being text-edited is drawn once more in slide
 	// space, where the regular inline editor can run, over its hidden static copy.
 	const slideElements = activeSlide?.elements;
+	// Boxes that grow under an abutting opaque box to close the AA seam
+	// (issue #141); the selection keeps its exact box while it is edited.
+	const edgeBleeds = useMemo(
+		() => resolveStageEdgeBleeds(templateElements, activeSlide, selectedElementIdSet),
+		[templateElements, activeSlide, selectedElementIdSet],
+	);
 	const enteredGroup = useMemo(() => {
 		if (!slideElements || !selectedElement) {
 			return null;
@@ -405,6 +420,7 @@ function SlideCanvasContent({
 							// affordance below, only while edit-template mode is on.
 							templateEditing={editTemplateMode}
 							zIndex={index}
+							edgeBleed={edgeBleeds.get(element.id)}
 							imageAltText='Template element'
 							showResizeHandles={shouldShowElementHandles(
 								isEditableCanvas,
@@ -454,6 +470,7 @@ function SlideCanvasContent({
 							selectionColorClass='blue-500'
 							showHoverBorder
 							zIndex={templateElements.length + index}
+							edgeBleed={edgeBleeds.get(element.id)}
 							imageAltText='Slide element'
 							showResizeHandles={shouldShowElementHandles(
 								isEditableCanvas,

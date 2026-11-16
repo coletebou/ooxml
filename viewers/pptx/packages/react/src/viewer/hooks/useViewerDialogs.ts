@@ -29,6 +29,7 @@ export function useViewerDialogs(input: UseViewerDialogsInput): ViewerDialogsRes
 		customShows,
 		activeCustomShowId,
 		setCustomShows,
+		setSlides,
 		setActiveCustomShowId,
 		setGuides,
 		setPresentationProperties,
@@ -49,6 +50,7 @@ export function useViewerDialogs(input: UseViewerDialogsInput): ViewerDialogsRes
 
 	// ── Dialog states ─────────────────────────────────────────────────
 	const [isSmartArtDialogOpen, setIsSmartArtDialogOpen] = useState(false);
+	const [isChartDialogOpen, setIsChartDialogOpen] = useState(false);
 	const [isEquationDialogOpen, setIsEquationDialogOpen] = useState(false);
 	const [isHyperlinkDialogOpen, setIsHyperlinkDialogOpen] = useState(false);
 	const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
@@ -58,6 +60,7 @@ export function useViewerDialogs(input: UseViewerDialogsInput): ViewerDialogsRes
 	const [isSignatureStrippedDialogOpen, setIsSignatureStrippedDialogOpen] = useState(false);
 	const signatureStripAcknowledgedRef = useRef(false);
 	const [isSetUpSlideShowOpen, setIsSetUpSlideShowOpen] = useState(false);
+	const [isCustomShowsOpen, setIsCustomShowsOpen] = useState(false);
 	const [isBroadcastDialogOpen, setIsBroadcastDialogOpen] = useState(false);
 	const [isPasswordProtected, setIsPasswordProtected] = useState(false);
 	const [presentationPassword, setPresentationPassword] = useState<string | null>(null);
@@ -183,6 +186,7 @@ export function useViewerDialogs(input: UseViewerDialogsInput): ViewerDialogsRes
 		setCustomShows,
 		setActiveCustomShowId,
 		history,
+		setSlides,
 	});
 
 	// ── Slide show settings ───────────────────────────────────────────
@@ -242,6 +246,8 @@ export function useViewerDialogs(input: UseViewerDialogsInput): ViewerDialogsRes
 	return {
 		isSmartArtDialogOpen,
 		setIsSmartArtDialogOpen,
+		isChartDialogOpen,
+		setIsChartDialogOpen,
 		isEquationDialogOpen,
 		setIsEquationDialogOpen,
 		isHyperlinkDialogOpen,
@@ -258,6 +264,8 @@ export function useViewerDialogs(input: UseViewerDialogsInput): ViewerDialogsRes
 		setIsSignatureStrippedDialogOpen,
 		isSetUpSlideShowOpen,
 		setIsSetUpSlideShowOpen,
+		isCustomShowsOpen,
+		setIsCustomShowsOpen,
 		isBroadcastDialogOpen,
 		setIsBroadcastDialogOpen,
 		isPasswordProtected,

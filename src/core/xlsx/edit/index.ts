@@ -6,21 +6,33 @@ export {
 	validationAt,
 	type ValidationOptions,
 } from './validation';
-export { compareCellValues } from './sort';
+export { compareCellValues, type SortKey, type SortOptions } from './sort';
+export { savedSortAt } from './sort-reapply';
+export { sortChoices, type SortChoices } from './sort-choices';
+export { BUILT_IN_SORT_LISTS, formatSortList, parseSortList } from '../sort-lists';
 export { detectSeries, type SeriesGenerator, type SeriesStep } from './fill-series';
 export { parseTsv, toTsv } from './clipboard-text';
 export { parseHtmlTable } from './clipboard-html-parse';
 export { toHtml } from './clipboard-html';
 export { cellsFromText } from './clipboard';
+export { CUT_MULTIPLE, MULTIPLE_SELECTIONS, areaLayout, pasteAreas } from './clipboard-areas';
 export { resolvePasteOptions } from './paste-options';
 export { currentRegion } from './filter';
 export { mergeWouldDiscard } from './merge';
 export { queryPattern, replaceText } from './find';
 export { cellInputText, formulaBarText, numberInputText } from './input-text';
 export { presetEdges } from './borders';
+export {
+	parseBreakPositions,
+	splitDelimited,
+	splitFixedWidth,
+	type SplitOptions,
+} from './text-columns';
 export { validateDefinedName } from './view';
 export { uniqueHeaders } from './tables';
-export { IMAGE_EXTENSIONS, newMediaPart, type ChartPatch } from './charts';
+export { IMAGE_EXTENSIONS, chartSpaceOf, newMediaPart, type ChartPatch } from './charts';
+export { workbookChartRangeNumbers } from './chart-range-numbers';
+export type { SmartArtEditResult, SmartArtInsertion, SmartArtLayoutChange } from './smart-art';
 export { validateTableName, type TablePatch, type TableRef } from './table-edits';
 export { autoGrowRows, rowsToRefit } from './row-autofit';
 export {
@@ -59,6 +71,7 @@ export type {
 	WorkbookChangeKind,
 } from './types';
 export * from './chart-colors';
+export * from './chart-design';
 export * from './chart-element-fill';
 export {
 	chartSeriesGradientPatch,
@@ -112,4 +125,10 @@ export {
 	scenariosOf,
 	type ScenarioDraft,
 } from './scenarios';
+export {
+	customViewMessage,
+	customViewsOf,
+	type CustomViewDraft,
+	type CustomViewProblem,
+} from './custom-views';
 export { displayText } from '../display-text';

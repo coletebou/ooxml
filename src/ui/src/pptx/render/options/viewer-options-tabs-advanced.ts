@@ -155,6 +155,20 @@ export const ADVANCED_TAB: ViewerOptionsTabDefinition = {
 				}),
 			],
 		},
+		{
+			id: 'pdf',
+			titleKey: 'pptx.options.advanced.pdf',
+			controls: [
+				toggle(
+					'advanced',
+					'pdfIncludeHiddenSlides',
+					'pptx.options.advanced.pdfIncludeHiddenSlides',
+				),
+				toggle('advanced', 'pdfSlidesAsPictures', 'pptx.options.advanced.pdfSlidesAsPictures', {
+					infoKey: 'pptx.options.advanced.pdfSlidesAsPicturesInfo',
+				}),
+			],
+		},
 	],
 };
 
@@ -219,6 +233,9 @@ export const TRUST_TAB: ViewerOptionsTabDefinition = {
 				}),
 				toggle('trust', 'allowExternalContent', 'pptx.options.trust.allowExternalContent', {
 					infoKey: 'pptx.options.trust.allowExternalContentInfo',
+				}),
+				toggle('trust', 'allowFontDownloads', 'pptx.options.trust.allowFontDownloads', {
+					infoKey: 'pptx.options.trust.allowFontDownloadsInfo',
 				}),
 				toggle('trust', 'confirmExternalHyperlinks', 'pptx.options.trust.confirmHyperlinks'),
 			],

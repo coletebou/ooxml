@@ -1,7 +1,7 @@
 import { isDialogAvailable } from 'ooxml-ui/pptx';
 import React, { useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
+import { useTranslation } from '../../i18n/use-translation';
 import { SlideTemplateGalleryDialog } from '../SlideTemplateGalleryDialog';
 import { DateTimeFieldDialog } from '../toolbar/DateTimeFieldDialog';
 import { InsertSection } from '../toolbar/InsertSection';
@@ -47,6 +47,7 @@ export function MobileInsertSheet(p: ToolbarProps): React.ReactElement {
 						onAddShape={p.onAddShape}
 						onAddTable={p.onAddTable}
 						onAddChart={p.onAddChart}
+						onOpenChartDialog={p.onOpenChartDialog}
 						onAddSmartArt={p.onAddSmartArt}
 						onAddEquation={p.onAddEquation}
 						onAddActionButton={p.onAddActionButton}

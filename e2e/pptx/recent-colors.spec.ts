@@ -7,9 +7,10 @@
  * dropdown. The viewer models that list once per deck (shared
  * `render/recent-colors.ts`) and every binding is expected to:
  *
- *   - render the row (`data-testid="pptx-color-recent"`) under the inspector's
- *     fill and stroke pickers, most-recent first, one button per colour whose
- *     `title` is the hex;
+ *   - render the row (`data-testid="pptx-color-recent"`, the shared
+ *     `pptx-ui-color-grid` with only Recent Colors) under the inspector's fill
+ *     and stroke pickers, most-recent first, one button per colour carrying its
+ *     hex in `data-color` and named "Recent #HEX";
  *   - hide the row while the list is empty;
  *   - push a colour into the list when a picker COMMITS (the `change` event,
  *     not the continuous `input` stream a native colour input emits while the
@@ -23,12 +24,18 @@
  * binding has (fill and stroke) and asserts the row contract through the same
  * `data-testid` in all five demos.
  *
+ * The drag itself follows one shared rule too (`createLiveColorInput`): every
+ * shade shows on the shape while the user drags, with no undo step, and the
+ * settled pick is ONE undo step. Two bindings showed nothing until the picker
+ * closed, and the other three recorded an undo step per shade.
+ *
  * Run: bunx playwright test recent-colors
  */
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
 import { fixture, inspector, loadDeck } from './support/deck';
+import { formatSection } from './support/format-pane';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -47,18 +54,20 @@ function recentRows(page: Page): Locator {
 	return inspector(page).getByTestId('pptx-color-recent').filter({ visible: true });
 }
 
-/** The hexes one recent-colours row shows, most-recent first. */
+/** The hexes one recent-colours row shows, most-recent first (the locator pierces its shadow root). */
 async function rowColors(row: Locator): Promise<string[]> {
 	return row
 		.locator('button')
 		.evaluateAll((buttons) =>
-			buttons.map((button) => (button.getAttribute('title') ?? '').toLowerCase()),
+			buttons.map((button) => (button.getAttribute('data-color') ?? '').toLowerCase()),
 		);
 }
 
 /**
- * The inspector's native colour inputs, in document order: for a shape the
- * fill picker comes first and the stroke picker after it in every binding.
+ * The inspector's native colour inputs, in document order. Every binding shows
+ * at least two for a shape, but not in the same order: Vue lays its Text section
+ * (with the text colour) out above Fill. A case that needs the FILL picker
+ * itself finds it with {@link fillColorInput}.
  */
 function colorInputs(page: Page): Locator {
 	return inspector(page).locator('input[type="color"]:visible');
@@ -79,11 +88,92 @@ async function pickColor(input: Locator, hex: string): Promise<void> {
 	}, hex);
 }
 
+/**
+ * Drag through the OS picker: one `input` event per shade passed, and no
+ * `change`, which a real picker only fires once the pick settles. Each shade is
+ * its own task, like the ticks of a real drag.
+ */
+async function dragColor(input: Locator, shades: readonly string[]): Promise<void> {
+	for (const shade of shades) {
+		await input.evaluate((element, value) => {
+			const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+			setter?.call(element, value);
+			element.dispatchEvent(new Event('input', { bubbles: true }));
+		}, shade);
+	}
+}
+
+/** The picker settles on `hex`: the one `change` a drag ends with. */
+async function settleColor(input: Locator, hex: string): Promise<void> {
+	await input.evaluate((element, value) => {
+		const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+		setter?.call(element, value);
+		element.dispatchEvent(new Event('change', { bubbles: true }));
+	}, hex);
+}
+
+/** Two frames, so every binding has rendered whatever the last events changed. */
+async function nextFrames(page: Page): Promise<void> {
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) => {
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+			}),
+	);
+}
+
+function sourceShape(page: Page): Locator {
+	return page.locator('[data-pptx-element="true"]').filter({ hasText: 'SOURCE' });
+}
+
 async function selectSourceShape(page: Page): Promise<void> {
-	const source = page.locator('[data-pptx-element="true"]').filter({ hasText: 'SOURCE' });
+	const source = sourceShape(page);
 	await source.waitFor();
 	await source.click();
+	// The slide's own Format pane has colour inputs too: wait for the shape's Fill
+	// section, or a case could read the slide's inputs before the selection lands.
+	await expect(formatSection(page, 'fill')).toBeVisible();
 	await expect(colorInputs(page).first()).toBeVisible();
+}
+
+/**
+ * The fill the shape paints: every binding writes the resolved fill onto the
+ * element container's background (as `format-painter.spec.ts` reads it).
+ */
+async function shapeFill(shape: Locator): Promise<string> {
+	return shape.evaluate((el) => getComputedStyle(el).backgroundColor);
+}
+
+/** `rgb(r, g, b)` as the `#rrggbb` a colour input holds. */
+function rgbToHex(rgb: string): string {
+	const channels = (/rgba?\(([^)]+)\)/u.exec(rgb)?.[1] ?? '').split(',').slice(0, 3);
+	return `#${channels.map((channel) => Number(channel).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * The inspector colour input that edits the shape's fill: the one showing the
+ * fill the shape paints, as `theme-color-picker.spec.ts` finds its fill row.
+ * Exactly one input must show it, or the case would not know which picker it
+ * drives.
+ */
+async function fillColorInput(page: Page, shape: Locator): Promise<Locator> {
+	const fill = rgbToHex(await shapeFill(shape));
+	const values = await colorInputs(page).evaluateAll((inputs) =>
+		inputs.map((input) => (input as HTMLInputElement).value.toLowerCase()),
+	);
+	expect(
+		values.filter((value) => value === fill),
+		`one inspector colour input shows the fill ${fill}`,
+	).toHaveLength(1);
+	return colorInputs(page).nth(values.indexOf(fill));
+}
+
+/**
+ * The ribbon's Undo control, by accessible name: it is a bare icon button in
+ * every binding (as `inspector-undo.spec.ts` finds it).
+ */
+function undoButton(page: Page): Locator {
+	return page.getByRole('button', { name: /^undo/iu }).first();
 }
 
 test.describe('recent colours', () => {
@@ -114,6 +204,26 @@ test.describe('recent colours', () => {
 		}
 	});
 
+	test('every recent-colours row stays inside the inspector', async ({ page }) => {
+		await loadDeck(page, DECK);
+		await selectSourceShape(page);
+		await pickColor(colorInputs(page).first(), RED);
+		await pickColor(colorInputs(page).nth(1), BLUE);
+		await expect.poll(() => recentRows(page).count()).toBeGreaterThanOrEqual(2);
+
+		// A row laid out beside its theme colours instead of under them ran past the panel's edge.
+		const panel = await inspector(page).boundingBox();
+		expect(panel).not.toBeNull();
+		const rows = recentRows(page);
+		const count = await rows.count();
+		for (let index = 0; index < count; index += 1) {
+			const box = await rows.nth(index).boundingBox();
+			expect(box).not.toBeNull();
+			expect(box!.x).toBeGreaterThanOrEqual(panel!.x - 1);
+			expect(box!.x + box!.width).toBeLessThanOrEqual(panel!.x + panel!.width + 1);
+		}
+	});
+
 	test('a second pick goes to the front, and re-picking a swatch moves it back to the front', async ({
 		page,
 	}) => {
@@ -129,7 +239,72 @@ test.describe('recent colours', () => {
 
 		// Clicking the older swatch commits it again, so it becomes the most
 		// recent pick and the row reorders rather than growing a duplicate.
-		await recentRows(page).first().locator(`button[title="${RED}" i]`).click();
+		await recentRows(page).first().locator(`button[data-color="${RED}" i]`).click();
 		await expect.poll(async () => rowColors(recentRows(page).first())).toStrictEqual([RED, BLUE]);
+	});
+
+	test('dragging through the fill picker adds nothing until the pick settles, then only that colour', async ({
+		page,
+	}) => {
+		await loadDeck(page, DECK);
+		await selectSourceShape(page);
+
+		// The shades a drag passes on its way: none of them is a pick.
+		const settled = '#cc0000';
+		await dragColor(colorInputs(page).first(), ['#330000', '#660000', '#990000', settled]);
+		await nextFrames(page);
+		await expect(recentRows(page)).toHaveCount(0);
+
+		// The picker settles where the drag ended: that one colour is the pick.
+		await settleColor(colorInputs(page).first(), settled);
+		await expect.poll(() => recentRows(page).count()).toBeGreaterThanOrEqual(1);
+		const rows = recentRows(page);
+		const count = await rows.count();
+		for (let index = 0; index < count; index += 1) {
+			expect(await rowColors(rows.nth(index))).toStrictEqual([settled]);
+		}
+	});
+
+	test('dragging through the fill picker shows each shade on the shape before the pick settles', async ({
+		page,
+	}) => {
+		await loadDeck(page, DECK);
+		await selectSourceShape(page);
+		const shape = sourceShape(page);
+		const fill = await fillColorInput(page, shape);
+
+		// No `change` yet: the picker is still open, so this is all preview.
+		for (const [shade, painted] of [
+			['#330000', 'rgb(51, 0, 0)'],
+			['#990000', 'rgb(153, 0, 0)'],
+		] as const) {
+			await dragColor(fill, [shade]);
+			await expect.poll(() => shapeFill(shape)).toBe(painted);
+		}
+		// A preview is not an edit: Undo has nothing to take back yet.
+		await expect(undoButton(page)).toBeDisabled();
+	});
+
+	test('a drag through the fill picker and its settling pick are one undo step', async ({
+		page,
+	}) => {
+		await loadDeck(page, DECK);
+		await selectSourceShape(page);
+		const shape = sourceShape(page);
+		const before = await shapeFill(shape);
+		const fill = await fillColorInput(page, shape);
+		await expect(undoButton(page)).toBeDisabled();
+
+		const settled = '#cc0000';
+		await dragColor(fill, ['#330000', '#660000', '#990000', settled]);
+		await settleColor(fill, settled);
+		await expect.poll(() => shapeFill(shape)).toBe('rgb(204, 0, 0)');
+		await expect(undoButton(page)).toBeEnabled();
+
+		// One press takes the whole drag back, and leaves nothing more to undo. A
+		// binding that recorded each shade lands on the shade before last instead.
+		await undoButton(page).click();
+		await expect.poll(() => shapeFill(shape)).toBe(before);
+		await expect(undoButton(page)).toBeDisabled();
 	});
 });

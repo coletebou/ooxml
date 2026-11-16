@@ -24,10 +24,10 @@ viewer.destroy(); // idempotent; later commands reject
 
 每个绑定都接受相同的属性并报告相同的事件（约定为 `ooxml-ui/visio` 中的 `ViewerProperties` 和 `ViewerEvents`；[绑定](/bindings)列出了各框架的原生形式）。
 
-| 接口 | 约定                                                                                                                                                                   |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 属性 | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `ribbonAddIns`, `collaboration`                                                                             |
-| 事件 | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change` |
+| 接口 | 约定                                                                                                                                                                                   |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 属性 | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `readOnly`, `ribbonAddIns`, `collaboration`, `storage`, `fileProviders`, `customization`                                    |
+| 事件 | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change`, `file-command` |
 
 - `canEdit`（布尔值）是编辑权限。完整查看器默认可编辑，`canEdit: false` 使其只读；[构建模块](/building-blocks)在宿主传入 `true` 之前是只读的。没有包字节的图纸（作为 `document` 传入的模型、旧版 `.vsd`）无论 `canEdit` 取何值都是只读的。
 - `document-change` 携带 `{ document, dirty, kind }`。`kind` 对本窗口自己的更改为 `edit`、`undo` 或 `redo`，应用协作者的更改时为 `remote`，`markClean()` 之后为 `save`。
@@ -122,11 +122,80 @@ const customization = {
 
 `edit: false` 是独立的只读锁，与宿主的只读开关和协作角色 `viewer` 并存：彼此互不解除。能力是界面策略，而不是文档保护。Visio 暂不提供区域替换（选项对话框、窗格）。各产品汇总：[嵌入指南](https://github.com/ChristopherVR/ooxml/blob/main/docs/embedding.md)。
 
+## 等待内联文本提交 {#awaited-text-commit}
+
+`commitTextEdit(): Promise<TextEditOutcome>` 将正在挂载画布的形状中输入的文本应用到文档，使宿主的保存
+能导出它。它只在草稿的编辑完成后才解析。失焦或 Esc 已经开始的提交会被等待，而不会重复执行。流程见
+[编辑形状文字时保存](building-blocks.md#saving-while-editing-text)。
+
+可用位置：
+
+| 接口                                                                                  | 调用                          |
+| ------------------------------------------------------------------------------------- | ----------------------------- |
+| `ViewerController`（React 的 `handle` 属性会收到它，句柄的 `viewer.controller` 也是） | `controller.commitTextEdit()` |
+| React `useViewerBuildingBlocks` 的返回值                                              | `commitTextEdit()`            |
+| Vue `useViewerBuildingBlocks` 的返回值                                                | `commitTextEdit()`            |
+| Solid 与 Svelte `createViewerBuildingBlocks` 的返回值                                 | `commitTextEdit()`            |
+| Angular `createViewerBuildingBlocks`（即 `ViewerBuildingBlocks` 服务）                | `commitTextEdit()`            |
+| Vanilla `createViewerBuildingBlocks` 的返回值                                         | `commitTextEdit()`            |
+
+画布通过 `ViewerController.registerTextCommitter` 注册其提交器，宿主无需调用它。`destroy()` 之后
+`ViewerController.destroyed` 为 `true`。
+
+这些类型与 `TextEditCommitter` 一起从 `ooxml-ui/visio` 导出：
+
+```ts
+interface TextEditIdentity {
+	readonly sourceGeneration: number;
+	readonly documentGeneration: number;
+	readonly pageId?: string;
+	readonly shapeId?: string;
+}
+
+type TextEditOutcome =
+	| (TextEditIdentity & { readonly status: 'committed'; readonly text: string })
+	| (TextEditIdentity & { readonly status: 'unchanged'; readonly reason: 'no-draft' | 'same-text' })
+	| (TextEditIdentity & {
+			readonly status: 'refused';
+			readonly reason: 'read-only' | 'rejected';
+			readonly message: string;
+			readonly text: string;
+	  })
+	| (TextEditIdentity & {
+			readonly status: 'cancelled';
+			readonly reason: 'stale-document' | 'superseded' | 'destroyed';
+			readonly text?: string;
+	  });
+```
+
+`sourceGeneration` 是已加载源的代次（若存在草稿则为草稿自身的代次），`documentGeneration` 是做出判定时已接受文档的代次。
+存在草稿时才包含 `pageId` 和 `shapeId`。
+
+| `status`    | `reason`         | 字段               | 出现时机                                                                                                           |
+| ----------- | ---------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `committed` |                  | `text`             | 草稿已作为一次可撤销的编辑应用，走常规编辑路径，校验与撤销/重做不变。                                              |
+| `unchanged` | `no-draft`       |                    | 没有打开的草稿，或没有挂载画布。                                                                                   |
+| `unchanged` | `same-text`      |                    | 草稿与形状的文本相同。                                                                                             |
+| `refused`   | `read-only`      | `message`, `text`  | 提交时绘图为只读，或草稿打开期间变为只读。`message` 为 "The drawing is read-only."。                               |
+| `refused`   | `rejected`       | `message`, `text`  | 编辑未通过校验。`message` 为编辑器的消息，`text` 保留草稿以便恢复。                                                |
+| `cancelled` | `stale-document` | `text`             | 草稿打开期间或编辑运行期间，已加载源发生变化。被加载丢弃的草稿会以其旧的 `sourceGeneration` 返回一次，且绝不应用。 |
+| `cancelled` | `superseded`     | `text`             | 运行期间被另一次编辑取代。                                                                                         |
+| `cancelled` | `destroyed`      | `text`（有草稿时） | 控制器已被销毁：对已销毁控制器的调用返回此结果且不含 `text`；进行中的草稿以其 `text` 被取消。                      |
+
+仅当 `status` 为 `committed` 或 `unchanged` 时才保存：
+
+```ts
+const outcome = await controller.commitTextEdit();
+if (outcome.status === 'refused') showError(outcome.message, outcome.text);
+else if (outcome.status === 'cancelled') showError(`Not saved: ${outcome.reason}`, outcome.text);
+else save(controller.exportVsdx().bytes);
+```
+
 ## 静态 SVG 导出 {#static-svg-export}
 
 `exportPageSvg(model, pageIndex, { maxBytes })` 以及每个已挂载的/原生句柄的 `exportSvg()` 都会返回当前页面的快照，而不改变文档、选择或视口。导出包括受支持的背景、嵌入的栅格资源，以及位于 SVG 描述/元数据中的可见兼容性说明。SVG 导出没有远程资源，也没有自动下载。演示仅在明确按下按钮后才会下载。
 
-UTF-8 的上限为 16 MiB；调用方可以降低它。保守的预检可能会拒绝那些最终序列化结果实际更小的内容。字体不会被嵌入，文本/布局仍是近似的。物理页面尺寸会被保留；下游的栅格化程序必须在分配图像表面之前限制其输出尺寸和像素面积。PDF、位图导出和打印布局仍未实现。
+UTF-8 的上限为 16 MiB；调用方可以降低它。保守的预检可能会拒绝那些最终序列化结果实际更小的内容。字体不会被嵌入，文本/布局仍是近似的。物理页面尺寸会被保留；下游的栅格化程序必须在分配图像表面之前限制其输出尺寸和像素面积。此函数只写入 SVG；查看器中的“文件 > 导出”会写入图片页面的 PNG 和 PDF。打印布局仍未实现。
 
 可选的 Linux 次级像素测试在构建之后通过 `node scripts/test-svg-rasterization.mjs` 运行，使用系统 Python 3、librsvg/Cairo 以及核心的原生 canvas 依赖。这些检查与浏览器或 Microsoft Visio 验证是分开的。
 
@@ -152,7 +221,7 @@ UTF-8 的上限为 16 MiB；调用方可以降低它。保守的预检可能会�
 
 `exportVsdx()` 返回 `{ bytes, dirty, diagnostics }`，用于明确下载的副本。它不会覆盖源文件、上传它，也不声称具备原生往返保真度。共享 UI 仅在用户明确操作之后才下载。历史记录有上限，可能会丢弃较早的撤销状态，这通过 `historyTruncated` 报告。纯文本替换仍限于上述已获准的子集。下文的格式设置和几何操作有各自独立的准入规则。原生重新打开的证据涵盖具体的已记录用例，详见[验证记录](/verification)；它并不证明通用保真度。
 
-## 实验性格式设置与排列 {#experimental-formatting-and-arrangement}
+## 格式设置与排列 {#experimental-formatting-and-arrangement}
 
 “开始”功能区和 `applyEdits()` 共用 `format-text`、`format-shape` 和 `reorder-shape` 命令。文本格式设置包括已保存的字体系列、磅值大小、粗体/斜体/下划线/删除线、颜色、项目符号、缩进以及水平/垂直对齐。形状格式设置包括纯色填充、线条颜色/粗细、线条图案 0-23、填充图案 0-24、背景色和透明度。格式设置要求是普通的本地叶子形状。针对整个形状的文本格式设置会更新每个有效的字符或段落行，同时保留运行标记、文本、无关的样式位以及受支持的缓存字段。字符格式和段落格式有各自独立的源准入；垂直对齐不会改写这两个部分中的任何一个。受保护的或有歧义的行以及受影响的公式依赖项会使整个事务被拒绝。字号增大和减小要求大小一致；字号选择器可以为大小不一的选区设置字号。当其祖先和缓存值/单位可以被证明时，本地的 Character/Paragraph `F="Inh"` 单元格是可编辑的。无缓存的委托需要真实的祖先；明确的格式选择会创建本地覆盖，即使值没有变化。顶层继承的保护和变换单元格仍受到保护。字体必须已存在于源绘图中。层叠命令支持对显示层带零中的一个普通顶层形状执行置于顶层/置于底层/上移一层/下移一层。
 
@@ -162,7 +231,7 @@ UTF-8 的上限为 16 MiB；调用方可以降低它。保守的预检可能会�
 
 六个“对齐”命令以所选的第一个形状为基准对齐。“位置”命令为三个或更多形状提供相等的水平和垂直边缘间距。核心的 `visioArrangeCommands(page, selectedIds, action)` 辅助函数为带有自定义控件的宿主生成原子编辑。它测量旋转后的宽/高边框，按中心点排序分布，并在并列时保留选择顺序。组、母版、图层和已粘合的连接线仍在其准入范围之外。这些操作与其他编辑共享历史记录、选择保留以及 VSDX 下载/重新打开。
 
-## 实验性复制 {#experimental-duplication}
+## 复制 {#experimental-duplication}
 
 控制器以及每个已挂载的/原生句柄上的 `duplicateSelection(): Promise<void>` 会复制当前页面上获准的选中形状。“开始”的“粘贴”菜单、形状右键菜单、“告诉我”和 Ctrl+D 调用同一个方法。文本输入框保留其原生键盘行为。复制不使用系统剪贴板。
 
@@ -180,7 +249,7 @@ UTF-8 的上限为 16 MiB；调用方可以降低它。保守的预检可能会�
 
 `controller.state.clipboard` 通过各框架现有的响应式订阅公开不可变的 `ready`、`preparing` 和 `error` 状态。源捕获在可取消的 Worker 中运行，并会因选择、页面、可见性或文档的更改而失效。提供自己的剪贴板传输的宿主可以在控制器上使用 `captureClipboardToken()`、`prepareClipboardSelection(token)`、`getPreparedClipboard(token)`、`cutPreparedSelection(token)` 和 `pasteClipboardText(text, token)`。令牌会拒绝过期的操作。不依赖 DOM 的核心导出 `captureVisioClipboard`、`serializeVisioClipboard`、`deserializeVisioClipboard`、`paste-shapes` 编辑以及 `visioPasteCommand(page, clipboard, offset?)` 命令构建器。
 
-## 实验性几何编辑 {#experimental-geometry-editing}
+## 几何编辑 {#experimental-geometry-editing}
 
 共享的几何控件提供创建矩形、移动、调整大小和安全删除。每个原生/已挂载的框架句柄还转发 `applyEdits(edits: readonly VisioEdit[])`，用于通过相同的 Worker、历史记录和取消路径执行原子批处理。
 

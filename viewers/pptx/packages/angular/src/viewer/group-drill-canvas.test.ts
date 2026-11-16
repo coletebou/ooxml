@@ -19,16 +19,7 @@ import {
 	setElementPosition,
 	updateElementById,
 } from './element-operations';
-import {
-	enteredGroupBox,
-	escapeSelectionTarget,
-	groupDrillChain,
-	placeTextareaCaretAt,
-	renderedTextOffsetAt,
-	resolveGroupDoubleClickTarget,
-	resolveGroupPressTarget,
-	withGroupMembers,
-} from './group-drill-canvas';
+import { enteredGroupBox, escapeSelectionTarget, withGroupMembers } from './group-drill-canvas';
 import { computeSelectionBoxes, computeSingleSelected } from './selection-geometry';
 
 const card = (id: string, x: number) =>
@@ -55,86 +46,9 @@ const cards = {
 const plain = card('plain', 0);
 const slideElements: PptxElement[] = [plain, cards];
 
-// Slide-space points over card a, card b, and the gap between them.
-const overA = { x: 250, y: 130 };
-const overB = { x: 370, y: 130 };
-const overGap = { x: 310, y: 130 };
-
 type Tree = PptxElement & { children?: Tree[] };
 const childOf = (elements: readonly PptxElement[], id: string) =>
 	(elements.find((el) => el.id === 'cards') as Tree).children?.find((el) => el.id === id);
-
-describe('resolveGroupPressTarget', () => {
-	it('selects the group on the first press', () => {
-		expect(resolveGroupPressTarget(slideElements, 'cards', overA, [])).toBe('cards');
-		expect(resolveGroupPressTarget(slideElements, 'cards', overA, ['plain'])).toBe('cards');
-	});
-
-	it('selects the member under the pointer once the group is selected', () => {
-		expect(resolveGroupPressTarget(slideElements, 'cards', overA, ['cards'])).toBe('a');
-		expect(resolveGroupPressTarget(slideElements, 'cards', overB, ['cards'])).toBe('b');
-	});
-
-	it('moves to another member of the entered group', () => {
-		expect(resolveGroupPressTarget(slideElements, 'cards', overB, ['a'])).toBe('b');
-	});
-
-	it('keeps the selected member selected (its text opens on release)', () => {
-		expect(resolveGroupPressTarget(slideElements, 'cards', overA, ['a'])).toBe('a');
-	});
-
-	it('keeps the group on a press between its members', () => {
-		expect(resolveGroupPressTarget(slideElements, 'cards', overGap, ['cards'])).toBe('cards');
-	});
-
-	it('leaves non-groups, rotated groups and multi-selections alone', () => {
-		expect(resolveGroupPressTarget(slideElements, 'plain', { x: 10, y: 10 }, ['plain'])).toBe(
-			'plain',
-		);
-		const rotated = [{ ...cards, rotation: 30 } as PptxElement];
-		expect(resolveGroupPressTarget(rotated, 'cards', overA, ['cards'])).toBe('cards');
-		expect(groupDrillChain(rotated, 'cards', overA)).toBeNull();
-		expect(resolveGroupPressTarget(slideElements, 'cards', overA, ['cards', 'plain'])).toBe(
-			'cards',
-		);
-	});
-});
-
-describe('locked group members', () => {
-	const withLocks = (first: Record<string, unknown>, group: Record<string, unknown> = {}) => {
-		const g = {
-			...(cards as unknown as Record<string, unknown>),
-			...group,
-			children: [{ ...card('a', 0), ...first }, card('b', 120)],
-		};
-		return [plain, g as unknown as PptxElement];
-	};
-
-	it('never drills into a noSelect member (press or double-click)', () => {
-		const elements = withLocks({ locks: { noSelect: true } });
-		expect(resolveGroupPressTarget(elements, 'cards', overA, ['cards'])).toBe('cards');
-		expect(resolveGroupDoubleClickTarget(elements, 'cards', overA)).toBe('cards');
-		// The unlocked sibling still resolves.
-		expect(resolveGroupDoubleClickTarget(elements, 'cards', overB)).toBe('b');
-	});
-
-	it('never drills into a noDrilldown group', () => {
-		const elements = withLocks({}, { locks: { noDrilldown: true } });
-		expect(resolveGroupPressTarget(elements, 'cards', overA, ['cards'])).toBe('cards');
-		expect(resolveGroupDoubleClickTarget(elements, 'cards', overA)).toBe('cards');
-	});
-});
-
-describe('resolveGroupDoubleClickTarget', () => {
-	it('goes straight to the member under the pointer', () => {
-		expect(resolveGroupDoubleClickTarget(slideElements, 'cards', overB)).toBe('b');
-	});
-
-	it('stays on the group between members, and on a plain shape', () => {
-		expect(resolveGroupDoubleClickTarget(slideElements, 'cards', overGap)).toBe('cards');
-		expect(resolveGroupDoubleClickTarget(slideElements, 'plain', { x: 1, y: 1 })).toBe('plain');
-	});
-});
 
 describe('escapeSelectionTarget', () => {
 	it('steps a selected member up to its group, then clears', () => {
@@ -210,97 +124,5 @@ describe('member updates are written back into the group', () => {
 		const next = updateElementById(slideElements, 'plain', { x: 7 });
 		expect(next[0].x).toBe(7);
 		expect(next[1]).toBe(cards);
-	});
-});
-
-describe('placeTextareaCaretAt', () => {
-	type CaretDoc = Document & {
-		caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
-	};
-
-	it('puts the caret at the click point, read against a mirror of the textarea', () => {
-		const textarea = document.createElement('textarea');
-		textarea.value = 'hello world';
-		textarea.getBoundingClientRect = () =>
-			({
-				left: 0,
-				top: 0,
-				right: 200,
-				bottom: 50,
-				width: 200,
-				height: 50,
-				x: 0,
-				y: 0,
-				toJSON: () => ({}),
-			}) as DOMRect;
-		document.body.appendChild(textarea);
-		const doc = document as CaretDoc;
-		const original = doc.caretPositionFromPoint;
-		// The browser answers with the mirror's text node (the last thing appended while measuring).
-		doc.caretPositionFromPoint = () => ({
-			offsetNode: document.body.lastElementChild!.firstChild!,
-			offset: 3,
-		});
-		try {
-			placeTextareaCaretAt(textarea, { clientX: 10, clientY: 10 });
-			expect(textarea.selectionStart).toBe(3);
-			expect(textarea.selectionEnd).toBe(3);
-		} finally {
-			doc.caretPositionFromPoint = original;
-			textarea.remove();
-		}
-	});
-
-	it('falls back to the end without a point or a usable position', () => {
-		const textarea = document.createElement('textarea');
-		textarea.value = 'hello';
-		document.body.appendChild(textarea);
-		const doc = document as CaretDoc;
-		const original = doc.caretPositionFromPoint;
-		doc.caretPositionFromPoint = () => ({ offsetNode: document.body, offset: 1 });
-		try {
-			placeTextareaCaretAt(textarea, null);
-			expect(textarea.selectionStart).toBe(5);
-			textarea.setSelectionRange(0, 0);
-			placeTextareaCaretAt(textarea, { clientX: 1, clientY: 1 });
-			expect(textarea.selectionStart).toBe(5);
-		} finally {
-			doc.caretPositionFromPoint = original;
-			textarea.remove();
-		}
-	});
-
-	it('maps a click on the rendered text to the editor text offset, across paragraphs', () => {
-		// "Scale" on line 1 (y 0..30), "Up to" on line 2 (y 40..60); 10px per character.
-		const root = document.createElement('div');
-		root.innerHTML = '<p>Scale</p><p>Up to</p>';
-		document.body.appendChild(root);
-		const lines = [...root.querySelectorAll('p')].map((p) => p.firstChild);
-		const proto = Range.prototype as unknown as { getBoundingClientRect: () => DOMRect };
-		const original = proto.getBoundingClientRect;
-		proto.getBoundingClientRect = function (this: Range) {
-			const line = lines.indexOf(this.startContainer as ChildNode);
-			const top = line === 0 ? 0 : 40;
-			const left = this.startOffset * 10;
-			return {
-				left,
-				right: left + 10,
-				top,
-				bottom: top + (line === 0 ? 30 : 20),
-				width: 10,
-				height: 20,
-				x: left,
-				y: top,
-				toJSON: () => ({}),
-			} as DOMRect;
-		};
-		try {
-			expect(renderedTextOffsetAt(root, 'Scale\nUp to', 22, 15)).toBe(2); // "Sc|ale"
-			expect(renderedTextOffsetAt(root, 'Scale\nUp to', 7, 50)).toBe(7); // "U|p to", after the break
-			expect(renderedTextOffsetAt(root, 'Scale\nUp to', 22, 35)).toBeNull(); // between the lines
-		} finally {
-			proto.getBoundingClientRect = original;
-			root.remove();
-		}
 	});
 });

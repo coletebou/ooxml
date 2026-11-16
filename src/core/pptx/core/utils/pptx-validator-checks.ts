@@ -62,7 +62,7 @@ async function validateMediaReferences(
 	issues: ValidationIssue[],
 ): Promise<void> {
 	const media = new Set(
-		Object.keys(zip.files).filter((path) => path.startsWith('ppt/media/') && !zip.files[path].dir),
+		Object.keys(zip.files).filter((path) => path.startsWith('ppt/media/') && !zip.files[path]?.dir),
 	);
 	for (const path of Object.keys(zip.files).filter((entry) =>
 		/^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(entry),
@@ -79,7 +79,7 @@ async function validateMediaReferences(
 			if (/^[A-Za-z][A-Za-z\d+.-]*:/.test(rel.target)) {
 				continue;
 			}
-			const resolved = resolveRelTarget(relsOwnerDir(path), rel.target.split('#')[0]);
+			const resolved = resolveRelTarget(relsOwnerDir(path), rel.target.split('#')[0] ?? '');
 			if (resolved.startsWith('ppt/media/') && !media.has(resolved)) {
 				issues.push({
 					severity: 'warning',

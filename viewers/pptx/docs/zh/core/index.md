@@ -40,16 +40,16 @@ bun add pptx-viewer-core
 
 引擎通过字符串和对象操作构建 XML/SVG，加载、编辑和保存路径均不依赖 DOM。
 
-| 环境                            | 解析 / 编辑 / 保存 | SVG 导出 | Markdown 转换            | 加密                         | CLI    |
-| ------------------------------- | ------------------ | -------- | ------------------------ | ---------------------------- | ------ |
-| **浏览器**                      | 支持               | 支持     | 支持，内存中处理         | 支持，使用 `crypto.subtle`   | 不支持 |
-| **Node 18+**                    | 支持               | 支持     | 支持，可接入磁盘适配器   | Node 19+ 支持，18 需启用标志 | 支持   |
-| **Bun**                         | 支持               | 支持     | 支持，可接入磁盘适配器   | 支持                         | 支持   |
-| **Deno / Workers / Serverless** | 支持               | 支持     | 支持，可接入自定义适配器 | 支持                         | 不支持 |
+| 环境                            | 解析 / 编辑 / 保存 | SVG 导出 | Markdown 转换            | 加密                       | CLI    |
+| ------------------------------- | ------------------ | -------- | ------------------------ | -------------------------- | ------ |
+| **浏览器**                      | 支持               | 支持     | 支持，内存中处理         | 支持，使用 `crypto.subtle` | 不支持 |
+| **Node 22+**                    | 支持               | 支持     | 支持，可接入磁盘适配器   | 支持                       | 支持   |
+| **Bun**                         | 支持               | 支持     | 支持，可接入磁盘适配器   | 支持                       | 支持   |
+| **Deno / Workers / Serverless** | 支持               | 支持     | 支持，可接入自定义适配器 | 支持                       | 不支持 |
 
 需要注意的平台条件包括：
 
-- **加密**需要 `globalThis.crypto` 上的 `crypto.subtle` 和 `crypto.getRandomValues`。浏览器、Bun、Deno、Workers 和 Node 19+ 原生提供；Node 18 需要 `--experimental-global-webcrypto`。
+- **加密**需要 `globalThis.crypto` 上的 `crypto.subtle` 和 `crypto.getRandomValues`。浏览器、Bun、Deno、Workers 和 Node 原生提供。
 - **写入文件**由调用方负责。引擎返回字符串或 `Uint8Array`，转换器接受可替换的 `FileSystemAdapter`。
 - **CLI** 使用 `node:fs`，在 Node 或 Bun 下运行。
 
@@ -131,10 +131,10 @@ const bytes = await handler.save(data.slides);
 
 :::
 
-`PptxHandler.create(options)` 及其别名 `PptxHandler.createBlank(options)` 均接收 `PresentationOptions`，包括以 EMU 表示的 `width`/`height`、`theme`、`title`、`creator` 和 `initialSlideCount`，返回 `{ handler, data, createSlide }`。链式接口见[构建器](/zh/core/builder)，加载流程及 `password`、`eagerDecodeImages`、`maxUncompressedBytes`、`allowExternalImages` 选项见[加载与解析](/zh/core/loading)。
+`PptxHandler.create(options)` 及其别名 `PptxHandler.createBlank(options)` 均接收 `PresentationOptions`，包括以 EMU 表示的 `width`/`height`、`theme`、`title`、`creator` 和 `initialSlideCount`，返回 `{ handler, data, createSlide }`。链式接口见[构建器](/zh/core/builder)，加载流程及 `password`、`eagerDecodeImages`、`eagerDecodeEmbeddedFonts`、`maxUncompressedBytes`、`allowExternalImages`、`limits` 选项见[加载与解析](/zh/core/loading)。
 
 ::: warning 加载保护
-`load()` 限制 ZIP 解压预算，默认总量 500 MiB、最多 65,536 个条目，超出时抛出 `ZipBombError`。外部 `http(s)` 图片引用默认丢弃，只有显式设置 `allowExternalImages: true` 才允许。
+`load()` 限制 ZIP 解压预算，默认总量 500 MiB、最多 65,536 个条目，超出时抛出 `ZipBombError`。外部 `http(s)` 图片引用默认丢弃，只有显式设置 `allowExternalImages: true` 才允许。打开不受信任演示文稿的宿主还可以用 `limits` 限制输入大小、幻灯片和形状数量（参见[加载限制](/zh/core/loading#load-limits)）。
 :::
 
 ## 主要公共导出 {#main-public-exports}

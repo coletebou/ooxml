@@ -92,9 +92,11 @@ describe('renderVectorShape freeform gradient fill', () => {
 				fillGradientFillToRect: { l: 0, t: 0, r: 1, b: 1 },
 			}),
 		);
-		expect(html).toContain('<radialGradient');
-		expect(html).toContain('cx="0"');
-		expect(html).toContain('cy="0"');
+		// A freeform's circle path is a true circle in the box's own pixels, drawn
+		// as an image whose focal point is the fillToRect corner.
+		const svg = decodeURIComponent(html);
+		expect(svg).toContain('radialGradient');
+		expect(svg).toContain('fx="0" fy="0"');
 	});
 
 	it('leaves a solid freeform fill exactly as it was', () => {
@@ -107,5 +109,29 @@ describe('renderVectorShape freeform gradient fill', () => {
 		const html = markup(freeform(LINEAR), true);
 		expect(html).toContain('fill="inherit"');
 		expect(html).not.toContain('<linearGradient');
+	});
+});
+
+describe('renderVectorShape freeform rect-path gradient fill', () => {
+	it('paints a path="rect" gradient through a pattern whose content is in bounding-box units', () => {
+		const html = markup(
+			freeform({
+				fillMode: 'gradient',
+				fillColor: '#808080',
+				fillGradientType: 'radial',
+				fillGradientPathType: 'rect',
+				fillGradientFillToRect: { l: 0.3, t: 0.3, r: 0.3, b: 0.3 },
+				fillGradientStops: [
+					{ color: '#FF0000', position: 0 },
+					{ color: '#00FF00', position: 50 },
+					{ color: '#0000FF', position: 100 },
+				],
+			}),
+		);
+		expect(html).toContain('fill="url(#pptx-grad-ppt_slides_slide3_xml-shape-9)"');
+		// Without `patternContentUnits="objectBoundingBox"` the tile's 1x1 image is a single
+		// user unit inside a 100x50 path, so the whole fill rendered blank in React only.
+		expect(html).toMatch(/<pattern[^>]*patternContentUnits="objectBoundingBox"/u);
+		expect(html).toContain('preserveAspectRatio="none"');
 	});
 });

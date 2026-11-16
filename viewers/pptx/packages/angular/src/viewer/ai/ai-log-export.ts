@@ -6,14 +6,18 @@
  * store and triggering the actual browser download via `downloadBlob`.
  */
 import { downloadBlob } from 'ooxml-ui/pptx';
+import type { ExportAiChatLogsMeta, PptxAiChatStore } from 'ooxml-ui/pptx/ai';
 import {
 	collectStoredChats,
 	createChatHistoryStore,
 	exportAiChatLogs as exportAiChatLogsPure,
-} from 'ooxml-ui/pptx/ai';
-import type { ExportAiChatLogsMeta, PptxAiChatStore } from 'ooxml-ui/pptx/ai';
+} from 'ooxml-ui/pptx/ai/host';
 
-export { buildChatLogExport, buildChatLogMarkdown, collectStoredChats } from 'ooxml-ui/pptx/ai';
+export {
+	buildChatLogExport,
+	buildChatLogMarkdown,
+	collectStoredChats,
+} from 'ooxml-ui/pptx/ai/host';
 export type {
 	AiLogChat,
 	AiLogExport,

@@ -100,10 +100,10 @@ import { resolveRotatedChildResizeOffset } from './group-child-rotated-resize';
 
 /** The subset of `GroupPptxElement` describing its captured child coordinate space. */
 export interface GroupChildSpaceEmu {
-	readonly chOffXEmu?: number;
-	readonly chOffYEmu?: number;
-	readonly chExtWidthEmu?: number;
-	readonly chExtHeightEmu?: number;
+	readonly chOffXEmu?: number | undefined;
+	readonly chOffYEmu?: number | undefined;
+	readonly chExtWidthEmu?: number | undefined;
+	readonly chExtHeightEmu?: number | undefined;
 }
 
 /** Minimal geometry view of a group child (leaf or nested group). */
@@ -112,12 +112,12 @@ export interface GroupChildGeometry {
 	readonly y: number;
 	readonly width: number;
 	readonly height: number;
-	readonly xEmu?: number;
-	readonly yEmu?: number;
-	readonly widthEmu?: number;
-	readonly heightEmu?: number;
+	readonly xEmu?: number | undefined;
+	readonly yEmu?: number | undefined;
+	readonly widthEmu?: number | undefined;
+	readonly heightEmu?: number | undefined;
 	/** The child's own rotation; see `group-child-rotated-resize.ts` for why a resized ROTATED child needs it. */
-	readonly rotation?: number;
+	readonly rotation?: number | undefined;
 }
 
 /**
@@ -148,8 +148,8 @@ export function hasCapturedChildSpace(group: GroupChildSpaceEmu): boolean {
  * no derivation is needed to produce it.
  */
 export interface GroupChildSpaceOwner extends GroupChildSpaceEmu {
-	readonly widthEmu?: number;
-	readonly heightEmu?: number;
+	readonly widthEmu?: number | undefined;
+	readonly heightEmu?: number | undefined;
 }
 
 /**

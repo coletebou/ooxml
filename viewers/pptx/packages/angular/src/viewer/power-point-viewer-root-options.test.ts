@@ -30,8 +30,11 @@ describe('powerPointViewerComponent readOnly input', () => {
 		expect(source).toContain(
 			"readonly readOnlyInput = input<boolean>(false, { alias: 'readOnly' });",
 		);
+		// The host's right reaches the edit permission through `documentView`, which also applies
+		// the edit right of a file opened from a File > Open cloud place.
+		expect(source).toMatch(/canEdit: this\.canEditInput\(\) && !this\.readOnlyInput\(\),/u);
 		expect(source).toMatch(
-			/hasEditPermission = computed\(\s*\(\) =>\s*this\.canEditInput\(\) &&\s*!this\.readOnlyInput\(\) &&/u,
+			/hasEditPermission = computed\(\s*\(\) =>\s*(?:\/\/[^\n]*\s*)?this\.documentView\(\)\.canEdit &&/u,
 		);
 		expect(source).toMatch(
 			/protectedViewActive = computed\(\s*\(\) =>\s*this\.canEditInput\(\) &&\s*!this\.readOnlyInput\(\) &&/u,
@@ -72,24 +75,34 @@ describe('powerPointViewerComponent root display inputs', () => {
 		);
 		expect(gateBefore('pptx-ng-protected-view-banner')).toContain('toolbarVisible()');
 		expect(gateBefore('<pptx-readonly-banner')).toContain('toolbarVisible()');
-		expect(gateBefore("@if (customizationService.panelVisible('titleBar'))")).toContain(
-			'!mobile.isMobile() && toolbarVisible()',
+		// The title bar sits in an outer desktop-and-toolbar block, then its own panel and ribbon gate.
+		expect(source).toMatch(
+			/@if \(!mobile\.isMobile\(\) && toolbarVisible\(\)\) \{\s*@if \(\s*customizationService\.panelVisible\('titleBar'\)/u,
 		);
 		expect(gateBefore('<pptx-mobile-toolbar')).toContain('toolbarVisible()');
 		expect(gateBefore('<pptx-status-bar')).toContain('toolbarVisible()');
 		expect(gateBefore('<pptx-mobile-slides-sheet')).toContain('rootOptions().showToolbar');
 	});
 
-	it('gates both slide thumbnail panes on showThumbnails', () => {
+	it('gates the slide thumbnail pane on showThumbnails', () => {
 		expect(source).toMatch(
 			/thumbnailsVisible = computed\(\s*\(\) => this\.chromeVisible\(\) && this\.rootOptions\(\)\.showThumbnails,/u,
 		);
 		expect(gateBefore('<pptx-slides-panel')).toContain('thumbnailsVisible()');
-		const readOnlyRail = source.slice(
-			source.indexOf('} @else if (', source.indexOf('<pptx-slides-panel')),
-			source.indexOf('<nav class="pptx-ng-thumbnails"'),
-		);
-		expect(readOnlyRail).toContain('thumbnailsVisible()');
+	});
+
+	/**
+	 * A read-only deck (modify password, read-only recommended) used to get a bare
+	 * numbered `<nav>` whose buttons had no accessible name and no thumbnail; the
+	 * other four bindings keep the real slide rail. One rail serves both modes.
+	 */
+	it('uses the one slide rail for read-only decks too', () => {
+		expect(source).not.toContain('<nav class="pptx-ng-thumbnails"');
+		expect(source).toContain('[canEdit]="canEdit()"');
+		const panelAt = source.indexOf('<pptx-slides-panel');
+		const gate = source.slice(source.lastIndexOf('} @else if (', panelAt), panelAt);
+		expect(gate).toContain('thumbnailsVisible()');
+		expect(gate).not.toMatch(/canEdit\(\) &&/u);
 	});
 
 	it('opens each loaded deck on the clamped initialSlide', () => {

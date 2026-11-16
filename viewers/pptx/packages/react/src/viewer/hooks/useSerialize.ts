@@ -112,7 +112,7 @@ export interface UseSerializeInput {
 	inlineEditingReaderRef?: React.MutableRefObject<
 		import('./useInlineEditingState').PendingInlineEditReader | undefined
 	>;
-	transformCommittedText?: (text: string) => string;
+	transformCommittedText?: (text: string, previous?: string) => string;
 	password?: string;
 	/**
 	 * File > Fonts > "Embed fonts in the file". `false` passes
@@ -204,12 +204,13 @@ export function useSerialize(input: UseSerializeInput): SerializeSlides {
 			}
 			const pendingEditText = read?.snapshot.text ?? inlineEditingTextRef.current;
 			const pendingSnapshot = read?.snapshot ?? inlineEditingSnapshotRef?.current;
+			const heldDeck = heldDeckRef?.current;
 
 			const pending = overlayPendingInlineEdit(
 				{
-					slides: heldDeckRef?.current?.slides ?? slides,
+					slides: heldDeck?.slides ?? slides,
 					templateElementsBySlideId:
-						heldDeckRef?.current?.templateElementsBySlideId ?? templateElementsBySlideId,
+						heldDeck?.templateElementsBySlideId ?? templateElementsBySlideId,
 					activeSlideIndex,
 					editTemplateMode,
 					masterViewTarget,
@@ -295,6 +296,7 @@ export function useSerialize(input: UseSerializeInput): SerializeSlides {
 			editTemplateMode,
 			masterViewTarget,
 			handlerRef,
+			heldDeckRef,
 			inlineEditingElementIdRef,
 			inlineEditingTextRef,
 			inlineEditingSnapshotRef,

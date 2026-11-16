@@ -139,40 +139,48 @@ export const INSPECTOR_EXTRAS_CSS = `
 }
 .pptxv-inspector-pattern[hidden],
 .pptxv-inspector-pattern:empty { display: none; }
-.pptxv-accessibility-alt {
+.pptxv-inspector-pattern-grid {
+	display: grid;
+	grid-template-columns: repeat(8, 1fr);
+	gap: 4px;
+	max-height: 160px;
+	overflow-y: auto;
+}
+.pptxv-inspector-pattern-swatch {
+	aspect-ratio: 1;
+	padding: 0;
+	border: 1px solid var(--pptx-border);
+	border-radius: 4px;
+	background-color: #ffffff;
+	background-repeat: repeat;
+	background-size: 8px 8px;
+	cursor: pointer;
+}
+.pptxv-inspector-pattern-swatch[aria-pressed='true'] {
+	border-color: var(--pptx-primary);
+	outline: 2px solid var(--pptx-primary);
+}
+/*
+ * Alt text and title stack their caption over a full-width field, as React's section does. Side by
+ * side in the inline .pptxv-field box, the title's caption and a text input of the browser's default
+ * width ran 10 px past the inspector, which then scrolled sideways.
+ */
+.pptxv-accessibility-alt,
+.pptxv-accessibility-title-field {
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
 	gap: 4px;
-	margin-bottom: 8px;
 }
-.pptxv-accessibility-alt-input { width: 100%; }
-.pptxv-accessibility-title-input { flex: 1 1 auto; min-width: 0; }
+.pptxv-accessibility-alt { margin-bottom: 8px; }
+.pptxv-accessibility-alt-input,
+.pptxv-accessibility-title-input { width: 100%; }
 .pptxv-tags-toggle-label {
 	color: var(--pptx-foreground);
 	font-size: 11px;
 	font-weight: 600;
 }
 
-/* ── SmartArt text pane: per-node hierarchy actions ──────────────────── */
-.pptxv-smartart-hierarchy {
-	display: flex;
-	flex-wrap: wrap;
-	grid-column: 2 / -1;
-	gap: 4px;
-	margin-top: 2px;
-}
-.pptxv-smartart-hierarchy button {
-	padding: 1px 6px;
-	border: 1px solid var(--pptx-border);
-	border-radius: var(--pptx-radius);
-	background: transparent;
-	color: var(--pptx-muted-foreground);
-	font: inherit;
-	font-size: 10px;
-	cursor: pointer;
-}
-.pptxv-smartart-hierarchy button:hover { background: var(--pptx-accent); color: var(--pptx-accent-foreground); }
 
 /* ── OLE editor dialog: nested deck tab ──────────────────────────────── */
 .pptxv-ole-edit-content { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

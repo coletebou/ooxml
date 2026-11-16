@@ -1,14 +1,10 @@
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
-import type {
-	NestedTablePreview,
-	TableCell,
-	TableCellMargins,
-	TableLook,
-	TableRowProperties,
-} from './table-model';
+import type { NestedTablePreview, TableCell, TableLook, TableRowProperties } from './table-model';
 import type { Paragraph, Table } from './model';
 import { children, first, getW, type XmlElement, WORD_NS } from './xml';
-import { canEditTableStructure } from './write-table';
+import { canEditTableStructure, canRestructureTable } from './table-structure-check';
+import { tableGrid } from './table-grid';
+import { rowRevision } from './parse-revisions';
 import type { ContentControl } from './content-control-model';
 import { flatCellParagraphs, flatCells, flatRows } from './parse-content-control';
 import { isStJcTable, isStVerticalJc } from './generated/wml-simple-types';
@@ -22,8 +18,22 @@ import {
 } from './simple-types';
 import type { Twips } from './units';
 import { parseShadingFill, parseShadingThemeFill, parseTableBorders } from './table-borders';
+import { parseTableFloating } from './parse-table-floating';
+import { parseCellMargins } from './table-margins';
 
 const dxa = parseTwips;
+
+/**
+ * A percentage width (`ST_MeasurementOrPercent`) as a fraction: fiftieths of a percent in the
+ * transitional schema (`2500` is 50%), or a `%` value (`50%`) in the strict one.
+ */
+function percentWidth(width: XmlElement | undefined): number | undefined {
+	if (getW(width, 'type') !== 'pct') return undefined;
+	const raw = getW(width, 'w')?.trim();
+	if (!raw) return undefined;
+	const value = raw.endsWith('%') ? Number(raw.slice(0, -1)) / 100 : Number(raw) / 5000;
+	return Number.isFinite(value) && value > 0 ? value : undefined;
+}
 
 function nestedPreview(node: XmlElement): NestedTablePreview {
 	return {
@@ -61,6 +71,8 @@ function parseCell(
 		const width = dxa(getW(tcW, 'w'));
 		if (width !== undefined) result.widthTwips = width;
 	}
+	const percent = percentWidth(tcW);
+	if (percent !== undefined) result.widthPercent = percent;
 	const vAlign = enumValue(isStVerticalJc, getW(first(props, 'vAlign'), 'val'), 'w:tcPr/w:vAlign');
 	if (vAlign) result.verticalAlign = vAlign;
 	const shd = first(props, 'shd');
@@ -72,7 +84,7 @@ function parseCell(
 	if (themeFill) result.shadingThemeFill = themeFill;
 	const borders = parseTableBorders(first(props, 'tcBorders'));
 	if (borders) result.borders = borders;
-	const margins = parseMargins(first(props, 'tcMar'));
+	const margins = parseCellMargins(first(props, 'tcMar'));
 	if (margins) result.margins = margins;
 	const nested = children(cell, 'tbl').map(nestedPreview);
 	if (nested.length) result.nestedTables = nested;
@@ -85,8 +97,12 @@ function parseCell(
 				const element = child as XmlElement;
 				if (element.namespaceURI !== WORD_NS) return [];
 				if (element.localName === 'p') return [result.paragraphs[paragraphIndex++]!];
-				if (element.localName === 'tbl')
-					return [parseTable(element, `${id}-nested${tableIndex++}`, parseParagraph)];
+				if (element.localName === 'tbl') {
+					const inner = parseTable(element, `${id}-nested${tableIndex++}`, parseParagraph);
+					// A table in a cell is always edited through the merge-aware structure editors.
+					markRestructurable(inner, element);
+					return [inner];
+				}
 				return [];
 			},
 		);
@@ -116,29 +132,6 @@ function parseLook(element: XmlElement | undefined): TableLook | undefined {
 	return Object.keys(look).length ? look : undefined;
 }
 
-/** Cell margins from `w:tcMar` or `w:tblCellMar`, in twips (`start`/`end` read as left/right). */
-function parseMargins(element: XmlElement | undefined): TableCellMargins | undefined {
-	if (!element) return undefined;
-	const parsed: TableCellMargins = {};
-	for (const [side, logical] of [
-		['top', 'top'],
-		['bottom', 'bottom'],
-		['left', 'start'],
-		['right', 'end'],
-	] as const) {
-		const edge = first(element, logical) ?? first(element, side);
-		const type = getW(edge, 'type') ?? 'dxa';
-		const value =
-			type === 'nil'
-				? parseSignedTwips('0')
-				: type === 'dxa'
-					? parseSignedTwips(getW(edge, 'w'))
-					: undefined;
-		if (value !== undefined) parsed[side] = value;
-	}
-	return Object.keys(parsed).length ? parsed : undefined;
-}
-
 /** Row height (`w:trHeight`, `auto` rule meaning at least), keep-together and header flags. */
 function parseRowProperties(row: XmlElement): TableRowProperties {
 	const trPr = first(row, 'trPr');
@@ -151,7 +144,14 @@ function parseRowProperties(row: XmlElement): TableRowProperties {
 	}
 	if (onOffElement(first(trPr, 'cantSplit'))) result.cantSplit = true;
 	if (onOffElement(first(trPr, 'tblHeader'))) result.header = true;
+	const revision = rowRevision(trPr);
+	if (revision) result.revision = revision;
 	return result;
+}
+
+/** Flags a table whose cells tile its grid and whose XML the structure editors can keep. */
+function markRestructurable(table: Table, node: XmlElement): void {
+	if (canRestructureTable(node) && tableGrid(table)) table.restructurable = true;
 }
 
 /** Parses a `w:tbl`, including grid widths, merges, borders, shading and table style/look. */
@@ -180,6 +180,11 @@ export function parseTable(
 	const width =
 		(getW(tableWidth, 'type') ?? 'dxa') === 'dxa' ? dxa(getW(tableWidth, 'w')) : undefined;
 	if (width !== undefined) table.widthTwips = width;
+	const percent = percentWidth(tableWidth);
+	if (percent !== undefined) table.widthPercent = percent;
+	table.layout = getW(first(tblPr, 'tblLayout'), 'type') === 'fixed' ? 'fixed' : 'autofit';
+	const floating = parseTableFloating(first(tblPr, 'tblpPr'));
+	if (floating) table.floating = floating;
 	const justification = enumValue(isStJcTable, getW(first(tblPr, 'jc'), 'val'), 'w:tblPr/w:jc');
 	if (justification) {
 		table.justification = justification;
@@ -203,7 +208,7 @@ export function parseTable(
 	if (styleId) table.style = styleId;
 	const look = parseLook(first(tblPr, 'tblLook'));
 	if (look) table.look = look;
-	const cellMargins = parseMargins(first(tblPr, 'tblCellMar'));
+	const cellMargins = parseCellMargins(first(tblPr, 'tblCellMar'));
 	if (cellMargins) table.cellMargins = cellMargins;
 	const rowProperties = rowEntries.map(({ element, control }) => {
 		const properties = parseRowProperties(element);
@@ -211,5 +216,6 @@ export function parseTable(
 		return properties;
 	});
 	if (rowProperties.some((row) => Object.keys(row).length)) table.rowProperties = rowProperties;
+	if (!table.structureEditable) markRestructurable(table, node);
 	return table;
 }

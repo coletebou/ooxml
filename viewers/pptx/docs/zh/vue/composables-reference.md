@@ -21,7 +21,7 @@ import { useEditorHistory, useAlignGroup } from 'pptx-vue-viewer/internals';
 | 组合式函数                    | 职责                                               |
 | ----------------------------- | -------------------------------------------------- |
 | `useLoadContent`              | 加载时通过 `PptxHandler` 解析 PPTX 缓冲区。        |
-| `useAutosave`                 | 带防抖的自动保存定时器、未保存修改跟踪和状态。     |
+| `useAutosave`                 | 自动保存间隔、未保存修改跟踪和状态。               |
 | `useDocumentStatistics`       | 为文档属性对话框统计单词、字符、幻灯片和备注数量。 |
 | `useDocumentPropertiesDialog` | 核心、自定义及应用文档属性的对话框状态。           |
 | `useMasterViewState`          | 幻灯片、备注和讲义的母版视图状态。                 |
@@ -57,11 +57,9 @@ import { useEditorHistory, useAlignGroup } from 'pptx-vue-viewer/internals';
 | 组合式函数                   | 职责                                                                   |
 | ---------------------------- | ---------------------------------------------------------------------- |
 | `useSmartArtEditing`         | 编辑 SmartArt 节点、布局、颜色和样式。                                 |
-| `useSmartArtFocus`           | SmartArt 节点的键盘焦点和导航。                                        |
 | `useSmartArtHoverRect`       | SmartArt 节点的悬停高亮矩形。                                          |
 | `useSmartArtNodeEditContext` | 通过 provide/inject 为 SmartArt 节点的内联文本和填充编辑提供上下文。   |
 | `useSmartArtInlineEditState` | SmartArt 内联节点编辑器的打开和关闭状态（`smartart-inline-edit.ts`）。 |
-| `useSmartArt3D`              | 通过 inject 读取可选的 `smartArt3D` 标记（`smart-art-3d.ts`）。        |
 
 ## 表格 {#tables}
 

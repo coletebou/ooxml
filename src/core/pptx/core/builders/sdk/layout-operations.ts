@@ -15,6 +15,7 @@ import { openPptxZip } from '../../utils/zip-open';
 import { escAttr } from '../../ppt/pptx/xml-utils';
 import { PptxHandler } from '../../PptxHandler';
 import type { PptxData, PptxLayoutOption } from '../../types/presentation';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -231,7 +232,7 @@ export async function addLayoutToSlideMaster(
 
 	// Find the highest rId currently in the rels
 	const rIdMatches = [...masterRelsContent.matchAll(/rId(\d+)/g)];
-	const maxRId = rIdMatches.reduce((max, m) => Math.max(max, parseInt(m[1], 10)), 0);
+	const maxRId = rIdMatches.reduce((max, m) => Math.max(max, parseInt(m[1] ?? '', 10)), 0);
 	const newRId = `rId${maxRId + 1}`;
 
 	// Insert new relationship before closing </Relationships>
@@ -248,7 +249,10 @@ export async function addLayoutToSlideMaster(
 
 	// Compute a unique layout id (2147483649 + offset to avoid collisions)
 	const idMatches = [...masterContent.matchAll(/sldLayoutId\s+id="(\d+)"/g)];
-	const maxLayoutId = idMatches.reduce((max, m) => Math.max(max, parseInt(m[1], 10)), 2147483648);
+	const maxLayoutId = idMatches.reduce(
+		(max, m) => Math.max(max, parseInt(m[1] ?? '', 10)),
+		2147483648,
+	);
 	const newLayoutId = maxLayoutId + 1;
 
 	// Insert new sldLayoutId entry before closing </p:sldLayoutIdLst>
@@ -396,7 +400,7 @@ export async function createLayouts(
 	const layoutPaths: string[] = [];
 
 	for (let i = 0; i < definitions.length; i++) {
-		const def = definitions[i];
+		const def = at(definitions, i);
 		const newIndex = existingCount + i + 1;
 		const layoutPath = `ppt/slideLayouts/slideLayout${newIndex}.xml`;
 

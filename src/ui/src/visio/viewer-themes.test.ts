@@ -2,7 +2,6 @@ import { afterEach, expect, it } from 'vitest';
 import { visioBuiltInTheme, visioThemeVariantColors } from 'ooxml-core/visio';
 import type { OfficeUiGallery } from '../ribbon/gallery';
 import { setupFormattingViewer as setup } from './__fixtures__/formatting-viewer';
-import { VARIANT_OPTION_REASONS } from './ribbon-themes';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -60,12 +59,102 @@ it('applies a built-in theme and its variants to the page, recolouring quick-sty
 	ui.controller.destroy();
 });
 
-it('keeps theme part options it cannot change disabled with reasons', async () => {
+it('Colors in More Variants applies one theme colour scheme to the page and undoes', async () => {
 	const ui = await setup();
-	for (const [id, , reason] of VARIANT_OPTION_REASONS) {
-		expect(ui.button(id).disabled).toBe(true);
-		expect(ui.button(id).title).toContain(reason);
-	}
+	const more = ui.root.querySelector<HTMLElement>('[data-menu="variant-options"]')!;
+	expect(more.hasAttribute('disabled')).toBe(false);
+	ui.selection();
+	await pick(ui.root, 'quick-styles', 'quick-style-2-4');
+	await ui.done();
+	await pick(ui.root, 'themes', 'theme-harbor');
+	await ui.done();
+	ui.root
+		.querySelector<HTMLElement>('[data-menu="theme-colors"] [command="colors-ember"]')!
+		.dispatchEvent(
+			new CustomEvent('office-command', { bubbles: true, detail: { command: 'colors-ember' } }),
+		);
+	await ui.done();
+	const page = ui.controller.state.document!.pages[0]!;
+	expect(ui.edits.at(-1)).toEqual([{ type: 'set-page-theme', pageId: page.id, colors: 'ember' }]);
+	expect(page.theme).toMatchObject({ builtIn: 'ember' });
+	expect(ui.shape().style.fill).toBe('#d9480f');
+	ui.press('undo');
+	await ui.done();
+	expect(ui.shape().style.fill).toBe('#1f78b4');
+	ui.dispose();
+	ui.controller.destroy();
+});
+
+const choose = async (ui: Awaited<ReturnType<typeof setup>>, menu: string, command: string) => {
+	ui.root
+		.querySelector<HTMLElement>(`[data-menu="${menu}"] [command="${command}"]`)!
+		.dispatchEvent(new CustomEvent('office-command', { bubbles: true, detail: { command } }));
+	await ui.done();
+};
+const checked = (root: ShadowRoot, menu: string) =>
+	[...root.querySelectorAll<HTMLElement>(`[data-menu="${menu}"] office-ui-menu-item`)]
+		.filter((item) => item.getAttribute('checked') === 'true')
+		.map((item) => item.getAttribute('command'));
+
+it('Fonts, Effects and Connectors apply one scheme each, mark it and undo', async () => {
+	const ui = await setup();
+	const page = () => ui.controller.state.document!.pages[0]!;
+	const disabled = (menu: string) =>
+		ui.root.querySelector(`[data-menu="${menu}"]`)!.hasAttribute('disabled');
+	// Without a theme only Colors and Fonts apply; effect and connector styles belong to a theme.
+	expect(disabled('theme-fonts')).toBe(false);
+	expect(disabled('theme-effects')).toBe(true);
+	expect(disabled('theme-connectors')).toBe(true);
+	expect(checked(ui.root, 'theme-fonts')).toEqual([]);
+	await choose(ui, 'theme-fonts', 'fonts-harbor');
+	expect(ui.edits.at(-1)).toEqual([{ type: 'set-page-theme', pageId: page().id, fonts: 'harbor' }]);
+	expect(page().themeSchemes).toEqual({ fonts: 'harbor' });
+	expect(checked(ui.root, 'theme-fonts')).toEqual(['fonts-harbor']);
+	expect(checked(ui.root, 'theme-colors')).toEqual([]);
+	await pick(ui.root, 'themes', 'theme-slate');
+	await ui.done();
+	expect(disabled('theme-effects')).toBe(false);
+	expect(disabled('theme-connectors')).toBe(false);
+	await choose(ui, 'theme-effects', 'effects-ember');
+	await choose(ui, 'theme-connectors', 'connectors-grove');
+	expect(ui.edits.at(-1)).toEqual([
+		{ type: 'set-page-theme', pageId: page().id, connectors: 'grove' },
+	]);
+	expect(page().themeSchemes).toMatchObject({
+		colors: 'slate',
+		fonts: 'slate',
+		effects: 'ember',
+		connectors: 'grove',
+	});
+	expect(checked(ui.root, 'theme-colors')).toEqual(['colors-slate']);
+	expect(checked(ui.root, 'theme-effects')).toEqual(['effects-ember']);
+	expect(checked(ui.root, 'theme-connectors')).toEqual(['connectors-grove']);
+	ui.press('undo');
+	await ui.done();
+	expect(checked(ui.root, 'theme-connectors')).toEqual(['connectors-slate']);
+	expect(checked(ui.root, 'theme-effects')).toEqual(['effects-ember']);
+	ui.dispose();
+	ui.controller.destroy();
+});
+
+it('Colors marks the current colour scheme', async () => {
+	const ui = await setup();
+	expect(checked(ui.root, 'theme-colors')).toEqual([]);
+	await choose(ui, 'theme-colors', 'colors-ember');
+	expect(checked(ui.root, 'theme-colors')).toEqual(['colors-ember']);
+	await choose(ui, 'theme-colors', 'colors-harbor');
+	expect(checked(ui.root, 'theme-colors')).toEqual(['colors-harbor']);
+	ui.dispose();
+	ui.controller.destroy();
+});
+
+it('Embellishment in More Variants writes the page level, with no theme needed', async () => {
+	const ui = await setup();
+	const page = () => ui.controller.state.document!.pages[0]!;
+	await choose(ui, 'theme-embellishment', 'embellishment-high');
+	expect(ui.edits.at(-1)).toEqual([
+		{ type: 'set-page-theme', pageId: page().id, embellishment: 'high' },
+	]);
 	ui.dispose();
 	ui.controller.destroy();
 });

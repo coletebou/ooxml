@@ -7,7 +7,9 @@ import { shapeLayers, type LayerBudget } from './layers';
 import { layerPaintSheet } from './layer-paint';
 import type { VisioLayer, VisioShape } from './model';
 import { shapeTransformDetails, geometryPaths } from './geometry';
+import { composeAffine, IDENTITY_AFFINE, type AffineMatrix } from '../geometry/affine';
 import { shapeConnections } from './shape-connections';
+import { shapeSections } from './shape-sections';
 import { readConnectorJumps } from './connector-jumps';
 import { VisioPackageError } from './package';
 import { shapeStyle, shapeText, type Resources } from './style';
@@ -29,6 +31,10 @@ export interface ShapeContext extends StyleContext {
 	resources: Resources;
 	maxShapes: number;
 	maxShapeDepth: number;
+	/** Current page size in pre-scale geometry units; infinite lines are clipped to it. */
+	pageSize?: { width: number; height: number };
+	/** A master without page dimensions uses its local box for infinite-line thumbnails. */
+	clipToShape?: boolean;
 	shapeCount: number;
 	consumeExpansion: () => void;
 	consumeGeometry: () => void;
@@ -86,6 +92,7 @@ export function normalizeShapes(
 	context: ShapeContext,
 	depth = 0,
 	masterStack: readonly string[] = [],
+	parentToPage: AffineMatrix = IDENTITY_AFFINE,
 ): VisioShape[] {
 	if (depth > context.maxShapeDepth)
 		throw new VisioPackageError('SHAPE_DEPTH_LIMIT', 'Shape nesting depth limit exceeded.');
@@ -219,6 +226,7 @@ export function normalizeShapes(
 				);
 			const cachedNoShow = number(sheet.cells, 'NoShow', sheet.cells.has('NoShow') ? NaN : 0);
 			const nonPrinting = number(sheet.cells, 'NonPrinting', NaN);
+			const toPage = composeAffine(parentToPage, transformDetails.transform);
 			const geometry = geometryPaths(
 				sheet,
 				width,
@@ -226,6 +234,15 @@ export function normalizeShapes(
 				report,
 				context.consumeGeometry,
 				context.consumeCurveWork,
+				context.pageSize
+					? { toPage, ...context.pageSize }
+					: context.clipToShape
+						? {
+								toPage: IDENTITY_AFFINE,
+								width: width > 0 ? width : 1,
+								height: height > 0 ? height : 1,
+							}
+						: undefined,
 			);
 			if (
 				!geometry.length &&
@@ -270,6 +287,7 @@ export function normalizeShapes(
 					oneD,
 					report,
 				),
+				...shapeSections(sheet, original, masterId !== undefined, report),
 				geometry,
 				style: shapeStyle(paintSheet, context.resources, report, width, height, geometry),
 				text: shapeText(
@@ -297,7 +315,7 @@ export function normalizeShapes(
 					...(Number.isNaN(nonPrinting) ? {} : { nonPrinting: nonPrinting !== 0 }),
 				},
 				layerIds: membership.layerIds,
-				children: normalizeShapes(shape.children, context, depth + 1, stack),
+				children: normalizeShapes(shape.children, context, depth + 1, stack, toPage),
 				...(masterId === undefined ? {} : { masterId }),
 				...(shape.foreignVector
 					? {
@@ -337,6 +355,7 @@ export function normalizeShapes(
 									0,
 									Math.min(1, 1 - number(sheet.cells, 'Transparency', 0, report)),
 								),
+								...pictureAdjustment(sheet, report),
 								x: number(sheet.cells, 'ImgOffsetX', 0, report),
 								y: number(sheet.cells, 'ImgOffsetY', 0, report),
 								width: Math.max(0, number(sheet.cells, 'ImgWidth', width, report)),
@@ -346,6 +365,18 @@ export function normalizeShapes(
 					: {}),
 			};
 		});
+}
+
+/** Picture Format > Adjust: Brightness and Contrast, reported only when they are not neutral. */
+function pictureAdjustment(sheet: Parameters<typeof visioShapeStructure>[0], report: Report) {
+	const fraction = (name: string) =>
+		Math.max(0, Math.min(1, number(sheet.cells, name, 0.5, report)));
+	const brightness = fraction('Brightness');
+	const contrast = fraction('Contrast');
+	return {
+		...(brightness === 0.5 ? {} : { brightness }),
+		...(contrast === 0.5 ? {} : { contrast }),
+	};
 }
 
 function structureOf(sheet: Parameters<typeof visioShapeStructure>[0]) {

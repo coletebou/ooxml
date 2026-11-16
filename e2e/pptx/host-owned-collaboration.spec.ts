@@ -154,6 +154,35 @@ test.describe('host-owned collaboration', () => {
 		}
 	});
 
+	test('two create clients opening one empty room at once share a single deck', async ({
+		browser,
+		baseURL,
+	}, info) => {
+		test.skip(Boolean(info.project.metadata.headless), 'Counts the full viewer slide rail.');
+		const thumbnails = (page: Page) => page.getByRole('button', { name: /^Go to slide \d+$/u });
+		// The race needs both clients to find the room empty, so it does not happen on
+		// every attempt; without the fix about three in four attempts doubled the deck.
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const room = `external-seed-race-${info.project.name}-${Date.now()}-${attempt}`;
+			const contexts = await Promise.all(
+				[0, 1].map(() => browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 } })),
+			);
+			try {
+				const pages = await Promise.all(contexts.map((context) => context.newPage()));
+				await Promise.all(
+					pages.map((page, index) => open(page, room, { sample: '1', name: `Editor ${index}` })),
+				);
+				for (const page of pages) {
+					// The sample deck has 7 slides; a doubled room shows 14.
+					await expect(thumbnails(page)).toHaveCount(7);
+				}
+				await expect(elements(pages[0])).toHaveCount(await elements(pages[1]).count());
+			} finally {
+				await Promise.all(contexts.map((context) => context.close()));
+			}
+		}
+	});
+
 	test('waits beyond the built-in grace period for host readiness', async ({ page }, info) => {
 		await open(page, `external-wait-${info.project.name}-${Date.now()}`, {
 			sample: '1',
@@ -453,6 +482,42 @@ test.describe('host-owned collaboration', () => {
 			}
 		});
 	}
+
+	test('the custom-shell slide rail navigates and syncs a slide added from it', async ({
+		page,
+		browser,
+		baseURL,
+	}, info) => {
+		// Every binding's custom shell composes the exported rail beside its canvas.
+		requireCustomHostShell();
+		const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 } });
+		const peer = await context.newPage();
+		const room = `external-shell-rail-${info.project.name}-${Date.now()}`;
+		const rows = (target: Page) =>
+			target.locator('[data-host-custom-shell] [data-pptx-chrome="slide-row"]');
+		try {
+			await open(page, room, { sample: '1' });
+			await open(peer, room, { name: 'Peer' });
+			const count = await rows(page).count();
+			expect(count).toBeGreaterThan(1);
+			await expect(rows(peer)).toHaveCount(count);
+			await expect(rows(page).first().locator('[data-pptx-chrome="slide-frame"]')).toBeVisible();
+
+			const firstSlideText = elements(page).filter({ hasText: 'Product Overview' });
+			await expect(firstSlideText).toBeVisible();
+			await rows(page).nth(1).click();
+			await expect(rows(page).nth(1)).toHaveAttribute('aria-current', 'true');
+			await expect(firstSlideText).toHaveCount(0);
+
+			await page
+				.locator('[data-host-custom-shell] [data-pptx-chrome="slide-footer"] button')
+				.click();
+			await expect(rows(page)).toHaveCount(count + 1);
+			await expect(rows(peer)).toHaveCount(count + 1, { timeout: 30_000 });
+		} finally {
+			await context.close();
+		}
+	});
 
 	test('custom-shell selections and cursors follow the receiver zoom exactly once', async ({
 		page,

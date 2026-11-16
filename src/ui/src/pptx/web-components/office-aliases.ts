@@ -1,10 +1,13 @@
 import {
 	defineButton,
 	defineCheckbox,
+	defineOpenPlaces,
+	defineConnectedServices,
 	defineColorGrid,
 	defineContextMenu,
 	defineDialogFooter,
 	definePasteOptions,
+	defineProgressDialog,
 	defineRadio,
 	defineRibbonGroup,
 	defineReadOnlyBanner,
@@ -26,6 +29,7 @@ import {
 import type {
 	CompatToastsViewState,
 	DialogFooterViewState,
+	ExportProgressViewState,
 	PasteOptionsViewState,
 	ReadOnlyBannerViewState,
 } from '../render';
@@ -101,6 +105,32 @@ export function definePptxRadio(registry: CustomElementRegistry): void {
 	registry.define(
 		'pptx-ui-radio',
 		class extends bridged(base(registry, defineRadio, 'office-ui-radio'), 'pptx-ui-radio') {},
+	);
+}
+/** PowerPoint's name for the shared place switcher of File > Open (`<office-ui-open-places>`; see `render/cloud-open`). */
+export function definePptxOpenPlaces(registry: CustomElementRegistry): void {
+	if (registry.get('pptx-ui-open-places')) {
+		return;
+	}
+	registry.define(
+		'pptx-ui-open-places',
+		class extends bridged(
+			base(registry, defineOpenPlaces, 'office-ui-open-places'),
+			'pptx-ui-open-places',
+		) {},
+	);
+}
+/** PowerPoint's name for File > Account's connected storage list (`<office-ui-connected-services>`). */
+export function definePptxConnectedServices(registry: CustomElementRegistry): void {
+	if (registry.get('pptx-ui-connected-services')) {
+		return;
+	}
+	registry.define(
+		'pptx-ui-connected-services',
+		class extends bridged(
+			base(registry, defineConnectedServices, 'office-ui-connected-services'),
+			'pptx-ui-connected-services',
+		) {},
 	);
 }
 export function definePptxSearchField(registry: CustomElementRegistry): void {
@@ -231,7 +261,20 @@ export function definePptxCompatToasts(registry: CustomElementRegistry): void {
 					id: toast.id,
 					code: toast.code,
 					severity: toast.severity,
-					message: t(toast.messageKey, toast.params),
+					message: t(
+						toast.messageKey,
+						toast.parts
+							? {
+									...toast.params,
+									parts: toast.parts
+										.map((part) => t(part.key, part.params))
+										.join(t('pptx.compatibility.partSeparator')),
+								}
+							: toast.params,
+					),
+					...(toast.details?.length
+						? { details: toast.details.map((line) => t(line.key, line.params)) }
+						: {}),
 				})),
 				overflowCount:
 					(value.overflowCount ?? 0) +
@@ -240,6 +283,7 @@ export function definePptxCompatToasts(registry: CustomElementRegistry): void {
 					title: t('pptx.compatibility.toastTitle'),
 					dismissAll: t('pptx.compatibility.dismissAll'),
 					dismiss: t('pptx.compatibility.dismiss'),
+					details: t('pptx.compatibility.details'),
 				},
 			};
 		}
@@ -488,4 +532,38 @@ export function definePptxContextMenu(registry: CustomElementRegistry): void {
 			static markerPattern = /^data-pptx-[a-z0-9-]+$/;
 		},
 	);
+}
+
+/**
+ * The export progress modal: the shared progress dialog under its pptx name, `export-cancel` and
+ * the `pptx-export-progress-*` test ids, with the pptx export strings.
+ */
+export function definePptxExportProgress(registry: CustomElementRegistry): void {
+	if (registry.get('pptx-ui-export-progress')) {
+		return;
+	}
+	const Base = bridged(
+		base(registry, defineProgressDialog, 'office-ui-progress-dialog'),
+		'pptx-ui-export-progress',
+	) as unknown as new () => Stateful;
+	class PptxExportProgress extends Base {
+		static cancelEvent = 'export-cancel';
+		static testIdPrefix = 'pptx-export-progress';
+		#model: ExportProgressViewState = { open: false, title: '', progress: 0 };
+		override get state(): ExportProgressViewState {
+			return this.#model;
+		}
+		override set state(value: ExportProgressViewState) {
+			this.#model = value;
+			const t = value.translate ?? identity;
+			super.state = {
+				open: value.open,
+				title: value.title,
+				progress: value.progress,
+				status: value.status || t('pptx.export.processing'),
+				cancelLabel: t('pptx.export.cancel'),
+			};
+		}
+	}
+	registry.define('pptx-ui-export-progress', PptxExportProgress as unknown as Ctor);
 }

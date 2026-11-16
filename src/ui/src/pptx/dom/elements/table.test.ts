@@ -249,6 +249,17 @@ describe('renderTableElement', () => {
 		expect(td.style.paddingRight).toBe('5px');
 	});
 
+	it('takes half of the border width out of the default cell margins too', () => {
+		const tableData: PptxTableData = {
+			columnWidths: [1],
+			rows: [{ cells: [{ text: '42', style: { borderTopWidth: 2, borderLeftWidth: 2 } }] }],
+		};
+		const td = renderTable(buildTableElement(tableData)).querySelector('td') as HTMLElement;
+		expect(td.style.paddingTop).toBe('3.8px');
+		expect(td.style.paddingLeft).toBe('8.6px');
+		expect(td.style.paddingBottom).toBe('4.8px');
+	});
+
 	it('lowers and shrinks a subscript run', () => {
 		const tableData: PptxTableData = {
 			columnWidths: [1],
@@ -357,6 +368,38 @@ describe('renderTableElement character spacing', () => {
 });
 
 describe('renderTableElement cell borders', () => {
+	it('draws the Themed Style 2 effect shadow on the table frame', () => {
+		const data: PptxTableData = {
+			columnWidths: [1],
+			rows: [{ cells: [{ text: 'a' }] }],
+			tableStyleId: '{D113A9D2-9D6B-4929-AA2D-F23B5EE8CBE7}',
+		};
+		const context = {
+			...buildContext(),
+			colorScheme: { accent1: '#156082', dk1: '#000000', lt1: '#FFFFFF' },
+			formatScheme: {
+				fillStyles: [],
+				lineStyles: [],
+				effectStyles: [
+					{ rawNode: {} },
+					{ rawNode: {} },
+					{
+						shadowColor: '#000000',
+						shadowOpacity: 0.63,
+						shadowBlur: 6,
+						shadowOffsetX: 0,
+						shadowOffsetY: 2,
+						rawNode: {},
+					},
+				],
+				backgroundFillStyles: [],
+			},
+		} as ElementRenderContext;
+		const frame = renderTableElement(buildTableElement(data), 3, context) as HTMLElement;
+		expect(frame.style.boxShadow).toBe('0px 2px 4px rgba(0, 0, 0, 0.63)');
+		expect(frame.style.overflow).toBe('hidden');
+	});
+
 	it('draws no border on a side the deck gives none, and keeps a border it gives', () => {
 		const data: PptxTableData = {
 			columnWidths: [0.5, 0.5],

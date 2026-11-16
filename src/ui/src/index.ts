@@ -1,6 +1,6 @@
 import { registerControls } from './controls';
 import { definePresence } from './presence';
-import { defineSmartArt } from './smartart';
+import { defineSmartArt, defineSmartArtPicker, defineSmartArtTextPane } from './smartart';
 import { TEAMS_TAGS, registerTeams } from './teams/index';
 import { installOfficeUiTheme } from './theme';
 
@@ -14,6 +14,7 @@ export * from './presence';
 export * from './smartart';
 export * from './teams/index';
 export * from './theme';
+export * from './recovery-scheduler';
 export { CONTRACT_REVISION, type Definer } from './registry';
 
 /** Every ooxml-ui tag this package defines, in registration order. */
@@ -37,6 +38,7 @@ export const OFFICE_UI_TAGS = [
 	'office-ui-zoom-slider',
 	'office-ui-tab-strip',
 	'office-ui-task-pane',
+	'office-ui-format-section',
 	'office-ui-options-dialog',
 	'office-ui-account',
 	'office-ui-ribbon',
@@ -44,6 +46,9 @@ export const OFFICE_UI_TAGS = [
 	'office-ui-find-bar',
 	'office-ui-ruler',
 	'office-ui-backstage',
+	'office-ui-cloud-files',
+	'office-ui-open-places',
+	'office-ui-connected-services',
 	'office-ui-print-preview',
 	'office-ui-radio',
 	'office-ui-search',
@@ -56,12 +61,19 @@ export const OFFICE_UI_TAGS = [
 	'office-ui-ribbon-section',
 	'office-ui-gallery',
 	'office-ui-comments-pane',
+	'office-ui-chart-format-pane',
 	'office-ui-symbol-picker',
 	'office-ui-color-grid',
 	'office-ui-color-custom',
 	'office-ui-chart-picker',
+	'office-ui-chart-data-sheet',
+	'office-ui-progress-dialog',
+	'office-ui-message-dialog',
+	'office-ui-share-dialog',
 	'office-ui-presence',
 	'office-ui-smartart',
+	'office-ui-smartart-picker',
+	'office-ui-smartart-text-pane',
 	...TEAMS_TAGS,
 ] as const;
 
@@ -75,5 +87,7 @@ export function registerOfficeUi(options: { theme?: boolean } = {}): void {
 	registerControls();
 	definePresence();
 	defineSmartArt();
+	defineSmartArtPicker();
+	defineSmartArtTextPane();
 	registerTeams();
 }

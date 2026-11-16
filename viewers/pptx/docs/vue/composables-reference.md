@@ -28,7 +28,7 @@ import { useEditorHistory, useAlignGroup } from 'pptx-vue-viewer/internals';
 | Composable                    | Concern                                                              |
 | ----------------------------- | -------------------------------------------------------------------- |
 | `useLoadContent`              | Parses the PPTX buffer on load via `PptxHandler`.                    |
-| `useAutosave`                 | Debounced autosave timer, dirty tracking, and status.                |
+| `useAutosave`                 | Autosave interval, dirty tracking, and status.                       |
 | `useDocumentStatistics`       | Word/character/slide/note counts for the Document Properties dialog. |
 | `useDocumentPropertiesDialog` | Core / custom / app document-properties dialog state.                |
 | `useMasterViewState`          | Slide / notes / handout master view state.                           |
@@ -64,11 +64,9 @@ import { useEditorHistory, useAlignGroup } from 'pptx-vue-viewer/internals';
 | Composable                   | Concern                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------- |
 | `useSmartArtEditing`         | SmartArt node/layout/color/style editing operations.                      |
-| `useSmartArtFocus`           | SmartArt node keyboard focus and navigation.                              |
 | `useSmartArtHoverRect`       | Hover-highlight rectangle for a SmartArt node.                            |
 | `useSmartArtNodeEditContext` | Provide/inject context for inline SmartArt node text/fill editing.        |
 | `useSmartArtInlineEditState` | Inline SmartArt node editor open/close state (`smartart-inline-edit.ts`). |
-| `useSmartArt3D`              | Reads the `smartArt3D` opt-in flag via inject (`smart-art-3d.ts`).        |
 
 ## Tables
 

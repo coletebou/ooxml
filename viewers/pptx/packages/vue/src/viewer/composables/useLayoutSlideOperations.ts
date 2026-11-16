@@ -1,3 +1,4 @@
+import { insertedLayoutCompletion } from 'ooxml-ui/pptx';
 import { createEditorId } from 'pptx-viewer-core';
 import type { PptxHandler, PptxLayoutPreview, PptxSlide } from 'pptx-viewer-core';
 import type { Ref, ShallowRef } from 'vue';
@@ -26,7 +27,11 @@ export function useLayoutSlideOperations(input: Input) {
 		if (!h || !target) {
 			return;
 		}
-		const updated = await h.applyLayoutToSlide(index, layoutPath, slides.value).catch(() => null);
+		// The core replaces the slide in the array it is given: a copy keeps `slides` as it was until
+		// the history step below records it.
+		const updated = await h
+			.applyLayoutToSlide(index, layoutPath, slides.value.slice())
+			.catch(() => null);
 		if (!updated || slides.value[index]?.id !== target.id) {
 			return;
 		}
@@ -63,12 +68,13 @@ export function useLayoutSlideOperations(input: Input) {
 		next.splice(insertAt, 0, draft);
 		slides.value = next;
 		activeSlideIndex.value = insertAt;
+		const placed = slides.value[insertAt] ?? draft;
 		const h = handler.value;
 		if (!h) {
 			return;
 		}
 		const updated = await h
-			.applyLayoutToSlide(insertAt, layoutPath, slides.value)
+			.applyLayoutToSlide(insertAt, layoutPath, slides.value.slice())
 			.catch(() => null);
 		if (!updated || updated.id !== draft.id || slides.value[insertAt]?.id !== draft.id) {
 			return;
@@ -76,12 +82,16 @@ export function useLayoutSlideOperations(input: Input) {
 		const elements = templateElementsBySlideId
 			? await h.getTemplateElementsForSlide(updated.id).catch(() => [])
 			: undefined;
-		if (slides.value[insertAt]?.id !== draft.id) {
+		// An edit made to the new slide while its layout loaded stays; it takes only the artwork.
+		const completion = insertedLayoutCompletion(slides.value[insertAt], placed);
+		if (completion === 'none') {
 			return;
 		}
-		const merged = slides.value.slice();
-		merged[insertAt] = updated;
-		slides.value = merged;
+		if (completion === 'replace') {
+			const merged = slides.value.slice();
+			merged[insertAt] = updated;
+			slides.value = merged;
+		}
 		if (templateElementsBySlideId) {
 			templateElementsBySlideId.value = {
 				...templateElementsBySlideId.value,

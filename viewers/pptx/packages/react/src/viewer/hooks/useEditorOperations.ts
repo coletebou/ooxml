@@ -9,7 +9,7 @@ import {
 	elementPictureFilename,
 	rasterResultToPngBlob,
 } from 'ooxml-ui/pptx';
-import type { ResolvedKeyboardCustomization } from 'ooxml-ui/pptx';
+import type { ListConversionScope, ResolvedKeyboardCustomization } from 'ooxml-ui/pptx';
 import type { PptxHandler, PptxSlide, PptxElement, TextStyle } from 'pptx-viewer-core';
 import type React from 'react';
 import { useCallback, useMemo } from 'react';
@@ -27,6 +27,7 @@ import { useElementOperations } from './useElementOperations';
 import type { ElementOperations } from './useElementOperations';
 import { useFindReplace } from './useFindReplace';
 import { useFormatPainterEditing } from './useFormatPainterEditing';
+import { useInlineRichTextPaste } from './useInlineRichTextPaste';
 import { useInsertElements } from './useInsertElements';
 import type { InsertElementHandlers } from './useInsertElements';
 import { usePasteSpecial } from './usePasteSpecial';
@@ -36,6 +37,7 @@ import { useSectionOperations } from './useSectionOperations';
 import type { SectionOperations } from './useSectionOperations';
 import { useSlideManagement } from './useSlideManagement';
 import type { SlideManagementHandlers } from './useSlideManagement';
+import { useTableCellsPaste } from './useTableCellsPaste';
 import { useTableOperations } from './useTableOperations';
 import type { TableOperationHandlers } from './useTableOperations';
 import type { ViewerDialogsResult } from './useViewerDialogs';
@@ -68,9 +70,11 @@ export interface UseEditorOperationsInput {
 	/** Ref to the loaded PPTX handler; populated by the content-lifecycle hook. */
 	handlerRef?: React.RefObject<PptxHandler | null> | React.MutableRefObject<PptxHandler | null>;
 	/** AutoCorrect transform applied to committed inline text edits. */
-	transformCommittedText?: (text: string) => string;
+	transformCommittedText?: (text: string, previous?: string) => string;
 	/** Host keyboard customisation, forwarded to the Find shortcut. */
 	keyboard?: ResolvedKeyboardCustomization;
+	/** Host `listConversionScope`: bare-caret Bullets / Numbering reach; forwarded to the text ops. */
+	listConversionScope?: ListConversionScope;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +131,7 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 		handlerRef,
 		transformCommittedText,
 		keyboard,
+		listConversionScope,
 	} = input;
 
 	// View > Slide Master edits a part that is not in `slides`, so element
@@ -182,6 +187,7 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 		inlineEditingElementId: state.inlineEditingElementId,
 		inlineEditingText: state.inlineEditingText,
 		inlineEditingSnapshotRef: state.inlineEditingSnapshotRef,
+		listConversionScope,
 	});
 
 	const sectionOps = useSectionOperations({
@@ -195,8 +201,7 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 	const findReplace = useFindReplace({
 		slides,
 		mode,
-		onSetActiveSlideIndex: state.setActiveSlideIndex,
-		onSetSelectedElementId: state.setSelectedElementId,
+		onShowMatch: state.showSlideSelection,
 		onUpdateSlides: ops.updateSlides,
 		onMarkDirty: history.markDirty,
 		keyboard,
@@ -233,6 +238,7 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 		shapeAdjustmentDragStateRef: state.shapeAdjustmentDragStateRef,
 		marqueeStateRef: state.marqueeStateRef,
 		justInteractedRef: state.justInteractedRef,
+		gestureRef: state.gestureControllerRef,
 		setInlineEditingElementId: state.setInlineEditingElementId,
 		setInlineEditingText: state.setInlineEditingText,
 		setContextMenuState: state.setContextMenuState,
@@ -261,13 +267,24 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 		ops,
 		history,
 	});
-	const imagePaste = useCanvasImagePaste({
+	const canvasImagePaste = useCanvasImagePaste({
 		state,
 		mode,
 		canEdit,
 		handlerRef,
 		insertElement: insertHandlers.addElement,
 	});
+	const richTextPaste = useInlineRichTextPaste({
+		elementLookup: state.elementLookup,
+		inlineEditingElementIdRef: state.inlineEditingElementIdRef,
+		setInlineEditingElementId: state.setInlineEditingElementId,
+		setInlineEditingText: state.setInlineEditingText,
+		updateElementById: ops.updateElementById,
+	});
+	const imagePaste = useMemo(
+		() => ({ ...canvasImagePaste, richText: richTextPaste }),
+		[canvasImagePaste, richTextPaste],
+	);
 
 	// "Edit Text" from the element context menu is the same effect as
 	// double-clicking the element: `handleElementDoubleClick` already ignores
@@ -323,6 +340,7 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 		setSelectedElementIds: state.setSelectedElementIds,
 		setIsInspectorPaneOpen: state.setIsInspectorPaneOpen,
 		setSidebarPanelMode: state.setSidebarPanelMode,
+		formatPane: state.formatPane,
 		ops,
 		history,
 		onOpenHyperlinkDialog: () => dialogs.setIsHyperlinkDialogOpen(true),
@@ -358,18 +376,25 @@ export function useEditorOperations(input: UseEditorOperationsInput): EditorOper
 		history,
 		transformCommittedText,
 	});
+	useTableCellsPaste({
+		selectedElement,
+		tableEditorState: state.tableEditorState,
+		updateElementById: ops.updateElementById,
+		markDirty: history.markDirty,
+	});
 
-	// Combined text style updater: if a table cell is active, apply formatting
-	// to that cell; otherwise delegate to the normal element text style updater.
+	// Combined text style updater: with a table selected, apply formatting to the
+	// selected cells (the whole table when no cell is active, as PowerPoint
+	// does); otherwise delegate to the normal element text style updater.
 	const combinedUpdateTextStyle = useCallback(
 		(updates: Partial<TextStyle>) => {
-			if (selectedElement?.type === 'table' && state.tableEditorState) {
+			if (selectedElement?.type === 'table') {
 				tableOps.handleUpdateCellTextStyle(updates as Record<string, unknown>);
 				return;
 			}
 			ops.updateSelectedTextStyle(updates);
 		},
-		[selectedElement, state.tableEditorState, tableOps, ops],
+		[selectedElement, tableOps, ops],
 	);
 
 	const combinedOps: ElementOperations = useMemo(

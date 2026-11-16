@@ -1,8 +1,17 @@
+// Outside a `PptxI18nProvider` the viewer translates through react-i18next, as from the main entry.
+import './i18n/react-i18next-source';
+
 export { PowerPointViewer, getAnimationInitialStyle } from './PowerPointViewer';
 export type { PowerPointViewerProps, PowerPointViewerHandle } from './PowerPointViewer';
+// Host translations: the same provider as the main entry, so either import shares one context.
+export { PptxI18nProvider } from './i18n/provider';
+export type { PptxI18nProviderProps } from './i18n/provider';
+export type { PptxTranslate, PptxTranslateParams } from './i18n/types';
 export * from './types';
 
-// AI assistant config types (for hosts wiring the optional `ai` prop).
+// AI assistant types (for hosts wiring the optional `ai` prop; `createAiAssistant` is
+// exported from `pptx-react-viewer/ai`).
+export type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 export type {
 	PptxAiBridge,
 	PptxAiConfig,

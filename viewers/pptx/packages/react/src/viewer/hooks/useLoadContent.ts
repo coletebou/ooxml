@@ -1,5 +1,8 @@
 import type {
 	CompatibilityWarningToast,
+	DeckWebfontProgress,
+	GoogleFontsOption,
+	PptxLoadLimits,
 	ReadOnlyRecommendation,
 	SlideSizeEmu,
 } from 'ooxml-ui/pptx';
@@ -7,8 +10,12 @@ import {
 	applyImagePathPatches,
 	compatibilityWarningToasts,
 	createPresentationLoadResources,
+	pptxLoadErrorMessage,
+	prefetchDeckWebfonts,
+	prepareDeckWebfonts,
 	readOnlyRecommendation,
 	resolveAuthoredCustomShowId,
+	resolveGoogleFontsCss2Base,
 	resolveInitialSlideIndex,
 	resolveTableCellImageUrls,
 	resolveTableStyleImageUrls,
@@ -48,6 +55,7 @@ import { PptxHandler, EncryptedFileError } from 'pptx-viewer-core';
 import { useEffect, useRef } from 'react';
 
 import { DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH } from '../constants';
+import { useTranslation } from '../i18n/use-translation';
 import type { CanvasSize } from '../types';
 import { glyphOutlineFontCache } from '../utils/glyph-outline-cache';
 import { partitionTemplateElements } from '../utils/template-editing';
@@ -58,6 +66,7 @@ import {
 	resolveMediaElementSource,
 } from './load-content-helpers';
 import type { EditorHistoryResult } from './useEditorHistory';
+import { GOOGLE_FONTS_LINK_ID } from './useFontInjection';
 
 /* ------------------------------------------------------------------ */
 /*  Input / Output types                                              */
@@ -121,6 +130,10 @@ export interface UseLoadContentInput {
 	/** Deck + slide compatibility-warning toast stack for this load. */
 	setCompatToasts: React.Dispatch<React.SetStateAction<CompatibilityWarningToast[]>>;
 	setLoading: React.Dispatch<React.SetStateAction<boolean>>;
+	/** Webfont download progress while the load waits for the deck's fonts, `null` when not shown. */
+	setFontProgress?: React.Dispatch<React.SetStateAction<DeckWebfontProgress | null>>;
+	/** Host `googleFonts` prop: the load waits for the faces it serves. Read through a ref. */
+	googleFonts?: GoogleFontsOption;
 	setError: React.Dispatch<React.SetStateAction<string | null>>;
 	setIsDirty: React.Dispatch<React.SetStateAction<boolean>>;
 	setIsEncrypted: React.Dispatch<React.SetStateAction<boolean>>;
@@ -143,6 +156,12 @@ export interface UseLoadContentInput {
 	 * changing it never reloads the deck; it applies on the next load.
 	 */
 	initialSlide?: number;
+	/**
+	 * Host `limits` prop, passed to `PptxHandler.load`; unset keeps the core
+	 * defaults. Read through a ref like `initialSlide`, so a new object never
+	 * reloads the deck; it applies on the next load.
+	 */
+	limits?: PptxLoadLimits;
 }
 
 export interface UseLoadContentResult {
@@ -195,16 +214,27 @@ export function useLoadContent({
 	setModifyVerifier,
 	setCompatToasts,
 	setLoading,
+	setFontProgress,
+	googleFonts,
 	setError,
 	setIsDirty,
 	setIsEncrypted,
 	onContentApplied,
 	allowExternalImages,
 	initialSlide,
+	limits,
 }: UseLoadContentInput): UseLoadContentResult {
 	const handlerRef = useRef<PptxHandler | null>(null);
 	const initialSlideRef = useRef(initialSlide);
 	initialSlideRef.current = initialSlide;
+	const limitsRef = useRef(limits);
+	limitsRef.current = limits;
+	const googleFontsRef = useRef(googleFonts);
+	googleFontsRef.current = googleFonts;
+	// The load-error text for a deck over a load limit is localized.
+	const { t } = useTranslation();
+	const translateRef = useRef(t);
+	translateRef.current = t;
 	const originalBufferRef = useRef<ArrayBuffer | null>(null);
 	const renderTokenRef = useRef(0);
 
@@ -220,10 +250,13 @@ export function useLoadContent({
 		const handler = new PptxHandler();
 		const resources = createPresentationLoadResources(handler);
 		const loadBlobUrls = resources.blobUrls;
+		// Releases this deck's embedded fonts from the glyph-outline cache.
+		let releaseOutlineFonts: (() => void) | undefined;
 
 		(async () => {
 			try {
 				setLoading(true);
+				setFontProgress?.(null);
 				setError(null);
 				const buffer =
 					content instanceof Uint8Array
@@ -246,12 +279,57 @@ export function useLoadContent({
 				// of broken images while the new file loads.
 				const previousHandler = handlerRef.current;
 
+				// ── The deck's Google Fonts webfonts ─────
+				// Started as soon as core has parsed the slides (`onSlidesParsed`), so the
+				// download runs while the rest of the deck loads and media resolves;
+				// awaited before the deck is shown, which it holds back only briefly (see
+				// deck-webfont-readiness.ts). Nothing after that point changes slide text,
+				// so these slides name the same faces (and stylesheet) as the committed ones.
+				let webfonts: Promise<unknown> | undefined;
+				const startWebfonts = (
+					deckSlides: PptxSlide[],
+					deckEmbeddedFonts: PptxEmbeddedFont[],
+				): void => {
+					if (typeof document === 'undefined' || cancelled || token !== renderTokenRef.current) {
+						return;
+					}
+					webfonts = prepareDeckWebfonts({
+						document,
+						linkId: GOOGLE_FONTS_LINK_ID,
+						slides: partitionTemplateElements(deckSlides).slides,
+						embeddedFonts: deckEmbeddedFonts,
+						googleFontsBase: resolveGoogleFontsCss2Base(googleFontsRef.current),
+						onProgress: (progress) => {
+							if (!cancelled && token === renderTokenRef.current) {
+								setFontProgress?.(progress);
+							}
+						},
+					});
+				};
+				// Start the stylesheet for the fonts the deck declares from its bytes, before parsing even
+				// reaches the slides (`prefetchDeckWebfonts`); `startWebfonts` then adds the exact one.
+				if (typeof document !== 'undefined') {
+					prefetchDeckWebfonts({
+						document,
+						linkId: GOOGLE_FONTS_LINK_ID,
+						bytes: buffer as ArrayBuffer,
+						googleFontsBase: resolveGoogleFontsCss2Base(googleFontsRef.current),
+					});
+				}
 				// Trust Center > "Allow external content" (default off, matching
 				// core's own SSRF/privacy-safe default): only pass `true` through
 				// when the option is explicitly on.
-				const parsed = await handler.load(buffer as ArrayBuffer, { allowExternalImages });
+				const parsed = await handler.load(buffer as ArrayBuffer, {
+					allowExternalImages,
+					limits: limitsRef.current,
+					onSlidesParsed: (deck) => startWebfonts([...deck.slides], [...deck.embeddedFonts]),
+				});
 				if (cancelled || token !== renderTokenRef.current) {
 					return;
+				}
+				// A JSON document is imported without the slide hook.
+				if (!webfonts) {
+					startWebfonts(parsed.slides, parsed.embeddedFonts ?? []);
 				}
 
 				// ── Resolve media Blob URLs (audio/video) ───────────────────
@@ -331,7 +409,15 @@ export function useLoadContent({
 					handler.getImageData(path),
 				);
 
-				// Content can change while media, pictures or table fills are resolving.
+				// Separate the inherited master/layout (template) elements that the
+				// core loader merged into `slide.elements` into their own per-slide
+				// store. They get a dedicated, gated render layer and are merged back
+				// at save time (buildSaveSlides) so edits to them persist.
+				const partition = partitionTemplateElements(nextSlides);
+
+				await webfonts;
+
+				// Content can change while media, pictures, table fills or fonts are resolving.
 				if (cancelled || token !== renderTokenRef.current) {
 					return;
 				}
@@ -347,11 +433,6 @@ export function useLoadContent({
 				}
 				resources.commit();
 				handlerRef.current = handler;
-				// Separate the inherited master/layout (template) elements that the
-				// core loader merged into `slide.elements` into their own per-slide
-				// store. They get a dedicated, gated render layer and are merged back
-				// at save time (buildSaveSlides) so edits to them persist.
-				const partition = partitionTemplateElements(nextSlides);
 				setSlides(partition.slides);
 				setTemplateElementsBySlideId(partition.templateElementsBySlideId);
 				setCanvasSize({
@@ -415,9 +496,12 @@ export function useLoadContent({
 				setEmbeddedFonts(parsed.embeddedFonts ?? []);
 				// Synchronous, not an effect: registers this deck's embedded fonts'
 				// real outlines (see glyph-outline-cache.ts) BEFORE the first render
-				// that uses them, so WordArt envelope glyphs get outline warping on
-				// the very first paint instead of needing a follow-up re-render.
-				glyphOutlineFontCache.registerEmbeddedFonts(parsed.embeddedFonts ?? []);
+				// that uses them. The font parser itself loads on the first envelope
+				// glyph that needs it; `WarpedText` repaints when it has. Released
+				// with the deck, in the cleanup below.
+				releaseOutlineFonts = glyphOutlineFontCache.registerEmbeddedFonts(
+					parsed.embeddedFonts ?? [],
+				);
 				setHasMacros(parsed.hasMacros === true);
 				setHasDigitalSignatures(parsed.hasDigitalSignatures === true);
 				setDigitalSignatureCount(parsed.digitalSignatureCount ?? 0);
@@ -454,12 +538,13 @@ export function useLoadContent({
 						// swallow here has previously masked real bugs (e.g. a caller
 						// missing a newly-required setter) as inexplicable hangs.
 						console.error('[pptx] Failed to load presentation content:', err);
-						setError(err instanceof Error ? err.message : String(err));
+						setError(pptxLoadErrorMessage(err, translateRef.current));
 					}
 				}
 			} finally {
 				resources.releaseIfUncommitted();
 				if (!cancelled && token === renderTokenRef.current) {
+					setFontProgress?.(null);
 					setLoading(false);
 				}
 			}
@@ -471,6 +556,8 @@ export function useLoadContent({
 			for (const url of loadBlobUrls) {
 				URL.revokeObjectURL(url);
 			}
+			// The cache is module-wide: drop the fonts this deck never looked up.
+			releaseOutlineFonts?.();
 			// Dispose handler to free core-side Blob URLs and ZIP memory
 			if (handlerRef.current) {
 				handlerRef.current.dispose();

@@ -11,13 +11,15 @@
 	 * whole bag rather than ~40 individual props is deliberate; the bag is the
 	 * viewer's single composition root and the chrome reads most of it.
 	 */
-	import { createGuide, readBackstageRecentFile, toggleSheet } from 'ooxml-ui/pptx';
+	import { createGuide, describeEmbeddedFontRestrictions, readBackstageRecentFile, toggleSheet } from 'ooxml-ui/pptx';
 	import type { AccountAuthConfig, ToolbarActionId } from 'ooxml-ui/pptx';
 
 	import type { ViewerStateBag } from '../state/create-viewer-state-types';
 	import { nextGuideId } from '../state/guide-id';
 	import { useViewerCustomization } from '../state/viewer-customization.svelte';
 	import { useViewerStorage } from '../state/viewer-storage-context';
+	import type { RibbonDisplayController } from 'ooxml-ui/pptx';
+	import { controllerState } from '../state/controller-state';
 	import Ribbon from './ribbon/Ribbon.svelte';
 	import ProtectedViewBanner from './ProtectedViewBanner.svelte';
 	import ReadOnlyBanner from './ReadOnlyBanner.svelte';
@@ -38,6 +40,8 @@
 		aiEnabled: boolean;
 		/** Enter the presenter view (a root-owned overlay, not part of the chrome). */
 		onpresenter: () => void;
+		/** The viewer's Ribbon Display Options controller (one per viewer, owned by the root). */
+		ribbonDisplay: RibbonDisplayController;
 	}
 
 	const {
@@ -48,7 +52,10 @@
 		accountAuth,
 		aiEnabled,
 		onpresenter,
+		ribbonDisplay,
 	}: ViewerChromeProps = $props();
+	// svelte-ignore state_referenced_locally
+	const ribbonDisplayState = controllerState(ribbonDisplay);
 
 	// Stable controller references (the bag is built once and never reassigned).
 	// svelte-ignore state_referenced_locally
@@ -106,7 +113,7 @@
 		oncancelpassword={() => readOnlyRec.cancelPasswordPrompt()}
 	/>
 {/if}
-{#if custom.isPanelVisible('titleBar')}<TitleBar
+{#if custom.isPanelVisible('titleBar') && ribbonDisplayState.current.layout.titleBar}<TitleBar
 	{fileName}
 	hiddenActions={effectiveHiddenActions}
 	editable={vm.editingActive}
@@ -130,6 +137,7 @@
 {#if vm.showRibbon}
 	<Ribbon
 		{fileName}
+		{ribbonDisplay}
 		{editor}
 		readOnly={ribbonReadOnly}
 		{findReplace}
@@ -153,6 +161,7 @@
 		onversionhistory={() => (vm.versionHistoryOpen = true)}
 		hasMacros={loader.hasMacros}
 		embeddedFontNames={loader.embeddedFonts.map((font) => font.name)}
+		embeddedFontRestrictions={describeEmbeddedFontRestrictions(loader.embeddedFonts)}
 		hasDigitalSignatures={loader.hasDigitalSignatures}
 		digitalSignatureCount={loader.digitalSignatureCount}
 		isPasswordProtected={loader.isPasswordProtected}
@@ -241,7 +250,10 @@
 		onopenrecent={(key) => {
 			void (async () => {
 				const bytes = await readBackstageRecentFile(key, viewerStorage());
-				if (bytes) await loader.load(bytes);
+				if (bytes) {
+					vm.cloudDocument.clear();
+					await loader.load(bytes);
+				}
 			})();
 		}}
 		onthemechange={(next) => { loader.presentationTheme = next; loader.colorScheme = next.colorScheme; }}
@@ -252,6 +264,7 @@
 	{#if vm.activeMobileSheet === 'menu'}
 		<MobileMenuSheet
 			{fileName}
+			{ribbonDisplay}
 			{editor}
 			readOnly={ribbonReadOnly}
 			{findReplace}
@@ -275,6 +288,7 @@
 			onversionhistory={() => (vm.versionHistoryOpen = true)}
 			hasMacros={loader.hasMacros}
 			embeddedFontNames={loader.embeddedFonts.map((font) => font.name)}
+			embeddedFontRestrictions={describeEmbeddedFontRestrictions(loader.embeddedFonts)}
 			hasDigitalSignatures={loader.hasDigitalSignatures}
 			digitalSignatureCount={loader.digitalSignatureCount}
 			isPasswordProtected={loader.isPasswordProtected}
@@ -363,7 +377,10 @@
 			onopenrecent={(key) => {
 				void (async () => {
 					const bytes = await readBackstageRecentFile(key, viewerStorage());
-					if (bytes) await loader.load(bytes);
+					if (bytes) {
+						vm.cloudDocument.clear();
+						await loader.load(bytes);
+					}
 				})();
 			}}
 			onthemechange={(next) => { loader.presentationTheme = next; loader.colorScheme = next.colorScheme; }}

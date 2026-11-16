@@ -36,8 +36,16 @@ function Probe(props: {
 	customization?: ViewerCustomization;
 	hiddenActions?: ToolbarActionId[];
 	store: ViewerOptionsStore;
+	allowExternalContent?: boolean;
+	googleFonts?: false | { baseUrl: string };
 }): null {
-	latest = useViewerCustomization(props.customization, props.hiddenActions, props.store);
+	latest = useViewerCustomization(
+		props.customization,
+		props.hiddenActions,
+		props.store,
+		props.allowExternalContent,
+		props.googleFonts,
+	);
 	return null;
 }
 
@@ -111,5 +119,77 @@ describe('useViewerCustomization', () => {
 		});
 		expect(current().resolved.hiddenActions.has('insert')).toBeFalsy();
 		expect(current().resolved.hiddenActions.has('view')).toBeTruthy();
+	});
+});
+
+describe('useViewerCustomization allowExternalContent host switch', () => {
+	it('locks the Trust Center setting off on the first render', () => {
+		const store = createViewerOptionsStore({ persist: false });
+		act(() => {
+			root.render(<Probe store={store} allowExternalContent={false} />);
+		});
+		expect(store.getOptions().trust.allowExternalContent).toBe(false);
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+		store.setValue('trust', 'allowExternalContent', true);
+		expect(store.getOptions().trust.allowExternalContent).toBe(false);
+	});
+
+	it('locks it on for true, and lifts the lock when the prop is unset', () => {
+		const store = createViewerOptionsStore({ persist: false });
+		act(() => {
+			root.render(<Probe store={store} allowExternalContent />);
+		});
+		expect(store.getOptions().trust.allowExternalContent).toBe(true);
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+		act(() => {
+			root.render(<Probe store={store} />);
+		});
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(false);
+	});
+
+	it('keeps the lock when a new customization object replaces the old one', () => {
+		const store = createViewerOptionsStore({ persist: false });
+		act(() => {
+			root.render(<Probe store={store} allowExternalContent={false} customization={{}} />);
+		});
+		act(() => {
+			root.render(
+				<Probe
+					store={store}
+					allowExternalContent={false}
+					customization={{ ribbon: { hiddenTabs: ['draw'] } }}
+				/>,
+			);
+		});
+		expect(store.isLocked('trust', 'allowExternalContent')).toBe(true);
+		expect(store.getOptions().trust.allowExternalContent).toBe(false);
+	});
+});
+
+describe('useViewerCustomization googleFonts host policy', () => {
+	it('locks Trust Center > Download fonts off on the first render for false', () => {
+		const store = createViewerOptionsStore({ persist: false });
+		act(() => {
+			root.render(<Probe store={store} googleFonts={false} />);
+		});
+		expect(store.getOptions().trust.allowFontDownloads).toBe(false);
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(true);
+		store.setValue('trust', 'allowFontDownloads', true);
+		expect(store.getOptions().trust.allowFontDownloads).toBe(false);
+	});
+
+	it('locks it on for a valid mirror, and lifts the lock when the prop is unset', () => {
+		const store = createViewerOptionsStore({ persist: false });
+		act(() => {
+			root.render(
+				<Probe store={store} googleFonts={{ baseUrl: 'https://fonts.example.test/css2' }} />,
+			);
+		});
+		expect(store.getOptions().trust.allowFontDownloads).toBe(true);
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(true);
+		act(() => {
+			root.render(<Probe store={store} />);
+		});
+		expect(store.isLocked('trust', 'allowFontDownloads')).toBe(false);
 	});
 });

@@ -21,7 +21,7 @@ The home page embeds them with a framework switcher: [open the live demo section
 
 ## Collaboration
 
-The demo has no separate collaboration page: co-editing is built into the editor. Choose **File > Share**, type a session name and start sharing; another window or tab of the same browser that shares under the same name joins it. See [collaboration](/collaboration) for the room options and what is and is not shared.
+The demo has no separate collaboration page: co-editing is built into the editor. Choose **Share**, then start a session; another window or tab of the same browser joins it from the invitation link or the session name. See [collaboration](/collaboration) for the room options and what is and is not shared.
 
 ## Embedded here
 
@@ -36,7 +36,8 @@ The demo has no separate collaboration page: co-editing is built into the editor
 ## Run them locally
 
 ```bash
-bun install
+bun install   # at the repository root
+cd viewers/xlsx
 bun run demo
 ```
 

@@ -40,16 +40,16 @@ bun add pptx-viewer-core
 
 The engine builds XML and SVG by string/object manipulation, so it has no DOM dependency anywhere in the load/edit/save path.
 
-| Runtime                         | Parse / Edit / Save | SVG export | Markdown convert     | Encryption               | CLI |
-| ------------------------------- | ------------------- | ---------- | -------------------- | ------------------------ | --- |
-| **Browser**                     | Yes                 | Yes        | Yes (in-memory)      | Yes (`crypto.subtle`)    | No  |
-| **Node 18+**                    | Yes                 | Yes        | Yes (+ disk adapter) | Yes (19+, or flag on 18) | Yes |
-| **Bun**                         | Yes                 | Yes        | Yes (+ disk adapter) | Yes                      | Yes |
-| **Deno / Workers / serverless** | Yes                 | Yes        | Yes (custom adapter) | Yes                      | No  |
+| Runtime                         | Parse / Edit / Save | SVG export | Markdown convert     | Encryption            | CLI |
+| ------------------------------- | ------------------- | ---------- | -------------------- | --------------------- | --- |
+| **Browser**                     | Yes                 | Yes        | Yes (in-memory)      | Yes (`crypto.subtle`) | No  |
+| **Node 22+**                    | Yes                 | Yes        | Yes (+ disk adapter) | Yes                   | Yes |
+| **Bun**                         | Yes                 | Yes        | Yes (+ disk adapter) | Yes                   | Yes |
+| **Deno / Workers / serverless** | Yes                 | Yes        | Yes (custom adapter) | Yes                   | No  |
 
 The only platform-conditional pieces are:
 
-- **Encryption** needs Web Crypto on `globalThis.crypto` (`crypto.subtle` and `crypto.getRandomValues`). That is native in browsers, Bun, Deno, Workers, and Node 19+; on Node 18 launch with `--experimental-global-webcrypto`.
+- **Encryption** needs Web Crypto on `globalThis.crypto` (`crypto.subtle` and `crypto.getRandomValues`). That is native in browsers, Bun, Deno, Workers, and Node.
 - **Writing files** (extracted media, exported SVGs) is your side of the contract: the engine returns strings/`Uint8Array`s, and the converter accepts a pluggable `FileSystemAdapter`.
 - The **CLI** binary uses `node:fs` and runs under Node or Bun.
 
@@ -131,10 +131,10 @@ const bytes = await handler.save(data.slides);
 
 :::
 
-`PptxHandler.create(options)` and its alias `PptxHandler.createBlank(options)` both accept a `PresentationOptions` object (`width`/`height` in EMU, `theme`, `title`, `creator`, `initialSlideCount`) and return `{ handler, data, createSlide }`. See [/core/builder](/core/builder) for the fluent API and [/core/loading](/core/loading) for the load pipeline and its options (`password`, `eagerDecodeImages`, `maxUncompressedBytes`, `allowExternalImages`).
+`PptxHandler.create(options)` and its alias `PptxHandler.createBlank(options)` both accept a `PresentationOptions` object (`width`/`height` in EMU, `theme`, `title`, `creator`, `initialSlideCount`) and return `{ handler, data, createSlide }`. See [/core/builder](/core/builder) for the fluent API and [/core/loading](/core/loading) for the load pipeline and its options (`password`, `eagerDecodeImages`, `eagerDecodeEmbeddedFonts`, `maxUncompressedBytes`, `allowExternalImages`, `limits`).
 
 ::: warning Hardened loading
-`load()` enforces a zip-bomb budget (500 MiB uncompressed by default, 65,536 entry cap; violation throws `ZipBombError`) and drops external `http(s)` image references unless you opt in with `allowExternalImages: true`.
+`load()` enforces a zip-bomb budget (500 MiB uncompressed by default, 65,536 entry cap; violation throws `ZipBombError`) and drops external `http(s)` image references unless you opt in with `allowExternalImages: true`. Hosts that open untrusted decks can also cap input size, slides and shapes with `limits` (see [Load limits](/core/loading#load-limits)).
 :::
 
 ## Main public exports

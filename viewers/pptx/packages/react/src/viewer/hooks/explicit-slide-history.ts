@@ -1,3 +1,5 @@
+import type { EditorHistoryController } from 'ooxml-ui/pptx';
+
 import type { EditorHistorySnapshot } from '../types';
 import { cloneHistorySnapshot } from '../utils/clone';
 
@@ -47,24 +49,57 @@ export function serializeHistoryDocument(snapshot: EditorHistorySnapshot): strin
 				elements.map(historyElementContent),
 			]),
 		),
+		// A theme pick that changes nothing on the slides is still an edit, and an undo step.
+		theme: snapshot.theme,
 	});
+}
+
+/** `snapshot` recording the theme parts of the masters in `paths` only. */
+function withMasterPathsIn(
+	snapshot: EditorHistorySnapshot,
+	paths: ReadonlySet<string>,
+): EditorHistorySnapshot {
+	const { theme, ...rest } = snapshot;
+	if (!theme?.masterThemePaths) {
+		return snapshot;
+	}
+	const { masterThemePaths, ...parts } = theme;
+	const kept = Object.entries(masterThemePaths).filter(([path]) => paths.has(path));
+	const next = kept.length > 0 ? { ...parts, masterThemePaths: Object.fromEntries(kept) } : parts;
+	return Object.keys(next).length > 0 ? { ...rest, theme: next } : rest;
+}
+
+/**
+ * The two snapshots differ only in which slide masters exist (Master view adds, duplicates or
+ * deletes one, or a paste brings its own): every master both record keeps its theme part, and the
+ * rest of the document is the same. That is no undo step; the tracking effect takes `next` as its
+ * baseline instead.
+ */
+export function differsOnlyInMasterSet(
+	previous: EditorHistorySnapshot,
+	next: EditorHistorySnapshot,
+): boolean {
+	const before = Object.keys(previous.theme?.masterThemePaths ?? {});
+	const after = new Set(Object.keys(next.theme?.masterThemePaths ?? {}));
+	if (before.length === after.size && before.every((path) => after.has(path))) {
+		return false;
+	}
+	const shared = new Set(before.filter((path) => after.has(path)));
+	return (
+		serializeHistoryDocument(withMasterPathsIn(previous, shared)) ===
+		serializeHistoryDocument(withMasterPathsIn(next, shared))
+	);
 }
 
 /** Record pending ordinary edits, then the explicit batch, as separate entries. */
 export function recordExplicitSlideUpdate(
-	past: EditorHistorySnapshot[],
-	future: EditorHistorySnapshot[],
+	history: EditorHistoryController<EditorHistorySnapshot>,
 	previous: EditorHistorySnapshot | null,
 	before: EditorHistorySnapshot,
 	label: string | undefined,
-	maxDepth: number,
 ): void {
 	if (previous && serializeHistoryDocument(previous) !== serializeHistoryDocument(before)) {
-		past.push(cloneHistorySnapshot(previous));
+		history.record(cloneHistorySnapshot(previous), previous.actionLabel);
 	}
-	past.push({ ...cloneHistorySnapshot(before), actionLabel: label });
-	while (past.length > Math.max(1, maxDepth)) {
-		past.shift();
-	}
-	future.length = 0;
+	history.record({ ...cloneHistorySnapshot(before), actionLabel: label }, label);
 }

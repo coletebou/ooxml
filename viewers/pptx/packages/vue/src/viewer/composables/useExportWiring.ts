@@ -1,5 +1,8 @@
 import type {
 	CanvasSize,
+	CompatibilityWarningToast,
+	PdfExportDialogTranslate,
+	VectorPdfExportResult,
 	DocumentSaveReason,
 	DocumentStorage,
 	RasterizeElementResult,
@@ -7,12 +10,16 @@ import type {
 	ViewerOptions,
 } from 'ooxml-ui/pptx';
 import {
+	choosePdfExportSelection,
 	deleteAutosaveSnapshot,
 	deliverSavedPresentation,
 	exportDeckJson,
+	isCleanAfterSave,
 	playFeedbackSound,
+	resolvePdfExportSettings,
 	rasterResultToPngBlob,
 	savedPresentationFileName,
+	savedPresentationRevision,
 	shouldDiscardAutosaveOnSuccessfulSave,
 } from 'ooxml-ui/pptx';
 import type { PptxData, PptxSaveFormat, PptxSlide } from 'pptx-viewer-core';
@@ -60,6 +67,21 @@ export interface UseExportWiringInput {
 	storage?: () => DocumentStorage | undefined;
 	/** A Save / Save As failed (serialising, or the host's storage rejected). */
 	onSaveError?: (error: unknown) => void;
+	/**
+	 * The values a save is built from (the ones autosave watches), read when a save starts and
+	 * when it lands: an edit in between keeps the document unsaved.
+	 */
+	changeSources?: () => readonly unknown[];
+	/** A Save / Save As landed with no edit while it was in flight: the document is clean. */
+	onSavedClean?: () => void;
+	/** The viewer's `pdf-export-report` emit (what a vector PDF approximated). */
+	onPdfExportReport?: (result: VectorPdfExportResult) => void;
+	/** Show a notice (the PDF approximation summary) in the compatibility toast stack. */
+	notify?: (toast: CompatibilityWarningToast) => void;
+	/** Where File > Export > PDF mounts its options dialog (inside the viewer root, for the theme). */
+	dialogContainer?: () => HTMLElement | null | undefined;
+	/** Active-language translator for the options dialog. */
+	translate?: PdfExportDialogTranslate;
 }
 
 export interface UseExportWiringResult {
@@ -115,19 +137,31 @@ export function useExportWiring(input: UseExportWiringInput): UseExportWiringRes
 	// the on-screen presentation and the saved file.
 	const exportSlide = computed(() => mergedSlides.value[exportIndex.value]);
 
-	const { rasterizeSlide, rasterizeSlideToRaster, rasterizeSlideToTiles } = useExportRasterize({
-		exportStageRef,
-		exportIndex,
-		canvasSize,
-		imageExportScale,
-	});
+	const { rasterizeSlide, rasterizeSlideToRaster, rasterizeSlideToTiles, mountSlide } =
+		useExportRasterize({
+			exportStageRef,
+			exportIndex,
+			canvasSize,
+			imageExportScale,
+		});
 
+	const getPdfExportSettings = () => {
+		const options = input.getOptions?.();
+		return options
+			? resolvePdfExportSettings(options)
+			: { mode: 'vector' as const, includeHiddenSlides: false };
+	};
 	const exporter = useExport({
 		slides,
 		canvasSize,
 		rasterizeSlide,
 		rasterizeSlideToRaster,
 		rasterizeSlideToTiles,
+		mountSlide,
+		getPdfExportSettings,
+		...(input.onPdfExportReport ? { onReport: input.onPdfExportReport } : {}),
+		...(input.notify ? { notify: input.notify } : {}),
+		...(imageExportScale ? { imageExportScale } : {}),
 	});
 	const mediaExport = useMediaExport({ slideCount, rasterizeSlide });
 	const exportProgressCtl = useExportProgress({ exporter, mediaExport });
@@ -135,8 +169,23 @@ export function useExportWiring(input: UseExportWiringInput): UseExportWiringRes
 	function onExportPng(): void {
 		void exporter.exportSlidePng(activeSlideIndex.value);
 	}
+	/** File > Export > PDF from the UI: the shared options step (Range), then the export. */
+	async function exportPdfWithOptions(): Promise<void> {
+		if (isExporting.value || slides.value.length === 0) {
+			return;
+		}
+		const selection = await choosePdfExportSelection(input.dialogContainer?.(), {
+			settings: getPdfExportSettings(),
+			slides: slides.value,
+			currentSlide: activeSlideIndex.value,
+			...(input.translate ? { translate: input.translate } : {}),
+		});
+		if (selection) {
+			await exportProgressCtl.runPdf(selection);
+		}
+	}
 	function onExportPdf(): void {
-		void exportProgressCtl.runPdf();
+		void exportPdfWithOptions();
 	}
 	function onExportGif(): void {
 		void exportProgressCtl.runGif();
@@ -163,6 +212,7 @@ export function useExportWiring(input: UseExportWiringInput): UseExportWiringRes
 		reason: DocumentSaveReason = 'saveAs',
 	): Promise<void> {
 		const storage = input.storage?.();
+		const revision = savedPresentationRevision(input.changeSources?.() ?? []);
 		try {
 			const bytes = await saveAs(format);
 			await deliverSavedPresentation({
@@ -172,6 +222,9 @@ export function useExportWiring(input: UseExportWiringInput): UseExportWiringRes
 				fileName: savedPresentationFileName(input.fileName?.(), format),
 				reason,
 			});
+			if (input.changeSources && isCleanAfterSave(revision, input.changeSources())) {
+				input.onSavedClean?.();
+			}
 			// Options > Accessibility > "feedback with sound", and Options > Save >
 			// "keep the last AutoRecover version": once a `.pptx` save lands, the
 			// crash-recovery snapshot for this file is stale (the real file already

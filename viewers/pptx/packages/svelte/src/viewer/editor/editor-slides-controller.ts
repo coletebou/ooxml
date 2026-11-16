@@ -1,4 +1,9 @@
-import { resetSlideLayoutPath, insertSlidePaste, applySlidePasteTemplates } from 'ooxml-ui/pptx';
+import {
+	applySlidePasteTemplates,
+	insertedLayoutCompletion,
+	insertSlidePaste,
+	resetSlideLayoutPath,
+} from 'ooxml-ui/pptx';
 import type { SlidePasteRequest, SlideTemplateBuildOptions, SlideTemplateId } from 'ooxml-ui/pptx';
 /* oxlint-disable eslint/one-var -- pervasive pre-existing pattern in this file
    (many independent short-lived `const`s per action, several separated by
@@ -244,19 +249,27 @@ export class EditorSlidesController {
 		const handler = this.#editor.getHandler();
 		const draft = this.#editor.slides[newIndex];
 		if (handler && draft) {
+			// The core replaces the slide in the array it is given, so it gets a copy; the re-mapped
+			// slide completes the insertion above, the one undo step, rather than recording another.
 			void handler
-				.applyLayoutToSlide(newIndex, layoutPath, this.#editor.slides)
+				.applyLayoutToSlide(newIndex, layoutPath, [...this.#editor.slides])
 				.then(async (updated) => {
 					const templateElements = await handler.getTemplateElementsForSlide(updated.id);
-					if (this.#editor.slides[newIndex]?.id === draft.id) {
-						this.#editor.commitSlides(
-							this.#editor.slides.map((slide, i) => (i === newIndex ? updated : slide)),
-						);
-						this.#editor.templateElementsBySlideId = {
-							...this.#editor.templateElementsBySlideId,
-							[updated.id]: templateElements,
-						};
+					// An edit made to the new slide while its layout loaded stays; it takes the artwork.
+					const completion = insertedLayoutCompletion(this.#editor.slides[newIndex], draft);
+					if (completion === 'none') {
+						return undefined;
 					}
+					if (completion === 'replace') {
+						this.#editor.slides = this.#editor.slides.map((slide, i) =>
+							i === newIndex ? updated : slide,
+						);
+					}
+					this.#editor.templateElementsBySlideId = {
+						...this.#editor.templateElementsBySlideId,
+						[updated.id]: templateElements,
+					};
+					this.#editor.commitChange();
 					return undefined;
 				})
 				.catch(() => undefined);
@@ -278,7 +291,9 @@ export class EditorSlidesController {
 		if (!target) {
 			return null;
 		}
-		const updated = await handler.applyLayoutToSlide(index, layoutPath, this.#editor.slides);
+		// The core replaces the slide in the array it is given: a copy keeps the slides as they were
+		// until the history step below records them.
+		const updated = await handler.applyLayoutToSlide(index, layoutPath, [...this.#editor.slides]);
 		const templateElements = await handler.getTemplateElementsForSlide(updated.id);
 		if (this.#editor.slides[index]?.id !== target.id) {
 			return null;

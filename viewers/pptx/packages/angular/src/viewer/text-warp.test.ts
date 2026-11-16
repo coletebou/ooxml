@@ -1,3 +1,4 @@
+import { computed } from '@angular/core';
 import { hasGlyphEnvelope } from 'ooxml-ui/pptx';
 /**
  * Unit tests for the Angular text-warp descriptor resolver.
@@ -127,9 +128,12 @@ describe('getWarpCategory', () => {
 		expect(getWarpCategory(undefined)).toBe('none');
 	});
 
-	it('returns "none" for textNoShape and textPlain', () => {
+	it('returns "none" for textNoShape', () => {
 		expect(getWarpCategory('textNoShape')).toBe('none');
-		expect(getWarpCategory('textPlain')).toBe('none');
+	});
+
+	it('returns "envelope" for textPlain (the block stretched to the box)', () => {
+		expect(getWarpCategory('textPlain')).toBe('envelope');
 	});
 
 	it('returns "none" for unknown preset', () => {
@@ -226,8 +230,30 @@ describe('getTextWarp - no warp', () => {
 		expect(getTextWarp(makeTextElement('textNoShape', { text: 'hi' }))).toBeUndefined();
 	});
 
-	it('returns undefined for textPlain', () => {
-		expect(getTextWarp(makeTextElement('textPlain', { text: 'hi' }))).toBeUndefined();
+	it('resolves textPlain to the glyph envelope', () => {
+		const def = getTextWarp(makeTextElement('textPlain', { text: 'hi' }));
+		expect(def?.strategy).toBe('glyph');
+	});
+
+	it('wraps a long textPlain paragraph into several rows, but keeps a single word on one', () => {
+		// Distinct unwarped baselines (`y`) among the glyphs: one per wrapped row.
+		const rows = (def: ReturnType<typeof getTextWarp>) =>
+			new Set((def as TextWarpGlyphDef).glyphs.map((g) => g.y)).size;
+		const long = getTextWarp(
+			makeTextElement('textPlain', {
+				text: 'The quick brown fox jumps over the lazy dog and then keeps on running far away',
+			}),
+		);
+		expect(long?.strategy).toBe('glyph');
+		expect(rows(long)).toBeGreaterThan(1);
+		// A word far wider than its small square box stays whole on one row.
+		const word = getTextWarp({
+			...makeTextElement('textPlain', { text: 'schedule' }),
+			width: 40,
+			height: 40,
+		} as PptxElement);
+		expect(rows(word)).toBe(1);
+		expect((word as TextWarpGlyphDef).glyphs.map((g) => g.char).join('')).toBe('schedule');
 	});
 
 	it('returns undefined for unknown preset', () => {
@@ -291,7 +317,7 @@ describe('getTextWarp - strategy: path', () => {
 			{ text: '', style: {}, isParagraphBreak: true },
 			{ text: 'b', style: {} },
 		];
-		const multiEl = makeTextElement('textWave1', { textSegments: segs });
+		const multiEl = makeTextElement('textArchDown', { textSegments: segs });
 		const def = getTextWarp(multiEl) as TextWarpPathDef;
 		const ids = def.pathLines.map((l) => l.pathId);
 		expect(new Set(ids).size).toBe(ids.length);
@@ -318,7 +344,7 @@ describe('getTextWarp - strategy: path', () => {
 	});
 
 	it('works for shape elements with text warp', () => {
-		const sh = makeShapeElement('textChevron');
+		const sh = makeShapeElement('textArchUp');
 		const def = getTextWarp(sh) as TextWarpPathDef;
 		expect(def).toBeDefined();
 		expect(def.strategy).toBe('path');
@@ -350,12 +376,12 @@ describe('getTextWarp - envelope/former-simple presets render as true SVG path',
 		'textSlantDown',
 		'textFadeLeft',
 		'textCascadeDown',
-	])('returns a TextWarpPathDef (not css) for %s', (preset) => {
+	])('returns a TextWarpGlyphDef (measured two-path envelope, not css) for %s', (preset) => {
 		const el = makeTextElement(preset, { text: 'hi' });
-		const def = getTextWarp(el) as TextWarpPathDef;
+		const def = getTextWarp(el) as TextWarpGlyphDef;
 		expect(def).toBeDefined();
-		expect(def.strategy).toBe('path');
-		expect(def.pathLines[0].d).toMatch(/^M /u);
+		expect(def.strategy).toBe('glyph');
+		expect(def.glyphs).toHaveLength('hi'.length);
 	});
 });
 
@@ -442,18 +468,25 @@ describe('getTextWarp - envelope presets (inflate/deflate/can) render as a glyph
 		}
 	});
 
-	it('sets outlinePath (not slices) once the font is registered in the outline cache', () => {
+	it('recomputes a glyph layout with outlinePath (not slices) once the outline font is ready', async () => {
 		const embedded: PptxEmbeddedFont = {
 			name: 'WarpOutlineAngularTestFont',
 			dataUrl: '',
 			rawFontData: buildTestFont(),
 		};
-		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
 		const el = makeTextElement('textInflate', {
 			text: 'Hello',
 			fontFamily: 'WarpOutlineAngularTestFont',
 		});
-		const def = getTextWarp(el) as TextWarpGlyphDef;
+		const layout = computed(() => getTextWarp(el) as TextWarpGlyphDef);
+		const before = layout();
+		// The font arrives after the layout was computed (a deferred parser load
+		// or a webfont fetch): the cache notification alone must invalidate it.
+		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
+		await glyphOutlineFontCache.preload();
+		await Promise.resolve();
+		const def = layout();
+		expect(def).not.toBe(before);
 		expect(def.strategy).toBe('glyph');
 		expect(def.glyphs).toHaveLength('Hello'.length);
 		for (const g of def.glyphs) {
@@ -480,5 +513,26 @@ describe('getTextWarp - all SVG path presets produce valid path defs', () => {
 		expect(def).toBeDefined();
 		expect(def.strategy).toBe('path');
 		expect(def.pathLines[0].d.length).toBeGreaterThan(0);
+	});
+});
+
+describe('arch lines lie one line pitch apart', () => {
+	it('puts the lines of an Arch Up block on ellipses 1.2 em apart, the last on the base ellipse', () => {
+		const def = getTextWarp(
+			makeTextElement('textArchUp', {
+				fontSize: 20,
+				textSegments: [
+					{ text: 'Top', style: {} },
+					{ text: '', style: {}, isParagraphBreak: true },
+					{ text: 'Bottom', style: {} },
+				],
+			}),
+		);
+		expect(def?.strategy).toBe('path');
+		const lines = (def as { pathLines: { d: string }[] }).pathLines;
+		const radii = lines.map((line) => Number(/A ([\d.]+),/u.exec(line.d)?.[1]));
+		expect(radii).toHaveLength(2);
+		expect(radii[1]).toBe(150);
+		expect(radii[0]).toBeCloseTo(174, 5);
 	});
 });

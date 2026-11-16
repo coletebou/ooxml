@@ -5,6 +5,27 @@ docx and pptx all draw through. This report is step 1: what the pptx renderer dr
 not, how big each piece is, and how hard it is to retarget. Step 2 ports the top gaps in slices (see
 "Slices" at the end for what has landed).
 
+**2026-10-28 review:** the harness was rerun at `16edc2fd9` (2 tests, 82 parts, no exceptions).
+See [the current sharing review](pptx-reuse-review-2026-10-28.md#fresh-evidence-and-limits) and
+[raw measurement](evidence/chart-gap-2026-10-28.json). The tables below retain their historical
+baseline. In particular, unchanged plot/point manual layouts do not imply missing title/legend
+layout support, and a nonempty SVG can contain placeholders rather than complete chart rendering.
+
+**2026-10-28 implementation:** [the delivery record](pptx-reuse-delivery-2026-10-28.md)
+and [delivery measurement](evidence/chart-gap-delivery-2026-10-28.json) supersede the
+baseline counts for implemented slices: manual-layout ablation is now 10/10 and funnel/box
+ChartEx parts render. Historical tables below remain labelled baseline evidence.
+
+**2026-10-30 code check:** the core painter now draws 3-D charts (`chart-3d-*.ts`: bar3D, line3D,
+area3D, pie3D and surface3D from `c:view3D`, oblique or perspective projection, painter's-algorithm
+ordering, flat face shading), so Word, Excel and Visio no longer draw them flat. Still open there:
+3-D data labels, floor/wall formatting, bar `c:shape` (cylinder, cone, pyramid), pie explosion and
+surface wireframe or contour modes; the three.js meshes stay in `src/ui/src/pptx/render`. Also open:
+region map ChartEx (`cx:geography` is modelled but not
+drawn), the Pareto cumulative line (unconfirmed), `c:userShapes` (parsed, not drawn) and pivot
+chart field buttons. Surface charts without a 3-D view still render the labelled frame; the 3-D painter has not been
+measured against Office renders. The [Office parity checklist](parity-checklist.md) carries these items.
+
 ## How the numbers were made
 
 - `src/core/pptx/__tests__/integration/chart-renderer-gap.test.ts` (kept; runs with the core tests).
@@ -12,6 +33,9 @@ not, how big each piece is, and how hard it is to retarget. Step 2 ports the top
   each runs core's own pipeline: `parseChartSpace`, `readChartFormatting` (the feed Word uses),
   `chartSummaryFromSpace`, `chartSummaryView`, `renderChartSvg`; ChartEx parts go through
   `chartExSummary`. It asserts nothing throws and that all 82 parts are reached.
+  Since 2026-10-23 `chartExSummary` builds its summary from the neutral ChartEx model
+  (`chart/ex`, `chart/render/summary-from-chartex.ts`), and the agnostic plan records that its outputs did not
+  change; the tables below were measured on 2026-10-17 and were not re-run.
 - Feature use is detected by regular expressions on the part text. "Core draws it" is measured by
   ablation: the feature is stripped from the part, the chart is rendered again, and if the SVG is
   identical core does not draw the feature. Set `CHART_GAP_REPORT=<file>` for the JSON table and
@@ -35,7 +59,7 @@ No part throws. Core renders 78 of 82 parts to a chart; funnel, box and whisker 
 | Markers (6 / 5)                                                                                                                                                                                | No: a fixed dot, symbol, size and fill ignored                              | ablation                                       |
 | Manual layout (10 / 4)                                                                                                                                                                         | Title and legend only; plot area and label layouts ignored                  | ablation                                       |
 | `c:txPr` text properties (52 / 12)                                                                                                                                                             | Partly: 34 of 52 change the output                                          | ablation                                       |
-| 3-D view (20 / 4)                                                                                                                                                                              | No: drawn as flat 2-D                                                       | ablation                                       |
+| 3-D view (20 / 4)                                                                                                                                                                              | Yes (core SVG painter, unmeasured)                                          | ablation                                       |
 | Explosion (1 / 1)                                                                                                                                                                              | No                                                                          | ablation                                       |
 | Trendlines (1 / 1)                                                                                                                                                                             | Yes                                                                         | ablation                                       |
 | Picture fills (2 / 2)                                                                                                                                                                          | No                                                                          | code reading (no `blip` handling in `render/`) |

@@ -161,7 +161,7 @@ describe('chart title rich text (titleRuns): load -> edit -> save -> re-parse', 
 
 		const saved = await handler.save(data.slides);
 		const xml = await readChartXml(saved);
-		expect(xml).toContain('<a:t>Annual Summary</a:t>');
+		expect(xml).toMatch(/<a:t(?: xml:space="preserve")?>Annual Summary<\/a:t>/u);
 		expect(xml).not.toContain('Sales ');
 		expect(xml).not.toContain('Overview');
 
@@ -197,8 +197,8 @@ describe('chart title rich text (titleRuns): load -> edit -> save -> re-parse', 
 		expect(xml).toContain('lang="en-AU"');
 		expect(xml).toContain('altLang="fr-FR"');
 		expect(xml).toContain('dirty="0"');
-		expect(xml).toContain('<a:schemeClr val="accent2"><a:lumMod val="75000">');
-		expect(xml).toContain('<a:latin typeface="+mj-lt">');
+		expect(xml).toMatch(/<a:schemeClr val="accent2"><a:lumMod val="75000"\s*\/?>/u);
+		expect(xml).toMatch(/<a:latin typeface="\+mj-lt"\s*\/?>/u);
 		expect(xml).toContain('<a:t>Annual Summary</a:t>');
 		expect(xml).not.toContain('<a:t>Q4 Sales</a:t>');
 

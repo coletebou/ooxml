@@ -1,13 +1,8 @@
 export const translations = {
-	'pptx.text3d.type': 'Tipo',
-	'pptx.text3d.width': 'Ancho',
-	'pptx.text3d.height': 'Altura',
 	'pptx.text3d.title': 'Texto 3D',
 	'pptx.text3d.extrusion': 'Extrusión 3D',
 	'pptx.text3d.depth': 'Profundidad (pt)',
-	'pptx.text3d.color': 'Color',
 	'pptx.text3d.topBevel': 'Bisel superior',
-	'pptx.text3d.bottomBevel': 'Bisel inferior',
 	'pptx.text3d.material': 'Material',
 	'pptx.textEffects.title': 'Efectos de texto',
 	'pptx.textEffects.shadow': 'Sombra de texto',
@@ -64,6 +59,12 @@ export const translations = {
 	'pptx.fonts.missingWarning':
 		'No se pudieron encontrar las fuentes {{count}} y no se incrustarán.',
 	'pptx.fonts.notFound': 'Extraviado',
+	'pptx.fonts.previewOnly': 'Solo vista previa e impresión',
+	'pptx.fonts.previewOnlyReason':
+		'La licencia de esta fuente solo permite mostrarla e imprimirla. Se conserva en este archivo, pero nunca se incrusta en otro archivo.',
+	'pptx.fonts.restricted': 'Restringida',
+	'pptx.fonts.restrictedReason':
+		'La licencia de esta fuente no permite incrustarla, por lo que no se usa para mostrar el texto y se muestra una sustituta. Sus datos de fuente se conservan sin cambios en este archivo.',
 	'pptx.fonts.scanning': 'Escaneando fuentes...',
 	'pptx.fonts.usedFonts': 'Fuentes usadas',
 	'pptx.text.title': 'Texto',
@@ -167,10 +168,8 @@ export const translations = {
 	'pptx.textAdvanced.lineSpacingExact': 'Interlineado (exacto)',
 	'pptx.textAdvanced.marginLeft': 'Margen izquierdo',
 	'pptx.textEffects.adjustment': 'Ajuste',
-	'pptx.textEffects.glowColor': 'Color del resplandor',
 	'pptx.textEffects.outline': 'Contorno del texto',
 	'pptx.textEffects.outlineWidth': 'Ancho del contorno',
-	'pptx.textEffects.shadowColor': 'Color de la sombra',
 	'pptx.textEffects.transform': 'Transformar',
 	'pptx.textFormatting.columns': 'Columnas',
 	'pptx.textFormatting.columnSpacing': 'Espaciado entre columnas',

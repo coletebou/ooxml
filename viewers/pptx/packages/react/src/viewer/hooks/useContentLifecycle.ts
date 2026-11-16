@@ -1,6 +1,8 @@
 import type {
 	CompatibilityWarningToast,
 	DocumentStorage,
+	GoogleFontsOption,
+	PptxLoadLimits,
 	ReadOnlyRecommendation,
 } from 'ooxml-ui/pptx';
 import type { PptxHandler, PptxModifyVerifier, PptxSlide } from 'pptx-viewer-core';
@@ -56,13 +58,17 @@ export interface UseContentLifecycleInput {
 	actionSoundHandlerRef: React.MutableRefObject<PptxHandler | null>;
 	setIsEncryptedDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
 	password?: string;
-	transformCommittedText?: (text: string) => string;
+	transformCommittedText?: (text: string, previous?: string) => string;
 	/** Forwarded to {@link useLoadContent}: fires after a parse applies. */
 	onContentApplied?: () => void;
 	/** Forwarded to {@link useLoadContent}: File > Options > Trust Center > "Allow external content". */
 	allowExternalImages?: boolean;
 	/** Forwarded to {@link useLoadContent}: the host `initialSlide` prop. */
 	initialSlide?: number;
+	/** Forwarded to {@link useFontInjection}: the host `googleFonts` prop. */
+	googleFonts?: GoogleFontsOption;
+	/** Forwarded to {@link useLoadContent}: the host `limits` prop. */
+	limits?: PptxLoadLimits;
 	/** Forwarded to {@link useLoadContent}: see `useReadOnlyRecommendationState`. */
 	setReadOnlyRecommendation: React.Dispatch<React.SetStateAction<ReadOnlyRecommendation>>;
 	/** Forwarded to {@link useLoadContent}: see `useReadOnlyRecommendationState`. */
@@ -82,6 +88,8 @@ export interface ContentLifecycleResult {
 	 * optional output container (`ppsx`/`pptm`/...) so Save As shares it.
 	 */
 	serializeSlides: SerializeSlides;
+	/** The values a save is built from, read fresh (see `savedPresentationRevision`). */
+	getChangeSources: () => readonly unknown[];
 	/**
 	 * Serialise for bytes the viewer reads back itself (autosave snapshot,
 	 * re-serialise-then-reload). Always plaintext, so recovery - which has no
@@ -113,6 +121,8 @@ export function useContentLifecycle(input: UseContentLifecycleInput): ContentLif
 		onContentApplied,
 		allowExternalImages,
 		initialSlide,
+		googleFonts,
+		limits,
 		setReadOnlyRecommendation,
 		setModifyVerifier,
 		setCompatToasts,
@@ -160,12 +170,15 @@ export function useContentLifecycle(input: UseContentLifecycleInput): ContentLif
 		setModifyVerifier,
 		setCompatToasts,
 		setLoading: state.setLoading,
+		setFontProgress: state.setFontProgress,
+		googleFonts,
 		setError: state.setError,
 		setIsDirty: state.setIsDirty,
 		setIsEncrypted: setIsEncryptedDialogOpen,
 		onContentApplied,
 		allowExternalImages,
 		initialSlide,
+		limits,
 	});
 
 	// Sync the shared handler ref for action sounds. `state.loading` is not read
@@ -176,7 +189,7 @@ export function useContentLifecycle(input: UseContentLifecycleInput): ContentLif
 		// oxlint-disable-next-line react/exhaustive-effect-dependencies -- see comment above
 	}, [handlerRef, actionSoundHandlerRef, state.loading]);
 
-	useFontInjection({ embeddedFonts: state.embeddedFonts, slides });
+	useFontInjection({ embeddedFonts: state.embeddedFonts, slides, googleFonts });
 
 	const serializeInput = {
 		slides,
@@ -228,6 +241,32 @@ export function useContentLifecycle(input: UseContentLifecycleInput): ContentLif
 	// the crash-recovery data was destroyed the moment protection was enabled.
 	const serializeForRecovery = useSerialize({ ...serializeInput, purpose: 'recovery-snapshot' });
 
+	// Everything the serializers read that changes by REASSIGNMENT: autosave skips a deck it has
+	// already snapshotted, and File > Save tells whether an edit landed while it was in flight.
+	// The refs are read by `.current` because an inline edit in progress lives there and nowhere
+	// else yet.
+	const getChangeSources = (): readonly unknown[] => [
+		slides,
+		state.templateElementsBySlideId,
+		state.guides,
+		state.headerFooter,
+		state.presentationProperties,
+		state.customShows,
+		state.sections,
+		state.coreProperties,
+		state.appProperties,
+		state.customProperties,
+		state.tagCollections,
+		state.notesMaster,
+		state.handoutMaster,
+		state.embeddedFonts,
+		embedFonts,
+		password,
+		state.inlineEditingElementIdRef.current,
+		state.inlineEditingTextRef.current,
+		state.inlineEditingSnapshotRef.current,
+	];
+
 	const { autosaveStatus } = useAutosave({
 		isDirty: state.isDirty,
 		filePath,
@@ -235,33 +274,11 @@ export function useContentLifecycle(input: UseContentLifecycleInput): ContentLif
 		serializeSlides: serializeForRecovery,
 		enabled: autosaveEnabled,
 		...(autosaveIntervalMs === undefined ? {} : { intervalMs: autosaveIntervalMs }),
-		// Everything `serializeForRecovery` reads that changes by REASSIGNMENT,
-		// so a poll that finds all of them unchanged can skip re-serializing a
-		// deck it has already snapshotted. The two refs are read by `.current`
-		// because an inline edit in progress lives there and nowhere else yet.
 		onSaved: input.onAutosave,
-		getChangeSources: () => [
-			slides,
-			state.templateElementsBySlideId,
-			state.guides,
-			state.headerFooter,
-			state.presentationProperties,
-			state.customShows,
-			state.sections,
-			state.coreProperties,
-			state.appProperties,
-			state.customProperties,
-			state.tagCollections,
-			state.notesMaster,
-			state.handoutMaster,
-			state.embeddedFonts,
-			embedFonts,
-			password,
-			state.inlineEditingElementIdRef.current,
-			state.inlineEditingTextRef.current,
-			state.inlineEditingSnapshotRef.current,
-		],
+		inlineDraftSinkRef: state.autosaveDraftSinkRef,
+		getInlineEditingId: () => state.inlineEditingElementIdRef.current,
+		getChangeSources,
 	});
 
-	return { handlerRef, serializeSlides, serializeForRecovery, autosaveStatus };
+	return { handlerRef, serializeSlides, serializeForRecovery, autosaveStatus, getChangeSources };
 }

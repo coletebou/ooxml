@@ -1,4 +1,5 @@
 import type { PptxXmlBuilder } from '../builders/fluent';
+import type { PptxSvgRasterizer } from './svg-rasterizer';
 import type {
 	PptxAppProperties,
 	PptxCoreProperties,
@@ -32,6 +33,7 @@ import type {
 	PptxThemeColorScheme,
 	PptxThemeFontScheme,
 	PptxThemeFormatScheme,
+	PptxThemePartSchemes,
 	PptxThemeVariant,
 	PptxViewProperties,
 	ParsedTableStyleMap,
@@ -42,20 +44,57 @@ import type {
 import type {
 	BackgroundStyleApplication,
 	BackgroundStyleScope,
-} from './runtime/PptxHandlerRuntimeBackgroundStyles';
-import type { StyleReferenceReResolution } from './runtime/PptxHandlerRuntimeThemeEffects';
+	StyleReferenceReResolution,
+} from './handler-result-types';
+import type { PptxLoadLimits } from './load-limits';
 
 export interface PptxHandlerLoadOptions {
-	eagerDecodeImages?: boolean;
+	eagerDecodeImages?: boolean | undefined;
+	/**
+	 * When `false` (default), embedded font variants are returned without
+	 * decompressing or de-obfuscating their parts: each variant's `dataUrl`,
+	 * `format` and `rawFontData` are decoded on first read or on
+	 * `PptxEmbeddedFont.load()`. Set to `true` to decode every variant during
+	 * `load()` and omit the ones that fail to decode.
+	 */
+	eagerDecodeEmbeddedFonts?: boolean;
 	password?: string;
 	/**
 	 * Maximum total uncompressed bytes accepted from the input ZIP archive.
 	 * Defaults to 500 MiB. When the sum of `_data.uncompressedSize` across
 	 * all archive entries exceeds this cap, `load()` rejects with a
 	 * {@link ZipBombError}. A hard cap of 65 536 archive entries also
-	 * applies.
+	 * applies. `limits.maxUncompressedBytes` takes precedence when set.
 	 */
 	maxUncompressedBytes?: number;
+	/**
+	 * Bounds on the work this load may do, for hosts that open untrusted
+	 * decks. Every field left out keeps its default, so omitting `limits`
+	 * changes nothing: 500 MiB inflated, 65,536 ZIP entries, and no limit on
+	 * input size, slides or shapes. Each limit is checked before the work it
+	 * bounds (the input size before the archive is opened, the slide count
+	 * before any slide is parsed, the shape count as each slide is parsed).
+	 * `maxInputBytes`, `maxSlides` and `maxShapes` reject with
+	 * `PptxLoadLimitError` (code `PPTX_LOAD_LIMIT`); `maxUncompressedBytes`
+	 * and `maxEntries` reject with {@link ZipBombError} as before.
+	 * `getPptxLoadLimitViolation` reads the limit and observed value from
+	 * either. An invalid value (not a positive finite number, or `maxEntries`
+	 * above 65,536) throws `RangeError` before any work. `PptxHandler.loadFromJson`
+	 * applies the same limits, `maxInputBytes` to the UTF-8 size of its text.
+	 */
+	limits?: PptxLoadLimits | undefined;
+	/**
+	 * Called once every slide is parsed, before the rest of the deck (notes
+	 * and handout masters, theme variants, document properties, thumbnail)
+	 * is read, so a host can start work that needs only the slides, such as
+	 * downloading the webfonts they draw, while `load()` finishes. `slides`
+	 * hold the same parsed content `load()` resolves with; `embeddedFonts` are
+	 * the deck's embedded font variants. Not called by `loadFromJson`.
+	 */
+	onSlidesParsed?: (parsed: {
+		slides: readonly PptxSlide[];
+		embeddedFonts: readonly PptxEmbeddedFont[];
+	}) => void;
 	/**
 	 * When `false` (default), relationship targets that resolve to
 	 * `http://` or `https://` URLs are dropped from rendered slides
@@ -68,50 +107,26 @@ export interface PptxHandlerLoadOptions {
 	allowExternalImages?: boolean;
 }
 
-/**
- * Default maximum uncompressed byte budget for {@link PptxHandlerLoadOptions.maxUncompressedBytes}.
- * 500 MiB.
- */
-export const DEFAULT_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
-
-/**
- * Hard cap on archive entry count. Beyond this, the package is rejected.
- */
-export const MAX_ZIP_ENTRY_COUNT = 65536;
-
-/**
- * Thrown by the load pipeline when a ZIP archive exceeds the configured
- * uncompressed-size budget or the entry-count limit.
- */
-export class ZipBombError extends Error {
-	public readonly code = 'ZIP_BOMB';
-
-	public readonly uncompressedBytes: number | undefined;
-
-	public readonly limit: number;
-
-	public readonly entryCount: number | undefined;
-
-	constructor(
-		message: string,
-		details: { uncompressedBytes?: number; limit: number; entryCount?: number },
-	) {
-		super(message);
-		this.name = 'ZipBombError';
-		this.uncompressedBytes = details.uncompressedBytes;
-		this.limit = details.limit;
-		this.entryCount = details.entryCount;
-	}
-}
+export { DEFAULT_MAX_UNCOMPRESSED_BYTES, MAX_ZIP_ENTRY_COUNT, ZipBombError } from './zip-bomb';
 
 /** Output format for the save pipeline. */
 export type PptxSaveFormat = 'pptx' | 'ppsx' | 'pptm' | 'ppt';
 
+export type { PptxSvgRasterizer } from './svg-rasterizer';
+
 export interface PptxHandlerSaveOptions {
-	headerFooter?: PptxHeaderFooter;
-	presentationProperties?: PptxPresentationProperties;
-	customShows?: PptxCustomShow[];
-	sections?: PptxSection[];
+	/**
+	 * A reproducible save: `dcterms:created` / `dcterms:modified` are this date
+	 * (unless `coreProperties` gives them), `cp:revision` is
+	 * `coreProperties.revision` or 1 instead of the next count, new table
+	 * columns get reproducible `a16:colId`s and every ZIP entry is dated this
+	 * date. Two saves of the same input then produce the same bytes.
+	 */
+	fixedDate?: Date;
+	headerFooter?: PptxHeaderFooter | undefined;
+	presentationProperties?: PptxPresentationProperties | undefined;
+	customShows?: PptxCustomShow[] | undefined;
+	sections?: PptxSection[] | undefined;
 	coreProperties?: PptxCoreProperties;
 	appProperties?: PptxAppProperties;
 	customProperties?: PptxCustomProperty[];
@@ -125,14 +140,14 @@ export interface PptxHandlerSaveOptions {
 	 * background) to the master at its `path`. Masters not listed here pass
 	 * through verbatim from the original load.
 	 */
-	slideMasters?: PptxSlideMaster[];
+	slideMasters?: PptxSlideMaster[] | undefined;
 	/**
 	 * Updated slide layouts to save back to ppt/slideLayouts/slideLayout*.xml.
 	 * Each entry applies typed mutations (clrMapOverride, attrs, hf flags,
 	 * background) to the layout at its `path`. Layouts not listed here pass
 	 * through verbatim from the original load.
 	 */
-	slideLayouts?: PptxSlideLayout[];
+	slideLayouts?: PptxSlideLayout[] | undefined;
 	/** Updated tag collections to save back to ppt/tags/tag*.xml. */
 	tags?: PptxTagCollection[];
 	/** Presentation-level customer data references to author or update. */
@@ -178,7 +193,7 @@ export interface PptxHandlerSaveOptions {
 	 * preserved verbatim. Omitting the option round-trips the original
 	 * part untouched.
 	 */
-	tableStyles?: ParsedTableStyleMap;
+	tableStyles?: ParsedTableStyleMap | undefined;
 	/**
 	 * Set `ppt/tableStyles.xml`'s `<a:tblStyleLst @def>` to this style GUID
 	 * (normalised to uppercase-with-braces). `undefined` preserves the
@@ -218,7 +233,16 @@ export interface PptxHandlerSaveOptions {
 	 * scheme is embedded directly in the `.ppt` stream rather than wrapping an
 	 * already-produced package.
 	 */
-	pptPassword?: string;
+	pptPassword?: string | undefined;
+	/**
+	 * Rasteriser for SVG pictures with no raster fallback in a `'ppt'`-format
+	 * save; ignored for every other {@link outputFormat}. When omitted the
+	 * writer uses the DOM's own SVG renderer, and in a runtime without one
+	 * (Node.js) writes a placeholder with a `ppt-image-format-unsupported`
+	 * warning. In Node.js pass `rasterizeSvgInNode` from
+	 * `ooxml-core/pptx/node` (it needs the optional Node canvas peer).
+	 */
+	rasterizeSvg?: PptxSvgRasterizer;
 	/**
 	 * Embedded fonts to write back (or add) to the saved PPTX.
 	 *
@@ -269,15 +293,29 @@ export interface IPptxHandlerRuntime {
 	Builder(data: PptxData): PptxXmlBuilder;
 	setTemplateBackground(path: string, backgroundColor: string | undefined): void;
 	setPresentationTheme(themePath: string, applyToAllMasters?: boolean): Promise<void>;
+	setSlideMasterTheme(masterPath: string, themePath: string): Promise<void>;
+	getThemePartSchemes(themePath: string): Promise<PptxThemePartSchemes | undefined>;
 	getTemplateBackgroundColor(path: string): string | undefined;
-	updateThemeColorScheme(colorScheme: PptxThemeColorScheme): Promise<void>;
-	updateThemeFontScheme(fontScheme: PptxThemeFontScheme): Promise<void>;
-	updateThemeName(name: string): Promise<void>;
+	/** Scheme edits write every part a slide master uses, or only `themePaths`. */
+	updateThemeColorScheme(
+		colorScheme: PptxThemeColorScheme,
+		themePaths?: readonly string[],
+	): Promise<void>;
+	updateThemeFontScheme(
+		fontScheme: PptxThemeFontScheme,
+		themePaths?: readonly string[],
+	): Promise<void>;
+	updateThemeName(name: string, themePaths?: readonly string[]): Promise<void>;
 	/** Resolve a `<p:style>` node against the loaded theme (see PptxHandlerRuntimeStyleMatrixResolve). */
 	resolveStyleMatrixReferences(styleXml: XmlObject, effectSchemeId?: string): ResolvedStyleMatrix;
 	/** Write a built-in effect scheme (`a:fmtScheme`) into the theme parts. */
 	applyThemeEffectScheme(id: string): Promise<PptxThemeFormatScheme | undefined>;
 	applyThemeFormatSchemeXml(fmtSchemeXml: string): Promise<PptxThemeFormatScheme | undefined>;
+	/** Put back a format scheme a theme part held before (Undo of an Effects pick). */
+	restoreThemeFormatScheme(
+		scheme: PptxThemeFormatScheme,
+		themePaths?: readonly string[],
+	): Promise<PptxThemeFormatScheme | undefined>;
 	getThemeFormatScheme(): PptxThemeFormatScheme | undefined;
 	getThemeVariants(): PptxThemeVariant[];
 	reResolveThemeStyleReferences(
@@ -335,7 +373,7 @@ export interface IPptxHandlerRuntime {
 	/**
 	 * Scan the loaded PPTX archive for all theme parts.
 	 */
-	getAvailableThemes(): Promise<Array<{ path: string; name?: string }>>;
+	getAvailableThemes(): Promise<Array<{ path: string; name?: string | undefined }>>;
 	/**
 	 * Apply a different layout to an existing slide by updating the slide's
 	 * relationship to point to the new layout and re-parsing layout

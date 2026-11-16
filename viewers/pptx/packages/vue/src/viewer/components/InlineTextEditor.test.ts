@@ -104,8 +104,10 @@ describe('inlineTextEditor', () => {
 		});
 		try {
 			const oldRoot = wrapper.get('[data-inline-editor]').element;
+			// The plain editor seeds styled runs, so the text sits inside them.
+			const text = document.createTreeWalker(oldRoot, NodeFilter.SHOW_TEXT).nextNode()!;
 			const range = document.createRange();
-			range.setStart(oldRoot.firstChild!, 3);
+			range.setStart(text, 3);
 			range.collapse(true);
 			window.getSelection()!.removeAllRanges();
 			window.getSelection()!.addRange(range);
@@ -197,14 +199,14 @@ describe('inlineTextEditor', () => {
 		expect(wrapper.emitted('format')).toBeUndefined();
 	});
 
-	it('ends the edit on Ctrl+Enter, committing the text', async () => {
+	it.each(['Enter', 'Escape'])('ends the edit on %s, committing the text', async (key) => {
 		const wrapper = mount(InlineTextEditor, { attachTo: document.body, props: { element } });
 		try {
 			const editor = wrapper.get('[data-inline-editor]').element as HTMLElement;
 			editor.focus();
 			const event = new KeyboardEvent('keydown', {
-				key: 'Enter',
-				ctrlKey: true,
+				key,
+				ctrlKey: key === 'Enter',
 				bubbles: true,
 				cancelable: true,
 			});

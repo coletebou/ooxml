@@ -3,6 +3,7 @@ import type { PptxElement, PptxSlide } from 'ooxml-core/pptx';
 import { describe, expect, it } from 'vitest';
 
 import { createTranslator } from '../i18n/translator';
+import { screenStrokeWidth } from '../render/device-pixel-stroke';
 import { createDefaultRegistry } from './elements';
 import { renderSlideStage } from './slide-stage';
 
@@ -31,7 +32,9 @@ function stage(elements: PptxElement[], scale = 0.5): HTMLElement {
 	});
 }
 
-const screenWidth = (authored: string): string => `max(${authored}px, var(--pptx-device-px, 0px))`;
+const STEP = 'max(var(--pptx-device-px, 0px), 0.001px)';
+const screenWidth = (authored: string): string => `max(${STEP}, round(${authored}px, ${STEP}))`;
+const borderWidth = (authored: string): string => `max(${authored}px, var(--pptx-device-px, 0px))`;
 
 describe('one device pixel minimum (vanilla DOM renderer)', () => {
 	it('publishes the device pixel on the stage for its scale', () => {
@@ -81,10 +84,10 @@ describe('one device pixel minimum (vanilla DOM renderer)', () => {
 			}),
 		]);
 		const box = node.querySelector<HTMLElement>('[data-element-id="inset"]');
-		expect(box?.getAttribute('style')).toContain(screenWidth('0.5'));
+		expect(box?.getAttribute('style')).toContain(borderWidth('0.5'));
 	});
 
-	it('holds a connector strand at one device pixel, never under its 1px floor', () => {
+	it('holds a connector strand at one device pixel, and at 1px off screen', () => {
 		const node = stage([
 			el({
 				type: 'connector',
@@ -96,7 +99,7 @@ describe('one device pixel minimum (vanilla DOM renderer)', () => {
 		]);
 		const line = node.querySelector<SVGLineElement>('[data-element-id="conn"] svg line');
 		expect(line?.getAttribute('stroke-width')).toBe('1');
-		expect(line?.style.getPropertyValue('stroke-width')).toBe(screenWidth('1'));
+		expect(line?.style.getPropertyValue('stroke-width')).toBe(screenStrokeWidth(HAIRLINE, 1));
 	});
 
 	it('holds table cell borders and diagonals at one device pixel', () => {
@@ -127,9 +130,33 @@ describe('one device pixel minimum (vanilla DOM renderer)', () => {
 			} as Partial<PptxElement> & Pick<PptxElement, 'type' | 'id'>),
 		]);
 		const td = node.querySelector<HTMLElement>('[data-element-id="tbl"] td');
-		expect(td?.getAttribute('style')).toContain(`border-top: ${screenWidth('0.5')} solid`);
+		expect(td?.getAttribute('style')).toContain(`border-top: ${borderWidth('0.5')} solid`);
 		const diagonal = td?.querySelector<SVGLineElement>('svg line');
 		expect(diagonal?.getAttribute('stroke-width')).toBe('0.5');
 		expect(diagonal?.style.getPropertyValue('stroke-width')).toBe(screenWidth('0.5'));
+	});
+
+	it('ends a connector with a flat cap unless the line declares another', () => {
+		const node = stage([
+			el({
+				type: 'connector',
+				id: 'plain',
+				shapeType: 'straightConnector1',
+				shapeStyle: { strokeColor: '#000000', strokeWidth: 12 },
+			}),
+			el({
+				type: 'connector',
+				id: 'round',
+				y: 60,
+				shapeType: 'straightConnector1',
+				shapeStyle: { strokeColor: '#000000', strokeWidth: 12, lineCap: 'rnd' },
+			}),
+		]);
+		const cap = (id: string) =>
+			node
+				.querySelector(`[data-element-id="${id}"] svg line[data-pptx-line]`)
+				?.getAttribute('stroke-linecap');
+		expect(cap('plain')).toBe('butt');
+		expect(cap('round')).toBe('round');
 	});
 });

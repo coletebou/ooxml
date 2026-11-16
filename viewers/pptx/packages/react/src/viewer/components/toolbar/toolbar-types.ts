@@ -2,6 +2,7 @@ import type {
 	AnimationApplyGroup,
 	FreeformToolKind,
 	InsertChartKind,
+	RibbonDisplayController,
 	ReviewCommentsHost,
 	SlideTemplateId,
 	ToolbarActionId,
@@ -41,6 +42,11 @@ export interface ToolbarProps {
 	isProtectedView?: boolean;
 	/** Drops the Protected View override for this session. Only offered when `isProtectedView` is true. */
 	onEnableEditing?: () => void;
+	/**
+	 * The viewer's Ribbon Display Options controller. Optional: a ribbon rendered on its own
+	 * stays in the default "always" mode.
+	 */
+	ribbonDisplay?: RibbonDisplayController;
 	isNarrowViewport: boolean;
 	isSidebarCollapsed: boolean;
 	isInspectorPaneOpen: boolean;
@@ -97,6 +103,8 @@ export interface ToolbarProps {
 	onAddShape: () => void;
 	onAddTable: (rows?: number, columns?: number) => void;
 	onAddChart?: (chartKind: InsertChartKind) => void;
+	/** Opens the Insert Chart dialog; without it the Chart menu leaves "Insert Chart..." out. */
+	onOpenChartDialog?: () => void;
 	onAddSmartArt: () => void;
 	onAddEquation: () => void;
 	onAddActionButton: (shapeType: string) => void;
@@ -243,6 +251,8 @@ export interface ToolbarProps {
 	eyedropperActive?: boolean;
 	onToggleEyedropper?: () => void;
 	onOpenSetUpSlideShow?: () => void;
+	/** Slide Show > Custom Slide Show: open the Custom Shows dialog. */
+	onOpenCustomShows?: () => void;
 	/** PowerPoint's Hide Slide toggle for the active slide (Slide Show tab). */
 	onToggleHideSlide?: () => void;
 	/** Whether the active slide is hidden, for Hide Slide's pressed state. */

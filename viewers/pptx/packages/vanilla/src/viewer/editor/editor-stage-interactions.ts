@@ -1,11 +1,9 @@
 import {
-	drillSelectionForClick,
-	drillSelectionForDoubleClick,
-	findElementPath,
+	attachTableCellsPaste,
 	isAdditiveSelectionPress,
-	isEnterableGroup,
 	isGroupMember,
-	memberChainAtPoint,
+	resolveGroupDoubleClickTarget,
+	resolveGroupPressTarget,
 	setPendingCaretPoint,
 } from 'ooxml-ui/pptx';
 import type { PendingInlineTextEdit } from 'ooxml-ui/pptx';
@@ -42,6 +40,8 @@ import { bindTableTouchEditor } from './table-touch-editor';
 export function createStageInteractions(deps: StageInteractionsDeps): StageInteractions {
 	const { doc, store, ops } = deps;
 	let inline: InlineEditorSession | null = null;
+	/** The element the open inline text editor edits. */
+	let inlineId: string | null = null;
 	let inlineTarget: PendingInlineTextEdit['target'] | undefined;
 	let modelObserver: ReturnType<typeof observeInlineTextModel> | undefined;
 	let tableInline: TableCellEditorSession | null = null;
@@ -54,6 +54,22 @@ export function createStageInteractions(deps: StageInteractionsDeps): StageInter
 		onOpen: (session) => (tableInline = session),
 		onEditEquation: deps.onEditEquation,
 	});
+	// Paste into selected table cells (none being edited): tab-separated text
+	// fills cells from the top-left selected cell, through the shared listener.
+	const disposeCellsPaste = attachTableCellsPaste(
+		doc,
+		() => {
+			const state = store.get();
+			const element = ops.selectedElement(state);
+			const anchor = state.selectedTableCell;
+			if (!state.editable || element?.type !== 'table' || !anchor) {
+				return undefined;
+			}
+			const range = state.selectedTableCells.length ? state.selectedTableCells : [anchor];
+			return { element, cells: range.map(({ row, column }) => ({ row, col: column })) };
+		},
+		(next) => ops.replaceTableElement(next),
+	);
 	const gestures = createTransformGestures({
 		store,
 		ops,
@@ -67,33 +83,18 @@ export function createStageInteractions(deps: StageInteractionsDeps): StageInter
 		resolveStagePoint(deps.getOverlay()?.root, deps.getScale(), event);
 
 	/**
-	 * The ids under the pointer inside the top-level group `id`, innermost first
-	 * and `id` last (shared `memberChainAtPoint`: geometric, since grouped
-	 * children never receive the pointer). Null when `id` isn't an enterable
-	 * group (rotated, flipped, not a group), which then selects as one.
+	 * What a press on the top-level element `id` selects, PowerPoint-style
+	 * (shared `resolveGroupPressTarget`): a group first, then (once it is
+	 * selected) the member under the pointer, and another member of the entered
+	 * group moves the selection to it.
 	 */
-	const drillChain = (state: ViewerState, id: string, event: MouseEvent): string[] | null => {
-		const elements = getActiveElements(state);
-		const top = elements.find((element) => element.id === id);
-		const point = stagePoint(event as PointerEvent);
-		return top && point && isEnterableGroup(top) ? memberChainAtPoint(elements, id, point) : null;
-	};
-
-	/**
-	 * What a press on the top-level element `id` selects, PowerPoint-style: a
-	 * group first, then (once it is selected) the member under the pointer, and
-	 * another member of the entered group moves the selection to it.
-	 */
-	const resolvePressTarget = (state: ViewerState, id: string, event: PointerEvent): string => {
-		const chain = drillChain(state, id, event);
-		if (!chain) {
-			return id;
-		}
-		const selectedPath = state.selectedElementId
-			? findElementPath(getActiveElements(state), state.selectedElementId)
-			: null;
-		return drillSelectionForClick(chain, selectedPath) ?? id;
-	};
+	const resolvePressTarget = (state: ViewerState, id: string, event: PointerEvent): string =>
+		resolveGroupPressTarget(
+			getActiveElements(state),
+			id,
+			stagePoint(event),
+			state.selectedElementIds,
+		);
 
 	/**
 	 * A press on the already-selected group member: when it is released without
@@ -186,6 +187,7 @@ export function createStageInteractions(deps: StageInteractionsDeps): StageInter
 		overlay.setEditing(true);
 		setStaticTextSuppressed(id, true);
 		inlineTarget = inlineTextEditTarget(state);
+		inlineId = id;
 		inline = openInlineEditor({
 			doc,
 			overlayRoot: overlay.root,
@@ -205,10 +207,13 @@ export function createStageInteractions(deps: StageInteractionsDeps): StageInter
 			onLiveFormatKey: deps.onInlineLiveFormatKey,
 			onClose() {
 				inline = null;
+				inlineId = null;
 				inlineTarget = undefined;
 				modelObserver = undefined;
 				deps.getOverlay()?.setEditing(false);
 				setStaticTextSuppressed(id, false);
+				// The draft is committed or cancelled now: autosave stops carrying it.
+				deps.onInlineTextInput?.(null, '');
 			},
 		});
 		modelObserver = observeInlineTextModel(
@@ -240,8 +245,13 @@ export function createStageInteractions(deps: StageInteractionsDeps): StageInter
 		}
 		// A double-click on a group goes straight to the innermost shape under the
 		// pointer, so its text can be edited without ungrouping (PowerPoint).
-		const chain = id ? drillChain(state, id, event) : null;
-		const target = (chain ? drillSelectionForDoubleClick(chain) : null) ?? id;
+		const target = id
+			? resolveGroupDoubleClickTarget(
+					getActiveElements(state),
+					id,
+					stagePoint(event as PointerEvent),
+				)
+			: null;
 		if (target && isElementIdSelectable(state, target)) {
 			if (target !== id) {
 				ops.select(target);
@@ -387,11 +397,14 @@ export function createStageInteractions(deps: StageInteractionsDeps): StageInter
 		hasActivePointerInteraction: () =>
 			gestures.isActive() || adjustGesture.isActive() || marquee.isActive(),
 		inlineActive: () => inline !== null || tableInline !== null,
+		inlineElementId: () => (inline ? inlineId : null),
+		openInlineEdit: (id) => enterInlineEdit(id),
 		dispose() {
 			pointerWindow()?.removeEventListener('pointerup', onPendingMemberEditUp);
 			pendingMemberEdit = null;
 			closeInline(false);
 			disposeTableTouch();
+			disposeCellsPaste();
 			gestures.dispose();
 			adjustGesture.dispose();
 			marquee.dispose();

@@ -15,6 +15,8 @@ import { openNestedZip } from './zip-open';
 
 import type { PptxEmbeddedWorkbookData } from '../types';
 import { preservesSpreadsheetXmlWhitespace } from './xml-whitespace';
+import { at } from '../../../geometry/indexed';
+import { isFiniteNumber } from '../../../units/finite';
 
 /** Represents a single parsed cell from the worksheet. */
 interface ParsedCell {
@@ -49,8 +51,8 @@ function parseCellReference(ref: string): { col: number; row: number } {
 		return { col: 0, row: 0 };
 	}
 	return {
-		col: columnLetterToIndex(match[1]),
-		row: Number.parseInt(match[2], 10) - 1,
+		col: columnLetterToIndex(match[1] ?? ''),
+		row: Number.parseInt(match[2] ?? '', 10) - 1,
 	};
 }
 
@@ -222,8 +224,8 @@ function resolveCellValue(cell: ParsedCell, sharedStrings: string[]): string | n
 		case 's': {
 			// Shared string index
 			const idx = Number.parseInt(cell.value, 10);
-			return Number.isFinite(idx) && idx >= 0 && idx < sharedStrings.length
-				? sharedStrings[idx]
+			return isFiniteNumber(idx) && idx >= 0 && idx < sharedStrings.length
+				? at(sharedStrings, idx)
 				: cell.value;
 		}
 		case 'b':
@@ -236,7 +238,7 @@ function resolveCellValue(cell: ParsedCell, sharedStrings: string[]): string | n
 		default: {
 			// Numeric
 			const num = Number.parseFloat(cell.value);
-			return Number.isFinite(num) ? num : cell.value;
+			return isFiniteNumber(num) ? num : cell.value;
 		}
 	}
 }
@@ -343,7 +345,7 @@ export async function parseEmbeddedXlsx(
 			grid[r] = Array.from<string | number | undefined>({ length: maxCol + 1 }).fill(undefined);
 		}
 		for (const cell of cells) {
-			grid[cell.row][cell.col] = resolveCellValue(cell, sharedStrings);
+			at(grid, cell.row)[cell.col] = resolveCellValue(cell, sharedStrings);
 		}
 
 		// Interpret the grid:
@@ -379,7 +381,7 @@ export async function parseEmbeddedXlsx(
 					values.push(cellVal);
 				} else {
 					const num = Number.parseFloat(String(cellVal));
-					values.push(Number.isFinite(num) ? num : 0);
+					values.push(isFiniteNumber(num) ? num : 0);
 				}
 			}
 

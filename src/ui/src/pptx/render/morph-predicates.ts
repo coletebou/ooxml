@@ -15,6 +15,8 @@
 
 import type { PptxElement } from 'ooxml-core/pptx';
 
+import { morphArrowSignature } from './morph-line-ends';
+import { morphGeometryBreaksPair } from './morph-geometry-key';
 import { getElementMorphName } from './morph-name';
 import { PROXIMITY_SIZE_RATIO_LIMIT, PROXIMITY_THRESHOLD } from './morph-types';
 
@@ -80,7 +82,11 @@ export function conflictingMorphNames(a: PptxElement, b: PptxElement): boolean {
 	return Boolean(toName) && toName !== fromName;
 }
 
-/** The media part an image/picture element paints (path, else data URL). */
+/**
+ * The media part an image/picture element paints (path, else data URL). An SVG
+ * picture is named by its SVG part: its raster is only a fallback, and new SVG
+ * pictures can share one placeholder raster.
+ */
 export function mediaIdentity(el: PptxElement): string | undefined {
 	const props = el as {
 		imagePath?: string;
@@ -88,7 +94,7 @@ export function mediaIdentity(el: PptxElement): string | undefined {
 		svgPath?: string;
 		svgData?: string;
 	};
-	return props.imagePath ?? props.imageData ?? props.svgPath ?? props.svgData ?? undefined;
+	return props.svgPath ?? props.svgData ?? props.imagePath ?? props.imageData ?? undefined;
 }
 
 /** Euclidean distance between two elements' top-left corners (slide space). */
@@ -167,6 +173,9 @@ export function appearanceSignature(el: PptxElement): string {
 		for (const key of APPEARANCE_KEYS) {
 			parts.push(style[key] === undefined ? '' : String(style[key]));
 		}
+		if (el.type === 'connector') {
+			parts.push(morphArrowSignature(style));
+		}
 	}
 	parts.push(mediaIdentity(el) ?? '');
 	return parts.join('|');
@@ -184,7 +193,8 @@ export function proximityAccepts(a: PptxElement, b: PptxElement): boolean {
 		a.type !== b.type ||
 		differentText(a, b) ||
 		conflictingMorphNames(a, b) ||
-		differentMedia(a, b)
+		differentMedia(a, b) ||
+		morphGeometryBreaksPair(a, b)
 	) {
 		return false;
 	}

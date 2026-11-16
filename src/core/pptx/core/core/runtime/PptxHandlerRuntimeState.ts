@@ -66,7 +66,12 @@ import type {
 	IPptxTableDataParser,
 } from '../builders';
 import type { IPptxRuntimeDependencyFactory } from '../factories';
+import { LoadPartReader, readPartText, readPartXml } from './load-part-reader';
 import { TemplateElementBaselineTracker } from './template-element-baselines';
+
+// Automation can save elements parsed by a different handler. Keep the
+// original Choice and Fallback with the raw node for as long as it is retained.
+const alternateContentBlocks = new WeakMap<XmlObject, AlternateContentBlock>();
 
 /**
  * Root state class for the PptxHandlerRuntime mixin chain.
@@ -82,6 +87,35 @@ import { TemplateElementBaselineTracker } from './template-element-baselines';
 export class PptxHandlerRuntime {
 	/** The in-memory ZIP archive representing the OPC (.pptx) package. */
 	protected zip!: JSZip;
+
+	/** Shares part reads within the load in progress; see {@link LoadPartReader}. */
+	protected loadPartReader: LoadPartReader | undefined;
+
+	/** Opens a part reader for the current package, closing any earlier one. */
+	protected beginPartReads(): LoadPartReader {
+		this.endPartReads();
+		const reader = new LoadPartReader(this.zip);
+		this.loadPartReader = reader;
+		return reader;
+	}
+
+	/** Closes `reader` (by default the open one) and releases its cached reads. */
+	protected endPartReads(reader: LoadPartReader | undefined = this.loadPartReader): void {
+		reader?.close();
+		if (reader && this.loadPartReader === reader) {
+			this.loadPartReader = undefined;
+		}
+	}
+
+	/** The text of a package part, shared within a load. */
+	protected readPartText(path: string): Promise<string | undefined> {
+		return readPartText(this.zip, path);
+	}
+
+	/** A parsed package part; relationship parts are parsed once per load. */
+	protected readPartXml(path: string): Promise<XmlObject | undefined> {
+		return readPartXml(this.zip, this.parser, path);
+	}
 
 	/** fast-xml-parser instance used to parse XML strings into JS objects. */
 	protected parser!: XMLParser;
@@ -121,7 +155,9 @@ export class PptxHandlerRuntime {
 	 */
 	protected chartDataBaselines: Map<string, string> = new Map();
 	/** Pending chart requests also retain warned workbook writes for later retry. */
-	protected pendingChartUpdates?: Array<{ chartData: PptxChartData; slidePath: string }>;
+	protected pendingChartUpdates?:
+		| Array<{ chartData: PptxChartData; slidePath: string }>
+		| undefined;
 	/** Last fully reconciled workbook data plus whether a write-back needs retry. */
 	protected chartWorkbookDataBaselines = new Map<string, { signature: string; pending: boolean }>();
 
@@ -389,23 +425,14 @@ export class PptxHandlerRuntime {
 	/** Custom XML data parts parsed from `customXml/` in the OPC package. */
 	protected customXmlParts: PptxCustomXmlPart[] = [];
 
-	/**
-	 * Maps an element's `rawXml` reference to the `mc:AlternateContent`
-	 * envelope that originally wrapped it (CC-4).  Populated during slide
-	 * (and `p:grpSp`) parsing; consulted at save time to re-emit the
-	 * original `<mc:Choice>` / `<mc:Fallback>` shape so legacy renderers
-	 * keep their fallback content.
-	 *
-	 * Multiple sibling elements may share the same `AlternateContentBlock`
-	 * value (a single AC envelope often wraps several child shapes — e.g.
-	 * `p14:media` + its `p:pic` fallback nest one each).  WeakMap so AC
-	 * envelopes are GC'd if the parsed XmlObject is dropped.
-	 */
-	protected alternateContentBlockByRawXml: WeakMap<XmlObject, AlternateContentBlock> =
-		new WeakMap();
+	/** The original compatibility envelope for a parsed `rawXml` node. */
+	protected readonly alternateContentBlockByRawXml = alternateContentBlocks;
 
 	/** Embedded fonts extracted during load, preserved for automatic re-embedding on save. */
 	protected loadedEmbeddedFonts: PptxEmbeddedFont[] = [];
+
+	/** Decode every embedded font variant during load (see `PptxHandlerLoadOptions`). */
+	protected eagerDecodeEmbeddedFonts = false;
 
 	/** Typed source metadata for lossless embedded-font list round trips. */
 	protected loadedEmbeddedFontList: import('../../types').PptxEmbeddedFontList | undefined;
@@ -616,12 +643,12 @@ export class PptxHandlerRuntime {
 	 * @param relsPath - Path of the `.rels` part; derived from `partPath` when omitted.
 	 */
 	protected async loadPartRelationships(partPath: string, relsPath?: string): Promise<void> {
-		const relsXml = await this.zip.file(relsPath ?? partRelsPath(partPath))?.async('string');
-		if (!relsXml) {
+		const path = relsPath ?? partRelsPath(partPath);
+		const relsData = await this.readPartXml(path);
+		if (!relsData) {
 			return;
 		}
 
-		const relsData = this.parser.parse(relsXml) as XmlObject | undefined;
 		const relationships = relsData?.['Relationships'] as XmlObject | undefined;
 		const raw = relationships?.['Relationship'];
 		const entries = (Array.isArray(raw) ? raw : raw ? [raw] : []) as XmlObject[];

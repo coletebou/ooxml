@@ -2,10 +2,10 @@
 import {
 	buildStrokeOutline,
 	buildSubpathFillOverlay,
+	getSilhouetteFillLayer,
 	getBevelLightingSvgFilter,
 	getComputedEffectStyle,
-	getEffectStyleSource,
-	getSoftEdgeSvgFilter,
+	getShapeEffectFilterDefs,
 	buildHollowHitOutline,
 	strokeOutlineViewBox,
 } from 'ooxml-ui/pptx';
@@ -79,6 +79,7 @@ const props = defineProps<{
  * Per-sub-path fill overlay for a multi-sub-path preset or custom geometry, or
  * `undefined` when a single merged fill is correct (the ordinary case).
  */
+const fillLayer = computed(() => getSilhouetteFillLayer(props.element));
 const subpathFill = computed(() => buildSubpathFillOverlay(props.element));
 
 /** `viewBox` for the sub-path fill overlay, in its own coordinate space. */
@@ -115,7 +116,7 @@ const fillOverlayStyle = computed<CSSProperties | undefined>(() => {
  * `<filter id="soft-edge-<id>">…</filter>` element injected via `v-html`.
  */
 const softEdge = computed(() => {
-	return getSoftEdgeSvgFilter(getEffectStyleSource(props.element), props.element.id);
+	return getShapeEffectFilterDefs(props.element);
 });
 
 /**
@@ -156,8 +157,15 @@ const reflection = computed<CSSProperties | undefined>(() =>
 </script>
 
 <template>
+	<div
+		v-if="fillLayer"
+		class="pptx-vue-silhouette-fill"
+		aria-hidden="true"
+		:style="fillLayer.cssText"
+	></div>
 	<svg
 		v-if="subpathFill"
+		:data-pptx-silhouette-fill="subpathFill.silhouette ? '' : undefined"
 		class="pptx-vue-subpath-fill"
 		aria-hidden="true"
 		:viewBox="subpathFillViewBox"
@@ -199,6 +207,7 @@ const reflection = computed<CSSProperties | undefined>(() =>
 	<svg
 		v-if="strokeOutline"
 		class="pptx-vue-gradient-outline"
+		data-pptx-outline=""
 		aria-hidden="true"
 		:viewBox="outlineViewBox"
 		preserveAspectRatio="none"
@@ -231,6 +240,7 @@ const reflection = computed<CSSProperties | undefined>(() =>
 				v-else-if="strokeOutline.paint.kind === 'rectPath'"
 				:id="strokeOutline.paint.id"
 				patternUnits="objectBoundingBox"
+				patternContentUnits="objectBoundingBox"
 				width="1"
 				height="1"
 			>
@@ -279,7 +289,7 @@ const reflection = computed<CSSProperties | undefined>(() =>
 		<path
 			v-for="(strand, idx) in strokeOutline.strands"
 			:key="idx"
-			:d="strokeOutline.d"
+			:d="strand.d ?? strokeOutline.d"
 			:marker-start="idx === 0 ? strokeOutline.markers?.start : undefined"
 			:marker-end="idx === 0 ? strokeOutline.markers?.end : undefined"
 			fill="none"
@@ -290,10 +300,14 @@ const reflection = computed<CSSProperties | undefined>(() =>
 			:stroke-linejoin="strokeOutline.lineJoin"
 			:style="{
 				strokeWidth: strand.cssStrokeWidth,
-				transform: strand.offset !== 0 ? `translate(0, ${strand.offset}px)` : undefined,
+				transform:
+					strand.cssTransform ??
+					(strand.offset !== 0 ? `translate(0, ${strand.offset}px)` : undefined),
 			}"
 		/>
 	</svg>
+	<!-- `<style>` is a forbidden side-effect tag in an SFC template. -->
+	<component :is="'style'" v-if="hollowHit?.textCss">{{ hollowHit.textCss }}</component>
 	<svg
 		v-if="hollowHit"
 		aria-hidden="true"
@@ -312,10 +326,10 @@ const reflection = computed<CSSProperties | undefined>(() =>
 	>
 		<path
 			:d="hollowHit.d"
-			fill="none"
-			stroke="transparent"
+			:fill="hollowHit.fill"
+			:stroke="hollowHit.stroke"
 			:stroke-width="hollowHit.strokeWidth"
-			style="pointer-events: stroke"
+			:style="{ pointerEvents: hollowHit.pointerEvents }"
 		/>
 	</svg>
 	<div v-if="reflection" class="pptx-vue-reflection" aria-hidden="true" :style="reflection">

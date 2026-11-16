@@ -87,6 +87,7 @@ export function runToInlineNodes(
 					anchored: Boolean(run.image.anchored),
 					placement: run.image.placement ? JSON.stringify(run.image.placement) : null,
 					svgPartName: run.image.svgPartName ?? null,
+					pictureFill: run.image.pictureFill ? JSON.stringify(run.image.pictureFill) : null,
 					unsupported: run.image.unsupported ?? null,
 					textBoxText: run.image.textBoxText ? JSON.stringify(run.image.textBoxText) : null,
 					textBoxEditable: run.image.textBoxEditable ?? null,
@@ -94,6 +95,10 @@ export function runToInlineNodes(
 					diagram: run.image.diagram ? JSON.stringify(run.image.diagram) : null,
 					chart: run.image.chart ? JSON.stringify(run.image.chart) : null,
 					shape: run.image.shape ? JSON.stringify(run.image.shape) : null,
+					watermark: run.image.watermark ? JSON.stringify(run.image.watermark) : null,
+					pictureWatermark: run.image.pictureWatermark
+						? JSON.stringify(run.image.pictureWatermark)
+						: null,
 				},
 				undefined,
 				marks,
@@ -188,6 +193,9 @@ export function appendInlineNode(runs: TextRun[], child: ProseMirrorNode): void 
 				...(child.attrs.title ? { title: child.attrs.title } : {}),
 				...(child.attrs.anchored ? { anchored: true } : {}),
 				...(child.attrs.svgPartName ? { svgPartName: child.attrs.svgPartName } : {}),
+				...(typeof child.attrs.pictureFill === 'string'
+					? { pictureFill: JSON.parse(child.attrs.pictureFill) }
+					: {}),
 				// Same key order as the parser's run: the writer compares an unchanged placeholder run by JSON.
 				...(child.attrs.unsupported ? { unsupported: child.attrs.unsupported } : {}),
 				...(typeof child.attrs.diagram === 'string'
@@ -195,6 +203,12 @@ export function appendInlineNode(runs: TextRun[], child: ProseMirrorNode): void 
 					: {}),
 				...(typeof child.attrs.chart === 'string' ? { chart: JSON.parse(child.attrs.chart) } : {}),
 				...(typeof child.attrs.shape === 'string' ? { shape: JSON.parse(child.attrs.shape) } : {}),
+				...(typeof child.attrs.watermark === 'string'
+					? { watermark: JSON.parse(child.attrs.watermark) }
+					: {}),
+				...(typeof child.attrs.pictureWatermark === 'string'
+					? { pictureWatermark: JSON.parse(child.attrs.pictureWatermark) }
+					: {}),
 				...(typeof child.attrs.placement === 'string'
 					? { placement: JSON.parse(child.attrs.placement) }
 					: {}),

@@ -37,6 +37,7 @@ export const translations = {
 	'pptx.smartart.styleIntense': 'Intensiv',
 	'pptx.smartart.textPane': 'Textbereich',
 	'pptx.smartart.addItem': 'Element hinzufügen',
+	'pptx.smartart.textPaneEmpty': 'Dieses Diagramm enthält keine Formen mit Text.',
 	'pptx.smartart.extraConnections':
 		'Dieses Diagramm verfügt über {{count}} zusätzliche Verbindungen, die im Textbereich nicht bearbeitet werden.',
 	'pptx.smartart.tabHint':
@@ -51,6 +52,16 @@ export const translations = {
 	'pptx.insertSmartArt.itemsLabel': 'Elemente (eines pro Zeile)',
 	'pptx.insertSmartArt.cancel': 'Abbrechen',
 	'pptx.insertSmartArt.insert': 'Einfügen',
+	'pptx.insertSmartArt.description.list':
+		'Nicht sequenzielle oder gruppierte Informationsblöcke darstellen.',
+	'pptx.insertSmartArt.description.process':
+		'Einen Ablauf, eine Zeitachse oder die aufeinanderfolgenden Schritte einer Aufgabe darstellen.',
+	'pptx.insertSmartArt.description.cycle':
+		'Einen fortlaufenden Prozess oder Teile um einen Mittelpunkt darstellen.',
+	'pptx.insertSmartArt.description.hierarchy':
+		'Hierarchische Beziehungen darstellen, zum Beispiel ein Organigramm.',
+	'pptx.insertSmartArt.description.relationship':
+		'Verbindungen, Überschneidungen, Anteile oder Einschlüsse zwischen Ideen darstellen.',
 	'pptx.smartArt.insertTitle': 'SmartArt einfügen',
 	'pptx.smartArt.categoriesLabel': 'SmartArt-Kategorien',
 	'pptx.smartArt.layoutsLabel': 'SmartArt-Layouts',

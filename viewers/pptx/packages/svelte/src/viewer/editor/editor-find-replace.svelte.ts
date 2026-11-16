@@ -1,37 +1,108 @@
-import type { FindResult } from 'ooxml-ui/pptx';
-import { findInSlides, replaceInSlides, replaceMatch } from 'ooxml-ui/pptx';
+import { createFindReplaceController } from 'ooxml-ui/pptx';
+import type {
+	FindReplaceController,
+	FindReplaceMode,
+	FindReplaceOptions,
+	FindResult,
+} from 'ooxml-ui/pptx';
 import type { PptxSlide } from 'pptx-viewer-core';
 
+import { controllerState } from '../state/controller-state';
+import type { ControllerState } from '../state/controller-state';
+
 /**
- * Reactive Find & Replace panel state for the Home tab's Editing group.
- * Wraps the shared, framework-agnostic `render/find-replace` functions
- * (pure slide-array search/replace); this class owns only the panel's UI
- * state (query, current match, open/closed) and routes every replace through
- * the host's history-tracked commit so undo/redo cover it.
+ * Reactive Find & Replace panel state for the Home tab's Editing group: the
+ * shared `createFindReplaceController` (the bar's open flag and mode, and the
+ * search session) read through `controllerState`, with every replace routed
+ * through the host's history-tracked commit so undo/redo cover it.
  */
 export interface FindReplaceDeps {
 	getSlides(): readonly PptxSlide[];
 	/** Commit a fully-replaced slide array (pushes history, marks dirty). */
 	commitSlides(next: PptxSlide[]): void;
-	/** Called with the match's slide/element so the host can navigate to it. */
-	onNavigate?(slideIndex: number, elementId: string): void;
+	/** Called with the match's slide and element (null for a speaker-notes match). */
+	onNavigate?(slideIndex: number, elementId: string | null): void;
 }
 
 export class FindReplaceState {
-	open = $state(false);
-	query = $state('');
-	replacement = $state('');
-	matchCase = $state(false);
-	includeNotes = $state(false);
-	includeChartTitles = $state(true);
-	includeChartData = $state(false);
-	results = $state.raw<FindResult[]>([]);
-	index = $state(0);
-
-	readonly #deps: FindReplaceDeps;
+	readonly controller: FindReplaceController;
+	readonly #state: ControllerState<ReturnType<FindReplaceController['getSnapshot']>>;
 
 	constructor(deps: FindReplaceDeps) {
-		this.#deps = deps;
+		this.controller = createFindReplaceController({
+			slides: () => deps.getSlides(),
+			commit: (next) => deps.commitSlides([...next]),
+			navigate: ({ slideIndex, elementId }) => deps.onNavigate?.(slideIndex, elementId),
+		});
+		this.#state = controllerState(this.controller);
+	}
+
+	get #session() {
+		return this.#state.current.session;
+	}
+
+	/** Whether the bar is open; setting it opens (searching again) or closes it. */
+	get open(): boolean {
+		return this.#state.current.open;
+	}
+	set open(open: boolean) {
+		this.controller.setOpen(open);
+	}
+
+	/** Find (Ctrl+F) or Find and Replace (Ctrl+H). */
+	get mode(): FindReplaceMode {
+		return this.#state.current.mode;
+	}
+
+	get query(): string {
+		return this.#session.query;
+	}
+	set query(query: string) {
+		this.controller.search({ query });
+	}
+
+	get replacement(): string {
+		return this.#session.replacement;
+	}
+	set replacement(replacement: string) {
+		this.controller.setReplacement(replacement);
+	}
+
+	get matchCase(): boolean {
+		return this.#session.options.matchCase;
+	}
+	set matchCase(matchCase: boolean) {
+		this.#setOption({ matchCase });
+	}
+
+	get includeNotes(): boolean {
+		return this.#session.options.includeNotes;
+	}
+	set includeNotes(includeNotes: boolean) {
+		this.#setOption({ includeNotes });
+	}
+
+	get includeChartTitles(): boolean {
+		return this.#session.options.includeChartTitles;
+	}
+	set includeChartTitles(includeChartTitles: boolean) {
+		this.#setOption({ includeChartTitles });
+	}
+
+	get includeChartData(): boolean {
+		return this.#session.options.includeChartData;
+	}
+	set includeChartData(includeChartData: boolean) {
+		this.#setOption({ includeChartData });
+	}
+
+	get results(): readonly FindResult[] {
+		return this.#session.matches;
+	}
+
+	/** Zero-based current match; -1 when there is none. */
+	get index(): number {
+		return this.#session.current;
 	}
 
 	get hasResults(): boolean {
@@ -42,82 +113,39 @@ export class FindReplaceState {
 		return this.results.length;
 	}
 
-	toggle(): void {
-		this.open = !this.open;
-		if (this.open) {
-			this.search();
-		}
+	/** Ctrl+F / Ctrl+H: close the bar open in `mode`, switch its mode, or open it. */
+	toggle(mode?: FindReplaceMode): void {
+		this.controller.toggle(mode);
 	}
 
 	close(): void {
-		this.open = false;
+		this.controller.close();
 	}
 
-	/** Re-run the search from the current query/matchCase and jump to the first match. */
+	/** Re-run the search from the current query and scopes and jump to the first match. */
 	search(): void {
-		this.results = this.query
-			? findInSlides(this.#deps.getSlides(), this.query, {
-					matchCase: this.matchCase,
-					includeNotes: this.includeNotes,
-					includeChartTitles: this.includeChartTitles,
-					includeChartData: this.includeChartData,
-				})
-			: [];
-		this.index = 0;
-		this.#navigateCurrent();
+		this.controller.search();
 	}
 
 	next(): void {
-		this.#step(1);
+		this.controller.next();
 	}
 
 	prev(): void {
-		this.#step(-1);
+		this.controller.previous();
 	}
 
-	#step(direction: 1 | -1): void {
-		if (this.results.length === 0) {
-			return;
-		}
-		this.index = (this.index + direction + this.results.length) % this.results.length;
-		this.#navigateCurrent();
-	}
-
-	#navigateCurrent(): void {
-		const match = this.results[this.index];
-		if (match) {
-			this.#deps.onNavigate?.(match.slideIndex, match.elementId);
-		}
-	}
-
-	/** Replace the current match, then refresh the result set. */
+	/** Replace the current match, then move on to the next one. */
 	replaceCurrent(): void {
-		if (this.results[this.index]?.readOnly) {
-			return;
-		}
-		if (this.results.length === 0) {
-			return;
-		}
-		const result = replaceMatch(this.#deps.getSlides(), this.results, this.index, this.replacement);
-		this.#deps.commitSlides([...result.slides]);
-		this.search();
+		this.controller.replaceCurrent();
 	}
 
-	/** Replace every match of the current query, then refresh the result set. */
+	/** Replace every match of the current query, then search again. */
 	replaceAll(): void {
-		if (this.results.some((match) => match.readOnly)) {
-			return;
-		}
-		if (!this.query) {
-			return;
-		}
-		const result = replaceInSlides(this.#deps.getSlides(), this.query, this.replacement, {
-			matchCase: this.matchCase,
-			includeNotes: this.includeNotes,
-			includeChartTitles: this.includeChartTitles,
-			includeChartData: this.includeChartData,
-		});
-		this.#deps.commitSlides([...result.slides]);
-		this.search();
+		this.controller.replaceAll();
+	}
+
+	#setOption(options: Partial<FindReplaceOptions>): void {
+		this.controller.search({ options });
 	}
 }

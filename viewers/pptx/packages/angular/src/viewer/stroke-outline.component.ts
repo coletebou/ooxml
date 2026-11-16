@@ -33,7 +33,13 @@ import type { StrokeOutline } from 'ooxml-ui/pptx';
 						/>
 					</svg:pattern>
 				} @else if (paint.kind === 'rectPath') {
-					<svg:pattern [attr.id]="paint.id" patternUnits="objectBoundingBox" width="1" height="1">
+					<svg:pattern
+						[attr.id]="paint.id"
+						patternUnits="objectBoundingBox"
+						patternContentUnits="objectBoundingBox"
+						width="1"
+						height="1"
+					>
 						<svg:image
 							[attr.href]="paint.href"
 							x="0"
@@ -82,7 +88,7 @@ import type { StrokeOutline } from 'ooxml-ui/pptx';
 		}
 		@for (strand of o.strands; track $index) {
 			<svg:path
-				[attr.d]="o.d"
+				[attr.d]="strand.d ?? o.d"
 				[attr.marker-start]="$index === 0 ? o.markers?.start : null"
 				[attr.marker-end]="$index === 0 ? o.markers?.end : null"
 				fill="none"
@@ -92,7 +98,10 @@ import type { StrokeOutline } from 'ooxml-ui/pptx';
 				[attr.stroke-dasharray]="o.dashArray"
 				[attr.stroke-linecap]="o.lineCap"
 				[attr.stroke-linejoin]="o.lineJoin"
-				[style.transform]="strand.offset !== 0 ? 'translate(0, ' + strand.offset + 'px)' : null"
+				[style.transform]="
+					strand.cssTransform ??
+					(strand.offset !== 0 ? 'translate(0, ' + strand.offset + 'px)' : null)
+				"
 			/>
 		}
 	`,

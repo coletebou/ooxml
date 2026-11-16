@@ -81,6 +81,67 @@ returns a framework-neutral descriptor, and the binding does nothing but map tha
 descriptor onto its own style object or template. Following that shape, a new
 branch reaches all five bindings at once.
 
+For **stateful** view logic (a stack, a mode, a timer), the target shape is a
+**headless controller** in `src/ui/src/pptx` (see `render/controller/controller.ts`):
+a plain object with `getSnapshot()` (an immutable state whose identity changes only
+when the state does), `subscribe(listener)` (returns the unsubscribe) and typed
+action methods, built on `createControllerStore`. A binding never re-implements a
+controller; it reads it through its ONE generic store adapter, which works for every
+controller: `useController` in React (`useSyncExternalStore`) and Vue (`shallowRef`
+plus `onScopeDispose`), `controllerState` in Svelte (`createSubscriber`, read
+`.current`), `controllerSignal` in Angular (a read-only signal) and a direct
+`subscribe` in vanilla. State the controller does not own (the live selection) stays
+binding state: the controller reads it through its `deps` when an action needs it, and
+derived values are pure functions next to the controller (`resolveAiEffectiveTargets`)
+that the binding calls from its own reactive scope. A binding keeps its own public shape
+(refs, signals, getters) and maps it onto these.
+
+The shared controllers, each adapted by every binding:
+
+- **Undo and redo**: `createEditorHistoryController` (`render/controller/history-controller.ts`),
+  one default depth of `DEFAULT_EDITOR_HISTORY_DEPTH` (100) for every binding.
+- **Recovery autosave**: `createAutosaveController` (`render/controller/autosave-controller.ts`),
+  one AutoRecover engine and one `PptxAutosaveStatus`. Uncommitted inline text is part of
+  its snapshot.
+- **Recovery offer**: `createAutosaveRecoveryController`; the dialog stays a native template.
+- **Collaboration room**: `createCollaborationSessionController` over `openCollaborationYSession`
+  and `createCollabProvider`. Each binding passes its own lazy `yjs` and `y-*` loaders, since
+  those packages are optional peers of the bindings.
+- **AI panel**: `createPptxAiPanelController` (`ai/panel-controller.ts`).
+- **Slide show**: `createPresentationRehearsalController` (Rehearse Timings),
+  `createPresentationInkController` (pen, highlighter, eraser, laser, per-slide strokes; keep with
+  `applyPresentationInk`) and `createPresenterSessionController` (audience window and channel).
+- **Slide Sorter**: `createSlideSorterController` (`render/controller/slide-sorter-controller.ts`:
+  selection, sorter clipboard, zoom, menu, drag reorder, keys; `slideSorterView` for drawn values).
+- **Comments panel**: `createCommentsPanelController` (per-slide drafts, edits and reply composers,
+  one per viewer).
+- **Selection Pane**: `createSelectionPaneController` with `selectionPaneRows` and
+  `selectionPaneLabel` (rename box, drag reorder, the one row label).
+- **Find and Replace bar**: `createFindReplaceController` (open state, Ctrl+F / Ctrl+H mode, the
+  search session); route the keymap's `find` / `findReplace` to `toggle`.
+- **Slide rail**: `createSlideRailController` with `slideRailMenuEntries` (thumbnail multi-select
+  by id, the right-click menu and its command routing).
+- **Canvas gestures**: move, resize and rotate run on `createGestureController`
+  (`render/editor-gestures.ts`: dead zone, window listeners, snapping, multi-selection snap
+  exclusion, minimum size, mid-gesture lock check). A binding supplies deps and paints the
+  frames (React writes them to the DOM, Angular emits them).
+
+Logic without its own state is a plain function set instead:
+
+- **AI bridge**: `createPptxAiBridge` over a `PptxAiBridgePort`.
+- **Keymap**: `dispatchEditorKey` with one `EditorKeyHandlers` interface.
+- **Outline view**: `createOutlineViewSession` (`render/outline-view-session.ts`); the binding
+  calls `restoreFocus` after its render.
+- **Group press**: `resolveGroupPressTarget` and `resolveGroupDoubleClickTarget`
+  (`render/group-press-target.ts`).
+- **Slide show steps**: `resolveShowForward` and `resolveShowBackward`
+  (`render/presentation-show-step.ts`); the binding performs the step with its own index,
+  overlay and timers.
+- **Ribbon tab row**: `buildRibbonTabRow` (`render/ribbon-tab-row.ts`) drawn by the shared
+  `pptx-ui-ribbon-tabs` (`office-ui-ribbon`); the binding routes `tab-select` by its `kind` and
+  `collapse-toggle` to the Ribbon Display Options controller. The tabs live in the element's
+  shadow root: tests find them with `ribbonTabButtons` and `ribbonTab`.
+
 Both rules are expanded, with the concrete failures that motivated them, under
 [Key Conventions](#key-conventions).
 
@@ -149,7 +210,7 @@ and the demos read the core's `dist`), then rebuild the pptx packages you need
 packages/
   core/             pptx-viewer-core     - Thin entry point re-exporting ooxml-core/pptx
   shared/           pptx-viewer-shared   - Private compatibility exports from ooxml-ui/pptx
-  locales/          pptx-viewer-locales  - de/es/fr/zh-CN dictionaries (internal)
+  locales/          pptx-viewer-locales  - de/es/fr/zh-CN/ja/ko dictionaries (internal)
   react/            pptx-react-viewer    - React viewer/editor component
   react-compat/     (private, no build)  - React 18 peer set; `packages/react` aliases onto it to
                                            re-run its suite + declaration check (`bun run test:react18`)
@@ -237,7 +298,7 @@ Files that need more are found by content, so a new test needs no registration:
 `scripts/vitest-dom-hygiene.setup.ts` removes the `document`/`window` listeners a file leaves and
 clears the body, because the DOM is shared too. Tests must still clean up what they change (module
 state, globals, timers): the next file in the worker sees it. `packages/react`'s React 18 leg
-(`vitest.react18.config.ts`) is unchanged and still isolates per file.
+(`vitest.react18.config.ts`) uses the same isolation projects, with the React 18 aliases applied to each.
 
 **Browser tests run React only by default** when not in CI. React is the parity reference: its
 parity specs drive all five demos and diff them against it, so one project still checks every
@@ -249,6 +310,12 @@ binding, at about a fifth of the cost. Run another binding with `--project=<name
   collaboration relay up between runs (Playwright reuses a server that is listening). Restart them
   after rebuilding `ooxml-ui`, core or the angular package, since a running server serves the old
   build. The list lives in `e2e-servers.ts`, which `playwright.config.ts` also uses.
+- `PPTX_E2E_SERVE=preview` serves each demo's built `dist/` with `vite preview` instead of a dev
+  server (CI does this: a react shard went from about 14 to 4 minutes). Build the demos first with
+  `VITE_PPTX_E2E_HANDLE=1 bun run build` in each `demos/pptx/demo-*`; the variable keeps the
+  `window.__pptxViewer` handle that a production build otherwise omits. Only the demos the
+  `--project` list needs are started (React plus the binding; React or no project starts all five).
+  `PPTX_E2E_VITE_FORCE=0` drops `--force` from the dev command.
 - `bun run e2e:changed` runs only the spec files changed against `origin/main`, plus specs that
   import a changed support file. It does not follow a change to product source: for that run the
   affected specs by name (`bun run e2e -- <spec>`), or the project (`bun run verify --browser`).

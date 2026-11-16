@@ -38,12 +38,17 @@ function makeSlideNoClickAdvance(id: string): PptxSlide {
  * i.e. "on mouse click" OFF and "after 10 ms" ON. Its timing is the only thing
  * that can move the show off it.
  */
-function makeTimedSlide(id: string): PptxSlide {
+function makeTimedSlide(id: string, transitionMs = 20): PptxSlide {
 	return {
 		id,
 		elements: [],
 		backgroundColor: '#ffffff',
-		transition: { type: 'fade', advanceOnClick: false, advanceAfterMs: 10 },
+		transition: {
+			type: 'fade',
+			durationMs: transitionMs,
+			advanceOnClick: false,
+			advanceAfterMs: 10,
+		},
 	} as unknown as PptxSlide;
 }
 
@@ -230,6 +235,18 @@ describe('presentationMode', () => {
 		wrapper.unmount();
 	});
 
+	it('counts the authored time from the end of the slide transition', async () => {
+		const wrapper = mountMode([makeTimedSlide('s1', 400), makeSlide('s2')]);
+		// The 10 ms timing must not cut the 400 ms entry transition short.
+		await settle();
+		expect(wrapper.emitted('slide-change')).toBeUndefined();
+		await new Promise((resolve) => {
+			setTimeout(resolve, 450);
+		});
+		expect(wrapper.emitted('slide-change')?.[0]).toStrictEqual([1]);
+		wrapper.unmount();
+	});
+
 	it('ignores authored timings when the show advances manually', async () => {
 		const wrapper = mountMode([makeTimedSlide('s1'), makeSlide('s2')], 0, false, {
 			advanceMode: 'manual',
@@ -237,6 +254,53 @@ describe('presentationMode', () => {
 		await settle();
 		expect(wrapper.emitted('slide-change')).toBeUndefined();
 		wrapper.unmount();
+	});
+
+	// Issue #141, slides 6 -> 7: slide 6 fades in and advances after 0 s, so its
+	// timer fires as its fade ends, while that overlay is still mounted. The
+	// reused overlay kept the fade's completion timer, which then tore down
+	// slide 7's morph 50 ms in: slide 7 appeared in one frame.
+	it("plays a timed slide's next transition in full", async () => {
+		const timed = {
+			id: 's2',
+			elements: [],
+			backgroundColor: '#ffffff',
+			transition: { type: 'fade', durationMs: 200, advanceOnClick: false, advanceAfterMs: 0 },
+		} as unknown as PptxSlide;
+		const next = {
+			id: 's3',
+			elements: [],
+			backgroundColor: '#ffffff',
+			transition: { type: 'fade', durationMs: 400 },
+		} as unknown as PptxSlide;
+		vi.useFakeTimers();
+		const wrapper = mountMode([makeSlide('s1'), timed, next]);
+		try {
+			await vi.advanceTimersByTimeAsync(60);
+			await nextTick();
+			pressKey('ArrowRight');
+			await nextTick();
+			// Slide 2's fade (200 ms) ends and its 0 s timing moves on to slide 3.
+			await vi.advanceTimersByTimeAsync(220);
+			await nextTick();
+			expect(wrapper.emitted('slide-change')?.at(-1)).toStrictEqual([2]);
+			expect(document.querySelector('[data-pptx-transition-layer="incoming"]')).not.toBeNull();
+			// Slide 2's leftover completion timer (200 ms + 50 ms margin) passes.
+			// A reused overlay would fire it now and tear slide 3's fade down.
+			await vi.advanceTimersByTimeAsync(120);
+			await nextTick();
+			expect(
+				document.querySelector('[data-pptx-transition-layer="incoming"]'),
+				"slide 3's 400 ms transition must still be on screen",
+			).not.toBeNull();
+			// And it does come down once its own 400 ms (plus margin) are over.
+			await vi.advanceTimersByTimeAsync(400);
+			await nextTick();
+			expect(document.querySelector('[data-pptx-transition-layer="incoming"]')).toBeNull();
+		} finally {
+			wrapper.unmount();
+			vi.useRealTimers();
+		}
 	});
 
 	it('does not keep advancing a slide with no timing of its own', async () => {

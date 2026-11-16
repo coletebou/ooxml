@@ -1,3 +1,5 @@
+import { CARDS_LOOK_CSS } from './look';
+import { LOOK_DARK_TOKENS } from './look-tokens';
 import { OFFICE_TOKENS, TOUCH } from './tokens';
 import { themeBridge } from './theme-bridge';
 import {
@@ -20,6 +22,16 @@ export {
 	type ShadcnBridgeOptions,
 	type ThemeBridgeMap,
 } from './theme-bridge';
+export {
+	applyOfficeLook,
+	CARDS_LOOK_CSS,
+	CARDS_LOOK_PROPERTIES,
+	normalizeOfficeLook,
+	OFFICE_LOOK_ATTRIBUTE,
+	OFFICE_LOOKS,
+	type OfficeLook,
+} from './look';
+export { LOOK_DARK_TOKENS, LOOK_TOKENS } from './look-tokens';
 export { COMPACT, FOCUS_RING, OFFICE_TOKENS, tok, TOUCH, type OfficeToken } from './tokens';
 
 /**
@@ -54,7 +66,10 @@ const DARK = `
 	--office-teams-divider: #3d3d3d;
 	--office-teams-text-subtle: #adadad;
 	--office-shadow: 0 6px 20px rgb(0 0 0 / 45%);
-	--office-shadow-lg: 0 10px 25px rgb(0 0 0 / 45%);`;
+	--office-shadow-lg: 0 10px 25px rgb(0 0 0 / 45%);
+${Object.entries(LOOK_DARK_TOKENS)
+	.map(([name, value]) => `\t${name}: ${value};`)
+	.join('\n')}`;
 
 /** Every token's default on `:root`, generated from the token table. */
 const LIGHT = Object.entries(OFFICE_TOKENS)
@@ -76,11 +91,36 @@ const modeCss = (selector: string, dark: boolean) =>
 		'--office-accent-foreground': OFFICE_TOKENS['--office-accent-foreground'],
 	}) + `${selector} { color-scheme: ${dark ? 'dark' : 'light'}; }`;
 
+/**
+ * Locally installed CJK UI faces per language, after the Latin ones. Han characters are shared by
+ * Chinese, Japanese and Korean but drawn differently, so the faces are keyed on the host's `lang`
+ * (a document or container attribute) instead of being appended to every stack. No web fonts.
+ */
+export const CJK_UI_FONTS: Readonly<Record<'ja' | 'ko' | 'zh-CN', string>> = {
+	ja: '"Yu Gothic UI", "Meiryo UI", Meiryo, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", "Noto Sans JP"',
+	ko: '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR"',
+	'zh-CN':
+		'"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC"',
+};
+const CJK_LANG_SELECTORS: Readonly<Record<keyof typeof CJK_UI_FONTS, string>> = {
+	ja: ':root:lang(ja), [lang|="ja"]',
+	ko: ':root:lang(ko), [lang|="ko"]',
+	'zh-CN': ':root:lang(zh-CN), :root:lang(zh-Hans), [lang|="zh-CN"], [lang|="zh-Hans"]',
+};
+const LATIN_UI_FONTS = OFFICE_TOKENS['--office-font'].replace(/,\s*sans-serif$/, '');
+const CJK_FONT_CSS = Object.entries(CJK_UI_FONTS)
+	.map(
+		([lang, faces]) =>
+			`:where(${CJK_LANG_SELECTORS[lang as keyof typeof CJK_UI_FONTS]}) { --office-font: ${LATIN_UI_FONTS}, ${faces}, sans-serif; }`,
+	)
+	.join('\n');
+
 export const THEME_CSS = `
 :where(:root) {
 ${LIGHT}
 color-scheme: light;
 }
+${CJK_FONT_CSS}
 ${modeCss(':where([data-office-theme="light"], [data-office-theme="auto"])', false)}
 ${modeCss(':where([data-office-theme="dark"])', true)}
 @media (prefers-color-scheme: dark) {
@@ -100,10 +140,11 @@ ${modeCss(':where([data-office-theme="dark"])', true)}
 		--office-accent-foreground: HighlightText;
 		--office-ring: Highlight;
 		--office-danger: CanvasText;
+		--office-card-border: CanvasText;
 	}
 }
 ${BUILDING_BLOCKS_CSS}
-`;
+${CARDS_LOOK_CSS}`;
 
 /** Idempotent per document or shadow root. Browser-only; false without a style container. */
 export function installOfficeUiTheme(

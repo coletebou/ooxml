@@ -8,6 +8,7 @@ import type { ChartDataLabels, ChartShapeProperties, ChartSpaceSeries } from '..
 import type { ChartStyleDefinition } from '../style-definition';
 import type { DrawingColor, DrawingFill } from '../../drawingml/types';
 import { summaryAnalysis } from './summary-analysis';
+import { chartPictureOptionsStack, chartPictureOptionsUnit } from './chart-picture-paint';
 import { summaryDataLabels } from './summary-labels';
 import type {
 	ChartSummary,
@@ -45,6 +46,7 @@ export function chartSummarySeries(
 	source: ChartSpaceSeries,
 	chartType: ChartSummaryType,
 	groupLabels?: ChartDataLabels,
+	groupSmooth?: boolean,
 ): ChartSummarySeries {
 	const categories = source.categories ?? source.xValues;
 	const values = source.values ?? source.yValues;
@@ -54,6 +56,9 @@ export function chartSummarySeries(
 		categories: chartSourceValues(categories),
 		values: chartSourceValues(values).map(numeric),
 	};
+	const smooth = source.smooth ?? groupSmooth;
+	if (smooth !== undefined) out.smooth = smooth;
+	if (source.spPr?.line) out.line = source.spPr.line;
 	if (values?.cache?.formatCode !== undefined) out.numberFormat = values.cache.formatCode;
 	if (source.bubbleSizes) {
 		out.bubbleSizes = chartSourceValues(source.bubbleSizes).map(numeric);
@@ -87,6 +92,11 @@ export function chartSummarySeries(
 	}
 	if (Object.keys(points).length) out.pointColors = points;
 	if (Object.keys(pointFills).length) out.pointFills = pointFills;
+	if ('pictureOptionsXml' in source && chartPictureOptionsStack(source.pictureOptionsXml)) {
+		out.pictureStack = true;
+		const unit = chartPictureOptionsUnit(source.pictureOptionsXml);
+		if (unit !== undefined) out.pictureStackUnit = unit;
+	}
 	const dataLabels = summaryDataLabels(source, groupLabels);
 	if (dataLabels) out.dataLabels = dataLabels;
 	Object.assign(out, summaryAnalysis(source));
@@ -130,7 +140,15 @@ function extraGroups(chartSpace: ChartSpace, firstType: ChartSummaryType): Chart
 		const entry: ChartSummaryGroup = {
 			chartType: type,
 			series: group.series.map((source, index) => ({
-				...chartSummarySeries(source, type, group.dataLabels),
+				...chartSummarySeries(
+					source,
+					type,
+					group.dataLabels,
+					group.smooth ??
+						(group.scatterStyle
+							? ['smooth', 'smoothMarker'].includes(group.scatterStyle)
+							: undefined),
+				),
 				...summaryMarkers(source, group, index),
 			})),
 			secondary: valueAxisId(chartSpace, group.axisIds) !== primary,
@@ -163,8 +181,17 @@ export function chartSummaryFromSpace(
 	let chartType: ChartSummaryType = group ? GROUP_TYPES[group.kind] : 'column';
 	if (chartType === 'bar' && group?.barDirection !== 'bar') chartType = 'column';
 	const series = (group?.series ?? []).map((source, index) => ({
-		...chartSummarySeries(source, chartType, group?.dataLabels),
+		...chartSummarySeries(
+			source,
+			chartType,
+			group?.dataLabels,
+			group?.smooth ??
+				(group?.scatterStyle ? ['smooth', 'smoothMarker'].includes(group.scatterStyle) : undefined),
+		),
 		...(group ? summaryMarkers(source, group, index) : {}),
+		...(group?.kind === 'scatter'
+			? { showLine: !['marker', 'none'].includes(group.scatterStyle ?? 'marker') }
+			: {}),
 	}));
 	const summary: ChartSummary = {
 		chartType,
@@ -173,6 +200,9 @@ export function chartSummaryFromSpace(
 		axes: chartSpace.plotArea.axes,
 		axisIds: group?.axisIds ?? [],
 	};
+	if (chartSpace.plotArea.dataTable) summary.dataTable = chartSpace.plotArea.dataTable;
+	if (chartSpace.date1904 !== undefined) summary.date1904 = chartSpace.date1904;
+	if (chartSpace.plotArea.layout) summary.plotLayout = chartSpace.plotArea.layout;
 	const combined = extraGroups(chartSpace, chartType);
 	if (combined.length) summary.extraGroups = combined;
 	if (chartType === 'stock' && group) summary.stock = stockStyle(group);
@@ -182,6 +212,18 @@ export function chartSummaryFromSpace(
 			sizeRepresents,
 			...(group.bubbleScale === undefined ? {} : { bubbleScale: group.bubbleScale }),
 			showNegativeBubbles: group.showNegativeBubbles === true,
+		};
+	}
+	if (group?.is3D) {
+		const v = chartSpace.view3D;
+		summary.view3D = {
+			...(v?.rotX === undefined ? {} : { rotX: v.rotX }),
+			...(v?.rotY === undefined ? {} : { rotY: v.rotY }),
+			...(v?.perspective === undefined ? {} : { perspective: v.perspective }),
+			...(v?.rightAngleAxes === undefined ? {} : { rAngAx: v.rightAngleAxes }),
+			...(v?.depthPercent === undefined ? {} : { depthPercent: v.depthPercent }),
+			...(v?.heightPercent === undefined ? {} : { hPercent: v.heightPercent }),
+			...(group.gapDepth === undefined ? {} : { gapDepth: group.gapDepth }),
 		};
 	}
 	const grouping = group?.grouping;

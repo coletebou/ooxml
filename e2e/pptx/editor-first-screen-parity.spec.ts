@@ -40,14 +40,17 @@ test('the new-slide halves stack and large labelled commands keep Office spacing
 		const icon = caret.querySelector('svg')!;
 		const iconBox = icon.getBoundingClientRect();
 		const caretBox = caret.getBoundingClientRect();
-		const tab = document.querySelector(
-			'[data-pptx-chrome="ribbon-tabs"] [role="tab"][aria-selected="true"]',
-		)!;
+		// The tab row is the shared element: its tabs live in its shadow root.
+		const tab = document
+			.querySelector('[data-pptx-chrome="ribbon-tabs"]')!
+			.shadowRoot!.querySelector('[role="tab"][aria-selected="true"]')!;
 		const underline = getComputedStyle(tab, '::after');
 		const tabBox = tab.getBoundingClientRect();
 		const underlineBottom = tabBox.bottom - Number.parseFloat(underline.bottom);
 		let clippedUnderline = false;
-		for (let parent = tab.parentElement; parent; parent = parent.parentElement) {
+		const up = (node: Element): Element | null =>
+			node.parentElement ?? ((node.parentNode as ShadowRoot | null)?.host || null);
+		for (let parent = up(tab); parent; parent = up(parent)) {
 			if (getComputedStyle(parent).overflowY !== 'visible') {
 				const bottom = parent.getBoundingClientRect().top + parent.clientTop + parent.clientHeight;
 				clippedUnderline ||= underlineBottom > bottom + 0.1;
@@ -219,10 +222,17 @@ test('Home keeps Office rows and flat, dimmed disabled actions', async ({ page }
 						button.getBoundingClientRect().left
 					);
 				})(),
+				// The Shape Fill column must sit inside the Drawing group, not over Editing.
+				fillOverhang: (() => {
+					const group = document.querySelector('[data-ribbon-group="home.drawing"]')!;
+					const fill = document.querySelector('[data-ribbon-control="home.drawing.shapeFill"]')!;
+					return fill.getBoundingClientRect().right - group.getBoundingClientRect().right;
+				})(),
 				rows: ['font-controls', 'drawing-controls', 'arrange-controls'].map((role) => {
 					const row = document.querySelector(`[data-pptx-chrome="${role}"]`)!;
 					return {
 						height: row.getBoundingClientRect().height,
+						display: getComputedStyle(row).display,
 						wrap: getComputedStyle(row).flexWrap,
 					};
 				}),
@@ -236,11 +246,13 @@ test('Home keeps Office rows and flat, dimmed disabled actions', async ({ page }
 		// Large Shapes: the glyph is centred over the caption, so it sits well inside the button.
 		expect(paint.shapesIconLeft).toBeGreaterThan(6);
 		const [font, drawing, arrange] = paint.rows;
-		// Font is two rows, Drawing a 66px column flow, Arrange the viewer's single flat row.
+		// Font is two rows, Drawing a 66px three-row grid (a column-wrap flex row is one column wide
+		// in Safari and Firefox), Arrange the viewer's single flat row.
 		expect(font.wrap, fontFamily).toBe('wrap');
 		expect(font.height, fontFamily).toBeGreaterThanOrEqual(54);
 		expect(drawing.height, fontFamily).toBe(66);
-		expect(drawing.wrap).toBe('wrap');
+		expect(drawing.display).toBe('grid');
+		expect(paint.fillOverhang, fontFamily).toBeLessThanOrEqual(0);
 		expect(arrange.wrap).toBe('nowrap');
 	}
 });

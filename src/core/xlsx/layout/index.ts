@@ -21,6 +21,17 @@ export {
 } from './metrics';
 export { visibleCells, type Viewport, type VisibleCells } from './viewport';
 export {
+	MIN_SPLIT_PANE,
+	clampSplitBar,
+	pxToSplit,
+	revealInSplit,
+	splitAtCell,
+	splitToPx,
+	splitVisible,
+	type SplitLayout,
+	type SplitScroll,
+} from './split';
+export {
 	layoutRemoteSelections,
 	type RemoteRange,
 	type RemoteSelectionBox,
@@ -53,7 +64,15 @@ export type {
 	MergeView,
 	VAlignView,
 } from './types';
-export { BORDER_STYLES, bordersView, edgeView, fillView, fontView, mergeFont } from './style-view';
+export {
+	BORDER_STYLES,
+	bordersView,
+	edgeView,
+	fillView,
+	fontFamilyName,
+	fontView,
+	mergeFont,
+} from './style-view';
 export {
 	sparklineScale,
 	sparklineValues,
@@ -134,3 +153,30 @@ export * from './print-merges';
 export * from './page-view';
 export * from './page-break-view';
 export * from './header-footer-edit';
+export { shapeSvg, wrapShapeLine } from './shape-view';
+export { resolveThemeTypeface, workbookFontFamily } from './font-stack';
+export {
+	WEBFONT_SAMPLE_CELLS,
+	collectWorkbookWebfontRuns,
+	type WorkbookWebfontRunOptions,
+} from './webfont-runs';
+export { shapeColor } from './shape-paint';
+export { formControlSvg, type FormControlViewOptions } from './form-control-view';
+export {
+	applyControlAction,
+	controlBounds,
+	controlState,
+	controlValueAtFraction,
+	isInteractiveControl,
+	radioGroup,
+	type ControlState,
+	type FormControlAction,
+	type LinkedValue,
+} from './form-control-state';
+export {
+	controlLinkCell,
+	controlLinkedValue,
+	controlListItems,
+	controlStateIn,
+	type ControlCell,
+} from './form-control-link';

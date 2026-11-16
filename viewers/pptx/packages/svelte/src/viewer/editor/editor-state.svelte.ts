@@ -8,6 +8,7 @@ import type {
 	InlineTextEditSnapshot,
 	PendingInlineTextEdit,
 	InlineListController,
+	ListConversionScope,
 } from 'ooxml-ui/pptx';
 import {
 	canInteractWithElement,
@@ -35,6 +36,7 @@ import type {
 	PptxSlideMaster,
 	PptxSlideSize,
 	PptxTheme,
+	PptxThemeOption,
 	PptxViewProperties,
 	PptxPresentationProperties,
 	PptxCustomShow,
@@ -57,6 +59,7 @@ import {
 	resetEditorSession,
 	restoreEditorSnapshot,
 	saveEditorState,
+	serializeEditorState,
 	updateEditorDocumentProperties,
 	updateEditorTagCollections,
 } from './editor-document-lifecycle';
@@ -99,6 +102,11 @@ export interface EditorStateDeps {
 	/** Host `authorName` prop: the comment/reply author that wins over Options > General. */
 	getAuthorName?: () => string | undefined;
 	/**
+	 * Host `listConversionScope` prop: how far a bare caret's Bullets /
+	 * Numbering reach. Optional; unset keeps PowerPoint's single paragraph.
+	 */
+	getListConversionScope?: () => ListConversionScope | undefined;
+	/**
 	 * The `tableStyles`/`tableStylesDefaultId`/`tableStylesToDelete` save
 	 * options (see `pptx-viewer-shared`'s `tableStyleSaveOptions`). Table style
 	 * DEFINITION edits live on the loader (like slide size), not the undo
@@ -110,10 +118,22 @@ export interface EditorStateDeps {
 	 * Adopt a fresh handler in place of the loaded one. Master-view CRUD
 	 * (`masterCrud`) rebuilds the package through core and comes back with a
 	 * new `PptxHandler`; the loader owns handler lifecycle, so it disposes the
-	 * previous one here. Optional for out-of-tree mounts and the unit tests.
+	 * previous one here unless `keepPrevious` (a master command and a slide
+	 * paste keep it, since the slides on screen still show its pictures).
+	 * Optional for out-of-tree mounts and the unit tests.
 	 */
 	setHandler?: (handler: PptxHandler, keepPrevious?: boolean, data?: PptxData) => void;
 	onChange?: () => void;
+	/**
+	 * The loaded deck's theme parts; an undo back to the loaded theme restores
+	 * the primary part's name. Optional for out-of-tree mounts and the unit tests.
+	 */
+	getThemeOptions?: () => readonly PptxThemeOption[];
+	/**
+	 * An undo or redo put a recorded theme back in {@link EditorState.theme};
+	 * the viewer publishes it as it does a gallery pick's theme.
+	 */
+	onThemeRestored?: (theme: PptxTheme) => void;
 	/** The host's `onpropertieschange`: the core fields a user edit changed. */
 	onCorePropertiesChange?: (updates: Partial<PptxCoreProperties>) => void;
 }
@@ -128,7 +148,7 @@ export class EditorState {
 	 * Identity until `useViewerOptionsWiring` installs the real transform (the
 	 * options store is constructed after `EditorState`).
 	 */
-	transformCommittedText: (text: string) => string = (text) => text;
+	transformCommittedText: (text: string, previous?: string) => string = (text) => text;
 	slides = $state.raw<PptxSlide[]>([]);
 	templateElementsBySlideId = $state.raw<TemplateElementMap>({});
 	slideMasters = $state.raw<PptxSlideMaster[]>([]);
@@ -147,9 +167,10 @@ export class EditorState {
 	tagCollections = $state.raw<PptxTagCollection[]>([]);
 	/**
 	 * The deck's active theme, kept here so the Home tab's font dropdown can
-	 * lead with the theme fonts. Set by the viewer once a deck is loaded;
-	 * deliberately outside {@link EditorSnapshot} because it is not content the
-	 * undo stack owns.
+	 * lead with the theme fonts and the Design galleries mark the applied one.
+	 * Set by the viewer once a deck is loaded. Its colour scheme, font scheme
+	 * and name are recorded in every {@link EditorSnapshot}, so Undo takes a
+	 * theme pick back with the slides.
 	 */
 	theme = $state.raw<PptxTheme | undefined>(undefined);
 	/**
@@ -378,6 +399,16 @@ export class EditorState {
 		return this.#deps.getHandler();
 	}
 
+	/** The loaded deck's theme parts (see `EditorStateDeps.getThemeOptions`). */
+	themeOptions(): readonly PptxThemeOption[] {
+		return this.#deps.getThemeOptions?.() ?? [];
+	}
+
+	/** Publish a theme an undo or redo put back (see `EditorStateDeps.onThemeRestored`). */
+	onThemeRestored(theme: PptxTheme): void {
+		this.#deps.onThemeRestored?.(theme);
+	}
+
 	/** Hand a rebuilt handler to the loader (see `EditorStateDeps.setHandler`). */
 	adoptHandler(handler: PptxHandler, keepPrevious = false, data?: PptxData): void {
 		this.#deps.setHandler?.(handler, keepPrevious, data);
@@ -396,6 +427,11 @@ export class EditorState {
 	/** The host `authorName` prop, or undefined (see {@link EditorStateDeps.getAuthorName}). */
 	get hostAuthorName(): string | undefined {
 		return this.#deps.getAuthorName?.();
+	}
+
+	/** The host `listConversionScope` prop, or undefined (see {@link EditorStateDeps.getListConversionScope}). */
+	get listConversionScope(): ListConversionScope | undefined {
+		return this.#deps.getListConversionScope?.();
 	}
 
 	/** The slide canvas in px (see {@link EditorStateDeps.getCanvasSize}). */
@@ -497,6 +533,13 @@ export class EditorState {
 	/** Patch geometry without history for live gesture preview frames. */
 	patchGeometry = (id: string, box: ElementBoxPatch): void =>
 		this.elementOps.patchGeometry(id, box);
+
+	/** Merge a live frame into an element without history (a colour picker drag's shade). */
+	previewElement = (id: string, patch: Partial<PptxElement>): void => {
+		if (this.editable) {
+			this.elementOps.previewElement(id, patch);
+		}
+	};
 
 	replaceActiveElements(elements: PptxElement[]): void {
 		this.templateOps.replace(elements);
@@ -625,5 +668,10 @@ export class EditorState {
 
 	save(format: PptxSaveFormat = 'pptx'): Promise<Uint8Array> {
 		return saveEditorState(this, format);
+	}
+
+	/** Serialise without touching the dirty flag: File > Save decides once the bytes are stored. */
+	serialize(format: PptxSaveFormat = 'pptx'): Promise<Uint8Array> {
+		return serializeEditorState(this, format);
 	}
 }

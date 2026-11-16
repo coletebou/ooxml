@@ -34,15 +34,17 @@ Every binding accepts the same properties and reports the same events (the contr
 `ViewerProperties` and `ViewerEvents` in `ooxml-ui/visio`; [bindings](bindings.md) lists the native
 forms).
 
-| Surface    | Contract                                                                                                                                                               |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Properties | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `ribbonAddIns`, `collaboration`                                                                             |
-| Events     | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change` |
+| Surface    | Contract                                                                                                                                                                               |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Properties | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `readOnly`, `ribbonAddIns`, `collaboration`, `storage`, `fileProviders`, `customization`                                    |
+| Events     | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change`, `file-command` |
 
 - `canEdit` (boolean) is the editing permission. The full viewer is editable by default and
   `canEdit: false` makes it read-only; the [building blocks](building-blocks.md) are read-only until
   the host passes `true`. A drawing without package bytes (a model passed as `document`, a legacy
   `.vsd`) is read-only whatever `canEdit` says.
+- `readOnly` (boolean) is a restriction of its own: `true` makes the drawing read-only and wins over
+  `canEdit`; `false` (or leaving it out after `true`) lifts only that restriction.
 - `document-change` carries `{ document, dirty, kind }`. `kind` is `edit`, `undo` or `redo` for this
   window's own changes, `remote` when a collaborator's change was applied, and `save` after
   `markClean()`.
@@ -55,6 +57,23 @@ forms).
   its status, sync or people change. On the element (`viewer.element` of a handle),
   `collaborationState` reads the current state, and `reconnectCollaboration()` and
   `stopCollaboration()` act on it. See [collaboration](collaboration.md).
+
+## Element-only members
+
+These `<visio-viewer>` members are not part of the shared binding contract (see [bindings](bindings.md)); use them on the element.
+
+| Member                         | Type                             | Description                                                                                                                                             |
+| ------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `googleFonts`                  | `GoogleFontsOption \| undefined` | Webfont fallback for drawing fonts that are not installed: `false` (off), `{ baseUrl }` (a CSS2 mirror), or unset for the reader's Trust Center choice. |
+| `pdfFonts`                     | `readonly PdfFontFile[]`         | TrueType files the host supplies, which File > Export > PDF embeds as subsets. Nothing is bundled.                                                      |
+| `createFromTemplate(template)` | `Promise<void>`                  | Creates a drawing from a File > New template (Blank Drawing, flowcharts, org chart).                                                                    |
+| `openBackstage(page?)`         | `void`                           | Opens Visio's File backstage at a page (Info by default).                                                                                               |
+| `closeBackstage()`             | `void`                           | Leaves the File backstage and returns to the drawing.                                                                                                   |
+| `startPresentation()`          | `void`                           | Starts Presentation Mode on the current foreground page (F5).                                                                                           |
+| `exitPresentation()`           | `void`                           | Leaves Presentation Mode; the page, zoom and selection are unchanged.                                                                                   |
+| `presenting`                   | `boolean` (read-only)            | True while Presentation Mode is on.                                                                                                                     |
+| `fileName`                     | `string` (read-only)             | Name of the last opened local file, or empty for bytes, models and closed drawings.                                                                     |
+| `renderWarnings`               | `readonly string[]` (read-only)  | Warnings the last page render reported.                                                                                                                 |
 
 ## Select shapes
 
@@ -248,8 +267,8 @@ offered for Visio yet. All products side by side are mapped in the [embedding gu
 
 ## Host-owned storage and file commands
 
-New, Open and Save (the backstage, the Quick Access Toolbar and Ctrl+N) first raise the
-cancelable `file-command` event with `{ command: 'new' | 'open' | 'save' }`, the same contract as
+New, Open, Save and Share (the backstage, the Quick Access Toolbar and Ctrl+N) first raise the
+cancelable `file-command` event with `{ command: 'new' | 'open' | 'save' | 'share' }`, the same contract as
 Word and Excel. Call `preventDefault()` on the DOM event, or return `false` from the binding
 callback `events['file-command']`, to handle the command yourself; the viewer then does nothing.
 The Angular `(fileCommand)` output only reports the command, so an Angular host cancels through
@@ -280,6 +299,77 @@ the `events` input.
 />
 ```
 
+## Awaited inline text commit {#awaited-text-commit}
+
+`commitTextEdit(): Promise<TextEditOutcome>` applies the text being typed into a shape on the
+mounted canvas, so a host Save exports it. It resolves only after the draft's edit completed. A
+commit a blur or Esc already started is awaited, not repeated. The workflow is in
+[Saving while a shape's text is being edited](building-blocks.md#saving-while-editing-text).
+
+Where it is available:
+
+| Surface                                                                                       | Call                          |
+| --------------------------------------------------------------------------------------------- | ----------------------------- |
+| `ViewerController` (the React `handle` prop receives it, and `viewer.controller` of a handle) | `controller.commitTextEdit()` |
+| React `useViewerBuildingBlocks` result                                                        | `commitTextEdit()`            |
+| Vue `useViewerBuildingBlocks` result                                                          | `commitTextEdit()`            |
+| Solid and Svelte `createViewerBuildingBlocks` result                                          | `commitTextEdit()`            |
+| Angular `createViewerBuildingBlocks` (the `ViewerBuildingBlocks` service)                     | `commitTextEdit()`            |
+| Vanilla `createViewerBuildingBlocks` result                                                   | `commitTextEdit()`            |
+
+The canvas registers its committer with `ViewerController.registerTextCommitter`; hosts do not call
+it. `ViewerController.destroyed` is `true` after `destroy()`.
+
+The types are exported from `ooxml-ui/visio`, together with `TextEditCommitter`:
+
+```ts
+interface TextEditIdentity {
+	readonly sourceGeneration: number;
+	readonly documentGeneration: number;
+	readonly pageId?: string;
+	readonly shapeId?: string;
+}
+
+type TextEditOutcome =
+	| (TextEditIdentity & { readonly status: 'committed'; readonly text: string })
+	| (TextEditIdentity & { readonly status: 'unchanged'; readonly reason: 'no-draft' | 'same-text' })
+	| (TextEditIdentity & {
+			readonly status: 'refused';
+			readonly reason: 'read-only' | 'rejected';
+			readonly message: string;
+			readonly text: string;
+	  })
+	| (TextEditIdentity & {
+			readonly status: 'cancelled';
+			readonly reason: 'stale-document' | 'superseded' | 'destroyed';
+			readonly text?: string;
+	  });
+```
+
+`sourceGeneration` is the loaded source's generation (the draft's own when there was a draft) and
+`documentGeneration` the accepted-document generation when the outcome was decided. `pageId` and
+`shapeId` are present when a draft existed.
+
+| `status`    | `reason`         | Fields                | When it occurs                                                                                                                                                             |
+| ----------- | ---------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `committed` |                  | `text`                | The draft was applied as one undoable edit through the normal edit path, so validation and undo/redo are unchanged.                                                        |
+| `unchanged` | `no-draft`       |                       | No draft was open, or no canvas is mounted.                                                                                                                                |
+| `unchanged` | `same-text`      |                       | The draft equals the shape's text.                                                                                                                                         |
+| `refused`   | `read-only`      | `message`, `text`     | The drawing is read-only when the commit runs, or it turned read-only while the draft was open. `message` is "The drawing is read-only."                                   |
+| `refused`   | `rejected`       | `message`, `text`     | The edit failed validation. `message` is the editor's message and `text` keeps the draft for recovery.                                                                     |
+| `cancelled` | `stale-document` | `text`                | The loaded source changed while the draft was open, or while the edit ran. A draft a load dropped is returned once, with its old `sourceGeneration`, and is never applied. |
+| `cancelled` | `superseded`     | `text`                | Another edit superseded this one while it ran.                                                                                                                             |
+| `cancelled` | `destroyed`      | `text` (with a draft) | The controller was destroyed: a call on a destroyed controller returns this without `text`, and a draft in progress is cancelled with its `text`.                          |
+
+Save only when `status` is `committed` or `unchanged`:
+
+```ts
+const outcome = await controller.commitTextEdit();
+if (outcome.status === 'refused') showError(outcome.message, outcome.text);
+else if (outcome.status === 'cancelled') showError(`Not saved: ${outcome.reason}`, outcome.text);
+else save(controller.exportVsdx().bytes);
+```
+
 ## Static SVG export
 
 `exportPageSvg(model, pageIndex, { maxBytes })` and each mounted/native handle's
@@ -293,8 +383,7 @@ The UTF-8 ceiling is 16 MiB; callers can lower it. Conservative preflight checks
 can reject content whose eventual serialization would be smaller. Fonts are not
 embedded and text/layout remain approximate. Physical page dimensions are
 preserved; downstream rasterizers must cap their output dimensions and pixel area
-before allocating an image surface. PDF, bitmap export and print layout remain
-unimplemented.
+before allocating an image surface. This function writes SVG only; File > Export in the viewer writes picture-page PNG and PDF. Print layout remains unimplemented.
 
 Optional Linux secondary pixel tests run with
 `node scripts/test-svg-rasterization.mjs` after building, using system Python 3,
@@ -346,11 +435,13 @@ result navigation. Native `document-change`, `selection-change` and `shape-selec
 events remain available through the framework callbacks. Replace All preserves
 selection; current replacement advances to the next occurrence. A same-text
 replacement keeps exact source bytes and adds no history while still navigating.
-Unsupported matched rich, field-bearing, master-linked, protected or dependent
+Unsupported matched rich, field-bearing, protected or dependent
 text refuses the entire batch. The draft displays the error and remains editable.
 Closing the controls or changing intent cancels its pending operation.
 
 ## Experimental local plain-text editing
+
+Stays experimental. Missing: native reopen of the Visio-saved reference through COM (the probe hung, 2026-10-09), evidence on the reference corpus, rich text and fields, which are refused.
 
 After `load(bytesOrBlob)`, select a local shape and use the shared text controls,
 or call `replacePlainText(pageId, shapeId, text)` on any mounted/native handle.
@@ -368,7 +459,7 @@ with diagnosed fallback styles. Original legacy bytes remain privately retained;
 editing, undo/redo and VSDX export are disabled for legacy sources. Earlier binary
 versions, groups/masters, complex geometry, stencils, templates and macro-enabled
 formats remain unsupported. Assigning a model with `document` does not supply
-editable package bytes. Core validation rejects master-linked shapes, rich text,
+editable package bytes. Core validation rejects unsupported rich text,
 fields, signed packages and macro-enabled content. XML/package edits run in an
 isolated worker; framework wrappers do not implement format logic. Plain-text
 edits refuse affected or unknown text-dependent formula caches instead of leaving
@@ -386,7 +477,9 @@ formatting and geometry operations below have separate admission rules. Native
 reopen evidence covers specific recorded cases, described in the
 [verification record](verification.md); it does not establish general fidelity.
 
-## Experimental formatting and arrangement
+## Formatting and arrangement
+
+Stable scope: the `format-text`, `format-shape` and `reorder-shape` commands on ordinary local leaf shapes and on one-shape master instances, as listed below. Native evidence: Visio 16.0 opened each recorded result without repair, read back every cached cell, recomputed the formulas and saved a copy (`evidence/native-edit-families-full-2026-10-29.json`, cases `formatting`, `arrangement`, `master-instance-format`, `master-instance-arrange`; [verification record](verification.md)). Limits: one Visio build and machine, no pixel comparison with Visio renders, groups, layers and glued connectors outside the Align and Position admission scope. Anything outside the listed scope is refused, never approximated. The shape of these commands is frozen by `src/core/visio/public-surface.test.ts` and the `VisioEdit` types under the [stability policy](../../../docs/stability.md).
 
 The Home ribbon and `applyEdits()` share `format-text`, `format-shape` and
 `reorder-shape` commands. Text formatting includes saved font families, point
@@ -437,7 +530,11 @@ distribution by centers and preserves selection order for ties. Groups, masters,
 layers and glued connectors remain outside its admission scope. These actions
 share history, selection retention and VSDX download/reopen with other edits.
 
-## Experimental duplication
+## Duplication
+
+Stable scope: `duplicate-shapes` of ordinary local 2D leaves, of one-shape master instances, of lines and connectors (below), and of a shape that connectors are glued to. Native evidence: cases `duplicate`, `duplicate-connected`, `glue-duplicate-line` and the flat-document equivalents in `evidence/native-edit-families-*-2026-10-29.json`, plus the Visio duplicate probe `evidence/native-duplicate-glue-2026-10-29.json`. Limits: groups, layers, foreign content and a connector copied together with a shape it is glued to are refused; a copy of a stencil connector whose end point box meets another dynamic connector is refused because Visio lays both out again on the next layout; Visio's own offset of a lone glued dynamic connector (none) is not reproduced, the edit offset is applied.
+
+**Glue.** Like Visio, copying a glued line keeps its end points and drops its glue: no Connect rows are written, end formulas become plain values (a stencil connector keeps its `_WALKGLUE` formulas and its triggers name the copy's own sheet). Copying a shape that connectors are glued to leaves the connectors with the original. Moving or resizing a glued shape follows its connectors (Visio's walking glue for right-angle dynamic connectors, point glue for drawn lines); shapes without connection points float the connector along the shared extent as Visio does.
 
 `duplicateSelection(): Promise<void>` on the controller and every mounted/native
 handle duplicates admitted selected shapes on the current page. Home's Paste
@@ -448,8 +545,7 @@ clipboard.
 The core `visioDuplicateCommand(page, selectedIds)` helper produces a
 `duplicate-shapes` source command with fresh page-local IDs. Copies retain source
 XML, mixed text and stacking order, receive fresh names without copied unique
-IDs, and move 0.33 drawing inches right and down. Source validation currently
-admits local unglued 2D leaf shapes, excluding masters, groups, foreign content,
+IDs, and move 0.33 drawing inches right and down. Source validation admits local 2D leaf shapes, glued or not, and the lines and connectors above, excluding groups, foreign content,
 layers, ambiguous identities and unsupported dependencies. Pin protection and
 affected formula caches are checked before accepting any source change.
 
@@ -460,6 +556,8 @@ partially change source bytes or selection. The ordinary `selection-change` and
 `document-change` events expose the accepted result to native framework state.
 
 ## Experimental shape clipboard
+
+Stays experimental. Missing: native evidence for paste across pages and documents, scaled pages and paste cascade (only a same-page `captureVisioClipboard` then `paste-shapes` case is recorded), and a decision on the wire format.
 
 Every mounted/native handle exposes `copySelection()`, `cutSelection()` and
 `pasteSelection()`, each returning `Promise<void>`. Invoke them from a user
@@ -498,7 +596,9 @@ The DOM-free core exports `captureVisioClipboard`, `serializeVisioClipboard`,
 `deserializeVisioClipboard`, the `paste-shapes` edit and the
 `visioPasteCommand(page, clipboard, offset?)` command builder.
 
-## Experimental geometry editing
+## Geometry editing
+
+Stable scope: create, move, resize (with anchor), rotate, flip, line end points and safe delete on local shapes, one-shape master instances, groups (resize with anchor, rotate) and glued shapes with their connectors. Native evidence: cases `geometry-*`, `multi-selection-resize`, `group-resize`, `master-instance-move`, `master-instance-resize`, `glue-move-*`, `glue-resize-target`, `glue-delete-line` and the delete findings `evidence/native-delete-freeze-2026-10-29.json` and `native-delete-error-2026-10-29.json` (Visio freezes a cell that read a deleted shape to its last result; the core does the same). Limits: formulas the core cannot evaluate refuse an edit only when the edit reaches them; connector routing is the walking-glue subset recorded in the evidence, not Visio's router, and vertical floating alignment and non-listed layouts are unverified; one Visio build.
 
 The shared geometry controls expose create rectangle, move, resize and safe
 delete. Every native/mounted framework handle also forwards

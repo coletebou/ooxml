@@ -5,6 +5,7 @@ import type {
 	PptxAppProperties,
 	PptxCoreProperties,
 	PptxCustomProperty,
+	PptxCustomShow,
 	PptxPresentationProperties,
 	PptxSection,
 	PptxSlide,
@@ -31,6 +32,7 @@ function makeBridge(extra: { onCorePropertiesChanged?: (p: PptxCoreProperties) =
 	const canvasSize = ref<CanvasSize>({ width: 960, height: 540 });
 	const theme = shallowRef<PptxTheme | undefined>(undefined);
 	const sections = shallowRef<PptxSection[]>([]);
+	const customShows = shallowRef<PptxCustomShow[]>([]);
 	const presentationProperties = shallowRef<PptxPresentationProperties>({});
 	const customProperties = shallowRef<PptxCustomProperty[]>([]);
 	const coreProperties = shallowRef<PptxCoreProperties | undefined>(undefined);
@@ -49,6 +51,7 @@ function makeBridge(extra: { onCorePropertiesChanged?: (p: PptxCoreProperties) =
 		theme,
 		handler: ref(null),
 		sections,
+		customShows,
 		presentationProperties,
 		customProperties,
 		coreProperties,
@@ -71,6 +74,7 @@ function makeBridge(extra: { onCorePropertiesChanged?: (p: PptxCoreProperties) =
 		slides,
 		canvasSize,
 		sections,
+		customShows,
 		presentationProperties,
 		customProperties,
 		coreProperties,
@@ -119,6 +123,15 @@ describe('useAiBridge deck-data seam', () => {
 			'metadata',
 		);
 		expect(onCorePropertiesChanged).toHaveBeenCalledExactlyOnceWith({ title: 'Renamed' });
+	});
+
+	it('applyDeckData commits changed custom shows to their ref', () => {
+		const h = makeBridge();
+		h.bridge.applyDeckData?.(
+			(data) => ({ ...data, customShows: [{ id: '0', name: 'Short', slideRIds: ['rId2'] }] }),
+			'custom shows',
+		);
+		expect(h.customShows.value).toStrictEqual([{ id: '0', name: 'Short', slideRIds: ['rId2'] }]);
 	});
 
 	it('applyDeckData fans out metadata and only touches changed fields', () => {
@@ -190,5 +203,24 @@ describe('useAiBridge deck-data seam', () => {
 		expect(h.tagCollections.value).toStrictEqual([
 			{ path: 'ppt/tags/tag1.xml', tags: [{ name: 'a', value: 'b' }] },
 		]);
+	});
+});
+
+describe('useAiBridge (shared bridge)', () => {
+	it('leaves the deck clean when an AI deck edit changes nothing', () => {
+		const h = makeBridge();
+		h.bridge.applyDeckData?.((data) => data, 'no-op');
+		expect(h.pushHistory).not.toHaveBeenCalled();
+		expect(h.markDirty).not.toHaveBeenCalled();
+	});
+
+	it('records a slides edit as one history entry before installing it', () => {
+		const h = makeBridge();
+		h.bridge.applySlidesUpdate(
+			(slides) => [...slides, { ...slides[0], id: 's2' } as PptxSlide],
+			'add',
+		);
+		expect(h.pushHistory).toHaveBeenCalledOnce();
+		expect(h.slides.value.map((s) => s.id)).toEqual(['s1', 's2']);
 	});
 });

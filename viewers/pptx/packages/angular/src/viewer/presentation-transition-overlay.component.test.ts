@@ -17,8 +17,8 @@
  *
  * No Angular TestBed (see `vitest.config.ts`), so the injected CSS is built
  * from the same shared helpers the component's effect calls, and the
- * template's `@if (liftedSlide(); as lifted)` predicate is tested through the
- * pure `morphLiftedSlide` it delegates to (issue #146).
+ * template's `@for (layer of overlayLayers(); ...)` is tested through the pure
+ * `morphOverlayLayerSlides` it delegates to (issues #141 and #146).
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -30,7 +30,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	classicIncomingLayerSlide,
 	morphCrossfadeGroupSlides,
-	morphLiftedSlide,
+	morphOverlayLayerSlides,
 } from './presentation-transition-overlay.component';
 
 const OVERLAY_SOURCE = readFileSync(
@@ -164,17 +164,91 @@ function discAndWording(): { from: PptxSlide; to: PptxSlide } {
 	};
 }
 
-describe('morphLiftedSlide', () => {
+/** Every lifted layer's slide, in paint order. */
+function liftedLayers(
+	plan: ReturnType<typeof buildMorphTransitionPlan>,
+	from: PptxSlide | undefined,
+	to: PptxSlide | undefined,
+): PptxSlide[] {
+	return morphOverlayLayerSlides(plan, from, to)
+		.filter((layer) => layer.side === 'incoming')
+		.map((layer) => layer.slide);
+}
+
+/**
+ * Issue #141's slides 4 to 5: a departing picture keeps the unchanged
+ * backdrop's ghost painted, a full-slide picture fades in above the backdrop,
+ * and the title travels ABOVE that picture on the incoming slide.
+ */
+function veiledTitle(): { from: PptxSlide; to: PptxSlide } {
+	const picture = (id: string, name: string, imagePath: string): PptxElement =>
+		({
+			id,
+			name,
+			type: 'picture',
+			x: 0,
+			y: 0,
+			width: 960,
+			height: 540,
+			imagePath,
+			imageData: `data:${imagePath}`,
+		}) as unknown as PptxElement;
+	const title = (id: string, x: number): PptxElement =>
+		({
+			id,
+			name: 'Title',
+			type: 'text',
+			x,
+			y: 160,
+			width: 400,
+			height: 100,
+			text: 'Our Services',
+		}) as unknown as PptxElement;
+	return {
+		from: slide('out', [
+			picture('out-gone', 'Leaving', 'ppt/media/leaving.png'),
+			picture('out-backdrop', 'Backdrop', 'ppt/media/backdrop.png'),
+			title('out-title', 520),
+		]),
+		to: slide('in', [
+			picture('in-backdrop', 'Backdrop', 'ppt/media/backdrop.png'),
+			picture('in-veil', 'Veil', 'ppt/media/veil.png'),
+			title('in-title', 80),
+		]),
+	};
+}
+
+describe('morphOverlayLayerSlides', () => {
 	it('wraps exactly the shapes the plan lifted, on the incoming slide', () => {
 		const { from, to } = discAndWording();
 		const plan = buildMorphTransitionPlan(from, to, 800);
 
-		const lifted = morphLiftedSlide(plan, to);
+		const lifted = liftedLayers(plan, from, to);
 
-		expect(lifted?.id).toBe('in');
-		expect(lifted?.elements.map((element) => element.id)).toStrictEqual(['in-wording']);
+		expect(lifted.map((layer) => layer.id)).toStrictEqual(['in']);
+		expect(lifted[0].elements.map((element) => element.id)).toStrictEqual(['in-wording']);
 		// The disc keeps its ghost: it is the shield the wording has to clear.
 		expect(plan?.outgoingElements.map((element) => element.id)).toContain('out-disc');
+	});
+
+	// Regression (issue #141): every lifted arrival used to be painted above
+	// every ghost, so a full-slide picture fading in veiled the title travelling
+	// ABOVE it on the incoming slide, which then snapped bright at the end.
+	it('stacks a travelling title ghost above a lifted picture arriving under it', () => {
+		const { from, to } = veiledTitle();
+		const layers = morphOverlayLayerSlides(buildMorphTransitionPlan(from, to, 800), from, to);
+		const zOf = (id: string): number =>
+			Number(
+				layers.find((layer) => layer.slide.elements.some((element) => element.id === id))!.style[
+					'z-index'
+				],
+			);
+
+		expect(zOf('out-backdrop')).toBeLessThan(zOf('in-veil'));
+		expect(zOf('in-veil')).toBeLessThan(zOf('out-title'));
+		expect(layers.map((layer) => layer.side)).toStrictEqual(['outgoing', 'incoming', 'outgoing']);
+		expect(MORPH_EXTRA_LAYERS_SOURCE).toContain('@for (layer of overlayLayers(); track layer.key)');
+		expect(MORPH_EXTRA_LAYERS_SOURCE).toContain('[ngStyle]="layer.style"');
 	});
 
 	it('renders no extra layer when a morph has nothing to lift', () => {
@@ -201,13 +275,15 @@ describe('morphLiftedSlide', () => {
 			} as unknown as PptxElement,
 		]);
 
-		expect(morphLiftedSlide(buildMorphTransitionPlan(from, to, 800), to)).toBeUndefined();
+		expect(liftedLayers(buildMorphTransitionPlan(from, to, 800), from, to)).toStrictEqual([]);
 	});
 
 	it('renders no extra layer without a plan or an incoming slide', () => {
 		const { from, to } = discAndWording();
-		expect(morphLiftedSlide(undefined, to)).toBeUndefined();
-		expect(morphLiftedSlide(buildMorphTransitionPlan(from, to, 800), undefined)).toBeUndefined();
+		expect(morphOverlayLayerSlides(undefined, from, to)).toStrictEqual([]);
+		expect(liftedLayers(buildMorphTransitionPlan(from, to, 800), from, undefined)).toStrictEqual(
+			[],
+		);
 	});
 });
 
@@ -320,8 +396,8 @@ describe('morphCrossfadeGroupSlides', () => {
 		expect(groups[0].outgoing.elements.map((element) => element.id)).toStrictEqual(['out-wording']);
 		expect(groups[0].incoming.elements.map((element) => element.id)).toStrictEqual(['in-wording']);
 		expect(groups[0].style['isolation']).toBe('isolate');
-		// Above the ghost layer (40) and the lifted layer (41).
-		expect(groups[0].style['z-index']).toBe('42');
+		// Above the one ghost layer (40).
+		expect(groups[0].style['z-index']).toBe('41');
 		// Both halves blend additively, and each carries its own dissolve: on the
 		// wrapper, not on the element, whose own layer would snap to whole device
 		// pixels and paint the wording off the live stage.
@@ -331,7 +407,7 @@ describe('morphCrossfadeGroupSlides', () => {
 		expect(groups[0].incomingStyle['animation']).toContain('-fade');
 		// Each half is painted exactly once: the flat layers no longer carry them.
 		expect(plan?.outgoingElements.map((element) => element.id)).not.toContain('out-wording');
-		expect(morphLiftedSlide(plan, to)).toBeUndefined();
+		expect(liftedLayers(plan, from, to)).toStrictEqual([]);
 	});
 
 	it('renders no group without a plan or either slide', () => {
@@ -354,6 +430,64 @@ describe('morphCrossfadeGroupSlides', () => {
 		expect(MORPH_HELPERS_SOURCE).toContain(`'mix-blend-mode': MORPH_CROSSFADE_HALF_BLEND_MODE`);
 		expect(MORPH_EXTRA_LAYERS_SOURCE).toContain('[ngStyle]="group.outgoingStyle"');
 		expect(MORPH_EXTRA_LAYERS_SOURCE).toContain('[ngStyle]="group.incomingStyle"');
+	});
+
+	// Regression (issue #141, slides 6 -> 7): a column of "L"s changes font, so
+	// it dissolves as a group, while it slides under a picture band the incoming
+	// slide stacks ABOVE it. Painted above every overlay layer, the column showed
+	// across the band for the whole morph and vanished from it in one frame when
+	// the overlay came down.
+	it('stacks a dissolving group under the band above it and over the strip below it', () => {
+		const picture = (id: string, name: string, y: number, height: number): PptxElement =>
+			({
+				id,
+				name,
+				type: 'picture',
+				x: 0,
+				y,
+				width: 1280,
+				height,
+				imagePath: `ppt/media/${name}.png`,
+			}) as unknown as PptxElement;
+		const column = (id: string, y: number, fontFamily: string): PptxElement =>
+			({
+				id,
+				name: 'Object 14',
+				type: 'text',
+				x: 284,
+				y,
+				width: 51,
+				height: 1066,
+				text: 'L\nL\nL',
+				textStyle: { color: '#FFFFFF', fontFamily },
+				textSegments: [{ text: 'L\nL\nL', style: { fontFamily, color: '#FFFFFF' } }],
+			}) as unknown as PptxElement;
+		const from = slide('6', [
+			picture('bg6', 'backdrop', 0, 720),
+			column('col6', -916, 'Calibri Light'),
+			picture('strip6', 'strip', -1, 720),
+			picture('band6', 'band', -1, 196),
+		]);
+		const to = slide('7', [
+			picture('bg7', 'backdrop', 0, 720),
+			picture('strip7', 'strip', -3, 720),
+			column('col7', -158, 'Calibri'),
+			picture('band7', 'band', -2, 196),
+		]);
+		const plan = buildMorphTransitionPlan(from, to, 2000);
+
+		const groups = morphCrossfadeGroupSlides(plan, from, to);
+		const layers = morphOverlayLayerSlides(plan, from, to);
+		expect(groups.map((group) => group.key)).toStrictEqual(['col7']);
+		const zOf = (id: string): number =>
+			Number(
+				layers.find((layer) => layer.slide.elements.some((element) => element.id === id))!.style[
+					'z-index'
+				],
+			);
+		const groupZ = Number(groups[0].style['z-index']);
+		expect(zOf('band6')).toBeGreaterThan(groupZ);
+		expect(zOf('strip6')).toBeLessThan(groupZ);
 	});
 });
 

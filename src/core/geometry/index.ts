@@ -81,6 +81,8 @@ export * from './shape-definitions-primary';
 export * from './shape-gallery-catalog';
 export { at } from './indexed';
 export * from './svg-path-flatten';
+export * from './svg-path-segments';
+export * from './svg-path-tokens';
 export * from './snap-guides';
 export * from './align-distribute';
 
@@ -91,3 +93,9 @@ export * from './auto-align';
 export * from './nudge';
 
 export * from './element-transform';
+export * from './resize-aspect';
+export * from './preset-shape-evaluator';
+export * from './ooxml-arc';
+
+export * from './picture-crop';
+export * from './picture-tile';

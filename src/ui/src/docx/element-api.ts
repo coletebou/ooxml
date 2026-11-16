@@ -1,4 +1,4 @@
-import type { DocumentStorage } from 'ooxml-core/embedding';
+import type { CloudFileProvider, CloudOpenedFile, DocumentStorage } from 'ooxml-core/embedding';
 import type { RibbonAddInTab } from '../ribbon/add-in-tabs';
 import { applyRibbonAddIns } from './editor-shell';
 import type { CollabSession } from 'ooxml-core/collab';
@@ -10,8 +10,8 @@ import { saveDocx } from 'ooxml-core/docx';
 import { schema } from './schema';
 import { docToModel } from './model-adapter';
 import type { EditorCore } from './editor-core';
-import { reflectAttribute } from './editor-attributes';
-import { downloadBytes, wordBlob } from './file-commands';
+import { modifiedStamp, reflectAttribute } from './editor-attributes';
+import { docxFileName, downloadBytes, wordBlob } from './file-commands';
 import {
 	normalizeRibbonActions,
 	type RibbonActionId,
@@ -29,6 +29,9 @@ import {
 	type WordStatusProps,
 } from './building-blocks-status';
 import type { SurfaceHostActions } from './building-blocks-actions';
+import type { GoogleFontsOption } from 'ooxml-core/text';
+import { refreshDocxWebfonts } from './docx-webfonts';
+import type { ReadAloudOptions } from './read-aloud-session';
 
 const HTMLElementBase: typeof HTMLElement =
 	typeof HTMLElement === 'undefined' ? (class {} as typeof HTMLElement) : HTMLElement;
@@ -80,6 +83,41 @@ export abstract class DocxEditorApi extends HTMLElementBase {
 	}
 	set storage(value: DocumentStorage | null | undefined) {
 		this.core.storage = value ?? undefined;
+	}
+	/**
+	 * Cloud places for File > Open (OneDrive and the like). When non-empty, Open lists "This
+	 * device" and one place per provider. A file opened from a place loads like any other, locks
+	 * the editor when the provider says it cannot be edited, and saves through the file's own
+	 * storage (not `storage`) until another document loads. Opening from a place does not fire
+	 * `file-command`: the host chose the providers.
+	 */
+	get fileProviders(): readonly CloudFileProvider[] {
+		return this.core.fileProviders;
+	}
+	set fileProviders(value: readonly CloudFileProvider[] | null | undefined) {
+		const next = value ?? [];
+		const current = this.core.fileProviders;
+		if (next.length === current.length && next.every((p, i) => p === current[i])) return;
+		this.core.fileProviders = [...next];
+		this.core.shell.chrome?.backstage.relocalize();
+	}
+	/**
+	 * Webfonts for the document fonts the reader has neither installed nor embedded. Unset (the
+	 * default): the reader decides in File > Options > Trust Center (off until turned on; when on,
+	 * Google Fonts). `false`: off, nothing is requested. A set value locks that toggle, which then
+	 * shows it read-only. `{ baseUrl }`: such a family that the Google
+	 * Fonts catalogue serves, or its metric-compatible clone (Calibri as Carlito), is requested from
+	 * that CSS2 endpoint (`https://fonts.googleapis.com/css2`, or a self-hosted mirror) with only
+	 * the family names, and `load` waits briefly (150 ms) for the faces before showing the document. An
+	 * invalid `baseUrl` warns and stays off. Read when a document loads; changing it re-requests
+	 * for the document on screen.
+	 */
+	get googleFonts(): GoogleFontsOption | undefined {
+		return this.core.webfonts.option;
+	}
+	set googleFonts(value: GoogleFontsOption | undefined) {
+		this.core.webfonts.option = value;
+		if (this.core.view) void refreshDocxWebfonts(this.core);
 	}
 	get loading(): boolean {
 		return this.core.loading;
@@ -150,6 +188,17 @@ export abstract class DocxEditorApi extends HTMLElementBase {
 	}
 
 	/**
+	 * Read Aloud options. `stopOnEdit` (default false) also stops playback when the document is
+	 * edited; replacing or reloading the document and unmounting always stop it.
+	 */
+	get readAloud(): ReadAloudOptions | null {
+		return this.core.viewOptions.readAloud;
+	}
+	set readAloud(value: ReadAloudOptions | null | undefined) {
+		this.core.viewOptions.readAloud = value ? { ...value } : null;
+	}
+
+	/**
 	 * Tabs a host adds after Word's own, as an Office add-in does. Each command runs its `run`
 	 * callback and dispatches `office-ribbon-add-in` (`{ tab, command }`) from the editor.
 	 */
@@ -214,6 +263,16 @@ export abstract class DocxEditorApi extends HTMLElementBase {
 		return this.core.dirtyState.dirty;
 	}
 
+	/**
+	 * Opens a file a host got from a `CloudFileProvider` (its own picker or a start page), exactly as
+	 * File > Open > OneDrive does: the file's name, read-only when `file.canEdit` is false, and Save
+	 * routed to `file.storage` until another document loads. A load failure is reported through
+	 * `document-error`. Does nothing when the host removed the Open command.
+	 */
+	async openCloudFile(file: CloudOpenedFile): Promise<void> {
+		await this.core.shell.chrome?.openCloudFile(file);
+	}
+
 	/** Declares the current content saved, for hosts that persist the result of `save()` themselves. */
 	markClean(): void {
 		this.core.dirtyState.set(false);
@@ -234,8 +293,13 @@ export abstract class DocxEditorApi extends HTMLElementBase {
 			...(core.collab.yjs?.media.all() ?? []),
 		]);
 		const media = pending.size ? pending : undefined;
-		if (core.loaded)
-			return media ? core.loaded.save(core.model, media) : core.loaded.save(core.model);
+		if (core.loaded) {
+			// A converted Word 97-2003 .doc saves as .docx here; its `save()` keeps the binary format.
+			const options = { modified: modifiedStamp(core.reviewAuthor) };
+			return core.loaded.saveDocx
+				? core.loaded.saveDocx(core.model, media, options)
+				: core.loaded.save(core.model, media, options);
+		}
 		return saveDocx(core.model, media);
 	}
 
@@ -247,7 +311,10 @@ export abstract class DocxEditorApi extends HTMLElementBase {
 	/** Saves and starts a browser download, then marks the document clean. */
 	async download(fileName?: string): Promise<void> {
 		const name = fileName || this.fileName;
-		downloadBytes(await this.saveBytes(), /\.[^./\\]+$/.test(name) ? name : `${name}.docx`);
+		downloadBytes(
+			await this.saveBytes(),
+			/\.[^./\\]+$/.test(name) ? docxFileName(name) : `${name}.docx`,
+		);
 		this.markClean();
 	}
 }

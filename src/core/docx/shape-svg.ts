@@ -1,7 +1,12 @@
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
 // Draws a shape as SVG from its preset geometry (the shared DrawingML geometry tables), fill and
 // outline, with its text centred inside. The editor, Print Layout and tests all use this one drawing.
-import { drawingColorCss, resolveDrawingColor } from '../drawingml/index';
+import {
+	drawingColorCss,
+	resolveDrawingColor,
+	parseCustomGeometry,
+	drawingPathData,
+} from '../drawingml/index';
 import type { DrawingColor, DrawingFill } from '../drawingml/index';
 import { evaluatePresetShape, lookupPresetShape } from '../geometry/preset-shape-evaluator';
 import { diagramColorTheme } from './diagram-theme';
@@ -13,18 +18,10 @@ import {
 	type ShapeSpec,
 } from './shape-model';
 import type { ThemeCatalog } from './theme-model';
+import { capCompensatedDashArray, dashPatternUnits } from '../drawingml/dash-pattern';
+import { parseXml } from '../xml/index';
 import { EMU_PER_PIXEL } from './units';
 
-const DASHES: Record<string, string> = {
-	dash: '4 3',
-	sysDash: '3 1',
-	dot: '1 2',
-	sysDot: '1 1',
-	dashDot: '4 3 1 3',
-	lgDash: '8 3',
-	lgDashDot: '8 3 1 3',
-	sysDashDot: '3 1 1 1',
-};
 const escapeXml = (text: string) =>
 	text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -61,11 +58,13 @@ export interface ShapeAppearance {
 /** The paint a shape ends up with, with Word's default style behind whatever the shape sets. */
 export function shapeAppearance(spec: ShapeSpec, theme?: ThemeCatalog): ShapeAppearance {
 	const line = spec.line;
+	const strokeWidthPx = round((line?.widthEmu ?? DEFAULT_SHAPE_LINE_EMU) / EMU_PER_PIXEL);
+	const dashUnits = dashPatternUnits(line?.dash);
 	return {
 		fill: isLinePreset(spec.preset) ? 'none' : fillPaint(spec.fill, theme),
 		stroke: linePaint(line?.fill, theme),
-		strokeWidthPx: round((line?.widthEmu ?? DEFAULT_SHAPE_LINE_EMU) / EMU_PER_PIXEL),
-		...(line?.dash && DASHES[line.dash] ? { dash: DASHES[line.dash]! } : {}),
+		strokeWidthPx,
+		...(dashUnits ? { dash: capCompensatedDashArray(dashUnits, strokeWidthPx) } : {}),
 	};
 }
 
@@ -108,9 +107,26 @@ export function shapeSvg(
 ): string | undefined {
 	const w = Math.max(1, widthPx);
 	const h = Math.max(1, heightPx);
-	const geometry = lookupPresetShape(spec.preset)
-		? evaluatePresetShape(spec.preset, w, h, spec.adjustments)
+	const customPaths = spec.customGeometryXml
+		? parseCustomGeometry(
+				parseXml(spec.customGeometryXml).documentElement,
+				w * EMU_PER_PIXEL,
+				h * EMU_PER_PIXEL,
+			)
 		: undefined;
+	const geometry = customPaths
+		? {
+				paths: customPaths.map((path) => ({
+					d: drawingPathData(path, w, h),
+					fill: path.fill,
+					stroke: path.stroke,
+				})),
+				fillNone: false,
+				textRect: undefined,
+			}
+		: lookupPresetShape(spec.preset)
+			? evaluatePresetShape(spec.preset, w, h, spec.adjustments)
+			: undefined;
 	if (!geometry) return undefined;
 	const look = shapeAppearance(spec, theme);
 	const paths = geometry.paths

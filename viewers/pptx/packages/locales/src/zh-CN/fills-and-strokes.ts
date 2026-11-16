@@ -6,6 +6,8 @@ export const translations = {
 	'pptx.fill.gradient': '渐变',
 	'pptx.fill.color': '颜色',
 	'pptx.fill.opacityPercent': '不透明度 ({{value}}%)',
+	'pptx.fill.picture': '图片',
+	'pptx.fill.slideBackground': '幻灯片背景',
 	'pptx.gradient.heading': '渐变填充',
 	'pptx.gradient.type': '类型',
 	'pptx.gradient.linear': '线性',
@@ -123,5 +125,6 @@ export const translations = {
 	'pptx.strokeOptions.joinMiter': '斜接',
 	'pptx.strokeOptions.joinRound': '圆头',
 	'pptx.colorPicker.recentColors': '最近的颜色',
+	'pptx.colorPicker.recentColor': '最近使用的颜色 {{hex}}',
 	'pptx.colorPicker.customColors': '自定义颜色',
 } as const;

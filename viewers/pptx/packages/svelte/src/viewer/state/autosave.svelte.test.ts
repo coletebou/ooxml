@@ -287,4 +287,60 @@ describe('autosaveController', () => {
 		expect(saveSnapshot).not.toHaveBeenCalled();
 		h.dispose();
 	});
+
+	it('reads the one shared engine: disabled while inactive, an edit mid-write waits an interval', async () => {
+		const off = setup({ enabled: false });
+		expect(off.ctl.status).toBe('disabled');
+		off.dispose();
+
+		const h = setup();
+		let finish!: (bytes: Uint8Array) => void;
+		h.save.mockImplementationOnce(
+			() =>
+				new Promise<Uint8Array>((resolve) => {
+					finish = resolve;
+				}),
+		);
+		h.editor.slides = [slide('s1'), slide('s2')];
+		flushSync();
+		await vi.advanceTimersByTimeAsync(1000);
+		h.editor.slides = [slide('s1'), slide('s3')];
+		flushSync();
+		finish(new Uint8Array([1]));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(saveSnapshot).toHaveBeenCalledOnce();
+		expect(h.ctl.isDirty).toBeTruthy();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(saveSnapshot).toHaveBeenCalledTimes(2);
+		h.dispose();
+	});
+});
+
+describe('autosaveController inline drafts', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		saveSnapshot.mockClear();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('snapshots uncommitted inline typing, with the typed text in the saved slides', async () => {
+		const h = setup();
+		h.editor.setSlides([
+			{
+				id: 's1',
+				rId: 'rId-s1',
+				slideNumber: 1,
+				elements: [{ id: 'title', type: 'text', text: 'Old', x: 0, y: 0, width: 10, height: 10 }],
+			} as unknown as PptxSlide,
+		]);
+		flushSync();
+		h.ctl.noteInlineDraft({ slideId: 's1', elementId: 'title', text: 'Typed' });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(saveSnapshot).toHaveBeenCalledOnce();
+		const saved = h.save.mock.calls.at(-1)![0] as PptxSlide[];
+		expect((saved[0]!.elements[0] as { text?: string }).text).toBe('Typed');
+		h.dispose();
+	});
 });

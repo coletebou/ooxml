@@ -1,19 +1,36 @@
 import type {
 	CollaborationInput,
 	CollaborationShellState,
+	CollaborationState,
+	GoogleFontsOption,
+	ListConversionScope,
+	PptxLoadLimits,
 	ToolbarActionId,
 	ViewportFitOptions,
 } from 'ooxml-ui/pptx';
 import type React from 'react';
 
 import type { SlideCanvasProps } from '../components/canvas/canvas-types';
+import type { ElementRenderErrorHandler } from '../components/ElementErrorBoundary';
+import type { SlidesPaneSidebarProps } from '../components/slides-pane/types';
 import type { ToolbarProps } from '../components/toolbar/toolbar-types';
 import type { PowerPointViewerHandle } from '../types';
 import type { ViewerMode } from '../types-core';
 import type { CollaborationContextValue } from './collaboration/types';
 import type { AutosaveStatus } from './useAutosave';
+import type {
+	BuildingBlockRequest,
+	UseViewerBuildingBlocksActionsOptions,
+	ViewerBuildingBlockActions,
+} from './useViewerBuildingBlocks-actions-types';
+import type { SlidesPaneLayoutGalleryRequest } from './useViewerBuildingBlocks-slides-pane-props';
 
-export interface UseViewerBuildingBlocksInput extends ViewportFitOptions {
+export type { BuildingBlockRequest, ViewerBuildingBlockActions };
+
+export interface UseViewerBuildingBlocksInput
+	extends ViewportFitOptions, UseViewerBuildingBlocksActionsOptions {
+	/** Reports an element omitted after a React render/lifecycle error; defaults to console.error. */
+	onElementRenderError?: ElementRenderErrorHandler;
 	/** Optional collaboration, including a host-owned document and presence session. */
 	collaboration?: CollaborationInput;
 	/** PPTX content as ArrayBuffer/Uint8Array, or null/undefined while no file is loaded. */
@@ -31,6 +48,27 @@ export interface UseViewerBuildingBlocksInput extends ViewportFitOptions {
 	 * the handle's `goTo` to move an open deck.
 	 */
 	initialSlide?: number;
+	/** As `PowerPointViewer`'s `googleFonts`: the Google Fonts fallback policy (off, or a self-hosted mirror). */
+	googleFonts?: GoogleFontsOption;
+	/**
+	 * As `PowerPointViewer`'s `listConversionScope`: how far Bullets / Numbering reach from a
+	 * bare caret. `'paragraph'` (default, PowerPoint behaviour) changes only the caret's
+	 * paragraph; `'list'` (Word / Google Docs behaviour) converts the whole adjacent list when
+	 * the caret switches a list paragraph between bullets and numbering.
+	 */
+	listConversionScope?: ListConversionScope;
+	/**
+	 * As `PowerPointViewer`'s `allowExternalContent`: `false` fetches no linked
+	 * http(s) content, `true` allows it, either value locks the Trust Center
+	 * setting; unset keeps the user's choice. A change applies from the next load.
+	 */
+	allowExternalContent?: boolean;
+	/**
+	 * As `PowerPointViewer`'s `limits`: bounds on loading a deck (input and
+	 * inflated size, ZIP entries, slides, shapes); unset keeps the core
+	 * defaults. A change applies from the next load.
+	 */
+	limits?: PptxLoadLimits;
 	/** Whether the built-in autosave-to-localStorage recovery timer is active. Defaults to true. */
 	autosaveEnabled?: boolean;
 	/** Display name used as the author for comments. */
@@ -52,6 +90,12 @@ export interface UseViewerBuildingBlocksInput extends ViewportFitOptions {
 	onOpenHeaderFooter?: () => void;
 	/** Fired by the toolbar's "Share" button; the host owns rendering that dialog. */
 	onOpenShareDialog?: () => void;
+	/**
+	 * Fired by the "Layout" entry of a slide's context menu in `<SlidesPane>`,
+	 * after that slide is made active; the host owns rendering the Layout
+	 * gallery (for example anchored at the click point).
+	 */
+	onOpenLayoutGallery?: (request: SlidesPaneLayoutGalleryRequest) => void;
 }
 
 export interface ViewerBuildingBlocksResult {
@@ -64,11 +108,26 @@ export interface ViewerBuildingBlocksResult {
 	 * `describeCollaborationShellState` for a localised status line.
 	 */
 	shellState: CollaborationShellState;
+	/**
+	 * The shared `CollaborationState` of the room (`COLLABORATION_OFF` when not sharing), the
+	 * value `PowerPointViewer`'s `onCollaborationChange` reports, in every binding's blocks.
+	 */
+	collaborationState: CollaborationState;
 	/** Flat, self-contained props for the standalone `<Toolbar>` component. */
 	toolbarProps: ToolbarProps;
 	/** Flat, self-contained props for the standalone `<SlideCanvas>` component. */
 	canvasProps: SlideCanvasProps;
-	/** Current viewer mode (edit, view, present, master). */
+	/**
+	 * Flat, self-contained props for the standalone `<SlidesPane>` component:
+	 * the slide thumbnail rail `PowerPointViewer` shows beside the canvas.
+	 * Its open state is the toolbar's sidebar toggle.
+	 */
+	slidesPaneProps: SlidesPaneSidebarProps;
+	/**
+	 * The effective mode, as every binding's building blocks report it: `preview` while the blocks
+	 * may not edit (no `canEdit`, a collaboration viewer role), otherwise the viewer's mode (`edit`,
+	 * `present`, `master`). `toolbarProps.mode` and `canvasProps.mode` keep the viewer's own mode.
+	 */
 	mode: ViewerMode;
 	/** True while the initial parse of `content` is in progress. */
 	loading: boolean;
@@ -76,4 +135,10 @@ export interface ViewerBuildingBlocksResult {
 	error: string | null;
 	/** Current autosave-to-localStorage recovery status. */
 	autosaveStatus: AutosaveStatus;
+	/**
+	 * Operations and state for finishing picker, dialog and layout workflows from host-rendered
+	 * controls: image / media insertion, hyperlink, SmartArt and equation editing, Find / Replace
+	 * and layout apply / reset, plus which actions can run now. See `docs/react/hooks.md`.
+	 */
+	actions: ViewerBuildingBlockActions;
 }

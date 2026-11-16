@@ -15,21 +15,48 @@ Omitting these options preserves the existing fit policy.
 `fitPadding` is an unscaled CSS-pixel allowance **on each side**: `8` reserves
 16 pixels in each axis; `{ horizontal: 4, vertical: 16 }` reserves 8 pixels
 horizontally and 32 vertically. `maxFitScale` is a positive fit-factor ceiling;
-`null` means unlimited. Invalid values fall back to the binding's defaults.
+`null` means unlimited. Invalid values fall back to the shared defaults.
+
+All five bindings use the same defaults, which are the React editor's: a desktop
+viewport (768 px or wider) reserves 4 / 16 px per side and caps the fit scale at 1.
+A viewport narrower than 768 px reserves 12 / 12 px per side instead.
 
 | Binding | Per-side horizontal / vertical padding | Maximum fit scale |
 | ------- | -------------------------------------- | ----------------- |
-| React   | 4 / 16 px                              | 1                 |
-| Vue     | 8 / 16 px                              | 1                 |
-| Angular | 8 / 16 px                              | 1                 |
-| Svelte  | 24 / 24 px                             | Unlimited         |
-| Vanilla | 16 / 16 px                             | Unlimited         |
+| React   | 4 / 16 px (12 / 12 px below 768 px)    | 1                 |
+| Vue     | 4 / 16 px (12 / 12 px below 768 px)    | 1                 |
+| Angular | 4 / 16 px (12 / 12 px below 768 px)    | 1                 |
+| Svelte  | 4 / 16 px (12 / 12 px below 768 px)    | 1                 |
+| Vanilla | 4 / 16 px (12 / 12 px below 768 px)    | 1                 |
 
 Each UI package exports the `ViewportFitOptions` and `ViewportFitPadding` types.
 These options affect ordinary viewer fitting, not authored slide dimensions,
 saved content, thumbnails, export, presentation mode, or the separate user zoom
-setting. Vanilla preserves its existing mobile CSS padding when `fitPadding`
-is omitted.
+setting. Vanilla always writes the resolved padding inline on its viewport, so a
+stylesheet padding rule on that element has no effect; use `fitPadding` instead.
+
+## Measurement
+
+Every binding fits to the viewport's fractional client size (its padding box
+without scrollbars, at the precision the browser lays it out), not the
+whole-pixel `clientWidth` and `clientHeight`. A viewport laid out at 801.5px is
+fitted to 801.5px, so with `fitPadding: 0` the slide fills it exactly and never
+extends past it. Borders are taken out at their used width, which keeps its
+fraction under browser zoom (a `1px` border is 1.111px at 90%).
+
+The exact size is used only in a plain context, where nothing transforms or
+CSS-zooms the viewport (browser zoom is fine). There the viewport's bounding
+rect matches its computed `width` and `height`, which are in its own CSS
+pixels. When a CSS `transform` or `zoom` on the viewport or an ancestor scales
+the rect, the slide is also laid out and painted through that scale, and its own
+layout rounding can move its edges by a fraction of a pixel. The fit then
+reserves one pixel instead, so the slide stays inside the viewport and the
+viewport does not scroll. One pixel is also reserved while the viewport shows a
+scrollbar, since the exact size cannot be recovered then.
+
+Later changes are picked up by `ResizeObserver`s on both the content box and the
+border box of the viewport, so a change to the viewport's padding alone also
+refits the slide.
 
 ## Configure your viewer
 

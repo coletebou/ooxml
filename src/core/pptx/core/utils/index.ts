@@ -254,6 +254,8 @@ export {
 export {
 	addSmartArtNode,
 	addSmartArtNodeAsChild,
+	addSmartArtNodeBefore,
+	addSmartArtNodeAbove,
 	removeSmartArtNode,
 	updateSmartArtNodeText,
 	reorderSmartArtNode,
@@ -380,6 +382,12 @@ export { normalizePartPath, resolveReferenceUriToPart } from './signature-refere
 export { computeDigestBase64 as computeDigestBase64WebCrypto } from './signature-digest';
 
 export { decodeXmlEntities, encodeXmlAttributeValue, encodeXmlTextValue } from './xml-entities';
+
+export {
+	inspectSignaturesFromBuffer,
+	parseSignaturesFromBuffer,
+	type PackageSignatureInfo,
+} from './signature-package-list';
 
 export {
 	preservesSpreadsheetXmlWhitespace,
@@ -560,6 +568,7 @@ export {
 	THEME_EFFECT_SCHEMES,
 	findThemeEffectScheme,
 	findThemeEffectSchemeByName,
+	formatSchemeKey,
 	type PptxThemeEffectScheme,
 } from './theme-effect-schemes';
 
@@ -605,6 +614,13 @@ export {
 } from './custom-show-utils';
 
 export {
+	normalizeCustomShowIds,
+	customShowActionId,
+	mapCustomShowActions,
+} from './custom-show-actions';
+export type { CustomShowActionRewrite } from './custom-show-actions';
+
+export {
 	resolveTableCellStyle,
 	mergeStyleParts,
 	type ParsedTableStylePart,
@@ -630,6 +646,7 @@ export {
 } from './animation-preset-catalog';
 
 export { regenerateSmartArtDrawingShapes, relayoutSmartArt } from './smartart-relayout';
+export { reflowSmartArtPictures } from './smartart-picture-reflow';
 export {
 	applySmartArtQuickStyle3d,
 	isDefaultSmartArtLabelScene,
@@ -733,3 +750,8 @@ export {
 } from './auto-number-scripts';
 
 export * from './chart-grid-operations';
+export * from './chart-data-sheet';
+
+/** Moves a comment's @-mention records onto its edited text (the save uses it too). */
+export { rebaseCommentMentions } from './modern-comment-mentions';
+export { chartModelLabelPositions } from './chart-label-positions';

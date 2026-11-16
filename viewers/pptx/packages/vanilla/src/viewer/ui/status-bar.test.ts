@@ -1,3 +1,5 @@
+import { createSaveProgressController } from 'ooxml-ui/pptx';
+import type { DocumentSaveMeta } from 'ooxml-ui/pptx';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createTranslator } from '../i18n';
@@ -92,16 +94,18 @@ describe('createStatusBar', () => {
 		expect(button('pptx.statusBar.slideShow').getAttribute('aria-pressed')).toBe('true');
 	});
 
-	it('shows pushed autosave labels, then falls back to the dirty/saved text', () => {
+	it('shows the autosave state, then falls back to the dirty/saved text', () => {
 		const { bar, root } = open();
 		const save = root.querySelector('[data-item="save"]')!;
 		expect(save.textContent).toBe(t('pptx.statusBar.allSaved'));
 		bar.setDirty(true);
 		expect(save.textContent).toBe(t('pptx.statusBar.unsavedChanges'));
-		bar.setSaveStatus('Saving...', 'saving');
-		expect(save.textContent).toBe('Saving...');
+		bar.setAutosave({ state: 'saving' });
+		expect(save.textContent).toBe(t('pptx.autosave.saving'));
 		expect(save.classList.contains('saving')).toBeTruthy();
-		bar.setSaveStatus('', 'idle');
+		bar.setAutosave({ state: 'saved', timestamp: Date.now() - 3 * 60_000 });
+		expect(save.textContent).toBe('Saved 3 min ago');
+		bar.setAutosave({ state: 'idle' });
 		expect(save.textContent).toBe(t('pptx.statusBar.unsavedChanges'));
 	});
 
@@ -110,5 +114,26 @@ describe('createStatusBar', () => {
 		const bar = createStatusBar(document, t, makeHandlers(), undefined, collab);
 		expect(bar.el.contains(collab)).toBeTruthy();
 		expect(collab.slot).toBe('collaboration');
+	});
+});
+
+describe('createStatusBar save progress', () => {
+	it('shows each step of a save to the host storage, then All saved again', async () => {
+		const { bar, root } = open();
+		const controller = createSaveProgressController();
+		controller.subscribe(() => bar.setSaveProgress(controller.getSnapshot()));
+		const save = () => root.querySelector('[data-item="save"]')!.textContent;
+		const seen: (string | null)[] = [];
+		const storage = controller.wrap({
+			async save(_bytes: Uint8Array, meta: DocumentSaveMeta) {
+				meta.onProgress?.({ phase: 'uploading', loaded: 45, total: 100 });
+				seen.push(save());
+				meta.onProgress?.({ phase: 'merging' });
+				seen.push(save());
+			},
+		});
+		await storage.save(new Uint8Array(), { fileName: 'a.pptx', mimeType: 'x', reason: 'save' });
+		expect(seen).toStrictEqual(['Saving… 45%', 'Combining edits…']);
+		expect(save()).toBe('All saved');
 	});
 });

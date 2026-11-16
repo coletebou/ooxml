@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
 	commitGalleryResult,
+	commitsThroughDeckStyle,
 	createGalleryPreviewController,
 	previewGalleryResult,
 } from './deck-style';
 import type { DeckStyleHandler, DeckStyleState } from './deck-style';
+import { settleThemeWrites } from './theme-history';
 
 const OLD: PptxThemeColorScheme = {
 	dk1: '#000000',
@@ -197,6 +199,42 @@ describe('commitGalleryResult', () => {
 		expect(handler.commitMasterBackgroundStyle).toHaveBeenCalledWith(3);
 	});
 
+	it('writes only the font scheme for a fonts pick, keeping the colours and the name', async () => {
+		// `applyTheme` would also rewrite the colour scheme (a `sysClr` slot becomes `srgbClr`).
+		const handler = fakeHandler();
+		const fontScheme = { majorFont: { latin: 'Arial' }, minorFont: { latin: 'Arial' } };
+		const out = (await commitGalleryResult(
+			{ kind: 'themeFontScheme', fontScheme, name: 'Arial' },
+			state(),
+			handler,
+			target,
+		))!;
+		expect(handler.updateThemeFontScheme).toHaveBeenCalledExactlyOnceWith(fontScheme);
+		expect(handler.updateThemeColorScheme).not.toHaveBeenCalled();
+		expect(handler.applyTheme).not.toHaveBeenCalled();
+		expect(out.theme).toStrictEqual({ name: 'T', colorScheme: OLD, fontScheme });
+	});
+
+	it('queues its theme part writes, so a save asked for mid-pick waits for them', async () => {
+		const handler = fakeHandler();
+		const order: string[] = [];
+		handler.applyTheme = vi.fn(async () => {
+			await new Promise<void>((done) => {
+				setTimeout(done, 30);
+			});
+			order.push('theme written');
+		});
+		const commit = commitGalleryResult(
+			{ kind: 'theme', colorScheme: NEW, fontScheme: {}, name: 'New' },
+			state(),
+			handler,
+			target,
+		);
+		await settleThemeWrites(handler).then(() => order.push('save'));
+		await commit;
+		expect(order).toStrictEqual(['theme written', 'save']);
+	});
+
 	it('does nothing without a handler', async () => {
 		expect(
 			await commitGalleryResult(
@@ -206,6 +244,23 @@ describe('commitGalleryResult', () => {
 				target,
 			),
 		).toBeUndefined();
+	});
+});
+
+describe('commitsThroughDeckStyle', () => {
+	it('takes every Design gallery pick that changes the theme or the backgrounds', () => {
+		const picks = [
+			{ kind: 'theme', colorScheme: NEW, fontScheme: {}, name: 'New' },
+			{ kind: 'themeColorScheme', colorScheme: NEW, name: 'New' },
+			{ kind: 'themeFontScheme', fontScheme: {}, name: 'New' },
+			{ kind: 'themeEffects', schemeId: 'glossy', name: 'Glossy' },
+			{ kind: 'backgroundStyle', styleIndex: 3, scope: 'all' },
+			{ kind: 'sequence', steps: [] },
+		] as const;
+		for (const pick of picks) {
+			expect(commitsThroughDeckStyle(pick), pick.kind).toBe(true);
+		}
+		expect(commitsThroughDeckStyle({ kind: 'element', elementId: 'a', patch: {} })).toBe(false);
 	});
 });
 

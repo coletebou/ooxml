@@ -1,6 +1,6 @@
 # Limites
 
-OpenTeams est une implémentation précoce. Cette page énumère ce qu’il ne fait pas, afin que vous
+OpenTeams est en bêta. Cette page énumère ce qu’il ne fait pas, afin que vous
 puissiez décider avant de vous y fier.
 
 ## Pas Microsoft Teams
@@ -26,16 +26,18 @@ Il n’implémente **pas** l’enregistrement, le flou d’arrière-plan, les so
 
 Word s’affiche en lecture seule ; Excel permet l’édition locale et l’enregistrement de nouvelles
 copies dans le canal lorsque le stockage est configuré ; Visio utilise sa visionneuse existante.
-Il n’y a ni co-édition, ni écrasement, ni réenregistrement versionné. PowerPoint nécessite une page
-de visionneuse intégrée configurée par l’hôte. Les intégrations manquantes sont signalées dans le
+Il n’y a ni co-édition, ni écrasement, ni réenregistrement versionné. PowerPoint s’ouvre dans un
+aperçu natif ; un hôte peut aussi fournir une page de visionneuse intégrée. Les intégrations manquantes sont signalées dans le
 volet. La lecture de texte est limitée à 2 Mio et celle des fichiers Office natifs à 32 Mio. L’interface existe en anglais, allemand, espagnol, français et chinois simplifié (propriété `locale`) ; le texte écrit par les personnes n’est jamais traduit.
 
 Les vues Fichiers permettent l’envoi direct, la création d’un classeur Excel vierge et la recherche
 dans les métadonnées lorsque le stockage est configuré. Les envois affichent un état d’occupation et
-permettent de réessayer, sans progression en octets ni annulation. Des lots en échec peuvent laisser
-des objets de stockage non référencés ; le serveur de référence n’a pas de contrat de nettoyage pour
-ces objets. Les dossiers, l’indexation du contenu des documents, l’historique des versions de
-fichiers et les permissions de fichiers authentifiées ne sont pas implémentés.
+permettent d’annuler et de réessayer, sans progression en octets. Un lot en échec peut laisser des fichiers envoyés avant l'échec que aucun message ne référence ; le serveur de
+référence supprime ses envois partiels et laisse la personne qui a envoyé le fichier ou un modérateur supprimer le reste
+(`DELETE /files/<scope>/<name>`), mais ne le fait pas de lui-même. Le serveur de référence limite les fichiers des chats
+privés à leurs membres et compte le stockage par espace de travail ; les fichiers de canal sont lisibles par tout
+utilisateur connecté du serveur. Les dossiers, l'indexation du contenu des documents et l'historique des versions de
+fichiers ne sont pas implémentés.
 
 Markdown prend en charge les titres, les puces, les citations, le code délimité, l’emphase de base,
 les liens web, les listes de tâches plates, les tableaux de premier niveau et les liens web relatifs au fichier. Il n’implémente pas CommonMark/GFM complet,
@@ -57,7 +59,7 @@ une autorisation côté serveur pour devenir applicables.
   déchiffrer).
 - **L’autorisation est l’affaire du serveur.** Les contrôles d’auteur et de rôle s’exécutent dans
   le client ; un client hostile peut écrire tout ce que le serveur accepte.
-- **Les comptes sont facultatifs.** Le serveur de référence peut signer des sessions pour des utilisateurs configurés (ou votre fonction `authenticate`) et prendre l’identifiant d’utilisateur dans la session, et `authorizeSync` peut décider de l’accès par salle. Sans eux, son jeton est un secret unique partagé, conservé dans le navigateur, et non une authentification par utilisateur, et les identifiants d’utilisateur sont des déclarations. Il n’y a ni SSO, ni réinitialisation de mot de passe, ni contrôle d’accès par équipe et par canal. Voir [ce que le serveur de référence ne fait pas](/fr/server#ce-que-le-serveur-de-reference-ne-fait-pas).
+- **L’authentification est obligatoire par défaut.** Le serveur de référence refuse de démarrer sans comptes, sans fonction `authenticate` ni `authorizeSync` ; `--insecure-dev` active un mode de développement ouvert, avec un avertissement. Avec des comptes, il signe des sessions pour des utilisateurs configurés (ou votre fonction `authenticate`) et prend l’identifiant d’utilisateur dans la session, et `authorizeSync` peut décider de l’accès par salle. Un `TEAMS_TOKEN` partagé seul est un secret unique conservé dans le navigateur, non une authentification par utilisateur, et les identifiants d’utilisateur sont des déclarations. Il n’y a ni SSO, ni réinitialisation de mot de passe, ni contrôle d’accès par équipe et par canal. Voir [ce que le serveur de référence ne fait pas](/fr/server#ce-que-le-serveur-de-reference-ne-fait-pas).
 - **La présence est indicative et non authentifiée**, comme toute awareness Yjs : un client peut
   revendiquer n’importe quel nom.
 - Tout ce qu’envoie un pair est revalidé à la relecture et affiché comme du texte, jamais comme du
@@ -68,8 +70,8 @@ une autorisation côté serveur pour devenir applicables.
 - **Les appels en maillage** connectent chaque participant à tous les autres. Cela ne nécessite
   aucun serveur média et convient à une poignée de personnes (le plafond par défaut est de 12),
   pas à un webinaire.
-- **L’historique grossit.** Le serveur de référence conserve un instantané par salle et ne le
-  compacte jamais.
+- **L’historique grossit.** Le serveur de référence conserve un instantané par salle et le
+  compacte au chargement de la salle et toutes les 6 heures par défaut (`TEAMS_COMPACT_INTERVAL_MIN`).
 - **Un seul processus serveur.** Le serveur de référence garde les salles en mémoire et ne passe
   pas à l’échelle horizontalement.
 

@@ -17,7 +17,7 @@
 import { DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { TranslateService } from '@ngx-translate/core';
 import {
-	applyAutoCorrect,
+	applyAutoCorrectToEdit,
 	clearAutosaveSnapshots,
 	createViewerOptionsStore,
 	playFeedbackSound,
@@ -26,14 +26,17 @@ import {
 	pruneExpiredAutosaveSnapshots,
 	resolveHistoryDepth,
 	resolveImageResolutionScale,
+	resolvePdfExportSettings,
 	resolveOptionRootClasses,
 	resolveScreenTip,
 	shouldClearAutosaveCacheOnClose,
+	confirmExternalHyperlinkDialog,
 	shouldConfirmExternalHyperlink,
 	shouldDiscardAutosaveOnSuccessfulSave,
 	shouldOpenInProtectedView,
 } from 'ooxml-ui/pptx';
 import type {
+	PdfExportSettings,
 	DocumentStorage,
 	PrintSettings,
 	ToolbarTabId,
@@ -143,6 +146,11 @@ export class ViewerOptionsService {
 		return resolveImageResolutionScale(this.options());
 	}
 
+	/** Options > Advanced > Save as PDF (vector pages or pictures, hidden slides). */
+	pdfExportSettings(): PdfExportSettings {
+		return resolvePdfExportSettings(this.options());
+	}
+
 	/** Print-dialog seed; `undefined` keeps the dialog's own recents. */
 	printDefaults(): Partial<PrintSettings> | undefined {
 		return resolveDefaultPrintSettings(this.options());
@@ -158,9 +166,9 @@ export class ViewerOptionsService {
 		return resolveScreenTip(this.options(), label, description, shortcut);
 	}
 
-	/** Run the enabled AutoCorrect rules over a committed run of text. */
-	autoCorrect(text: string): string {
-		return applyAutoCorrect(text, this.options().proofing);
+	/** Run the enabled AutoCorrect rules over what was typed since previous. */
+	autoCorrect(text: string, previous?: string): string {
+		return applyAutoCorrectToEdit(text, previous, this.options().proofing);
 	}
 
 	/** Play the Accessibility "feedback with sound" cue for a completed action. */
@@ -177,17 +185,16 @@ export class ViewerOptionsService {
 	 * Gate an external hyperlink activation. Returns `true` when navigation may
 	 * proceed (no confirmation required, or the user confirmed the prompt).
 	 */
-	confirmExternalHyperlink(href: string): boolean {
+	confirmExternalHyperlink(href: string): boolean | Promise<boolean> {
 		if (!shouldConfirmExternalHyperlink(this.options(), href)) {
 			return true;
 		}
-		if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
+		if (typeof window === 'undefined') {
 			return true;
 		}
-		const label =
-			this.translate?.instant('pptx.options.trust.confirmHyperlinks') ??
-			'Confirm before opening external hyperlinks';
-		return window.confirm(`${label}\n\n${href}`);
+		return confirmExternalHyperlinkDialog(href, {
+			t: (key) => this.translate?.instant(key) ?? key,
+		});
 	}
 
 	/**

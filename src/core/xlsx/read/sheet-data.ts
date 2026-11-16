@@ -56,6 +56,7 @@ function readValue(ctx: CellContext, c: XmlElement, cell: Cell): void {
 			}
 			cell.value = entry.text;
 			if (entry.runs) cell.richText = entry.runs.map((run) => ({ ...run }));
+			if (entry.phonetic) cell.phonetic = structuredClone(entry.phonetic);
 			return;
 		}
 		case 'inlineStr': {
@@ -64,6 +65,7 @@ function readValue(ctx: CellContext, c: XmlElement, cell: Cell): void {
 			const entry = parseRichString(is, ctx.palette);
 			cell.value = entry.text;
 			if (entry.runs) cell.richText = entry.runs;
+			if (entry.phonetic) cell.phonetic = entry.phonetic;
 			return;
 		}
 		case 'str':
@@ -166,16 +168,35 @@ function readRowInfo(ctx: CellContext, rowEl: XmlElement): RowInfo | undefined {
 	const outline = numAttr(rowEl, 'outlineLevel');
 	if (outline) info.outlineLevel = outline;
 	if (boolAttr(rowEl, 'collapsed')) info.collapsed = true;
+	if (boolAttr(rowEl, 'thickTop')) info.thickTop = true;
+	if (boolAttr(rowEl, 'thickBot')) info.thickBot = true;
 	return Object.keys(info).length ? info : undefined;
 }
 
-/** Reads `<sheetData>` into the sheet's cell map and row info. */
-export function readSheetData(ctx: CellContext, sheetData: XmlElement, sheet: Worksheet): void {
+/**
+ * Reads the children of `<sheetData>` (`elements(sheetData)`, or the rows of a split part) into
+ * the sheet's cell map and row info.
+ */
+export function readSheetData(
+	ctx: CellContext,
+	rows: Iterable<XmlElement>,
+	sheet: Worksheet,
+): void {
+	const reader = sheetDataReader(ctx, sheet);
+	for (const rowEl of rows) reader.read(rowEl);
+	reader.done();
+}
+
+/**
+ * Reads `<sheetData>` children into `sheet` one at a time, carrying shared formulas and the row
+ * position from one to the next; `done` marks the cells dynamic arrays spill into.
+ */
+export function sheetDataReader(ctx: CellContext, sheet: Worksheet) {
 	const masters = new Map<string, SharedMaster>();
 	const anchors: DynamicAnchor[] = [];
 	let rowIndex = -1;
-	for (const rowEl of elements(sheetData)) {
-		if (rowEl.localName !== 'row') continue;
+	const read = (rowEl: XmlElement): void => {
+		if (rowEl.localName !== 'row') return;
 		const r = numAttr(rowEl, 'r');
 		rowIndex = r !== undefined ? r - 1 : rowIndex + 1;
 		const info = readRowInfo(ctx, rowEl);
@@ -216,8 +237,8 @@ export function readSheetData(ctx: CellContext, sheetData: XmlElement, sheet: Wo
 			}
 			cells.set(colIndex, cell);
 		}
-	}
-	markSpills(sheet, anchors);
+	};
+	return { read, done: () => markSpills(sheet, anchors) };
 }
 
 /**

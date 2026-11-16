@@ -7,6 +7,40 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.1.2](https://github.com/ChristopherVR/ooxml/releases/tag/@christophervr/xlsx-core@1.1.2) - 2026-11-13
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/@christophervr/xlsx-core@1.1.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/@christophervr/xlsx-core@1.1.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/@christophervr/xlsx-core@1.0.0) - 2026-10-29
+
+### Features
+
+- **xlsx:** Commit xlsx-core and xlsx-viewer-mcp to a stable 1.0 api ([e458ecf](https://github.com/ChristopherVR/ooxml/commit/e458ecf368421096ccffb366cc1e0ba17f438b77))
+
+## [0.3.1](https://github.com/ChristopherVR/ooxml/releases/tag/@christophervr/xlsx-core@0.3.1) - 2026-10-23
+
+### Other
+
+- Word and Excel docs for wave 6 (docs6-4) ([da0f3e8](https://github.com/ChristopherVR/ooxml/commit/da0f3e83c59b8ff55104bd852cf46fa052c587b5))
+
+### Documentation
+
+- Describe wave 6 chart and smartart editing in word and excel ([d212908](https://github.com/ChristopherVR/ooxml/commit/d212908f59be7f5da51ce5347b23a665e4cedb08))
+
 ## [0.3.0](https://github.com/ChristopherVR/ooxml/releases/tag/@christophervr/xlsx-core@0.3.0) - 2026-10-21
 
 ### Features

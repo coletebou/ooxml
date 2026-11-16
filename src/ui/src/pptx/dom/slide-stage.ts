@@ -15,19 +15,24 @@ import type {
 	ChartPartRef,
 	ElementAnimationState,
 	FieldSubstitutionContext,
+	SlideFindHighlights,
 	ZoomNavigationTarget,
 } from '../index';
 import {
 	actionAffordanceLabels,
 	applyElementActionAffordances,
+	guardElementRender,
 	applyRenderedElementAccessibility,
 	deviceStrokeStageStyle,
 	elementHitTargetStyle,
 	getSlideBackgroundStyle,
 	isElementRendered,
 	isTemplateElementId,
+	resolveStageEdgeBleeds,
 	shouldRenderHitTarget,
+	stripElementIdMarkers,
 } from '../index';
+import type { ElementRenderErrorHandler, ElementRenderFailures } from '../index';
 
 import type { Translator } from '../i18n/translator';
 import { buildActiveXControlsOverlay } from './activex-controls-overlay';
@@ -51,6 +56,8 @@ export interface SlideStageOptions {
 	/** Optional parsed table-style definitions for theme-aware table rendering. */
 	tableStyleMap?: ParsedTableStyleMap;
 	fieldContext?: FieldSubstitutionContext;
+	/** The Find bar's matches, marked in the elements' text (`findTextHighlightsByElement`). */
+	findHighlights?: SlideFindHighlights;
 	registry: ElementRendererRegistry;
 	t: Translator;
 	/** Scale applied via CSS transform (default 1). */
@@ -117,6 +124,14 @@ export interface SlideStageOptions {
 	 * test hooks the React/Vue/Angular bindings also emit. Defaults to `false`.
 	 */
 	interactive?: boolean;
+	/**
+	 * Keep the `data-element-id` marker on every rendered element. Defaults to
+	 * `true`. Pass `false` for a static stage (thumbnails, previews, sorter
+	 * tiles), whose copies would otherwise shadow the editing canvas in
+	 * `[data-element-id]` queries; `stageKeepsElementIds` decides it from the
+	 * stage's role. The markers are removed once the stage is assembled.
+	 */
+	exposeElementIds?: boolean;
 	/** Whether inherited layout/master nodes participate in editing. */
 	templateEditing?: boolean;
 	/** Per-element native-animation playback state (presentation mode only). */
@@ -127,6 +142,16 @@ export interface SlideStageOptions {
 	 * build, `p:animClr` fill / stroke) in place without rebuilding the stage.
 	 */
 	captureContext?: (context: ElementRenderContext) => void;
+	/**
+	 * Reports an element omitted because its renderer threw (`console.error` when absent). The
+	 * failed element renders nothing; its neighbours and the stage still render.
+	 */
+	onElementRenderError?: ElementRenderErrorHandler;
+	/**
+	 * Failures remembered across rebuilds of the same surface, so an unchanged failed element is
+	 * neither retried nor reported again on every repaint (`createElementRenderFailures`).
+	 */
+	elementRenderFailures?: ElementRenderFailures;
 }
 
 /**
@@ -183,6 +208,7 @@ export function renderSlideStage(options: SlideStageOptions): HTMLElement {
 		formatScheme: options.formatScheme,
 		tableStyleMap: options.tableStyleMap,
 		fieldContext: options.fieldContext,
+		findHighlights: options.findHighlights,
 		presentationStates: options.presentationStates,
 		t,
 		smartArt3D: options.smartArt3D ?? false,
@@ -201,6 +227,7 @@ export function renderSlideStage(options: SlideStageOptions): HTMLElement {
 		chartPartSelection: options.chartPartSelection,
 		onChartPartSelect: options.onChartPartSelect,
 		selectedElementIds: options.selectedElementIds,
+		edgeBleeds: resolveStageEdgeBleeds(undefined, slide, options.selectedElementIds),
 		registry,
 		renderElement(element: PptxElement, zIndex: number) {
 			// Hidden via the Selection Pane: build no node at all, exactly as
@@ -212,7 +239,23 @@ export function renderSlideStage(options: SlideStageOptions): HTMLElement {
 			if (!isElementRendered(element)) {
 				return null;
 			}
-			const node = registry.resolve(element.type)(element, zIndex, context);
+			// One element's failure omits only that element (group children included): the
+			// stage, its neighbours and the canvas stay.
+			const before = renderedNodes?.length ?? 0;
+			const node = guardElementRender(
+				element,
+				() => registry.resolve(element.type)(element, zIndex, context),
+				{
+					slideId: slide.id,
+					onElementRenderError: options.onElementRenderError,
+					failures: options.elementRenderFailures,
+					onFailure: () => {
+						for (const orphan of renderedNodes?.splice(before) ?? []) {
+							disposeChartPixelSubscriptions(orphan);
+						}
+					},
+				},
+			);
 			if (node) renderedNodes?.push(node);
 			if (node && interactive && 'setAttribute' in node) {
 				// The element marker means "rendered slide element carrying the
@@ -305,6 +348,11 @@ export function renderSlideStage(options: SlideStageOptions): HTMLElement {
 		// nothing).
 		if (slide.activeXControls && slide.activeXControls.length > 0) {
 			stage.appendChild(buildActiveXControlsOverlay(doc, slide.activeXControls, canvasSize));
+		}
+
+		// After assembly: the group renderer indexes its own subtree by these ids.
+		if (options.exposeElementIds === false) {
+			stripElementIdMarkers(stage);
 		}
 
 		return stage;

@@ -2,8 +2,14 @@ import type { Paragraph } from './model';
 import { first, getW, type XmlElement } from './xml';
 import { parseTabStops } from './tab-stops';
 import { parseJustification } from './paragraph-alignment';
-import { onOffElement, parseInteger, parseSignedTwips, parseTwips } from './simple-types';
-import { PAGINATION_KEYS, parseOutlineLevel } from './paragraph-styles';
+import {
+	onOffElement,
+	parseInteger,
+	parseOnOff,
+	parseSignedTwips,
+	parseTwips,
+} from './simple-types';
+import { EAST_ASIAN_TYPOGRAPHY_KEYS, PAGINATION_KEYS, parseOutlineLevel } from './paragraph-styles';
 import { parseParagraphBorders, parseShadingFill } from './table-borders';
 
 export type DirectParagraphProperties = Omit<
@@ -34,7 +40,7 @@ export function parseDirectParagraphProperties(
 	if (style) paragraph.style = style;
 	const pageBreakBefore = onOffElement(first(props, 'pageBreakBefore'));
 	if (pageBreakBefore !== undefined) paragraph.pageBreakBefore = pageBreakBefore;
-	for (const key of PAGINATION_KEYS) {
+	for (const key of [...PAGINATION_KEYS, ...EAST_ASIAN_TYPOGRAPHY_KEYS]) {
 		const value = onOffElement(first(props, key));
 		if (value !== undefined) paragraph[key] = value;
 	}
@@ -64,6 +70,10 @@ export function parseDirectParagraphProperties(
 	const line = signedTwipValue(getW(spacing, 'line'));
 	if (before !== undefined) paragraph.spacingBeforeTwips = before;
 	if (after !== undefined) paragraph.spacingAfterTwips = after;
+	const beforeAuto = parseOnOff(getW(spacing, 'beforeAutospacing'));
+	const afterAuto = parseOnOff(getW(spacing, 'afterAutospacing'));
+	if (beforeAuto !== undefined) paragraph.spacingBeforeAuto = beforeAuto;
+	if (afterAuto !== undefined) paragraph.spacingAfterAuto = afterAuto;
 	if (line !== undefined) {
 		paragraph.lineSpacingTwips = line;
 	}

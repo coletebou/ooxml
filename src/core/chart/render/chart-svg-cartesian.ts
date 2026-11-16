@@ -1,3 +1,8 @@
+import { chartTableMetrics } from './chart-svg-data-table';
+import { chartDateAxis } from './chart-svg-date-axis';
+import { chartLineSvg } from './chart-svg-line';
+import { chartPlotRect } from './chart-svg-plot-layout';
+import type { ChartFrameSize } from '../manual-layout';
 import { chartMarkerRadius, chartSeriesMarkerSvg } from './chart-svg-markers';
 import { axisTickText, axisGridlines, axisLine } from './chart-svg-axes';
 import { chartAxisRatio, chartAxisLabels } from './chart-view-axes';
@@ -8,6 +13,7 @@ import { chartAreaRect, chartTextAttributes } from './chart-svg-appearance';
 import { pointLabels, type PointMark } from './chart-svg-labels';
 
 export interface Frame {
+	order?: number[];
 	plot: Rect;
 	/** Value to pixel along the value axis. */
 	value: (v: number) => number;
@@ -19,9 +25,22 @@ export interface Frame {
 }
 
 /** Axes, gridlines and labels; returns the plot frame for the series painters. */
-export function cartesianAxes(model: ChartViewModel, area: Rect, out: string[]): Frame | undefined {
+export function cartesianAxes(
+	model: ChartViewModel,
+	area: Rect,
+	out: string[],
+	size?: ChartFrameSize,
+): Frame | undefined {
 	const scale = model.valueAxis;
 	if (!scale) return undefined;
+	const table = chartTableMetrics(model);
+	if (table)
+		area = {
+			...area,
+			x: Math.max(area.x, table.keyW + 8),
+			w: Math.max(1, area.w - Math.max(0, table.keyW + 8 - area.x)),
+			h: Math.max(1, area.h - table.height),
+		};
 	const labels = scale.ticks.map((t) => axisTickText(t, model.axes?.value, scale.percent));
 	const valueAttrs = chartTextAttributes(model, 'valueAxis')!;
 	const categoryAttrs = chartTextAttributes(model, 'categoryAxis')!;
@@ -30,6 +49,7 @@ export function cartesianAxes(model: ChartViewModel, area: Rect, out: string[]):
 	const valueLabels =
 		chartAxisLabels(model.axes?.value) && model.appearance?.valueAxis?.labelsVisible !== false;
 	const categoryLabels =
+		!table &&
 		chartAxisLabels(model.axes?.category) &&
 		model.appearance?.categoryAxis?.labelsVisible !== false;
 	const labelW = valueLabels ? Math.max(...labels.map((l) => textWidth(l, valueSize)), 8) + 6 : 4;
@@ -47,7 +67,7 @@ export function cartesianAxes(model: ChartViewModel, area: Rect, out: string[]):
 			? Math.max(...secondLabels.map((l) => textWidth(l, valueSize)), 8) + 8
 			: 4
 		: 0;
-	const plot: Rect = horizontal
+	const auto: Rect = horizontal
 		? {
 				x: area.x + catW,
 				y: area.y,
@@ -60,15 +80,20 @@ export function cartesianAxes(model: ChartViewModel, area: Rect, out: string[]):
 				w: Math.max(1, area.w - labelW - 4 - secondW),
 				h: Math.max(1, area.h - Math.max(20, categorySize * 1.5)),
 			};
+	const plot = chartPlotRect(model, auto, area, size);
 	const value = horizontal
 		? (v: number): number => plot.x + chartAxisRatio(v, scale, model.axes?.value) * plot.w
 		: (v: number): number => plot.y + plot.h - chartAxisRatio(v, scale, model.axes?.value) * plot.h;
-	const bandSize = (horizontal ? plot.h : plot.w) / cats;
+	const dateMarkup: string[] = [];
+	const dates = chartDateAxis(model, plot, dateMarkup);
+	const bandSize = dates?.bandSize ?? (horizontal ? plot.h : plot.w) / cats;
 	const index = (i: number): number =>
 		model.axes?.category?.range.reverseOrder ? cats - 1 - i : i;
-	const band = horizontal
-		? (i: number): number => plot.y + plot.h - bandSize * (index(i) + 0.5) // first category at the bottom, as Excel
-		: (i: number): number => plot.x + bandSize * (index(i) + 0.5);
+	const band =
+		dates?.band ??
+		(horizontal
+			? (i: number): number => plot.y + plot.h - bandSize * (index(i) + 0.5) // first category at the bottom, as Excel
+			: (i: number): number => plot.x + bandSize * (index(i) + 0.5));
 	out.push(chartAreaRect(model, 'plotArea', plot));
 	out.push(axisGridlines(model, model.axes?.value, scale.ticks, value, plot, horizontal));
 	if (model.axes?.category?.source.majorGridlines || model.axes?.category?.source.minorGridlines)
@@ -112,12 +137,13 @@ export function cartesianAxes(model: ChartViewModel, area: Rect, out: string[]):
 		out.push(
 			axisLine(model, model.axes?.category, 'categoryAxis', plot.x, zero, plot.x + plot.w, zero),
 		);
+	out.push(...dateMarkup);
 	const step = Math.max(
 		1,
 		Math.ceil(cats / Math.max(1, Math.floor((horizontal ? plot.h : plot.w) / 14))),
 	);
 	model.categories.forEach((c, i) => {
-		if (!categoryLabels || i % step !== 0) return;
+		if (dates || !categoryLabels || i % step !== 0) return;
 		const p = band(i);
 		if (horizontal)
 			out.push(
@@ -134,7 +160,7 @@ export function cartesianAxes(model: ChartViewModel, area: Rect, out: string[]):
 				}),
 			);
 	});
-	const frame: Frame = { plot, value, band, bandSize };
+	const frame: Frame = { plot, value, band, bandSize, ...(dates ? { order: dates.order } : {}) };
 	if (second) {
 		frame.secondary = (v) =>
 			plot.y + plot.h - chartAxisRatio(v, second, model.axes?.secondary) * plot.h;
@@ -194,7 +220,7 @@ export function linesAndAreas(model: ChartViewModel, frame: Frame, out: string[]
 	model.series.forEach((s, si) => {
 		const points: [number, number][] = [];
 		const lower: [number, number][] = [];
-		model.categories.forEach((_, i) => {
+		(frame.order ?? model.categories.map((_, i) => i)).forEach((i) => {
 			const v = values[si]?.[i] ?? null;
 			if (v === null && !area) {
 				points.push([NaN, NaN]);
@@ -229,21 +255,19 @@ export function linesAndAreas(model: ChartViewModel, frame: Frame, out: string[]
 			out.push(`<polygon points="${poly}" fill="${color}" fill-opacity="0.85"${filter}/>`);
 			continue;
 		}
-		let segment: string[] = [];
+		let segment: { x: number; y: number }[] = [];
 		const flush = (): void => {
-			if (segment.length > 1)
-				out.push(
-					`<polyline points="${segment.join(' ')}" fill="none" stroke="${color}" stroke-width="2.25" stroke-linejoin="round"${filter}/>`,
-				);
+			out.push(chartLineSvg(segment, series));
 			segment = [];
 		};
 		for (const [x, y] of points) {
 			if (Number.isNaN(x)) flush();
-			else segment.push(`${n(x)},${n(y)}`);
+			else segment.push({ x, y });
 		}
 		flush();
 		points.forEach(([x, y], index) => {
-			if (!Number.isNaN(x)) out.push(chartSeriesMarkerSvg(series, index, x, y, 2.5));
+			if (!Number.isNaN(x))
+				out.push(chartSeriesMarkerSvg(series, frame.order?.[index] ?? index, x, y, 2.5));
 		});
 	}
 	pointLabels(model, marks, out);

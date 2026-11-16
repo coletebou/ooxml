@@ -12,8 +12,9 @@ export function paragraphFloats(paragraph: Paragraph, theme?: ThemeCatalog): Lay
 		const svg = image.shape && shapeSvg(image.shape, image.widthPx, image.heightPx, theme);
 		floats.push({
 			index: floats.length,
-			...(svg ? { chart: { svg, label: 'Shape' } } : {}),
+			...(svg ? { chart: { svg, label: 'Shape', shape: true as const } } : {}),
 			partName: image.partName,
+			...(image.pictureFill ? { pictureFill: image.pictureFill } : {}),
 			contentType: image.contentType,
 			widthPx: image.widthPx,
 			heightPx: image.heightPx,
@@ -25,6 +26,7 @@ export function paragraphFloats(paragraph: Paragraph, theme?: ThemeCatalog): Lay
 			...(placement?.offsetYPx !== undefined ? { offsetYPx: placement.offsetYPx } : {}),
 			...(placement?.behindText ? { behindText: true } : {}),
 			...(placement?.wrap ? { wrap: placement.wrap } : {}),
+			...(placement?.wrapText ? { wrapText: placement.wrapText } : {}),
 		});
 	}
 	return floats;

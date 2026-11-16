@@ -91,24 +91,21 @@
 		outgoingSlide: () => outgoingSlide,
 		incomingSlide: () => incomingSlide,
 		durationMs: () => durationMs,
+		slideSize: () => canvasSize,
 	});
 	const morphPlan = $derived(morph.morphPlan);
-	const morphOutgoingSlide = $derived(morph.morphOutgoingSlide);
-	const morphLiftedSlide = $derived(morph.morphLiftedSlide);
+	const morphOverlayLayers = $derived(morph.morphOverlayLayers);
 	const morphCrossfadeGroups = $derived(morph.morphCrossfadeGroups);
 	const morphCss = $derived(morph.morphCss);
 
 	// A layer-wide animation would drag every shape as one block and cancel the
 	// morph, so the layers stay unanimated while a plan is active.
-	const outgoingZIndex = $derived(morphPlan ? 2 : animations.outgoingOnTop ? 2 : 1);
+	const outgoingZIndex = $derived(animations.outgoingOnTop ? 2 : 1);
 	const incomingZIndex = $derived(morphPlan ? 1 : animations.outgoingOnTop ? 1 : 2);
-	const outgoingStyle = $derived(
-		styleToString(layerStyle(morphPlan ? 'none' : animations.outgoing, outgoingZIndex)),
-	);
+	const outgoingStyle = $derived(styleToString(layerStyle(animations.outgoing, outgoingZIndex)));
 	const incomingStyle = $derived(
 		styleToString(layerStyle(morphPlan ? 'none' : animations.incoming, incomingZIndex)),
 	);
-	const liftedStyle = styleToString(layerStyle('none', 3));
 
 	/**
 	 * Play or stop this transition's sound action (`p:sndAc/p:stSnd`/`p:endSnd`)
@@ -169,24 +166,14 @@
 			zIndex={outgoingZIndex}
 			layerName="outgoing"
 		/>
-	{:else}
+	{:else if !morphPlan}
+		<!-- A morph paints its ghosts in the stacked layers of `MorphExtraLayers`. -->
 		<div
 			class="pptx-svelte-transition-layer"
 			data-pptx-transition-layer="outgoing"
-			data-pptx-morph-outgoing={morphPlan ? 'true' : undefined}
 			style={outgoingStyle}
 		>
-			<!-- transparentBackground during a morph: this layer sits ABOVE the
-			     incoming slide and only carries the departing shapes, so painting the
-			     outgoing slide's own (always opaque) background here would cover the
-			     whole morph with a flat slab for its entire duration. -->
-			<SlideStage
-				slide={morphPlan ? morphOutgoingSlide : outgoingSlide}
-				{canvasSize}
-				{mediaDataUrls}
-				{scale}
-				transparentBackground={Boolean(morphPlan)}
-			/>
+			<SlideStage slide={outgoingSlide} {canvasSize} {mediaDataUrls} {scale} />
 		</div>
 	{/if}
 	{#if !morphPlan && fragmented?.incoming}
@@ -206,14 +193,14 @@
 			data-pptx-morph-incoming={morphPlan ? 'true' : undefined}
 			style={incomingStyle}
 		>
-			<SlideStage slide={incomingSlide} {canvasSize} {mediaDataUrls} {scale} />
+			<!-- A morph's keyframe CSS selects the incoming elements by their ids. -->
+			<SlideStage slide={incomingSlide} {canvasSize} {mediaDataUrls} {scale} preserveElementIds={Boolean(morphPlan)} />
 		</div>
 	{/if}
-	<!-- The two morph-only extra layers (arriving-above-departing "lifted"
-	     shapes, and same-pair crossfade groups) - see `MorphExtraLayers.svelte`. -->
+	<!-- The morph's own layers (ghosts and lifted arrivals in one stacking
+	     order, then same-pair crossfade groups) - see `MorphExtraLayers.svelte`. -->
 	<MorphExtraLayers
-		liftedSlide={morphLiftedSlide}
-		{liftedStyle}
+		overlayLayers={morphOverlayLayers}
 		crossfadeGroups={morphCrossfadeGroups}
 		{canvasSize}
 		{mediaDataUrls}

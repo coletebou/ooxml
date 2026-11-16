@@ -1,5 +1,6 @@
 // Sort & Filter (shared by Home > Editing and the Data tab): sort A to Z / Z to A, custom sort,
 // the auto-filter toggle, clear and reapply.
+import { savedSortAt } from '../../edit/sort-reapply';
 import type { Command } from '../commands';
 import type { EditorContext } from '../context';
 import { icon } from './icons';
@@ -80,19 +81,13 @@ export function sortCommands(): Command[] {
 			label: 'Reapply',
 			icon: icon('reapply'),
 			lock: 'autoFilter',
-			enabled: (ctx) => filtered(ctx).length > 0,
+			enabled: (ctx) => {
+				const t = target(ctx);
+				return filtered(ctx).length > 0 || (!!t && !!savedSortAt(t.ws, t.active));
+			},
 			run: (ctx) => {
 				const t = target(ctx);
-				const filter = t?.ws.autoFilter;
-				if (!t || !filter) return;
-				const columns = structuredClone(filter.columns ?? []);
-				t.session.batch('Reapply', () => {
-					for (const fc of columns)
-						t.session.filterColumn(t.sheet, filter.range.start.col + fc.offset, [
-							...(fc.values ?? []),
-							...(fc.blank ? [''] : []),
-						]);
-				});
+				if (t) t.session.reapplyFilter(t.sheet, t.active);
 			},
 		}),
 	];

@@ -3,6 +3,7 @@ import { XMLBuilder } from 'fast-xml-parser';
 import { orderedXmlKey, stripXmlOrderMarkers } from '../../geometry/custom-geometry-command-order';
 import type { PptxSmartArtDrawingShape, TextSegment, TextStyle, XmlObject } from '../../types';
 import { applyTextBodySp3d } from '../../utils/text-body-sp3d-writer';
+import { at } from '../../../../geometry/indexed';
 
 const builder = new XMLBuilder({
 	ignoreAttributes: false,
@@ -149,7 +150,7 @@ function splitParagraphs(segments: TextSegment[]): TextSegment[][] {
 		if (segment.isParagraphBreak) {
 			paragraphs.push([]);
 		} else {
-			paragraphs[paragraphs.length - 1].push(segment);
+			at(paragraphs, paragraphs.length - 1).push(segment);
 		}
 	}
 	return paragraphs;
@@ -166,7 +167,9 @@ function reconcileFlatText(segments: TextSegment[], desired: string): TextSegmen
 	const separators = (value: string): string =>
 		[...value].filter((character) => character === '\n' || character === '\t').join('');
 	if (separators(segmentText(segments)) !== separators(desired)) {
-		return [{ ...segments[0], text: desired, isLineBreak: undefined, isParagraphBreak: undefined }];
+		// With no segment to inherit from, the flattened text takes the default (empty) style.
+		const [first = { text: '', style: {} }] = segments;
+		return [{ ...first, text: desired, isLineBreak: undefined, isParagraphBreak: undefined }];
 	}
 	const result = segments.map((segment) => ({ ...segment }));
 	const targets = desired.split(/[\t\n]/u);
@@ -175,7 +178,7 @@ function reconcileFlatText(segments: TextSegment[], desired: string): TextSegmen
 	const flush = (): void => {
 		const target = targets[targetIndex++] ?? '';
 		if (region.length > 0) {
-			const texts = region.map((index) => result[index].text);
+			const texts = region.map((index) => at(result, index).text);
 			const before = texts.join('');
 			let prefix = 0;
 			while (
@@ -199,13 +202,14 @@ function reconcileFlatText(segments: TextSegment[], desired: string): TextSegmen
 			let offset = 0;
 			let inserted = false;
 			for (let regionIndex = 0; regionIndex < region.length; regionIndex++) {
-				const text = texts[regionIndex];
+				// `texts` has one entry per region index.
+				const text = at(texts, regionIndex);
 				const start = offset;
 				const end = start + text.length;
 				const localStart = Math.max(0, removeStart - start);
 				const localEnd = Math.min(text.length, removeEnd - start);
 				if (localEnd > localStart || (!inserted && removeStart >= start && removeStart <= end)) {
-					result[region[regionIndex]].text =
+					at(result, at(region, regionIndex)).text =
 						text.slice(0, localStart) + (inserted ? '' : insertion) + text.slice(localEnd);
 					inserted = true;
 				}
@@ -215,7 +219,7 @@ function reconcileFlatText(segments: TextSegment[], desired: string): TextSegmen
 		region = [];
 	};
 	for (let index = 0; index < result.length; index++) {
-		const segment = result[index];
+		const segment = at(result, index);
 		if (segment.isParagraphBreak || segment.isLineBreak || segment.text === '\t') {
 			flush();
 		} else {

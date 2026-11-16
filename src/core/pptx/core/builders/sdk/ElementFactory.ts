@@ -22,11 +22,34 @@ import type {
 	GroupPptxElement,
 	PptxElement,
 } from '../../types/elements';
+import type { PptxAction } from '../../types/actions';
 import type { ShapeStyle } from '../../types/shape-style';
-import type { PptxTableData, PptxTableRow, PptxTableCell } from '../../types/table';
+import type {
+	PptxTableData,
+	PptxTableRow,
+	PptxTableCell,
+	PptxTableCellStyle,
+} from '../../types/table';
 import type { TextStyle, TextSegment } from '../../types/text';
 import { chartSeriesGradientFromInput } from './chart-gradient-input';
+import { applyChartContentInput, chartSeriesValuesFromInput } from './chart-content-operations';
 import { applyChartInputLayout } from './chart-layout-operations';
+import { mapPictureLayoutInput } from './picture-layout-input';
+import { mapLinkToAction, mapLinkToRunStyle } from './link-input';
+import { svgPictureSource } from './svg-picture-input';
+import { pictureEffectsFromInput } from './picture-effects-input';
+import { tableCellStyle } from './table-cell-input';
+import { columnFractions, placeTableCells } from './table-merge-input';
+import { characterSpacingToSpc, mapTextBodyInput } from './text-body-input';
+import { tableCellRunsFromSegments } from './table-cell-runs-input';
+import { elementStyleForSegments } from './text-segment-style';
+import { customGeometryFromInput } from './custom-path-input';
+import {
+	buildShapeStyle,
+	connectorLineEndOverride,
+	mapStrokeToShapeStyle,
+} from './shape-style-input';
+import type { ShapeStyleInputs } from './shape-style-input';
 import type {
 	TextOptions,
 	TextSegmentInput,
@@ -39,11 +62,14 @@ import type {
 	ConnectorOptions,
 	MediaOptions,
 	GroupOptions,
-	FillInput,
-	StrokeInput,
-	ShadowInput,
 	TextStyleInput,
+	ShapeDefaultsInput,
+	FillInput,
+	ElementFlipInput,
+	LinkInput,
+	TableCellInput,
 } from './types';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // ID generation
@@ -65,87 +91,20 @@ export function resetIdCounter(): void {
 // Internal mapping helpers
 // ---------------------------------------------------------------------------
 
-function mapFillToShapeStyle(fill?: FillInput): Partial<ShapeStyle> {
-	if (!fill) {
-		return {};
-	}
-	switch (fill.type) {
-		case 'solid':
-			return {
-				fillMode: 'solid',
-				fillColor: fill.color,
-				fillOpacity: fill.opacity,
-				...(fill.themeColorRef ? { fillColorRef: fill.themeColorRef } : {}),
-			};
-		case 'gradient':
-			return {
-				fillMode: 'gradient',
-				fillGradientType: fill.gradientType ?? 'linear',
-				fillGradientAngle: fill.angle ?? 0,
-				fillGradientStops: fill.stops.map((s) => ({
-					color: s.color,
-					position: s.position,
-					opacity: s.opacity,
-				})),
-			};
-		case 'pattern':
-			return {
-				fillMode: 'pattern',
-				fillPatternPreset: fill.preset,
-				fillPatternBackgroundColor: fill.background,
-			};
-		case 'image':
-			return {
-				fillMode: 'image',
-				fillImageUrl: fill.url,
-				fillImageMode: fill.mode ?? 'stretch',
-			};
-		case 'none':
-			return { fillMode: 'none' };
-		default:
-			return {};
-	}
-}
-
-function mapStrokeToShapeStyle(stroke?: StrokeInput): Partial<ShapeStyle> {
-	if (!stroke) {
-		return {};
-	}
+/** The fill, stroke and effect inputs of a text box or shape, with `fill` resolved. */
+function effectInputs(
+	options: TextOptions | ShapeOptions | undefined,
+	fill: ShapeStyleInputs['fill'],
+): ShapeStyleInputs {
 	return {
-		strokeColor: stroke.color,
-		strokeWidth: stroke.width,
-		strokeDash: stroke.dash,
-		strokeOpacity: stroke.opacity,
-		lineJoin: stroke.join,
-		lineCap: stroke.cap,
-		...(stroke.themeColorRef ? { strokeColorRef: stroke.themeColorRef } : {}),
+		fill,
+		stroke: options?.stroke,
+		shadow: options?.shadow,
+		innerShadow: options?.innerShadow,
+		glow: options?.glow,
+		softEdge: options?.softEdge,
+		reflection: options?.reflection,
 	};
-}
-
-function mapShadowToShapeStyle(shadow?: ShadowInput): Partial<ShapeStyle> {
-	if (!shadow) {
-		return {};
-	}
-	return {
-		shadowColor: shadow.color ?? '#000000',
-		shadowBlur: shadow.blur ?? 4,
-		shadowOffsetX: shadow.offsetX ?? 2,
-		shadowOffsetY: shadow.offsetY ?? 2,
-		shadowOpacity: shadow.opacity ?? 0.4,
-	};
-}
-
-function buildShapeStyle(opts: {
-	fill?: FillInput;
-	stroke?: StrokeInput;
-	shadow?: ShadowInput;
-}): ShapeStyle | undefined {
-	const parts: Partial<ShapeStyle> = {
-		...mapFillToShapeStyle(opts.fill),
-		...mapStrokeToShapeStyle(opts.stroke),
-		...mapShadowToShapeStyle(opts.shadow),
-	};
-	return Object.keys(parts).length > 0 ? (parts as ShapeStyle) : undefined;
 }
 
 function mapTextStyleInput(opts?: Partial<TextStyleInput>): Partial<TextStyle> {
@@ -192,6 +151,12 @@ function mapTextStyleInput(opts?: Partial<TextStyleInput>): Partial<TextStyle> {
 	if (opts.spaceAfter !== undefined) {
 		ts.paragraphSpacingAfter = opts.spaceAfter;
 	}
+	if (opts.characterSpacing !== undefined) {
+		ts.characterSpacing = characterSpacingToSpc(opts.characterSpacing);
+	}
+	if (opts.link !== undefined) {
+		Object.assign(ts, mapLinkToRunStyle(opts.link));
+	}
 	return ts;
 }
 
@@ -204,7 +169,7 @@ function buildTextSegments(
 		const lines = input.split('\n');
 		const segments: TextSegment[] = [];
 		for (let i = 0; i < lines.length; i++) {
-			segments.push({ text: lines[i], style: base as TextStyle });
+			segments.push({ text: at(lines, i), style: base as TextStyle });
 			if (i < lines.length - 1) {
 				segments.push({
 					text: '\n',
@@ -219,6 +184,43 @@ function buildTextSegments(
 		text: seg.text,
 		style: { ...base, ...mapTextStyleInput(seg.style) } as TextStyle,
 	}));
+}
+
+/** The element's flips (`a:xfrm/@flipH`, `@flipV`), only when set. */
+function flipsOf(
+	options: ElementFlipInput | undefined,
+): Pick<PptxElement, 'flipHorizontal' | 'flipVertical'> {
+	return {
+		...(options?.flipHorizontal ? { flipHorizontal: true } : {}),
+		...(options?.flipVertical ? { flipVertical: true } : {}),
+	};
+}
+
+/** The text of a shape's options: plain or rich, with the text body options. */
+function applyShapeText(el: ShapePptxElement, options: ShapeOptions | undefined): void {
+	const text = options?.text;
+	if (!text || text.length === 0) {
+		// Body options still apply to the empty text body a shape is saved with.
+		const body = mapTextBodyInput(options);
+		if (Object.keys(body).length > 0) {
+			el.text = '';
+			el.textStyle = body as TextStyle;
+		}
+		return;
+	}
+	const textSegments = buildTextSegments(text, options.textStyle);
+	el.text = typeof text === 'string' ? text : text.map((s) => s.text).join('');
+	el.textStyle = {
+		...elementStyleForSegments(mapTextStyleInput(options.textStyle), textSegments),
+		...mapTextBodyInput(options),
+	} as TextStyle;
+	el.textSegments = textSegments;
+}
+
+/** `{ actionClick }` for an element link, or nothing. */
+function withAction(link: LinkInput | undefined): { actionClick?: PptxAction } {
+	const actionClick = mapLinkToAction(link);
+	return actionClick ? { actionClick } : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -284,28 +286,35 @@ export function createTextElement(
 		lineSpacing: options?.lineSpacing,
 	};
 
+	const textSegments = buildTextSegments(text, textStyleBase);
 	return {
 		type: 'text',
 		id: generateId('txt'),
 		...p,
 		rotation: options?.rotation,
+		...flipsOf(options),
 		opacity: options?.opacity,
 		text: plainText,
-		textStyle: mapTextStyleInput(textStyleBase) as TextStyle,
-		textSegments: buildTextSegments(text, textStyleBase),
-		shapeStyle: buildShapeStyle({
-			fill: options?.fill,
-			stroke: options?.stroke,
-			shadow: options?.shadow,
-		}),
+		textStyle: {
+			...elementStyleForSegments(mapTextStyleInput(textStyleBase), textSegments),
+			...mapTextBodyInput(options),
+		} as TextStyle,
+		textSegments,
+		shapeStyle: buildShapeStyle(effectInputs(options, options?.fill)),
+		...withAction(options?.link),
 	};
 }
+
+/** The fill a new shape gets when neither its options nor the defaults give one. */
+export const DEFAULT_SHAPE_FILL: FillInput = { type: 'solid', color: '#4472C4' };
 
 /**
  * Create a shape element with optional text overlay.
  *
  * @param shapeType - Preset geometry name (e.g. "rect", "ellipse", "roundRect").
  * @param options - Position, styling, and optional text.
+ * @param defaults - What an omitted option falls back to (an omitted `fill`
+ *   is {@link DEFAULT_SHAPE_FILL} unless `defaults.fill` says otherwise).
  * @returns A valid {@link ShapePptxElement}.
  *
  * @example
@@ -316,27 +325,30 @@ export function createTextElement(
  * });
  * ```
  */
-export function createShapeElement(shapeType: string, options?: ShapeOptions): ShapePptxElement {
+export function createShapeElement(
+	shapeType: string,
+	options?: ShapeOptions,
+	defaults?: ShapeDefaultsInput,
+): ShapePptxElement {
 	const p = pos('shape', options);
 	const el: ShapePptxElement = {
 		type: 'shape',
 		id: generateId('shp'),
 		...p,
 		rotation: options?.rotation,
+		...flipsOf(options),
 		opacity: options?.opacity,
 		shapeType,
 		shapeAdjustments: options?.adjustments,
-		shapeStyle: buildShapeStyle({
-			fill: options?.fill ?? { type: 'solid', color: '#4472C4' },
-			stroke: options?.stroke,
-			shadow: options?.shadow,
-		}),
+		shapeStyle: buildShapeStyle(
+			effectInputs(options, options?.fill ?? defaults?.fill ?? DEFAULT_SHAPE_FILL),
+		),
+		...withAction(options?.link),
 	};
-	if (options?.text) {
-		el.text = options.text;
-		el.textStyle = mapTextStyleInput(options.textStyle) as TextStyle;
-		el.textSegments = buildTextSegments(options.text, options.textStyle);
+	if (options?.paths && options.paths.length > 0) {
+		Object.assign(el, customGeometryFromInput(options.paths, p.width, p.height));
 	}
+	applyShapeText(el, options);
 	return el;
 }
 
@@ -355,11 +367,22 @@ export function createConnectorElement(options?: ConnectorOptions): ConnectorPpt
 				? 'curvedConnector3'
 				: 'straightConnector1';
 
+	// The SDK's own connector defaults (black, 1 px) apply field by field, so a
+	// stroke that sets only a dash or an arrow does not fall through to the
+	// connector writer's UI defaults instead.
+	const strokeInput = options?.stroke;
+	const stroke = mapStrokeToShapeStyle({
+		...strokeInput,
+		color: strokeInput?.color ?? '#000000',
+		width: strokeInput?.width ?? 1,
+	});
 	const style: ShapeStyle = {
-		...mapStrokeToShapeStyle(options?.stroke ?? { color: '#000000', width: 1 }),
-		connectorStartArrow: options?.startArrow ?? 'none',
-		connectorEndArrow: options?.endArrow ?? 'none',
+		...stroke,
+		...connectorLineEndOverride('Start', options?.startArrow),
+		...connectorLineEndOverride('End', options?.endArrow),
 	} as ShapeStyle;
+	style.connectorStartArrow ??= 'none';
+	style.connectorEndArrow ??= 'none';
 
 	if (options?.from) {
 		style.connectorStartConnection = {
@@ -379,6 +402,7 @@ export function createConnectorElement(options?: ConnectorOptions): ConnectorPpt
 		id: generateId('cxn'),
 		...p,
 		rotation: options?.rotation,
+		...flipsOf(options),
 		shapeType: connType,
 		shapeStyle: style,
 	};
@@ -393,13 +417,26 @@ export function createConnectorElement(options?: ConnectorOptions): ConnectorPpt
  */
 export function createImageElement(source: string, options?: ImageOptions): ImagePptxElement {
 	const p = pos('image', options);
+	const svg = svgPictureSource(source, options?.svgFallback);
+	if (svg) {
+		// The Office form of an SVG picture: a raster in the blip, the SVG in its
+		// `asvg:svgBlip` extension (written on save). Renderers prefer `svgData`.
+		const { svgFallback: _raster, ...rest } = options ?? {};
+		const svgPicture = createImageElement(svg.raster, rest);
+		svgPicture.svgData = svg.svgData;
+		return svgPicture;
+	}
 	const isDataUrl = source.startsWith('data:');
+	// Opacity is the picture's `a:alphaModFix`, which the renderers apply and
+	// the save writes; an element `opacity` beside it would apply twice.
+	const imageEffects = pictureEffectsFromInput(options);
 	return {
 		type: 'image',
 		id: generateId('img'),
 		...p,
 		rotation: options?.rotation,
-		opacity: options?.opacity,
+		...flipsOf(options),
+		...(imageEffects ? { imageEffects } : {}),
 		imagePath: isDataUrl ? undefined : source,
 		imageData: isDataUrl ? source : undefined,
 		altText: options?.altText,
@@ -407,6 +444,63 @@ export function createImageElement(source: string, options?: ImageOptions): Imag
 		cropTop: options?.cropTop,
 		cropRight: options?.cropRight,
 		cropBottom: options?.cropBottom,
+		...mapPictureLayoutInput('ImageOptions', {
+			tile: options?.tile,
+			fillRect: options?.fillRect,
+		}),
+		...withAction(options?.link),
+	};
+}
+
+/** A table cell from its input: the text with the cell style and fill. */
+function createTableCell(cellInput: TableCellInput): PptxTableCell {
+	if (cellInput.runs && cellInput.runs.length > 0) {
+		return createRichTableCell(cellInput);
+	}
+	return {
+		text: cellInput.text ?? '',
+		gridSpan: cellInput.gridSpan,
+		rowSpan: cellInput.rowSpan,
+		style: tableCellStyle(cellInput),
+	};
+}
+
+/**
+ * A cell with rich text: the runs become `textSegments` (written as given)
+ * and `textRuns` (what the table renderers draw). The cell style keeps only
+ * what is not run formatting, so the save does not stamp one run's format
+ * over the others.
+ */
+function createRichTableCell(cellInput: TableCellInput): PptxTableCell {
+	const { fontSize, ...rest } = cellInput.style ?? {};
+	// Cell `style.fontSize` is points; runs, like all text segments, take px.
+	const base: Partial<TextStyleInput> = {
+		...rest,
+		...(fontSize !== undefined ? { fontSize: (fontSize * 96) / 72 } : {}),
+	};
+	const textSegments = buildTextSegments(cellInput.runs ?? [], base);
+	const text = textSegments.map((segment) => segment.text).join('');
+	if (cellInput.text !== undefined && cellInput.text !== text) {
+		throw new RangeError(
+			`A table cell gives both text "${cellInput.text}" and runs that spell "${text}"`,
+		);
+	}
+	// The fill, borders and alignment of the cell, without the run formatting.
+	const style: PptxTableCellStyle = { ...tableCellStyle(cellInput) };
+	delete style.fontSize;
+	delete style.bold;
+	delete style.italic;
+	delete style.color;
+	if (cellInput.style?.verticalAlignment !== undefined) {
+		style.vAlign = cellInput.style.verticalAlignment;
+	}
+	return {
+		text,
+		textSegments,
+		textRuns: tableCellRunsFromSegments(textSegments),
+		...(cellInput.gridSpan !== undefined ? { gridSpan: cellInput.gridSpan } : {}),
+		...(cellInput.rowSpan !== undefined ? { rowSpan: cellInput.rowSpan } : {}),
+		...(Object.keys(style).length > 0 ? { style } : {}),
 	};
 }
 
@@ -430,36 +524,28 @@ export function createImageElement(source: string, options?: ImageOptions): Imag
  * ```
  */
 export function createTableElement(input: TableInput, options?: TableOptions): TablePptxElement {
-	const numCols = Math.max(...input.rows.map((r) => r.cells.length), 1);
+	const grid = input.fillMergedCells ? placeTableCells(input) : undefined;
+	const numCols = grid?.columnCount ?? Math.max(...input.rows.map((r) => r.cells.length), 1);
 	const rowHeight = input.rows.length > 0 ? Math.max(30, Math.floor(200 / input.rows.length)) : 30;
 	const totalHeight = options?.height ?? Math.max(100, input.rows.length * rowHeight);
 	const p = pos('table', { ...options, height: totalHeight });
 
-	// Normalize column widths to proportions summing to 1
-	let colWidths: number[];
-	if (input.columnWidths && input.columnWidths.length === numCols) {
-		const sum = input.columnWidths.reduce((a, b) => a + b, 0);
-		colWidths = input.columnWidths.map((w) => w / sum);
-	} else {
-		colWidths = Array(numCols).fill(1 / numCols);
-	}
+	// Column widths as proportions summing to 1.
+	const colWidths = columnFractions(input.columnWidths, numCols);
 
-	const rows: PptxTableRow[] = input.rows.map((rowInput) => ({
+	const rows: PptxTableRow[] = input.rows.map((rowInput, ri) => ({
 		height: rowInput.height ?? rowHeight,
-		cells: rowInput.cells.map((cellInput): PptxTableCell => ({
-			text: cellInput.text,
-			gridSpan: cellInput.gridSpan,
-			rowSpan: cellInput.rowSpan,
-			style: cellInput.style
-				? {
-						fontSize: cellInput.style.fontSize,
-						bold: cellInput.style.bold,
-						italic: cellInput.style.italic,
-						color: cellInput.style.color,
-						align: cellInput.style.alignment,
-					}
-				: undefined,
-		})),
+		cells: grid
+			? (grid.rows[ri] ?? []).map((slot) =>
+					slot.cell
+						? createTableCell(slot.cell)
+						: {
+								text: '',
+								...(slot.hMerge ? { hMerge: true } : {}),
+								...(slot.vMerge ? { vMerge: true } : {}),
+							},
+				)
+			: rowInput.cells.map(createTableCell),
 	}));
 
 	const tableData: PptxTableData = {
@@ -475,7 +561,10 @@ export function createTableElement(input: TableInput, options?: TableOptions): T
 		// Accent 1 unless the caller picked a style. This is decided at
 		// creation time so the save pipeline never has to invent a style for
 		// loaded tables that legitimately have none.
-		tableStyleId: input.style ?? DEFAULT_POWERPOINT_TABLE_STYLE_ID,
+		// `style: 'none'` (or '') opts out, so the cells' own formatting is not
+		// painted over by the theme banding.
+		tableStyleId:
+			input.style === 'none' ? undefined : (input.style ?? DEFAULT_POWERPOINT_TABLE_STYLE_ID),
 	};
 
 	return {
@@ -512,7 +601,7 @@ export function createChartElement(
 
 	const series: PptxChartSeries[] = input.series.map((s, index) => ({
 		name: s.name,
-		values: s.values,
+		...chartSeriesValuesFromInput(s.values),
 		color: s.color,
 		...chartSeriesGradientFromInput(chartType, s.gradientFill, index),
 		...(s.boxWhiskerOptions ? { boxWhiskerOptions: { ...s.boxWhiskerOptions } } : {}),
@@ -561,6 +650,7 @@ export function createChartElement(
 		chartData,
 	};
 	applyChartInputLayout(element, input);
+	applyChartContentInput(element, input);
 	return element;
 }
 
@@ -584,6 +674,7 @@ export function createMediaElement(
 		id: generateId('med'),
 		...p,
 		rotation: options?.rotation,
+		...flipsOf(options),
 		mediaType,
 		mediaPath: isDataUrl ? undefined : source,
 		mediaData: isDataUrl ? source : undefined,
@@ -613,6 +704,7 @@ export function createGroupElement(
 		id: generateId('grp'),
 		...p,
 		rotation: options?.rotation,
+		...flipsOf(options),
 		children,
 	};
 }
@@ -646,6 +738,7 @@ export function createFreeformElement(pathData: string, options?: ShapeOptions):
 		id: generateId('frm'),
 		...p,
 		rotation: options?.rotation,
+		...flipsOf(options),
 		opacity: options?.opacity,
 		shapeType: 'custom',
 		pathData,
@@ -653,15 +746,11 @@ export function createFreeformElement(pathData: string, options?: ShapeOptions):
 		pathHeight,
 		customGeometryPaths,
 		shapeStyle: buildShapeStyle({
-			fill: options?.fill ?? { type: 'none' },
+			...effectInputs(options, options?.fill ?? { type: 'none' }),
 			stroke: options?.stroke ?? { color: '#000000', width: 2 },
-			shadow: options?.shadow,
 		}),
+		...withAction(options?.link),
 	};
-	if (options?.text) {
-		el.text = options.text;
-		el.textStyle = mapTextStyleInput(options.textStyle) as TextStyle;
-		el.textSegments = buildTextSegments(options.text, options.textStyle);
-	}
+	applyShapeText(el, options);
 	return el;
 }

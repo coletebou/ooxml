@@ -8,6 +8,7 @@
  * @module PptxSlideLoaderService
  */
 import { applyBackgroundFillToShapes } from '../core/builders/background-fill-shapes';
+import { readPartText, readPartXml } from '../core/runtime/load-part-reader';
 import { applyHiddenFlagFromRawXml } from '../core/builders/element-hidden-flag';
 import type { PptxSlide, XmlObject } from '../types';
 import { slideBackgroundStyleRefFromNode } from '../utils/background-style-ref';
@@ -24,6 +25,7 @@ import { mergeNativeAfterAnimationIntoEditorAnimations } from './editor-animatio
 import type { IPptxSlideLoaderService, PptxSlideLoaderParams } from './slide-loader-types';
 import { readCommonSlideDataName } from './slide-name';
 import { resolveSlideTimingNode } from './slide-transition-envelope';
+import { at } from '../../../geometry/indexed';
 
 export type {
 	PptxMediaTimingEntry,
@@ -78,7 +80,7 @@ export class PptxSlideLoaderService implements IPptxSlideLoaderService {
 		// Load each slide sequentially (order matters for theme override state)
 		const slides: PptxSlide[] = [];
 		for (let index = 0; index < sldIds.length; index++) {
-			const slide = await this.loadSingleSlide(params, sldIds[index], index, relsMap);
+			const slide = await this.loadSingleSlide(params, at(sldIds, index), index, relsMap);
 			if (slide) {
 				slides.push(slide);
 			}
@@ -101,12 +103,14 @@ export class PptxSlideLoaderService implements IPptxSlideLoaderService {
 	private async loadPresentationSlideRels(
 		params: PptxSlideLoaderParams,
 	): Promise<Map<string, string>> {
-		const relsXml = await params.zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
-		if (!relsXml) {
+		const relsData = await readPartXml(
+			params.zip,
+			params.parser,
+			'ppt/_rels/presentation.xml.rels',
+		);
+		if (!relsData) {
 			return new Map<string, string>();
 		}
-
-		const relsData = params.parser.parse(relsXml) as XmlObject;
 		const relationships = (relsData['Relationships'] as XmlObject | undefined)?.['Relationship'];
 		const relNodes = this.toXmlObjectArray(relationships);
 
@@ -157,7 +161,7 @@ export class PptxSlideLoaderService implements IPptxSlideLoaderService {
 			path = `ppt/${target}`;
 		}
 
-		const slideXmlStr = await params.zip.file(path)?.async('string');
+		const slideXmlStr = await readPartText(params.zip, path);
 		if (!slideXmlStr) {
 			return undefined;
 		}

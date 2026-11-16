@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { themeSwatch, themeSwatches } from '../theme-color-swatch-grid.test-support';
+import {
+	recentSwatches,
+	themeSwatch,
+	themeSwatches,
+} from '../theme-color-swatch-grid.test-support';
 import { createTextSection } from './text-section';
 import type { InspectorHandlers, InspectorState } from './types';
 
@@ -11,15 +15,7 @@ function baseState(overrides: Partial<InspectorState> = {}): InspectorState {
 		vAlign: 'top',
 		textWrap: 'square',
 		autoFitMode: 'none',
-		characterSpacing: 0,
-		lineSpacing: 1,
-		lineSpacingExactPt: null,
-		paragraphSpacingBefore: 0,
-		paragraphSpacingAfter: 0,
-		paragraphIndent: 0,
-		paragraphMarginLeft: 0,
 		textDirection: 'horizontal',
-		textRtl: false,
 		textStyle: { color: '#ff0000' },
 		recentColors: [],
 		...overrides,
@@ -31,9 +27,9 @@ function mount() {
 		setTextVerticalAlign: vi.fn(),
 		setTextWrap: vi.fn(),
 		setAutoFitMode: vi.fn(),
-		setTextAdvanced: vi.fn(),
 		setTextStyle: vi.fn(),
 		pushRecentColor: vi.fn(),
+		liveColor: vi.fn(),
 	} as unknown as InspectorHandlers;
 	const section = createTextSection(
 		document,
@@ -58,18 +54,24 @@ describe('createTextSection text colour', () => {
 		expect(colorInput.value).toBe('#123456');
 	});
 
-	it('commits a typed colour through setTextStyle live, and pushes it on commit', () => {
+	it("hands the native picker's drag, settle and blur to the live text colour", () => {
+		// The live action previews the drag and makes the settled pick one undo step and one
+		// recent colour (`colour-drag-undo.test.ts` covers it end to end), so the section no
+		// longer applies each shade through the recorded `setTextStyle` itself.
 		const { section, handlers } = mount();
 		section.update(baseState());
 
 		const colorInput = section.el.querySelector<HTMLInputElement>('input[type="color"]')!;
 		colorInput.value = '#00ff00';
 		colorInput.dispatchEvent(new Event('input'));
-		expect(handlers.setTextStyle).toHaveBeenCalledWith({ color: '#00ff00' });
-		expect(handlers.pushRecentColor).not.toHaveBeenCalled();
+		expect(handlers.liveColor).toHaveBeenLastCalledWith('text', 'input', '#00ff00');
 
 		colorInput.dispatchEvent(new Event('change'));
-		expect(handlers.pushRecentColor).toHaveBeenCalledExactlyOnceWith('#00ff00');
+		expect(handlers.liveColor).toHaveBeenLastCalledWith('text', 'change', '#00ff00');
+		colorInput.dispatchEvent(new Event('blur'));
+		expect(handlers.liveColor).toHaveBeenLastCalledWith('text', 'blur', '#00ff00');
+		expect(handlers.setTextStyle).not.toHaveBeenCalled();
+		expect(handlers.pushRecentColor).not.toHaveBeenCalled();
 	});
 
 	it('is hidden until there are recent colours, then renders and commits from a swatch', () => {
@@ -81,7 +83,7 @@ describe('createTextSection text colour', () => {
 		section.update(baseState({ recentColors: ['#abcdef'] }));
 		expect(row.hidden).toBeFalsy();
 
-		row.querySelector<HTMLButtonElement>('.pptxv-swatch')!.click();
+		recentSwatches(row)[0]!.click();
 		expect(handlers.setTextStyle).toHaveBeenCalledWith({ color: '#abcdef' });
 		expect(handlers.pushRecentColor).toHaveBeenCalledWith('#abcdef');
 	});
@@ -93,11 +95,7 @@ describe('createTextSection text colour', () => {
 		expect(
 			section.el.querySelector<HTMLInputElement>('input[type="color"]')!.disabled,
 		).toBeTruthy();
-		expect(
-			section.el
-				.querySelector<HTMLElement>('[data-testid="pptx-color-recent"]')!
-				.querySelector<HTMLButtonElement>('.pptxv-swatch')!.disabled,
-		).toBeTruthy();
+		expect(recentSwatches(section.el)[0]!.disabled).toBeTruthy();
 	});
 });
 
@@ -153,17 +151,17 @@ describe('createTextSection text colour theme grid', () => {
 		expect(swatch.getAttribute('aria-checked')).toBe('true');
 	});
 
-	it('the native colour input clears colorRef', () => {
+	it('the native colour input never commits the theme ref (the live action clears it)', () => {
+		// `colour-drag-undo.test.ts` asserts the committed native pick has no `colorRef`.
 		const { section, handlers } = mount();
 		section.update(baseState());
 
 		const colorInput = section.el.querySelector<HTMLInputElement>('input[type="color"]')!;
 		colorInput.value = '#00ff00';
 		colorInput.dispatchEvent(new Event('input'));
-		expect(handlers.setTextStyle).toHaveBeenCalledExactlyOnceWith({
-			color: '#00ff00',
-			colorRef: undefined,
-		});
+		colorInput.dispatchEvent(new Event('change'));
+		expect(handlers.liveColor).toHaveBeenCalledTimes(2);
+		expect(handlers.setTextStyle).not.toHaveBeenCalled();
 	});
 
 	it('disables the theme grid when text cannot be formatted', () => {
@@ -173,5 +171,53 @@ describe('createTextSection text colour theme grid', () => {
 		const swatches = themeSwatches(section.el);
 		expect(swatches).toHaveLength(60);
 		expect(swatches.every((swatch) => swatch.disabled)).toBeTruthy();
+	});
+});
+
+describe('createTextSection text box options', () => {
+	it('draws the shared Text Box options from the text style and commits through setTextStyle', () => {
+		const { section, handlers } = mount();
+		section.update(baseState({ textStyle: { vAlign: 'middle', columnCount: 2 } }));
+		const byTestId = (id: string) =>
+			section.el.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+		expect(byTestId('text-box-valign').value).toBe('middle');
+		expect(byTestId('text-box-columns').value).toBe('2');
+
+		const autofit = byTestId('text-box-autofit');
+		autofit.value = 'shrink';
+		autofit.dispatchEvent(new Event('change'));
+		expect(handlers.setTextStyle).toHaveBeenCalledWith({ autoFitMode: 'shrink', autoFit: true });
+
+		const wrap = byTestId('text-box-wrap');
+		wrap.checked = false;
+		wrap.dispatchEvent(new Event('change'));
+		expect(handlers.setTextStyle).toHaveBeenLastCalledWith({ textWrap: 'none' });
+	});
+
+	it('disables the text box options when text cannot be formatted', () => {
+		const { section } = mount();
+		section.update(baseState({ canText: false }));
+		const direction = section.el.querySelector<HTMLSelectElement>(
+			'[data-testid="text-box-direction"]',
+		)!;
+		expect(direction.disabled).toBeTruthy();
+	});
+});
+
+describe('createTextSection spacing fields', () => {
+	it('draws the shared spacing descriptors in points and writes the model units', () => {
+		const { section, handlers } = mount();
+		section.update(baseState({ textStyle: { paragraphSpacingBefore: 16, characterSpacing: 200 } }));
+		const before = section.el.querySelector<HTMLInputElement>(
+			'[data-testid="paragraph-spaceBefore"]',
+		)!;
+		expect(before.value).toBe('12');
+		const spacing = section.el.querySelector<HTMLInputElement>(
+			'[data-testid="font-characterSpacing"]',
+		)!;
+		expect(spacing.value).toBe('2');
+		before.value = '6';
+		before.dispatchEvent(new Event('change'));
+		expect(handlers.setTextStyle).toHaveBeenCalledWith({ paragraphSpacingBefore: 8 });
 	});
 });

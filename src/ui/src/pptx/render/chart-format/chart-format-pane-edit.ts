@@ -1,6 +1,11 @@
 /**
- * Turns one field change of a chart Format pane into a new chart model, via
- * the core's chart format operations. Returns `null` when the value is not
+ * PowerPoint's adapter for the shared chart Format pane: turns one edit of
+ * `office-ui-chart-format-pane` (a field change, with its neutral
+ * `ChartEditIntent`) into a new `PptxChartData`, via the core's pptx chart
+ * format operations. `PptxChartData` is not a `ChartSpace` yet, so the field
+ * id drives the mapping; it also covers the PowerPoint-only fields (pattern
+ * and picture fills, effects, 3-D, text, the secondary axis) the neutral
+ * intents do not. Returns `null` when the value is not
  * usable (an empty or out-of-range number), so the pane can repaint the
  * current value instead of committing.
  *
@@ -21,11 +26,13 @@ import {
 	withChartDataLabelOptions,
 	withChartElementFormat,
 	withChartLegendOptions,
+	withChartSeriesErrorBars,
+	withChartSeriesTrendline,
 	withChartSeriesOnSecondaryAxis,
 	withChartSeriesOptions,
 } from 'ooxml-core/pptx';
 
-import { DEFAULT_CHART_GLOW, DEFAULT_CHART_SHADOW } from './chart-format-pane-effects';
+import { DEFAULT_CHART_GLOW, DEFAULT_CHART_SHADOW } from '../../../chart/format-pane-effects';
 import {
 	DEFAULT_CHART_TEXTURE,
 	defaultChartGradient,
@@ -33,8 +40,11 @@ import {
 	textPatch,
 	threeDPatch,
 } from './chart-format-pane-edit-extra';
+import type { ChartFormatEditDetail } from '../../../chart/format-pane';
 import type { ChartFormatFieldValue } from './chart-format-pane-types';
 import { resolveChartFormatTarget } from './chart-format-targets';
+import { pptxChartFormatSource } from './chart-format-source';
+import { chartAnalysisFieldIntent } from '../../../chart/format-pane-analysis';
 
 function number(value: ChartFormatFieldValue): number | null {
 	if (value === '' || typeof value === 'boolean') {
@@ -239,6 +249,19 @@ export function applyChartFormatField(
 			const key = field.slice(7) as 'gapWidth' | 'overlap' | 'firstSliceAngle' | 'holeSize';
 			return withChartSeriesOptions(data, { [key]: Math.round(n) });
 		}
+		if (field.startsWith('errorBars.') || field.startsWith('trendline.')) {
+			// The shared pane's neutral intent, applied to PowerPoint's model.
+			const series =
+				target.kind === 'series'
+					? pptxChartFormatSource(data).seriesOptions?.(target.seriesIndex)
+					: undefined;
+			const intent = chartAnalysisFieldIntent(series, target, field, value);
+			if (intent?.op === 'trendline')
+				return withChartSeriesTrendline(data, intent.seriesIndex, intent.index, intent.edit);
+			return intent?.op === 'errorBars'
+				? withChartSeriesErrorBars(data, intent.seriesIndex, intent.edit)
+				: null;
+		}
 		if (field.startsWith('axis.')) {
 			const edit = target.kind === 'axis' ? axisEdit(field, value) : null;
 			return edit && target.kind === 'axis'
@@ -277,4 +300,12 @@ export function resetChartFormatTarget(
 	targetKey: PptxChartFormatTargetKey,
 ): PptxChartData {
 	return resetChartElementFormat(data, resolveChartFormatTarget(data, targetKey).target);
+}
+
+/** Applies an edit of the shared chart Format pane to `data`; `null` when it is refused. */
+export function applyChartFormatEdit(
+	data: PptxChartData,
+	edit: Pick<ChartFormatEditDetail, 'target' | 'field' | 'value'>,
+): PptxChartData | null {
+	return applyChartFormatField(data, edit.target, edit.field, edit.value);
 }

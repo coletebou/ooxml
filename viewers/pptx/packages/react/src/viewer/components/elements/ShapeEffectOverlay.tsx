@@ -4,8 +4,8 @@ import {
 	buildSubpathFillOverlay,
 	getBevelLightingSvgFilter,
 	getComputedEffectStyle,
-	getEffectStyleSource,
-	getSoftEdgeSvgFilter,
+	getShapeEffectFilterDefs,
+	getSilhouetteFillLayer,
 	strokeOutlineViewBox,
 } from 'ooxml-ui/pptx';
 import type { StrokeOutlinePaint } from 'ooxml-ui/pptx';
@@ -15,6 +15,7 @@ import React from 'react';
 import type { CSSProperties } from 'react';
 
 import { getImageSurfaceMaskStyle } from '../../utils';
+import { rendersCustomVectorPath, rendersWedgeCalloutVector } from '../../utils/shape-visual-style';
 import { StaticElementRenderer } from '../StaticElementRenderer';
 
 /**
@@ -38,7 +39,13 @@ function renderOutlinePaint(paint: StrokeOutlinePaint): React.ReactElement {
 		// A freeform `a:path type="rect"` gradient: the nested-rectangle band
 		// field stretched over the shape's bounding box.
 		return (
-			<pattern id={paint.id} patternUnits='objectBoundingBox' width={1} height={1}>
+			<pattern
+				id={paint.id}
+				patternUnits='objectBoundingBox'
+				patternContentUnits='objectBoundingBox'
+				width={1}
+				height={1}
+			>
 				<image href={paint.href} x={0} y={0} width={1} height={1} preserveAspectRatio='none' />
 			</pattern>
 		);
@@ -132,7 +139,7 @@ export function ShapeEffectOverlay({
 	const fx = getComputedEffectStyle(element);
 	const overlay = fx.fillOverlay;
 	const reflection = suppressReflection ? undefined : fx.reflection;
-	const softEdge = getSoftEdgeSvgFilter(getEffectStyleSource(element), element.id);
+	const softEdge = getShapeEffectFilterDefs(element);
 	// The real SVG lighting filter for a `a:sp3d` bevel (see shared
 	// `apply3dEffects`'s doc comment): the container's own `filter` already
 	// carries the matching `url(#bevel-light-<id>)` reference (set by
@@ -145,7 +152,15 @@ export function ShapeEffectOverlay({
 	// so clicks fall through to what it is drawn over, and this transparent band
 	// opts its OUTLINE back into hit testing (same trick as connector-hit-target).
 	const hollowHit = buildHollowHitOutline(element);
-	const subpathFill = buildSubpathFillOverlay(element);
+	// A silhouette shape's fill is painted here, except where React already paints
+	// the whole fill as an inline vector path (custom geometry, wedge callouts).
+	const fillLayer = getSilhouetteFillLayer(element);
+	const overlayFill = buildSubpathFillOverlay(element);
+	const subpathFill =
+		overlayFill?.silhouette &&
+		(rendersCustomVectorPath(element) || rendersWedgeCalloutVector(element))
+			? undefined
+			: overlayFill;
 	if (
 		!overlay &&
 		!softEdge &&
@@ -153,6 +168,7 @@ export function ShapeEffectOverlay({
 		!strokeOutline &&
 		!hollowHit &&
 		!subpathFill &&
+		!fillLayer &&
 		!reflection
 	) {
 		return null;
@@ -171,9 +187,17 @@ export function ShapeEffectOverlay({
 
 	return (
 		<>
+			{fillLayer ? (
+				<div
+					className='pptx-react-silhouette-fill'
+					aria-hidden='true'
+					style={fillLayer.style as CSSProperties}
+				/>
+			) : null}
 			{subpathFill ? (
 				<svg
 					className='pptx-react-subpath-fill'
+					data-pptx-silhouette-fill={subpathFill.silhouette ? '' : undefined}
 					aria-hidden='true'
 					viewBox={`0 0 ${subpathFill.viewBoxWidth} ${subpathFill.viewBoxHeight}`}
 					preserveAspectRatio='none'
@@ -230,6 +254,7 @@ export function ShapeEffectOverlay({
 			{strokeOutline ? (
 				<svg
 					className='pptx-react-gradient-outline'
+					data-pptx-outline=''
 					aria-hidden='true'
 					viewBox={strokeOutlineViewBox(element)}
 					preserveAspectRatio='none'
@@ -251,7 +276,7 @@ export function ShapeEffectOverlay({
 					{strokeOutline.strands.map((strand, idx) => (
 						<path
 							key={idx}
-							d={strokeOutline.d}
+							d={strand.d ?? strokeOutline.d}
 							markerStart={idx === 0 ? strokeOutline.markers?.start : undefined}
 							markerEnd={idx === 0 ? strokeOutline.markers?.end : undefined}
 							fill='none'
@@ -263,12 +288,15 @@ export function ShapeEffectOverlay({
 							style={{
 								// Never under one device pixel on screen (shared `device-pixel-stroke`).
 								strokeWidth: strand.cssStrokeWidth,
-								transform: strand.offset !== 0 ? `translate(0, ${strand.offset}px)` : undefined,
+								transform:
+									strand.cssTransform ??
+									(strand.offset !== 0 ? `translate(0, ${strand.offset}px)` : undefined),
 							}}
 						/>
 					))}
 				</svg>
 			) : null}
+			{hollowHit?.textCss ? <style>{hollowHit.textCss}</style> : null}
 			{hollowHit ? (
 				<svg
 					aria-hidden='true'
@@ -287,10 +315,10 @@ export function ShapeEffectOverlay({
 				>
 					<path
 						d={hollowHit.d}
-						fill='none'
-						stroke='transparent'
+						fill={hollowHit.fill}
+						stroke={hollowHit.stroke}
 						strokeWidth={hollowHit.strokeWidth}
-						style={{ pointerEvents: 'stroke' }}
+						style={{ pointerEvents: hollowHit.pointerEvents }}
 					/>
 				</svg>
 			) : null}

@@ -12,6 +12,11 @@ export const translations = {
 	'pptx.statusBar.zoomOut': 'Zoom arrière',
 	'pptx.statusBar.zoomToFit': 'Ajuster à la fenêtre',
 	'pptx.autosave.saving': 'Enregistrement...',
+	'pptx.autosave.progress.uploading': 'Enregistrement… {percent}%',
+	'pptx.autosave.progress.checking': 'Recherche de modifications…',
+	'pptx.autosave.progress.downloading': 'Récupération de la dernière version… {percent}%',
+	'pptx.autosave.progress.downloadingUnknown': 'Récupération de la dernière version…',
+	'pptx.autosave.progress.merging': 'Fusion des modifications…',
 	'pptx.autosave.saved': 'Enregistré {{time}}',
 	'pptx.autosave.error': "Erreur d'enregistrement automatique",
 	'pptx.autosave.disabled': 'Enregistrement automatique indisponible',
@@ -112,9 +117,20 @@ export const translations = {
 	'pptx.toolbar.save': 'Sauvegarder',
 	'pptx.settings.done': 'Fait',
 	'pptx.viewer.loading': 'Chargement de la présentation…',
+	'pptx.viewer.loadingFonts': 'Téléchargement des polices ({{loaded}} sur {{total}})…',
 	'pptx.viewer.encrypted':
 		'Cette présentation est protégée par mot de passe et ne peut pas être ouverte.',
 	'pptx.viewer.loadError': 'Échec du chargement de la présentation.',
+	'pptx.viewer.loadLimit.maxInputBytes':
+		'Ce fichier fait {{actual}}, plus que les {{maximum}} acceptés par cette visionneuse.',
+	'pptx.viewer.loadLimit.maxUncompressedBytes':
+		'Une fois décompressée, cette présentation fait au moins {{actual}}, plus que les {{maximum}} acceptés par cette visionneuse.',
+	'pptx.viewer.loadLimit.maxEntries':
+		'Cette présentation contient {{actual}} parties, plus que les {{maximum}} acceptées par cette visionneuse.',
+	'pptx.viewer.loadLimit.maxSlides':
+		'Cette présentation contient {{actual}} diapositives, plus que les {{maximum}} acceptées par cette visionneuse.',
+	'pptx.viewer.loadLimit.maxShapes':
+		'Cette présentation contient au moins {{actual}} formes, plus que les {{maximum}} acceptées par cette visionneuse.',
 	'pptx.viewer.slide': 'Diapositive',
 	'pptx.viewer.background': 'Arrière-plan',
 	'pptx.viewer.speakerNotesPlaceholder': 'Cliquez pour ajouter des notes de conférencier',
@@ -124,6 +140,12 @@ export const translations = {
 	'pptx.common.close': 'Fermer',
 	'pptx.common.save': 'Sauvegarder',
 	'pptx.common.ok': 'OK',
+	'pptx.dialog.confirmTitle': 'Confirmer',
+	'pptx.dialog.inputTitle': 'Saisir un nom',
+	'pptx.dialog.noticeTitle': "Impossible de terminer l'action",
+	'pptx.dialog.hyperlinkTitle': 'Ouvrir le lien externe ?',
+	'pptx.dialog.hyperlinkMessage': 'Ce lien quitte la présentation :',
+	'pptx.dialog.hyperlinkOpen': 'Ouvrir',
 	'pptx.toolbar.findAndReplace': 'Rechercher et remplacer',
 	'pptx.mode.closeMasterViewTooltip': 'Fermer la vue principale',
 	'pptx.mode.masterView': 'Vue principale',

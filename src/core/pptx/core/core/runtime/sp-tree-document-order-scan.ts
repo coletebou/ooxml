@@ -30,6 +30,7 @@
  * attribute value holding a literal `>` would have to be hand-authored.
  */
 import { SHAPE_TREE_ELEMENT_TAGS } from '../../utils';
+import { at } from '../../../../geometry/indexed';
 
 const ALTERNATE_CONTENT_TAG = 'mc:AlternateContent';
 const GROUP_TAG = 'p:grpSp';
@@ -78,7 +79,8 @@ export function scanSpTreeDocumentOrder(xml: string): SpTreeChildPlan[] {
 	tagPattern.lastIndex = bodyStart + 1;
 	let match: RegExpExecArray | null;
 	while ((match = tagPattern.exec(xml))) {
-		const [, closing, tag, , selfClosing] = match;
+		// The tag-name group is required, so it is always a string once the pattern matched.
+		const [, closing, tag = '', , selfClosing] = match;
 		if (closing) {
 			if (inert > 0) {
 				inert--;
@@ -91,7 +93,7 @@ export function scanSpTreeDocumentOrder(xml: string): SpTreeChildPlan[] {
 			continue;
 		}
 		if (inert === 0 && isContainerChild(tag)) {
-			const frame = stack[stack.length - 1];
+			const frame = at(stack, stack.length - 1);
 			const indexInType = frame.counters.get(tag) ?? 0;
 			frame.counters.set(tag, indexInType + 1);
 			const children: SpTreeChildPlan[] = [];

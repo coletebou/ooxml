@@ -1,4 +1,10 @@
-import type { ElementBoxPatch } from 'ooxml-ui/pptx';
+import type {
+	EditorHistoryController,
+	ElementBoxPatch,
+	HistoryTheme,
+	TableCellEditEnd,
+	TableCellEditOutcome,
+} from 'ooxml-ui/pptx';
 import {
 	applyFormatToElement,
 	buildDeckSaveOptions,
@@ -8,7 +14,7 @@ import {
 	copyFormatFromElement,
 	overlayInlineTextSnapshot,
 	overlayMasterViewInlineSnapshot,
-	EditorHistory,
+	createEditorHistoryController,
 	resolveSlideSizeSelection,
 	saveDeckWithPassword,
 	updateSlideNotes,
@@ -28,6 +34,7 @@ import type {
 	PptxSection,
 	PptxSlide,
 	PptxSlideMaster,
+	TablePptxElement,
 	TextSegment,
 	TextStyle,
 } from 'pptx-viewer-core';
@@ -44,6 +51,7 @@ import {
 import { setHandoutSlidesPerPage } from './editor-master-actions';
 import { selectionState } from './editor-selection-state';
 import { createStructuredEditorOperations } from './editor-structured-operations';
+import { restoreStoreTheme, storeHistoryTheme } from './editor-theme-history';
 import {
 	remapInlineText,
 	resolveInlineTextAutoFitHeight,
@@ -67,7 +75,7 @@ export interface EditorOpsDeps {
 	/** Fired whenever canUndo/canRedo may have changed (toolbar refresh). */
 	onHistoryChange(): void;
 	/** Options > Proofing > AutoCorrect, applied to committed inline-edit text. */
-	transformCommittedText?: (text: string) => string;
+	transformCommittedText?: (text: string, previous?: string) => string;
 	getPendingInlineTextEdit?: () => import('ooxml-ui/pptx').PendingInlineTextEdit | undefined;
 	readInlineList?: () => import('ooxml-ui/pptx').InlineListReadResult | undefined;
 	formatInlineList?: (snapshot: import('ooxml-ui/pptx').InlineTextEditSnapshot) => boolean;
@@ -87,6 +95,13 @@ export interface EditorOps {
 	commitChange(): void;
 	/** Patch geometry WITHOUT history (live gesture preview frames). */
 	patchGeometry(id: string, box: ElementBoxPatch): void;
+	/**
+	 * Merge `patch` into an element WITHOUT history or the dirty flag: a live
+	 * frame its caller commits later as one undo step (a gesture frame, or a
+	 * shade of a colour picker drag, which shared `createLiveColorInput` puts
+	 * back before its one committed edit).
+	 */
+	previewElement(id: string, patch: Partial<PptxElement>): void;
 	deleteSelected(): void;
 	duplicateSelected(): string | null;
 	nudgeSelected(dx: number, dy: number): void;
@@ -101,6 +116,15 @@ export interface EditorOps {
 	setHandoutSlidesPerPage(count: number): void;
 	applyFormatPainter(sourceId: string, targetId: string): boolean;
 	commitTableCell(id: string, row: number, column: number, text: string): void;
+	/** The rich cell editor closed: apply the shared outcome as one history entry. */
+	endTableCellEdit(
+		id: string,
+		row: number,
+		column: number,
+		end: TableCellEditEnd,
+	): TableCellEditOutcome | undefined;
+	/** Replace a table element as one undoable step (a paste into selected cells). */
+	replaceTableElement(next: TablePptxElement): void;
 	updateEquation(id: string, omml: Record<string, unknown>): void;
 	updateDocumentProperties(
 		core: PptxCoreProperties,
@@ -112,6 +136,8 @@ export interface EditorOps {
 	updateSections(value: PptxSection[]): void;
 	updateHeaderFooter(value: PptxHeaderFooter): void;
 	updateCustomShows(value: PptxCustomShow[]): void;
+	/** The shared undo/redo controller (subscribe to follow `canUndo` / labels). */
+	readonly history: EditorHistoryController<EditorSnapshot>;
 	undo(): void;
 	redo(): void;
 	canUndo(): boolean;
@@ -122,10 +148,13 @@ export interface EditorOps {
 	clearHistory(): void;
 	/** File > Options > Advanced > "Maximum number of undos". */
 	setHistoryDepth(depth: number): void;
+	/** Serialise and mark the document clean (`getContent`). */
 	save(format?: PptxSaveFormat): Promise<Uint8Array>;
+	/** Serialise without touching the dirty flag: File > Save decides once the bytes are stored. */
+	serialize(format?: PptxSaveFormat): Promise<Uint8Array>;
 }
 
-interface EditorSnapshot {
+export interface EditorSnapshot {
 	slides: PptxSlide[];
 	sections: PptxSection[];
 	coreProperties?: PptxCoreProperties;
@@ -139,15 +168,17 @@ interface EditorSnapshot {
 	presentationProperties: PptxPresentationProperties;
 	headerFooter: PptxHeaderFooter;
 	customShows: PptxCustomShow[];
+	/** The theme's colour scheme, font scheme and name, so Undo takes a theme pick back too. */
+	theme?: HistoryTheme;
 }
 
-const MAX_HISTORY_ENTRIES = 100;
 /** Consecutive arrow-key nudges within this window share one history entry. */
 const NUDGE_COALESCE_MS = 800;
 
 export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 	const { store } = deps;
-	const history = new EditorHistory<EditorSnapshot>({ maxDepth: MAX_HISTORY_ENTRIES });
+	// The shared history controller owns the stack and its one default depth.
+	const history = createEditorHistoryController<EditorSnapshot>();
 	let lastNudgeAt = 0;
 
 	const selectedElement = (state: ViewerState = store.get()): PptxElement | undefined =>
@@ -171,6 +202,7 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		presentationProperties: structuredClone(store.get().presentationProperties),
 		headerFooter: structuredClone(store.get().headerFooter),
 		customShows: structuredClone(store.get().customShows),
+		theme: storeHistoryTheme(store.get()),
 	});
 
 	const pushHistory = (label = ''): void => {
@@ -185,17 +217,19 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		deps.onChange?.();
 	};
 
-	const patchGeometry = (id: string, box: ElementBoxPatch): void => {
+	const previewElement = (id: string, patch: Partial<PptxElement>): void => {
 		const state = store.get();
 		// A group member's box is slide space; `mapActiveElement` writes it back
 		// into the group's space.
 		const elements = mapActiveElement(
 			state,
 			id,
-			(element) => ({ ...element, ...box }) as PptxElement,
+			(element) => ({ ...element, ...patch }) as PptxElement,
 		);
 		store.set(replaceActiveElements(state, elements));
 	};
+	const patchGeometry = (id: string, box: ElementBoxPatch): void =>
+		previewElement(id, box as Partial<PptxElement>);
 
 	const restore = (next: EditorSnapshot | undefined): void => {
 		if (!next) {
@@ -223,6 +257,15 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		});
 		commitChange();
 	};
+	/** Undo or redo one step; a step that crosses a theme change puts that theme back too. */
+	const step = (move: (current: EditorSnapshot) => EditorSnapshot | undefined): void => {
+		const current = snapshot();
+		const next = move(current);
+		if (next) {
+			restoreStoreTheme(store, deps.getHandler(), current.theme, next.theme);
+		}
+		restore(next);
+	};
 	const structured = createStructuredEditorOperations({
 		store,
 		pushHistory,
@@ -230,7 +273,7 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		transformCommittedText: deps.transformCommittedText,
 	});
 
-	return {
+	const ops: EditorOps = {
 		readInlineList: deps.readInlineList,
 		formatInlineList: deps.formatInlineList,
 		cancelInlineList: deps.cancelInlineList,
@@ -239,6 +282,7 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		pushHistory,
 		commitChange,
 		patchGeometry,
+		previewElement,
 
 		deleteSelected() {
 			const state = store.get();
@@ -314,7 +358,9 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 			if (!target) {
 				return;
 			}
-			const text = deps.transformCommittedText ? deps.transformCommittedText(rawText) : rawText;
+			const text = deps.transformCommittedText
+				? deps.transformCommittedText(rawText, (target as { text?: string }).text)
+				: rawText;
 			pushHistory();
 			// `a:spAutoFit`: grow/shrink the shape to the text's natural content
 			// height, the way PowerPoint does. See `resolveInlineTextAutoFitHeight`
@@ -447,15 +493,16 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		},
 
 		undo() {
-			restore(history.undo(snapshot())?.snapshot);
+			step((current) => history.undo(current)?.snapshot);
 		},
 		redo() {
-			restore(history.redo(snapshot())?.snapshot);
+			step((current) => history.redo(current)?.snapshot);
 		},
-		canUndo: () => history.canUndo,
-		canRedo: () => history.canRedo,
-		undoLabel: () => history.undoLabel,
-		redoLabel: () => history.redoLabel,
+		history,
+		canUndo: () => history.getSnapshot().canUndo,
+		canRedo: () => history.getSnapshot().canRedo,
+		undoLabel: () => history.getSnapshot().undoLabel,
+		redoLabel: () => history.getSnapshot().redoLabel,
 		clearHistory() {
 			history.clear();
 			lastNudgeAt = 0;
@@ -466,6 +513,12 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 		},
 
 		async save(format: PptxSaveFormat = 'pptx') {
+			const bytes = await ops.serialize(format);
+			store.set({ dirty: false });
+			return bytes;
+		},
+
+		async serialize(format: PptxSaveFormat = 'pptx') {
 			const handler = deps.getHandler();
 			if (!handler) {
 				throw new Error('No presentation is loaded.');
@@ -473,7 +526,11 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 			const state = store.get();
 			const pending = deps.getPendingInlineTextEdit?.();
 			const pendingText = pending
-				? (deps.transformCommittedText?.(pending.snapshot.text) ?? pending.snapshot.text)
+				? (deps.transformCommittedText?.(
+						pending.snapshot.text,
+						(findActiveElement(state, pending.snapshot.elementId) as { text?: string } | undefined)
+							?.text,
+					) ?? pending.snapshot.text)
 				: undefined;
 			const masterWrite =
 				pending && 'masterView' in pending.target
@@ -542,8 +599,8 @@ export function createEditorOps(deps: EditorOpsDeps): EditorOps {
 					passwordProtected: state.presentationPassword !== null,
 				},
 			);
-			store.set({ dirty: false });
 			return bytes;
 		},
 	};
+	return ops;
 }

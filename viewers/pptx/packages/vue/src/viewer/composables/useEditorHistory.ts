@@ -1,10 +1,17 @@
-import { EditorHistory } from 'ooxml-ui/pptx';
+import {
+	createEditorHistoryController,
+	historyTheme,
+	restoreCrossedTheme,
+	withHistoryMasterThemes,
+} from 'ooxml-ui/pptx';
+import type { CollaborationHistory, HistoryTheme } from 'ooxml-ui/pptx';
 import { cloneElement, cloneSlide } from 'pptx-viewer-core';
-import type { PptxSlide } from 'pptx-viewer-core';
-import { computed, nextTick, shallowRef } from 'vue';
+import type { PptxHandler, PptxSlide, PptxSlideMaster, PptxTheme } from 'pptx-viewer-core';
+import { computed, nextTick } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
 
 import type { TemplateElementMap } from './template-editing';
+import { useController } from './useController';
 
 /**
  * useEditorHistory: framework-idiomatic undo/redo stack over `PptxSlide[]`.
@@ -15,10 +22,10 @@ import type { TemplateElementMap } from './template-editing';
  * template-element layers; the Vue editor foundation operates purely on the
  * `PptxSlide[]` model, so a snapshot is simply a cloned slide array.
  *
- * The stack itself is the shared, framework-agnostic `EditorHistory<T>` command
- * stack (`pptx-viewer-shared`); this composable adds only the Vue reactivity
- * (`computed` canUndo/canRedo) and the `cloneSlide` deep-snapshotting the shared
- * class deliberately leaves to the caller.
+ * The stack itself is the shared history controller
+ * (`createEditorHistoryController` in `ooxml-ui/pptx`), read through the
+ * generic `useController` adapter; this composable adds only the `cloneSlide`
+ * deep-snapshotting the shared stack deliberately leaves to the caller.
  *
  * Usage pattern (push-before-mutate):
  *
@@ -35,13 +42,6 @@ import type { TemplateElementMap } from './template-editing';
  * clears the redo stack; callers invoke it immediately before committing a new
  * `slides.value`. `undo`/`redo` swap snapshots in and out of the live ref.
  */
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Cap the past stack to bound memory; mirrors the React `MAX_HISTORY_ENTRIES`. */
-const MAX_HISTORY_ENTRIES = 120;
 
 // ---------------------------------------------------------------------------
 // Result interface
@@ -68,11 +68,18 @@ export interface EditorHistoryResult {
 	/** Drop all undo/redo history (e.g. when new content is loaded). */
 	clearHistory: () => void;
 	/**
+	 * Drop the undo and redo steps that would bring back a state `reaches` matches, with the steps
+	 * behind them: a Slide Master view command removed a layout the package cannot get back.
+	 */
+	forgetHistory: (reaches: (snapshot: HistorySnapshot) => boolean) => void;
+	/**
 	 * Apply a new File > Options > Advanced > "Maximum number of undos" value
 	 * at runtime (`resolveHistoryDepth`). Trims the past stack immediately if
 	 * the new limit is smaller.
 	 */
 	setMaxDepth: (depth: number) => void;
+	/** Route Undo and Redo through a room's history while attached (returns the detach). */
+	attachCollaboration: (history: CollaborationHistory | null) => () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,16 +90,38 @@ export interface EditorHistoryResult {
  * One undoable snapshot: the slide array plus (optionally) the separate template
  * (master/layout) element store, so edits in `editTemplateMode` undo/redo too.
  */
-interface HistorySnapshot {
+export interface HistorySnapshot {
 	slides: PptxSlide[];
 	template: TemplateElementMap;
+	/** The theme's colour scheme, font scheme and name, and the colour map built from them. */
+	theme?: HistoryTheme;
+	themeColorMap?: Record<string, string>;
+}
+
+/**
+ * The deck theme an undo step carries along with the slides (`render/theme-history`). An undo or
+ * redo that crosses a theme change puts the recorded theme and colour map back, and writes the
+ * parts that differ into the handler's theme parts, so a save after it writes the theme it shows.
+ */
+export interface EditorHistoryThemeSource {
+	theme: Ref<PptxTheme | undefined>;
+	themeColorMap: Ref<Record<string, string> | undefined>;
+	handler: Ref<PptxHandler | null | undefined>;
+	/** The primary theme part's loaded name; the parsed theme carries none. */
+	loadedThemeName?: () => string | undefined;
+	/**
+	 * The slide masters. Each one's theme part is recorded with the theme, so Undo of a theme
+	 * applied by path points the masters back (in the viewer and in the handler).
+	 */
+	slideMasters?: Ref<PptxSlideMaster[]>;
 }
 
 /** Optional tuning knobs for the history stack. */
 export interface UseEditorHistoryOptions {
 	/**
-	 * Maximum undo depth. Defaults to `MAX_HISTORY_ENTRIES`; File > Options >
-	 * Advanced > "Maximum number of undos" threads `resolveHistoryDepth` here.
+	 * Maximum undo depth. Defaults to the shared `DEFAULT_EDITOR_HISTORY_DEPTH`;
+	 * File > Options > Advanced > "Maximum number of undos" threads
+	 * `resolveHistoryDepth` here.
 	 */
 	maxDepth?: number;
 	/**
@@ -107,6 +136,8 @@ export interface UseEditorHistoryOptions {
 	 * event. Deferred a tick so a listener reads the committed deck, not the one before it.
 	 */
 	onChange?: () => void;
+	/** The deck theme, recorded with every snapshot so a theme pick undoes like any other edit. */
+	theme?: EditorHistoryThemeSource;
 }
 
 /**
@@ -122,19 +153,13 @@ export function useEditorHistory(
 	templateElementsBySlideId?: Ref<TemplateElementMap>,
 	options?: UseEditorHistoryOptions,
 ): EditorHistoryResult {
-	// The shared, framework-agnostic command stack. It performs no cloning, so we
-	// snapshot with `cloneSlide` / `cloneElement` before every record/undo/redo
-	// round-trip.
-	const stack = new EditorHistory<HistorySnapshot>({
-		maxDepth: options?.maxDepth ?? MAX_HISTORY_ENTRIES,
-	});
-
-	// A monotonically-increasing tick bumped on every mutation so the `computed`
-	// flags below re-evaluate against the (non-reactive) shared stack.
-	const tick = shallowRef(0);
-	const bump = (): void => {
-		tick.value++;
-	};
+	// The shared history controller (one stack and one default depth for every
+	// binding). It performs no cloning, so we snapshot with `cloneSlide` /
+	// `cloneElement` before every record/undo/redo round-trip.
+	const stack = createEditorHistoryController<HistorySnapshot>(
+		options?.maxDepth === undefined ? {} : { maxDepth: options.maxDepth },
+	);
+	const state = useController(stack);
 
 	const cloneTemplateMap = (source: TemplateElementMap): TemplateElementMap => {
 		const next: TemplateElementMap = {};
@@ -144,10 +169,40 @@ export function useEditorHistory(
 		return next;
 	};
 
-	const snapshot = (): HistorySnapshot => ({
-		slides: slides.value.map(cloneSlide),
-		template: cloneTemplateMap(templateElementsBySlideId?.value ?? {}),
-	});
+	const themeSource = options?.theme;
+	const snapshot = (): HistorySnapshot => {
+		const theme = historyTheme(themeSource?.theme.value, themeSource?.slideMasters?.value);
+		const themeColorMap = themeSource?.themeColorMap.value;
+		return {
+			slides: slides.value.map(cloneSlide),
+			template: cloneTemplateMap(templateElementsBySlideId?.value ?? {}),
+			...(theme ? { theme } : {}),
+			...(themeColorMap ? { themeColorMap: { ...themeColorMap } } : {}),
+		};
+	};
+
+	/** Moving from `current` to `snap` crosses a theme change: put the recorded theme back. */
+	const restoreTheme = (current: HistorySnapshot, snap: HistorySnapshot): void => {
+		if (!themeSource) {
+			return;
+		}
+		const theme = restoreCrossedTheme(
+			themeSource.theme.value,
+			current.theme,
+			snap.theme,
+			themeSource.handler.value,
+			themeSource.loadedThemeName?.(),
+		);
+		if (theme) {
+			themeSource.theme.value = theme;
+			themeSource.themeColorMap.value = snap.themeColorMap ? { ...snap.themeColorMap } : undefined;
+			const masters = themeSource.slideMasters;
+			const restored = masters && withHistoryMasterThemes(masters.value, snap.theme);
+			if (masters && restored !== masters.value) {
+				masters.value = [...restored!];
+			}
+		}
+	};
 
 	const restore = (snap: HistorySnapshot): void => {
 		slides.value = snap.slides.map(cloneSlide);
@@ -163,23 +218,10 @@ export function useEditorHistory(
 		}
 	};
 
-	const canUndo = computed(() => {
-		void tick.value;
-		return stack.canUndo;
-	});
-	const canRedo = computed(() => {
-		void tick.value;
-		return stack.canRedo;
-	});
-
-	const undoLabel = computed(() => {
-		void tick.value;
-		return stack.undoLabel || undefined;
-	});
-	const redoLabel = computed(() => {
-		void tick.value;
-		return stack.redoLabel || undefined;
-	});
+	const canUndo = computed(() => state.value.canUndo);
+	const canRedo = computed(() => state.value.canRedo);
+	const undoLabel = computed(() => state.value.undoLabel);
+	const redoLabel = computed(() => state.value.redoLabel);
 
 	let changePending = false;
 	const notifyChange = (): void => {
@@ -195,38 +237,41 @@ export function useEditorHistory(
 
 	const pushHistory = (label = ''): void => {
 		stack.record(snapshot(), label);
-		bump();
 		notifyChange();
 	};
 
 	const undo = (): void => {
-		const result = stack.undo(snapshot());
+		const current = snapshot();
+		const result = stack.undo(current);
 		if (!result) {
 			return;
 		}
 		restore(result.snapshot);
-		bump();
+		restoreTheme(current, result.snapshot);
 		notifyChange();
 	};
 
 	const redo = (): void => {
-		const result = stack.redo(snapshot());
+		const current = snapshot();
+		const result = stack.redo(current);
 		if (!result) {
 			return;
 		}
 		restore(result.snapshot);
-		bump();
+		restoreTheme(current, result.snapshot);
 		notifyChange();
 	};
 
 	const clearHistory = (): void => {
 		stack.clear();
-		bump();
+	};
+
+	const forgetHistory = (reaches: (snapshot: HistorySnapshot) => boolean): void => {
+		stack.forget(reaches);
 	};
 
 	const setMaxDepth = (depth: number): void => {
 		stack.setMaxDepth(depth);
-		bump();
 	};
 
 	return {
@@ -238,6 +283,8 @@ export function useEditorHistory(
 		undo,
 		redo,
 		clearHistory,
+		forgetHistory,
 		setMaxDepth,
+		attachCollaboration: stack.attachCollaboration,
 	};
 }

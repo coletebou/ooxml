@@ -3,6 +3,7 @@ import {
 	afterNextRender,
 	ChangeDetectionStrategy,
 	Component,
+	DestroyRef,
 	computed,
 	effect,
 	ElementRef,
@@ -13,13 +14,22 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
-import type { TableStyleContext } from 'ooxml-ui/pptx';
+import type {
+	TableCellCaret,
+	TableCellEditEnd,
+	TableCellTextEditorSession,
+	TableStyleContext,
+} from 'ooxml-ui/pptx';
 import {
 	canDrillDown,
 	DEFAULT_FONT_FAMILY,
+	openTableCellTextEditor,
+	resolveTableCellEditEnd,
 	screenStrokeWidth,
+	tableCellEditorSegments,
 	tableCellPointerIntent,
 	tableContainerCss,
+	tableFrameCss,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxTableData, PptxTableRow, TablePptxElement } from 'pptx-viewer-core';
 
@@ -34,18 +44,22 @@ import {
 import type { CellParagraph, TableRowViewModel } from './table-renderer-helpers';
 import { TableResizeOverlayComponent } from './table-resize-overlay.component';
 import { TableSelectionService } from './table-selection.service';
+import { TABLE_STYLE_CONTEXT_OVERRIDE } from './table-style-context';
 
 /** A committed table-cell text edit (original grid coordinates + new text). */
 export interface TableCellCommit {
 	rowIndex: number;
 	colIndex: number;
 	text: string;
+	/** Set by the rich cell editor: why it closed, with the runs it committed. */
+	end?: TableCellEditEnd;
 }
 
 /** The cell currently being edited (original grid coordinates), or null. */
 interface EditingCell {
 	rowIndex: number;
 	colIndex: number;
+	caret: TableCellCaret;
 }
 
 /**
@@ -135,6 +149,8 @@ export class TableRendererComponent {
 	 * thumbnail/export renderers, where the hardcoded defaults are used.
 	 */
 	private readonly loader = inject(LoadContentService, { optional: true });
+	/** A surface's own table style context (the thumbnail rail's), preferred over the loader's. */
+	private readonly styleOverride = inject(TABLE_STYLE_CONTEXT_OVERRIDE, { optional: true });
 
 	/** The table element to render. Must be `type === 'table'`. */
 	readonly element = input.required<PptxElement>();
@@ -151,8 +167,11 @@ export class TableRendererComponent {
 	/** The cell currently being edited (original grid coords), or null. */
 	private readonly editingCell = signal<EditingCell | null>(null);
 
-	/** The mounted `<input>` for the active cell edit, if any. */
-	private readonly cellInput = viewChild<ElementRef<HTMLInputElement>>('cellInput');
+	/** The host the rich cell editor mounts into while a cell is edited. */
+	private readonly cellEditorHost = viewChild<ElementRef<HTMLDivElement>>('cellEditorHost');
+
+	/** The open rich cell editor, if any. */
+	private cellSession: TableCellTextEditorSession | undefined;
 
 	/**
 	 * `<table>`-level style beyond the font stack: `a:tblPr@rtl` mirrors the
@@ -173,10 +192,18 @@ export class TableRendererComponent {
 	 * deck loader, or `undefined` outside the viewer subtree. `fontScheme` lets a
 	 * table style's `a:fontRef@idx` resolve to a concrete font family.
 	 */
-	private readonly styleCtx = computed<TableStyleContext | undefined>(() =>
-		this.loader
+	private readonly styleCtx = computed<TableStyleContext | undefined>(() => {
+		if (this.styleOverride) {
+			return this.styleOverride();
+		}
+		return this.loader
 			? tableStyleContextFor(this.loader.tableStyleMap(), this.loader.theme())
-			: undefined,
+			: undefined;
+	});
+
+	/** The table style's drop shadow (Themed Style 1/2), drawn on the table's frame. */
+	readonly tableFrameStyle = computed<StyleMap>(
+		() => tableFrameCss(this.tableData(), this.styleCtx()) as StyleMap,
 	);
 
 	/** Projected view-model rows with merged-cell resolution + banding applied. */
@@ -191,21 +218,22 @@ export class TableRendererComponent {
 	readonly tableRows = computed<PptxTableRow[]>(() => this.tableData()?.rows ?? []);
 
 	constructor() {
-		// Focus + select-all the cell input as soon as it mounts (mirrors React's
-		// TableCellInput useEffect). Runs whenever the edited cell changes.
+		// Mount the shared rich editor once the edited cell's host renders; close
+		// it (committing if still open) when editing ends or moves elsewhere.
 		effect(() => {
-			if (this.editingCell()) {
-				afterNextRender(
-					() => {
-						const el = this.cellInput()?.nativeElement;
-						if (el) {
-							el.focus();
-							el.select();
-						}
-					},
-					{ injector: this.injector },
-				);
+			const cell = this.editingCell();
+			if (!cell) {
+				const open = this.cellSession;
+				this.cellSession = undefined;
+				open?.destroy();
+				return;
 			}
+			afterNextRender(() => this.openCellEditor(cell), { injector: this.injector });
+		});
+		inject(DestroyRef).onDestroy(() => {
+			const open = this.cellSession;
+			this.cellSession = undefined;
+			open?.destroy();
 		});
 	}
 
@@ -278,35 +306,63 @@ export class TableRendererComponent {
 			return;
 		}
 		event.stopPropagation();
-		this.editingCell.set({ rowIndex, colIndex });
+		this.editingCell.set({ rowIndex, colIndex, caret: 'all' });
 		this.selectionSvc?.beginEditing(this.element().id, rowIndex, colIndex);
 	}
 
-	/** Commit the current edit (called on blur). */
-	commitCellEdit(event: Event): void {
-		const cell = this.editingCell();
-		if (!cell) {
+	/** Mount the shared rich cell editor into the edited cell's host. */
+	private openCellEditor(cell: EditingCell): void {
+		this.cellSession?.destroy();
+		this.cellSession = undefined;
+		const host = this.cellEditorHost()?.nativeElement;
+		const data = this.tableData();
+		if (!host || !this.isEditing(cell.rowIndex, cell.colIndex)) {
 			return;
 		}
-		const value = (event.target as HTMLInputElement).value;
-		this.editingCell.set(null);
-		this.selectionSvc?.endEditing();
-		this.cellCommit.emit({ rowIndex: cell.rowIndex, colIndex: cell.colIndex, text: value });
+		this.cellSession = openTableCellTextEditor({
+			host,
+			segments: tableCellEditorSegments(
+				data?.rows[cell.rowIndex]?.cells[cell.colIndex],
+				this.element() as TablePptxElement,
+				cell.rowIndex,
+				cell.colIndex,
+			),
+			caret: cell.caret,
+			rtl: data?.rtl === true,
+			onEnd: (end) => this.onCellEditEnd(cell, end),
+		});
 	}
 
-	/** Enter/Tab commits, Escape cancels. Stops propagation so the canvas ignores it. */
-	onCellInputKeydown(event: KeyboardEvent): void {
-		event.stopPropagation();
-		if (event.key === 'Enter' || event.key === 'Tab') {
-			event.preventDefault();
-			(event.target as HTMLInputElement).blur();
-		} else if (event.key === 'Escape') {
-			event.preventDefault();
-			this.editingCell.set(null);
-			this.selectionSvc?.endEditing();
+	/**
+	 * The rich cell editor closed. The shared `resolveTableCellEditEnd` outcome
+	 * names the next cell (Tab, Shift+Tab, an arrow at the text's edge); the
+	 * commit handler applies the same outcome to the document.
+	 */
+	onCellEditEnd(cell: EditingCell, end: TableCellEditEnd): void {
+		const element = this.element();
+		const outcome =
+			element.type === 'table'
+				? resolveTableCellEditEnd(element as TablePptxElement, cell.rowIndex, cell.colIndex, end)
+				: {};
+		const current = this.editingCell();
+		if (current?.rowIndex === cell.rowIndex && current.colIndex === cell.colIndex) {
+			if (outcome.edit) {
+				this.editingCell.set({
+					rowIndex: outcome.edit.row,
+					colIndex: outcome.edit.col,
+					caret: outcome.edit.caret,
+				});
+				this.selectionSvc?.beginEditing(element.id, outcome.edit.row, outcome.edit.col);
+			} else {
+				this.editingCell.set(null);
+				this.selectionSvc?.endEditing();
+				if (outcome.select) {
+					this.selectionSvc?.selectCell(element.id, outcome.select.row, outcome.select.col);
+				}
+			}
 		}
+		this.cellCommit.emit({ rowIndex: cell.rowIndex, colIndex: cell.colIndex, text: '', end });
 	}
-
 	/** Persist a column-width drag by emitting new table data. */
 	onResizeColumns(newWidths: number[]): void {
 		const td = this.tableData();

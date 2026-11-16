@@ -19,6 +19,7 @@ import {
 	getEffectFillOverlay,
 	getSoftEdgeFilterDef,
 	getStrokeOutline,
+	getFillLayer,
 	getSubpathFillOverlay,
 } from './element-effect-defs';
 import type { SoftEdgeFilterDef } from './element-effect-defs';
@@ -119,6 +120,9 @@ import { SlideTextBlockComponent } from './slide-text-block.component';
 			</div>
 		} @else {
 			<div style="width: 100%; height: 100%" [ngStyle]="boxStyle()">
+				@if (fillLayer(); as fl) {
+					<div aria-hidden="true" [attr.style]="fl.cssText"></div>
+				}
 				@if (subpathFill(); as sf) {
 					<svg
 						aria-hidden="true"
@@ -183,7 +187,7 @@ import { SlideTextBlockComponent } from './slide-text-block.component';
 					>
 						@for (strand of so.strands; track $index) {
 							<path
-								[attr.d]="so.d"
+								[attr.d]="strand.d ?? so.d"
 								fill="none"
 								[attr.stroke]="so.stroke"
 								[attr.stroke-width]="strand.strokeWidth"
@@ -265,6 +269,7 @@ export class ReflectionMirrorContentComponent {
 	);
 	/** viewBox in the element's PAINTED box, which the outline path data is authored in. */
 	readonly outlineViewBox = computed(() => strokeOutlineViewBox(this.element()));
+	readonly fillLayer = computed(() => getFillLayer(this.element()));
 	readonly subpathFill = computed<SubpathFillOverlay | undefined>(() =>
 		getSubpathFillOverlay(this.element()),
 	);

@@ -14,8 +14,10 @@ import { DestroyRef, Injector, runInInjectionContext } from '@angular/core';
 import type { PptxEmbeddedFont } from 'pptx-viewer-core';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { embeddedFontList, retainedFontLists } from '../../../shared/test-utils/outline-fonts.mjs';
 import { EMBEDDED_FONTS_STYLE_ID } from './embedded-fonts-helpers';
 import { EmbeddedFontsService } from './embedded-fonts.service';
+import { glyphOutlineFontCache } from './glyph-outline-cache';
 
 const TINY_DATA_URL = 'data:font/ttf;base64,AAEAAA==';
 
@@ -84,6 +86,24 @@ describe('embeddedFontsService', () => {
 		destroy();
 	});
 
+	it('exposes licence restrictions and never registers a restricted face', () => {
+		const { svc, destroy } = makeService();
+		svc.setFonts([
+			makeFont({ name: 'Brand', dataUrl: '', fsType: 0x0002, rawFontData: undefined }),
+			makeFont({ name: 'Proof', fsType: 0x0004 }),
+		]);
+		expect(svc.restrictions().Brand).toMatchObject({
+			licence: 'restricted',
+			labelKey: 'pptx.fonts.restricted',
+			reasonKey: 'pptx.fonts.restrictedReason',
+		});
+		expect(svc.restrictions().Proof?.licence).toBe('preview-print');
+		expect(svc.fontFaceCss()).not.toContain('"Brand"');
+		expect(svc.fontFaceCss()).toContain('font-family: "Proof"');
+		destroy();
+		expect(svc.restrictions()).toStrictEqual({});
+	});
+
 	it('removes the injected <style> and clears signals on destroy', () => {
 		const { svc, destroy } = makeService();
 		svc.setFonts([makeFont({ name: 'Injected' })]);
@@ -129,5 +149,24 @@ describe('embeddedFontsService', () => {
 		expect(svc.fontFamilies()).toStrictEqual([]);
 		expect(document.getElementById(EMBEDDED_FONTS_STYLE_ID)).toBeNull();
 		destroy();
+	});
+
+	it('releases a replaced deck and the last deck from the glyph-outline cache', () => {
+		const { svc, destroy } = makeService();
+		const first = embeddedFontList();
+		const second = embeddedFontList();
+		svc.setFonts(first);
+		svc.setFonts(first);
+		expect(retainedFontLists(glyphOutlineFontCache).has(first)).toBeTruthy();
+
+		svc.setFonts(second);
+		let retained = retainedFontLists(glyphOutlineFontCache);
+		expect(retained.has(first)).toBeFalsy();
+		expect(retained.has(second)).toBeTruthy();
+
+		destroy();
+		retained = retainedFontLists(glyphOutlineFontCache);
+		expect(retained.has(first)).toBeFalsy();
+		expect(retained.has(second)).toBeFalsy();
 	});
 });

@@ -121,7 +121,8 @@ export class PresentationToolbarComponent {
 			tool: this.annotations.tool(),
 			penColor: this.annotations.penColor(),
 			highlighterColor: this.annotations.highlighterColor(),
-			hasAnnotations: this.annotations.annotationStrokes().length > 0,
+			hasAnnotations: this.annotations.hasAnyAnnotations(),
+			hasSlideAnnotations: this.annotations.annotationStrokes().length > 0,
 			blackout: this.presenterWindow.snapshot().blackout,
 			presenterViewVisible: true,
 			presenterViewActive: this.presenterMode(),
@@ -194,7 +195,7 @@ export class PresentationToolbarComponent {
 					this.annotations.setHighlighterColor(intent.color);
 				}
 				if (this.annotations.tool() !== intent.tool) {
-					this.annotations.setTool(intent.tool);
+					this.annotations.selectTool(intent.tool);
 				}
 				return;
 			case 'blackboard':
@@ -202,7 +203,7 @@ export class PresentationToolbarComponent {
 					blackout: this.presenterWindow.snapshot().blackout,
 					tool: this.annotations.tool(),
 					setBlackout: (blackout) => this.presenterWindow.updateSnapshot({ blackout }),
-					setTool: (tool) => this.annotations.setTool(tool),
+					setTool: (tool) => this.annotations.selectTool(tool),
 				});
 				return;
 			case 'clear':

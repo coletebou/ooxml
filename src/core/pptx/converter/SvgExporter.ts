@@ -22,6 +22,7 @@ import {
 	renderSmartArtSvg,
 	renderZoomPreviewSvg,
 } from './svg-rich-elements';
+import { at } from '../../geometry/indexed';
 
 // ────────────────────────────────────────────────────────────────────
 // Public options
@@ -32,9 +33,9 @@ import {
  */
 export interface SvgExportOptions {
 	/** Include hidden slides when exporting all. Default `false`. */
-	includeHidden?: boolean;
+	includeHidden?: boolean | undefined;
 	/** Slide indices to export (0-based). If omitted, all slides are exported. */
-	slideIndices?: number[];
+	slideIndices?: number[] | undefined;
 	/** Default font family when the element does not specify one. */
 	defaultFontFamily?: string;
 	/** Default font size in points when the element does not specify one. */
@@ -405,7 +406,7 @@ function renderTable(el: PptxElement, defaults: ReturnType<typeof resolveDefault
 		let xOffset = 0;
 
 		for (let ci = 0; ci < row.cells.length; ci++) {
-			const cell = row.cells[ci];
+			const cell = at(row.cells, ci);
 			if (cell.vMerge || cell.hMerge) {
 				xOffset += (cols[ci] ?? 0) * el.width;
 				continue;
@@ -703,7 +704,7 @@ export class SvgExporter {
 				continue;
 			}
 
-			const slide = data.slides[i];
+			const slide = at(data.slides, i);
 
 			// Skip hidden unless asked
 			if (slide.hidden && !includeHidden) {

@@ -9,6 +9,7 @@
  * @module sdk/chart-operations
  */
 
+import { assertChartModelLabelPosition } from '../../utils/chart-label-positions';
 import type {
 	PptxChartAxisFormatting,
 	PptxChartDataLabel,
@@ -16,12 +17,21 @@ import type {
 	PptxChartDataPoint,
 	PptxChartErrBars,
 	PptxChartMarker,
+	PptxChartSeries,
 	PptxChartMarkerSymbol,
 	PptxChartShapeProps,
 	PptxChartTrendline,
 	PptxChartType,
 } from '../../types/chart';
+import type { PptxChartTickMark } from '../../types/chart-axis';
 import type { ChartPptxElement } from '../../types/elements';
+import type { ChartAxisLineInput } from './chart-axis-input';
+import { withChartAxisAppearance } from './chart-axis-input';
+import { applyChartAxisPlacement, chartGridlinesLine } from './chart-axis-placement';
+import type { ChartFontInput } from './chart-content-input';
+import { chartFontInput } from './chart-input-values';
+import { clearChartSeriesPointPaint } from './chart-series-point-paint';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -50,6 +60,16 @@ export function validateSeriesIndex(element: ChartPptxElement, seriesIndex: numb
 			`Series index ${seriesIndex} is out of range. Chart has ${element.chartData.series.length} series (indices 0–${element.chartData.series.length - 1}).`,
 		);
 	}
+}
+
+/** {@link validateSeriesIndex}, then the series it names. */
+export function validatedSeries(element: ChartPptxElement, seriesIndex: number): PptxChartSeries {
+	validateSeriesIndex(element, seriesIndex);
+	const series = element.chartData?.series[seriesIndex];
+	if (!series) {
+		throw new RangeError(`Series index ${seriesIndex} is out of range.`);
+	}
+	return series;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +106,7 @@ export function setChartType(element: ChartPptxElement, newType: PptxChartType):
  */
 export function addChartSeries(
 	element: ChartPptxElement,
-	series: { name: string; values: number[]; color?: string },
+	series: { name: string; values: number[]; color?: string | undefined },
 ): void {
 	ensureChartData(element);
 	element.chartData.series.push({
@@ -148,7 +168,7 @@ export function updateChartSeriesValues(
 	values: number[],
 ): void {
 	validateSeriesIndex(element, seriesIndex);
-	element.chartData!.series[seriesIndex].values = values;
+	at(element.chartData!.series, seriesIndex).values = values;
 }
 
 /**
@@ -208,7 +228,7 @@ export type PptxChartLegendPosition = 'b' | 'tr' | 'l' | 'r' | 't';
  */
 export function setChartLegend(
 	element: ChartPptxElement,
-	options: { show?: boolean; position?: PptxChartLegendPosition },
+	options: { show?: boolean | undefined; position?: PptxChartLegendPosition },
 ): void {
 	ensureChartData(element);
 	const style = (element.chartData.style ??= {});
@@ -232,6 +252,9 @@ export function setChartLegend(
  * @param edit - `show` toggles all data labels; the `show*` flags pick which
  *   content appears; `position` sets placement. Setting any content flag or a
  *   position turns labels on when not already set.
+ * @throws {RangeError} A `position` the chart type does not offer (a line
+ *   chart's `outEnd`, any position on an area chart): PowerPoint repairs a
+ *   file whose labels sit where its Format pane offers no such place.
  *
  * @example
  * ```ts
@@ -242,8 +265,8 @@ export function setChartLegend(
 export function setChartDataLabels(
 	element: ChartPptxElement,
 	edit: {
-		show?: boolean;
-		showValue?: boolean;
+		show?: boolean | undefined;
+		showValue?: boolean | undefined;
 		showCategory?: boolean;
 		showSeriesName?: boolean;
 		showPercent?: boolean;
@@ -252,6 +275,7 @@ export function setChartDataLabels(
 	},
 ): void {
 	ensureChartData(element);
+	assertChartModelLabelPosition(element.chartData, edit.position);
 	const style = (element.chartData.style ??= {});
 	if (edit.show !== undefined) {
 		style.hasDataLabels = edit.show;
@@ -265,8 +289,8 @@ export function setChartDataLabels(
 			labels?.showSeriesName === true ||
 			labels?.showPercent === true ||
 			labels?.showBubbleSize === true;
-		if (edit.show && labels !== undefined && !anyContent && edit.showValue === undefined) {
-			labels.showValue = true;
+		if (edit.show && !anyContent && edit.showValue === undefined) {
+			(style.dataLabels ??= {}).showValue = true;
 		}
 	}
 	const contentKeys = [
@@ -315,7 +339,7 @@ export function setChartSeriesTrendline(
 	trendline: PptxChartTrendline | null,
 ): void {
 	validateSeriesIndex(element, seriesIndex);
-	element.chartData!.series[seriesIndex].trendlines = trendline ? [trendline] : [];
+	at(element.chartData!.series, seriesIndex).trendlines = trendline ? [trendline] : [];
 }
 
 /**
@@ -339,7 +363,7 @@ export function setChartSeriesErrorBars(
 	errBars: PptxChartErrBars | null,
 ): void {
 	validateSeriesIndex(element, seriesIndex);
-	element.chartData!.series[seriesIndex].errBars = errBars ? [errBars] : [];
+	at(element.chartData!.series, seriesIndex).errBars = errBars ? [errBars] : [];
 }
 
 /** Axis kinds that can be addressed by {@link setChartAxis}. */
@@ -353,8 +377,8 @@ export type PptxChartAxisType = PptxChartAxisFormatting['axisType'];
  *   clear it so the axis falls back to its automatic behaviour.
  */
 export interface ChartAxisEdit {
-	min?: number | null;
-	max?: number | null;
+	min?: number | null | undefined;
+	max?: number | null | undefined;
 	majorUnit?: number | null;
 	minorUnit?: number | null;
 	orientation?: PptxChartAxisFormatting['orientation'] | null;
@@ -374,6 +398,38 @@ export interface ChartAxisEdit {
 	displayUnitsLabel?: PptxChartAxisFormatting['displayUnitsLabel'];
 	/** Show or hide (`c:delete`) the axis. */
 	visible?: boolean;
+	/**
+	 * Axis font, sizes in points. The model keeps one font per axis, so `family`,
+	 * `size`, `bold` and `color` style the tick labels and the axis title together
+	 * (as {@link setChartAxisTitleStyle}); `italic` styles the tick labels.
+	 */
+	font?: ChartFontInput;
+	/** Tick label angle in degrees, -90..90 (`c:txPr/a:bodyPr/@rot`); `null` clears it. */
+	rotation?: number | null;
+	/** Axis line (`c:spPr/a:ln`): a colour, width in points and dash, or `'none'` to hide it. */
+	line?: ChartAxisLineInput;
+	/**
+	 * Major gridline line (`c:majorGridlines/c:spPr/a:ln`). A line shows the major gridlines
+	 * unless `majorGridlines` is `false`; `'none'` hides them unless `majorGridlines` is `true`.
+	 */
+	majorGridlinesLine?: ChartAxisLineInput;
+	/**
+	 * Minor gridline line (`c:minorGridlines/c:spPr/a:ln`). A line shows the minor gridlines
+	 * unless `minorGridlines` is `false`; `'none'` hides them unless `minorGridlines` is `true`.
+	 */
+	minorGridlinesLine?: ChartAxisLineInput;
+	/** Major tick marks (`c:majorTickMark`). */
+	majorTickMark?: PptxChartTickMark;
+	/** Minor tick marks (`c:minorTickMark`). */
+	minorTickMark?: PptxChartTickMark;
+	/**
+	 * Where this axis sits on the axis it crosses (`c:crosses`, or `c:crossesAt` for a number):
+	 * the position is read on the OTHER axis. `catAx: { crosses: 15 }` draws the category axis at
+	 * value 15; `valAx: { crosses: 2 }` draws the value axis at the second category.
+	 */
+	crosses?: 'autoZero' | 'min' | 'max' | number;
+	/** Whether a value axis crosses between categories or on them (`c:crossBetween`). */
+	crossBetween?: 'between' | 'midCat';
 }
 
 /**
@@ -382,9 +438,14 @@ export interface ChartAxisEdit {
  * `c:tickLblPos`, `c:delete` via `visible`).
  *
  * Finds the first axis of `axisType` in `chartData.axes`, creating an entry
- * if none exists. Note that newly created axes only serialize for charts that
- * already contain a matching axis in the source XML (the save pipeline links
- * edits by the parsed axis id), which is the normal case for loaded charts.
+ * (with no `axisId`) if none exists. A loaded chart links the entry to its
+ * axis by the parsed axis id. A new chart's part is written with fixed axis
+ * ids, and an entry without one is matched to the written axis of its type
+ * (the first `catAx`, `valAx`, `dateAx` or `serAx`; for scatter and bubble
+ * charts the first and second `valAx`), so every edit, the title and number
+ * format included, is saved. An entry the chart type has no axis for (a pie
+ * chart's) is not written and is reported as a `CHART_FIELDS_NOT_WRITTEN`
+ * save warning.
  *
  * @example
  * ```ts
@@ -450,6 +511,34 @@ export function setChartAxis(
 	if (edit.visible !== undefined) {
 		axis.deleted = !edit.visible;
 	}
+	if (edit.font) {
+		const font = chartFontInput(edit.font, 'Axis font');
+		setChartAxisTitleStyle(element, axisType, {
+			...(font.fontFamily !== undefined ? { fontFamily: font.fontFamily } : {}),
+			...(font.fontSize !== undefined ? { fontSize: font.fontSize } : {}),
+			...(font.bold !== undefined ? { fontBold: font.bold } : {}),
+			...(font.color !== undefined ? { fontColor: font.color } : {}),
+		});
+	}
+	applyChartAxisPlacement(axis, edit);
+	const majorGridlinesLine = chartGridlinesLine(axis, edit, 'majorGridlines');
+	const minorGridlinesLine = chartGridlinesLine(axis, edit, 'minorGridlines');
+	const italic = edit.font?.italic;
+	if (
+		edit.rotation !== undefined ||
+		italic !== undefined ||
+		edit.line !== undefined ||
+		majorGridlinesLine !== undefined ||
+		minorGridlinesLine !== undefined
+	) {
+		element.chartData = withChartAxisAppearance(element.chartData, axes.indexOf(axis), {
+			...(edit.rotation !== undefined ? { rotation: edit.rotation } : {}),
+			...(italic !== undefined ? { italic } : {}),
+			...(edit.line !== undefined ? { line: edit.line } : {}),
+			...(majorGridlinesLine !== undefined ? { majorGridlinesLine } : {}),
+			...(minorGridlinesLine !== undefined ? { minorGridlinesLine } : {}),
+		});
+	}
 }
 
 /**
@@ -472,8 +561,7 @@ export function updateChartDataPoint(
 	pointIndex: number,
 	value: number,
 ): void {
-	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	const series = validatedSeries(element, seriesIndex);
 	if (pointIndex < 0 || pointIndex >= series.values.length) {
 		throw new RangeError(
 			`Point index ${pointIndex} is out of range. Series "${series.name}" has ${series.values.length} data points (indices 0\u2013${series.values.length - 1}).`,
@@ -537,7 +625,10 @@ export function removeChartCategory(element: ChartPptxElement, categoryIndex: nu
  * its automatic theme colour.
  *
  * Also clears any series gradient (`setChartSeriesGradient`): solid colour
- * and gradient are one fill choice, so the last call wins.
+ * and gradient are one fill choice, so the last call wins. As in the Format
+ * pane, the points lose their own fill (their own line on a line-drawn
+ * series), which is what the saved part holds: set point colours
+ * (`setChartDataPointFill`) after the series colour.
  *
  * @param element - The chart element to modify.
  * @param seriesIndex - Zero-based index of the series to recolour.
@@ -555,10 +646,10 @@ export function setChartSeriesColor(
 	seriesIndex: number,
 	color: string | null | undefined,
 ): void {
-	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	const series = validatedSeries(element, seriesIndex);
 	// A solid colour and a gradient are one fill choice: the last call wins.
 	Reflect.deleteProperty(series, 'gradientFill');
+	clearChartSeriesPointPaint(element.chartData!, series);
 	if (!color) {
 		series.color = undefined;
 		return;
@@ -727,11 +818,10 @@ export function setChartSeriesMarker(
 	seriesIndex: number,
 	marker:
 		| PptxChartMarker
-		| { symbol?: PptxChartMarkerSymbol; size?: number; fillColor?: string }
+		| { symbol?: PptxChartMarkerSymbol | undefined; size?: number | undefined; fillColor?: string }
 		| null,
 ): void {
-	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	const series = validatedSeries(element, seriesIndex);
 	if (marker === null) {
 		series.marker = undefined;
 		return;
@@ -759,7 +849,13 @@ export function setChartSeriesMarker(
  * `bar` chart). Pass `null` to clear it so the series uses the chart-level type.
  *
  * Setting a per-series type also promotes the chart to `combo` so that the save
- * pipeline emits multiple chart-type containers.
+ * pipeline emits multiple chart-type containers; the other series then keep
+ * the chart's former type as their own, so a line chart with one column
+ * series stays a line chart for the rest. In a combination chart a series
+ * with no type of its own is drawn as columns. A new chart's part holds the
+ * combinations of 2-D column, line and area series; other mixes are saved by
+ * the legacy generator as a single chart type, with a
+ * `CHART_WRITTEN_BY_LEGACY_GENERATOR` save warning.
  *
  * @example
  * ```ts
@@ -774,12 +870,14 @@ export function setChartSeriesChartType(
 ): void {
 	validateSeriesIndex(element, seriesIndex);
 	const data = element.chartData!;
-	data.series[seriesIndex].seriesChartType = seriesType ?? undefined;
+	at(data.series, seriesIndex).seriesChartType = seriesType ?? undefined;
 	// Promote to combo when at least two distinct effective types exist.
 	const effective = new Set(
 		data.series.map((s) => s.seriesChartType ?? data.chartType).filter((t) => t !== 'combo'),
 	);
-	if (effective.size > 1) {
+	if (effective.size > 1 && data.chartType !== 'combo') {
+		const former = data.chartType;
+		for (const series of data.series) series.seriesChartType ??= former;
 		data.chartType = 'combo';
 	}
 }
@@ -790,7 +888,7 @@ export function setChartSeriesChartType(
 
 /** Find (or create) the `c:dPt` override for `pointIndex` in a series. */
 export function ensureDataPoint(
-	series: { dataPoints?: PptxChartDataPoint[] },
+	series: { dataPoints?: PptxChartDataPoint[] | undefined },
 	pointIndex: number,
 ): PptxChartDataPoint {
 	const points = (series.dataPoints ??= []);
@@ -825,8 +923,7 @@ export function setChartDataPointFill(
 	pointIndex: number,
 	color: string | null,
 ): void {
-	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	const series = validatedSeries(element, seriesIndex);
 	if (color === null) {
 		const dp = series.dataPoints?.find((p) => p.idx === pointIndex);
 		if (!dp) {
@@ -871,8 +968,7 @@ export function setChartDataPointExplosion(
 	pointIndex: number,
 	explosion: number | null,
 ): void {
-	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	const series = validatedSeries(element, seriesIndex);
 	if (explosion === null) {
 		const dp = series.dataPoints?.find((p) => p.idx === pointIndex);
 		if (dp) {
@@ -903,10 +999,13 @@ export function setChartDataPointMarker(
 	element: ChartPptxElement,
 	seriesIndex: number,
 	pointIndex: number,
-	marker: { symbol?: PptxChartMarkerSymbol; size?: number; fillColor?: string } | null,
+	marker: {
+		symbol?: PptxChartMarkerSymbol | undefined;
+		size?: number | undefined;
+		fillColor?: string;
+	} | null,
 ): void {
-	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	const series = validatedSeries(element, seriesIndex);
 	if (marker === null) {
 		const dp = series.dataPoints?.find((p) => p.idx === pointIndex);
 		if (dp) {
@@ -1006,7 +1105,8 @@ function applyLabelEdit(label: PptxChartDataLabel, edit: ChartDataPointLabelEdit
  * @param seriesIndex - Zero-based index of the series.
  * @param pointIndex - Zero-based index of the data point (category).
  * @param edit - The label fields to set, or `null` to remove the override.
- * @throws {RangeError} If `seriesIndex` is out of bounds.
+ * @throws {RangeError} If `seriesIndex` is out of bounds, or `position` is one
+ *   the series' chart type does not offer.
  *
  * @example
  * ```ts
@@ -1022,7 +1122,8 @@ export function setChartDataPointLabel(
 	edit: ChartDataPointLabelEdit | null,
 ): void {
 	validateSeriesIndex(element, seriesIndex);
-	const series = element.chartData!.series[seriesIndex];
+	assertChartModelLabelPosition(element.chartData!, edit?.position, seriesIndex);
+	const series = validatedSeries(element, seriesIndex);
 	if (edit === null) {
 		if (!series.dataLabels) {
 			return;
@@ -1045,7 +1146,7 @@ export function setChartDataPointLabel(
 
 /** Drop a `c:dPt` override that no longer carries any formatting. */
 export function removeEmptyDataPoint(
-	series: { dataPoints?: PptxChartDataPoint[] },
+	series: { dataPoints?: PptxChartDataPoint[] | undefined },
 	pointIndex: number,
 ): void {
 	if (!series.dataPoints) {

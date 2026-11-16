@@ -1,9 +1,16 @@
+import { DEFAULT_GENERATED_DIAGRAM_SCHEME } from 'ooxml-core/diagram';
 import type { DocxDiagram, ThemeCatalog } from 'ooxml-core/docx';
 import type { Node as ProseMirrorNode } from 'prosemirror-model';
 import type { NodeView } from 'prosemirror-view';
 import { defineSmartArt } from '../smartart';
 import { placementClass } from 'ooxml-core/docx/ui';
-import { themeDrawing } from 'ooxml-core/docx/ui';
+import { previewDocxDiagram, themeDrawing } from 'ooxml-core/docx/ui';
+import {
+	translate,
+	translateTemplate,
+	type EditorLocale,
+	type LocalizationKey,
+} from './localization';
 
 const EMU_PER_PX = 9525;
 
@@ -12,11 +19,14 @@ interface RenderReport {
 	approximatedGeometries?: string[];
 	approximatedFills?: string[];
 	flattened3d?: number;
+	approximated3d?: number;
 }
 
 type SmartArtElement = HTMLElement & {
 	drawing: unknown;
 	schemeColors: Record<string, string>;
+	schemeFonts: { major?: string; minor?: string };
+	pictureResolver?: (partName: string) => string | undefined;
 };
 
 /** Registers `<office-ui-smartart>` once; a no-op without a DOM (server rendering). */
@@ -49,6 +59,8 @@ export function diagramNotes(
 	diagram: DocxDiagram,
 	report: RenderReport | undefined,
 	themed?: { unappliedTransforms: string[]; alphaDropped: boolean },
+	approximate?: string,
+	locale: EditorLocale = 'en',
 ): string[] {
 	const notes = [diagram.notice];
 	for (const issue of diagram.issues) notes.push(`${issue.code}: ${issue.message}`);
@@ -56,11 +68,17 @@ export function diagramNotes(
 		notes.push(`Shapes drawn as rectangles: ${report.approximatedGeometries.join(', ')}.`);
 	if (report?.approximatedFills?.length)
 		notes.push(`Fills approximated: ${report.approximatedFills.join(', ')}.`);
-	if (report?.flattened3d) notes.push(`${report.flattened3d} shape(s) with 3D drawn flat.`);
+	// Counted notes, one key per count form (as `dyn.line` / `dyn.lines`), in every locale.
+	const counted = (n: number, key: 'flat3d' | 'approximate3d') =>
+		translateTemplate(locale, `smartart.note.${key}.${n === 1 ? 'one' : 'other'}`, { n });
+	if (report?.flattened3d) notes.push(counted(report.flattened3d, 'flat3d'));
+	if (report?.approximated3d) notes.push(counted(report.approximated3d, 'approximate3d'));
 	if (themed?.alphaDropped) notes.push('Transparent colours are drawn opaque.');
 	if (themed?.unappliedTransforms.length)
 		notes.push(`Colour transforms not applied: ${themed.unappliedTransforms.join(', ')}.`);
-	notes.push('Shown read-only from the saved drawing; not recomputed and not Word-identical.');
+	notes.push(
+		approximate ?? 'Shown read-only from the saved drawing; not recomputed and not Word-identical.',
+	);
 	return notes.filter(Boolean);
 }
 
@@ -102,12 +120,16 @@ let infoCounter = 0;
 /**
  * Node view for an image node that carries a SmartArt `diagram`: mounts `<office-ui-smartart>`
  * with the cached drawing (theme colours resolved), scaled from the diagram frame to the run's
- * size. Read-only: the diagram parts are never edited, and the node stays an atom.
+ * size. A diagram without a cached drawing (inserted or edited here, or saved without one) is
+ * drawn with the core's approximate layout instead. The node stays an atom: SmartArt Design and
+ * the text pane edit it, and a changed node is rebuilt.
  */
 export function smartArtNodeView(
 	node: ProseMirrorNode,
 	diagram: DocxDiagram,
 	theme: ThemeCatalog | undefined,
+	locale: EditorLocale = 'en',
+	pictureResolver?: (partName: string) => string | undefined,
 ): NodeView {
 	registerSmartArt();
 	const dom = box(node, diagram);
@@ -132,19 +154,31 @@ export function smartArtNodeView(
 	let themed: ReturnType<typeof themeDrawing> | undefined;
 	const writeNotes = (report?: RenderReport) => {
 		const list = document.createElement('ul');
-		for (const note of diagramNotes(diagram, report, themed)) {
+		for (const note of [
+			...diagramNotes(diagram, report, themed, approximate, locale),
+			...(preview?.issues.map((issue) => `${issue.code}: ${issue.message}`) ?? []),
+		]) {
 			const item = document.createElement('li');
-			item.textContent = note;
+			item.textContent = translate(locale, note as LocalizationKey);
 			list.append(item);
 		}
 		panel.replaceChildren(list);
 		dom.title = diagram.notice;
 	};
 
-	const drawable =
-		diagram.rendering === 'cached-drawing' && (diagram.drawing?.shapes.length ?? 0) > 0;
-	if (drawable && diagram.drawing) {
-		themed = themeDrawing(diagram.drawing, theme);
+	const cached =
+		(diagram.rendering === 'cached-drawing' || diagram.rendering === 'generated-drawing') &&
+		(diagram.drawing?.shapes.length ?? 0) > 0
+			? diagram.drawing
+			: undefined;
+	const preview = cached ? undefined : previewDocxDiagram(diagram, theme);
+	const drawing = cached ?? preview?.drawing;
+	const approximate = cached
+		? undefined
+		: translate(locale, 'Drawn with an approximate layout computed here; not Word-identical.');
+	if (drawing) {
+		dom.dataset.rendering = cached ? diagram.rendering : (preview?.mode ?? 'placeholder');
+		themed = themeDrawing(drawing, theme);
 		const element = document.createElement('office-ui-smartart') as SmartArtElement;
 		element.className = 'dve-smartart-drawing';
 		element.setAttribute('label', diagramLabel(node, diagram));
@@ -161,7 +195,15 @@ export function smartArtNodeView(
 			writeNotes((event as CustomEvent<RenderReport>).detail);
 		});
 		writeNotes();
-		element.schemeColors = themed.schemeColors;
+		element.schemeColors =
+			diagram.rendering === 'generated-drawing'
+				? { ...DEFAULT_GENERATED_DIAGRAM_SCHEME, ...themed.schemeColors }
+				: themed.schemeColors;
+		element.schemeFonts = {
+			...(theme?.fonts.major.latin ? { major: theme.fonts.major.latin } : {}),
+			...(theme?.fonts.minor.latin ? { minor: theme.fonts.minor.latin } : {}),
+		};
+		if (pictureResolver) element.pictureResolver = pictureResolver;
 		element.drawing = themed.drawing;
 		dom.append(element);
 	} else {

@@ -18,8 +18,8 @@ interface XmlElement {
 function elements(xml: string): XmlElement[] {
 	return [...xml.matchAll(/<(?!\/|\?|!)(?:([\w.-]+):)?([\w.-]+)\b([^>]*)>/g)].map((match) => ({
 		prefix: match[1] ?? '',
-		local: match[2],
-		attributes: match[3],
+		local: match[2] ?? '',
+		attributes: match[3] ?? '',
 	}));
 }
 
@@ -167,7 +167,7 @@ function validateLanguage(element: XmlElement, path: string, issues: ValidationI
 
 function validateEnums(element: XmlElement, path: string, issues: ValidationIssue[]): void {
 	for (const [key, values] of Object.entries(ENUMS)) {
-		const [local, name] = key.split('@');
+		const [local = '', name = ''] = key.split('@');
 		if (local !== element.local) {
 			continue;
 		}

@@ -9,6 +9,8 @@ const engine = vi.hoisted(() => ({
 	disposeStage: vi.fn(),
 	revoke: vi.fn(),
 	fieldContext: vi.fn(() => ({})),
+	outlineListeners: new Set<() => void>(),
+	registerFonts: vi.fn((_fonts: unknown) => vi.fn()),
 }));
 vi.mock('ooxml-ui/pptx/dom', () => ({
 	loadPresentation: engine.load,
@@ -18,7 +20,13 @@ vi.mock('ooxml-ui/pptx/dom', () => ({
 	createTranslator: () => (key: string) => key,
 	buildFieldSubstitutionContext: engine.fieldContext,
 	buildEmbeddedFontStyles: () => ({ fontFaceCss: '', objectUrls: [] }),
-	glyphOutlineFontCache: { registerEmbeddedFonts: vi.fn() },
+	glyphOutlineFontCache: {
+		registerEmbeddedFonts: engine.registerFonts,
+		subscribe: (listener: () => void) => {
+			engine.outlineListeners.add(listener);
+			return () => engine.outlineListeners.delete(listener);
+		},
+	},
 	renderSlideStage: ({ slide }: { slide: { id: string } }) => {
 		const node = document.createElement('div');
 		node.setAttribute('role', 'region');
@@ -35,6 +43,7 @@ beforeEach(() => {
 	engine.dispose.mockClear();
 	engine.disposeStage.mockClear();
 	engine.revoke.mockClear();
+	engine.registerFonts.mockClear();
 	vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
 	vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
 });
@@ -115,6 +124,34 @@ describe('presentation reading preview', () => {
 		preview.remove();
 		expect(engine.dispose).toHaveBeenCalledTimes(1);
 		expect(engine.revoke).toHaveBeenCalledWith(['blob:one']);
+	});
+	it('repaints the slide when deferred glyph outlines arrive, until it closes', async () => {
+		engine.load.mockResolvedValue(deck());
+		const preview = await mount();
+		await preview.load(new Uint8Array([1]));
+		const first = preview.shadowRoot!.querySelector('[role=region]')!;
+		expect(engine.outlineListeners.size).toBe(1);
+		for (const listener of engine.outlineListeners) listener();
+		await preview.updateComplete;
+		const repainted = preview.shadowRoot!.querySelector('[role=region]')!;
+		expect(repainted).not.toBe(first);
+		expect(repainted.getAttribute('aria-label')).toBe('Slide 1');
+		expect(engine.disposeStage).toHaveBeenCalledWith(first);
+		preview.remove();
+		expect(engine.outlineListeners.size).toBe(0);
+	});
+	it("releases each deck's glyph-outline fonts on reload and disconnect", async () => {
+		engine.load.mockResolvedValueOnce(deck('one')).mockResolvedValueOnce(deck('two'));
+		const preview = await mount();
+		await preview.load(new Uint8Array([1]));
+		await preview.load(new Uint8Array([2]));
+		const [first, second] = engine.registerFonts.mock.results.map((result) => result.value);
+		expect(engine.registerFonts).toHaveBeenCalledTimes(2);
+		expect(first).toHaveBeenCalledTimes(1);
+		expect(second).not.toHaveBeenCalled();
+		preview.remove();
+		expect(first).toHaveBeenCalledTimes(1);
+		expect(second).toHaveBeenCalledTimes(1);
 	});
 	it('passes the deck start slide number to the field context', async () => {
 		engine.load.mockResolvedValue({ ...deck(), firstSlideNumber: 45 });

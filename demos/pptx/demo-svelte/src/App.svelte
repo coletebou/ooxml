@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { demoFileProviders } from '../../shared/demo-file-providers';
 	/**
 	 * Demo shell for `pptx-svelte-viewer`, mirroring demos/demo-vue/src/App.vue:
 	 * the viewer fills the screen and a landing dropzone handles file open /
@@ -8,6 +9,7 @@
 	 */
 	import type {
 		CollaborationConfig,
+		PptxAiAssistant,
 		PptxAiConfig,
 		PowerPointViewerApi,
 		ViewerCustomization,
@@ -28,7 +30,7 @@
 	} from 'pptx-svelte-viewer';
 	import { PptxHandler } from 'pptx-viewer-core';
 
-	import { buildViewerAiConfig } from './ai-config';
+	import { buildViewerAi } from './ai-config';
 	import { resolveAutoName, resolveAutoRoomId, randomUserColor } from './collab';
 	import { language, t } from './demo-i18n.svelte';
 	import { installDevViewerHandle } from '../../dev-viewer-handle';
@@ -38,12 +40,12 @@
 	import { readStoredTheme, themes } from './themes';
 
 	let viewerRef: PowerPointViewerApi | undefined = $state();
-	$effect(() => installDevViewerHandle(() => viewerRef, import.meta.env.DEV));
+	$effect(() => installDevViewerHandle(() => viewerRef, import.meta.env.DEV || import.meta.env.VITE_PPTX_E2E_HANDLE === '1'));
 	let bytes = $state<Uint8Array | null>(null);
 	let fileName = $state('');
 	// Built from the persisted demo AI settings when a deck opens; undefined
 	// leaves the viewer with no AI assistant (the default when no key is set).
-	let aiConfig = $state<PptxAiConfig | undefined>(undefined);
+	let aiConfig = $state<PptxAiAssistant | PptxAiConfig | undefined>(undefined);
 	const themeKey = readStoredTheme();
 	let errorMessage = $state('');
 	// eslint-disable-next-line prefer-const
@@ -146,7 +148,7 @@
 	function openFile(file: File): void {
 		dropSampleParam();
 		errorMessage = '';
-		aiConfig = buildViewerAiConfig();
+		aiConfig = buildViewerAi();
 		fileName = file.name;
 		void file.arrayBuffer().then((buf) => {
 			bytes = new Uint8Array(buf);
@@ -160,7 +162,7 @@
 	async function newPresentation(): Promise<void> {
 		dropSampleParam();
 		creating = true;
-		aiConfig = buildViewerAiConfig();
+		aiConfig = buildViewerAi();
 		try {
 			const { handler, data } = await PptxHandler.createBlank({
 				title: 'Untitled Presentation',
@@ -227,7 +229,7 @@
 			return;
 		}
 		dropSampleParam();
-		aiConfig = buildViewerAiConfig();
+		aiConfig = buildViewerAi();
 		bytes = deck.data;
 		fileName = deck.fileName;
 		document.title = `${deck.fileName} - PPTX Viewer`;
@@ -297,6 +299,10 @@
 	}
 
 	function onViewerError(message: string): void {
+		// An error in an open deck (a failed save, say) is the viewer's notice, not a load failure.
+		if ((viewerRef?.getSlideCount() ?? 0) > 0) {
+			return;
+		}
 		errorMessage = message || t('demo.viewer.loadError');
 		bytes = null;
 		document.title = 'pptx-svelte-viewer demo';
@@ -322,6 +328,7 @@
 			{customization}
 			{...rootOptions}
 			editable
+			fileProviders={demoFileProviders}
 			autosave
 			autosaveIntervalMs={2000}
 			fileName={fileName || undefined}

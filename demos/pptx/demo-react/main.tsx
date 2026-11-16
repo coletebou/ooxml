@@ -1,3 +1,7 @@
+import { completeDemoSignInPopup } from 'ooxml-demo-onedrive';
+
+// Test-only: `?elementRenderFault=<id>` makes that element's renderer throw (e2e).
+import '../shared/element-render-fault';
 import type { PowerPointViewerHandle, ViewerCustomization } from 'pptx-react-viewer';
 /* oxlint-disable eslint/one-var -- pervasive pre-existing pattern in this file
    (many independent short-lived `const`s per hook/handler, several separated
@@ -40,11 +44,13 @@ import {
 import type { CollaborationConfig } from '../../../viewers/pptx/packages/react/src/viewer';
 import { installDevViewerHandle } from '../dev-viewer-handle';
 import { currentDemoCustomization } from '../shared/demo-customization';
+import { demoFileProviders } from '../shared/demo-file-providers';
 import { currentDemoRootOptions } from '../shared/demo-root-options';
 import { externalSessionRequested } from '../shared/host-owned-collaboration';
 import { currentDemo3DFlags } from '../shared/rendering-3d-flags';
 import { sameBrowserRoom } from '../shared/same-browser-collaboration';
-import { useDemoAiConfig } from './ai-config';
+import { useDemoAiAssistant } from './ai-config';
+import { BuildingBlocksDemoApp, buildingBlocksRequested } from './BuildingBlocksDemo';
 import { HostOwnedDemoApp } from './HostOwnedDemo';
 import i18nInstance from './i18n'; // Initialises i18next before any component renders
 import { SameBrowserDemoApp } from './SameBrowserDemo';
@@ -450,7 +456,7 @@ function App() {
 
 	// ── AI assistant (demo-only: the host supplies the provider) ─────────
 	// Read from localStorage only; the demo ships no key and no config UI.
-	const aiConfig = useDemoAiConfig();
+	const aiAssistant = useDemoAiAssistant();
 
 	// ── Collaboration ────────────────────────────────────────────────────
 	// Auto-connect if room and/or broadcast is in the URL at mount (collaboration
@@ -919,7 +925,14 @@ function App() {
 
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const viewerRef = useRef<PowerPointViewerHandle>(null);
-	useEffect(() => installDevViewerHandle(() => viewerRef.current, import.meta.env.DEV), []);
+	useEffect(
+		() =>
+			installDevViewerHandle(
+				() => viewerRef.current,
+				import.meta.env.DEV || import.meta.env.VITE_PPTX_E2E_HANDLE === '1',
+			),
+		[],
+	);
 
 	/** Open the native picker from the explicit Browse control. */
 	const openFilePicker = useCallback(() => {
@@ -955,6 +968,7 @@ function App() {
 					fileName={fileName}
 					filePath={fileName}
 					canEdit
+					fileProviders={demoFileProviders}
 					autosaveIntervalMs={2000}
 					customization={customization}
 					{...rootOptions}
@@ -973,7 +987,7 @@ function App() {
 						userName: autoName,
 						serverUrl: defaultServerUrl,
 					}}
-					ai={aiConfig}
+					ai={aiAssistant}
 					onDirtyChange={(dirty) => {
 						document.title = dirty ? `* ${fileName} - PPTX Viewer` : `${fileName} - PPTX Viewer`;
 					}}
@@ -1079,7 +1093,8 @@ function App() {
 	);
 }
 
-const rootEl = document.getElementById('app-root');
+// The MSAL sign-in popup loads this page too: hand the response back and do not boot the app.
+const rootEl = completeDemoSignInPopup() ? null : document.getElementById('app-root');
 if (rootEl) {
 	// HMR guard: this module mixes the `App` component with this top-level
 	// mount call, so `@vitejs/plugin-react`'s Fast Refresh can never treat it
@@ -1102,7 +1117,9 @@ if (rootEl) {
 		hot.data.root = root;
 	}
 	root.render(
-		externalSessionRequested() ? (
+		buildingBlocksRequested() ? (
+			<BuildingBlocksDemoApp />
+		) : externalSessionRequested() ? (
 			<HostOwnedDemoApp />
 		) : sameBrowserRoom() ? (
 			<SameBrowserDemoApp />

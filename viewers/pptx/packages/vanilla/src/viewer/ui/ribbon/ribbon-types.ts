@@ -1,4 +1,6 @@
 import type {
+	CloudFileProvider,
+	CloudOpenedFile,
 	FreeformToolKind,
 	ResolvedCustomization,
 	ReviewCommentsHost,
@@ -67,6 +69,10 @@ export interface RibbonNavHandlers {
 	toggleMasterView?(): void;
 	/** Show/hide the right-hand property inspector (React's panel toggle). */
 	toggleInspector?(): void;
+	/** Open the inspector's Properties tab on a Format pane section (dialog launchers). */
+	requestFormatPane?(section: import('ooxml-ui/pptx').FormatSectionId): void;
+	/** The viewer's Ribbon Display Options state (the shared headless controller). */
+	getRibbonDisplay?(): import('ooxml-ui/pptx').RibbonDisplayController;
 	/**
 	 * Drop the current selection. Design > Slide Size needs it: the slide-size
 	 * fields live on the inspector's DECK panel, which only renders when nothing
@@ -88,11 +94,22 @@ export interface RibbonPrimaryHandlers {
 	save(): void;
 }
 
+/** The host's `fileProviders` as File > Open places, and how a file opened in one is loaded. */
+export interface BackstageCloudFiles {
+	providers: readonly CloudFileProvider[];
+	/** The viewer's language, for the places' dates. */
+	locale: string | undefined;
+	/** Load a file the user opened in a place (closes the backstage like any open). */
+	open(file: CloudOpenedFile): void;
+}
+
 /** File tab handlers: save + export actions already implemented by the viewer's export lifecycle. */
 export interface RibbonFileHandlers {
 	openFile(): void;
 	openRecentFile(key: string): void;
 	createPresentation(templateId: string): void;
+	/** The host's cloud places for File > Open (omitted or empty: no places, as before). */
+	getCloudFiles?(): BackstageCloudFiles;
 	openSettings(): void;
 	/** The host's resolved UI customisation (omitted: nothing customised). */
 	getCustomization?(): ResolvedCustomization;

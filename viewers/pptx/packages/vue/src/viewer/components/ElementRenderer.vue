@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import type { AbuttingEdgeBleed } from 'ooxml-ui/pptx';
 import {
+	abuttingEdgeBleedStyle,
 	buildParagraphs,
+	highlightFindMatches,
 	buildTextBody3DSceneStyle,
 	buildTextStyleOverrideCss,
 	getGroupChildParentFill,
@@ -12,11 +15,12 @@ import {
 	isElementRendered,
 	isEquationOnlyText,
 	placeholderPromptDescriptor,
+	probeElementRenderFault,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, ShapeStyle } from 'pptx-viewer-core';
 import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
 import type { CSSProperties } from 'vue';
-import { computed } from 'vue';
+import { computed, onBeforeUpdate } from 'vue';
 
 import { useElementHitTargetStyle } from '../composables/element-hit-target';
 import {
@@ -25,15 +29,16 @@ import {
 	getTextBlockStyle,
 } from '../composables/element-style';
 import { injectFieldContext, resolveFieldContext } from '../composables/field-context';
+import { injectElementFindHighlights } from '../composables/find-highlights';
 import { injectPresentationElementStates } from '../composables/presentation-element-states';
 import { useRendering3DFlags } from '../composables/rendering-3d-flags';
 import { injectSlideElements, resolveSlideElements } from '../composables/slide-elements';
 import { build3DExtrusionData } from '../composables/visual-3d';
-import ActionButtonGlyphOverlay from './ActionButtonGlyphOverlay.vue';
 import ChartRenderer from './ChartRenderer.vue';
 import ConnectorRenderer from './ConnectorRenderer.vue';
 import ContentPartRenderer from './ContentPartRenderer.vue';
 import DuotoneFilterDefs from './DuotoneFilterDefs.vue';
+import ElementBoundary from './ElementBoundary.vue';
 import ElementImageBox from './ElementImageBox.vue';
 import ElementMediaBox from './ElementMediaBox.vue';
 import EquationRenderer from './EquationRenderer.vue';
@@ -62,11 +67,18 @@ const props = defineProps<{
 	mediaDataUrls: Map<string, string>;
 	zIndex: number;
 	/**
+	 * Grow this box under an abutting opaque box above it, closing the
+	 * anti-aliasing seam between the two (shared `resolveAbuttingEdgeBleeds`).
+	 */
+	edgeBleed?: AbuttingEdgeBleed;
+	/**
 	 * When true, emit the `data-pptx-element` test/interaction hook. Only the
 	 * primary editable canvas sets this; thumbnails, the sorter, the export
 	 * stage and presentation mode render without it.
 	 */
 	interactive?: boolean;
+	/** Whether this element is part of the current selection (media control bar). */
+	selected?: boolean;
 	/**
 	 * When true, emit the `data-pptx-element` marker even though `interactive` is
 	 * off. The main canvas sets this for template (master/layout) elements, which
@@ -102,6 +114,9 @@ const props = defineProps<{
 	 */
 	inlineEditingElementId?: string | null;
 }>();
+// Test-only fault hook (inert unless a test page sets it), inside this element's `ElementBoundary`.
+probeElementRenderFault(props.element);
+onBeforeUpdate(() => probeElementRenderFault(props.element));
 
 /** Host opt-in to the Three.js SmartArt renderer (provided by PowerPointViewer). */
 const rendering3DFlags = useRendering3DFlags();
@@ -112,6 +127,8 @@ const fieldContextSource = injectFieldContext();
 
 /** Sibling elements of the slide being painted, used to resolve linked text box chains. */
 const slideElementsSource = injectSlideElements();
+/** The Find bar's marks in this element's text (editing canvas only). */
+const findHighlights = injectElementFindHighlights(() => props.element.id);
 
 /**
  * Native-animation playback state for this element (present only during a running
@@ -170,7 +187,16 @@ const shapeDivStyle = computed<CSSProperties>(() => {
 	if (c.transform && s.transform) {
 		merged.transform = `${c.transform} ${s.transform}`;
 	}
-	return merged;
+	// Close the seam with an abutting opaque box above (issue #141): empty for
+	// nearly every element, so the box style is untouched.
+	return {
+		...merged,
+		...(abuttingEdgeBleedStyle(
+			props.element,
+			props.edgeBleed,
+			merged as Readonly<Record<string, unknown>>,
+		) as CSSProperties),
+	};
 });
 const backgroundLayers = computed(() =>
 	getBackgroundAnimationLayers(props.element, shapeDivStyle.value, backgroundState.value),
@@ -243,7 +269,10 @@ const linkedSegments = computed(() =>
 
 /** Rendered paragraphs (runs + bullet/indent), built by shared logic. */
 const paragraphs = computed(() =>
-	buildParagraphs(props.element, resolveFieldContext(fieldContextSource), linkedSegments.value),
+	highlightFindMatches(
+		buildParagraphs(props.element, resolveFieldContext(fieldContextSource), linkedSegments.value),
+		findHighlights(),
+	),
 );
 const hasText = computed(() =>
 	paragraphs.value.some((p) => p.runs.length > 0 || p.bulletMarker !== undefined),
@@ -378,18 +407,18 @@ const hitTargetStyle = useElementHitTargetStyle(
 		     `ShapeEffectOverlay`'s doc comment), but `p:grpSpPr/a:effectLst/a:reflection`
 		     mirrors the whole group subtree, so this still needs mounting. -->
 		<ShapeEffectOverlay :element="element" :media-data-urls="mediaDataUrls" />
-		<ElementRenderer
-			v-for="(child, i) in element.children ?? []"
-			:key="child.id"
-			:element="child"
-			:media-data-urls="mediaDataUrls"
-			:z-index="i"
-			:interactive="interactive"
-			:marked="marked"
-			:presenting="presenting"
-			:parent-group-fill="childParentGroupFill"
-			:inline-editing-element-id="inlineEditingElementId"
-		/>
+		<ElementBoundary v-for="(child, i) in element.children ?? []" :key="child.id" :element="child">
+			<ElementRenderer
+				:element="child"
+				:media-data-urls="mediaDataUrls"
+				:z-index="i"
+				:interactive="interactive"
+				:marked="marked"
+				:presenting="presenting"
+				:parent-group-fill="childParentGroupFill"
+				:inline-editing-element-id="inlineEditingElementId"
+			/>
+		</ElementBoundary>
 	</div>
 
 	<!-- Image / picture -->
@@ -411,6 +440,7 @@ const hitTargetStyle = useElementHitTargetStyle(
 		:media-data-urls="mediaDataUrls"
 		:z-index="zIndex"
 		:interactive="interactive"
+		:selected="selected"
 		:marked="marked"
 		:presenting="presenting"
 		:class="templateClass"
@@ -570,8 +600,6 @@ const hitTargetStyle = useElementHitTargetStyle(
 		>
 			<ShapeEffectOverlay :element="element" :media-data-urls="mediaDataUrls" />
 			<Extrusion3DOverlay v-if="extrusionData.hasExtrusion" :data="extrusionData" />
-			<!-- Action-button glyph (home/help/sound/arrows/...); self-hides for non-buttons. -->
-			<ActionButtonGlyphOverlay :element="element" />
 		</div>
 		<!-- While this element is open in the inline text editor, its live text is
 		     drawn by that overlay instead (see `isBeingInlineEdited`); rendering it

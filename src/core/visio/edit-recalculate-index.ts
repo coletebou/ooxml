@@ -9,6 +9,7 @@ import {
 	inertDoubleClickFormula,
 	shapeDataFormulaSection,
 } from './cell-formula';
+import { isClassifiedVisioFunction } from './formula-analyze';
 import { isNativeGlueCell } from './edit-connector-glue';
 
 export interface VisioCellKey {
@@ -31,12 +32,47 @@ export interface VisioRecalculationOptions {
 	glueShapes?: ReadonlySet<Element>;
 	/** Internal authorization of the proven local parent-group Angle leaf only. */
 	groupRotationCells?: ReadonlySet<Element>;
+	/** Internal group-resize scope: read-only dependency discovery, or a proven local writer. */
+	groupResizeShapes?: ReadonlySet<Element>;
+	/**
+	 * A cell caught in a dependency cycle keeps its cached value and is reported in `diagnostics`
+	 * instead of refusing the whole recalculation. Default: refuse.
+	 */
+	cycles?: 'refuse' | 'keep';
+	/**
+	 * `affected`: a cell whose formula cannot be analysed (dynamic functions, unknown functions)
+	 * is indexed as unevaluable instead of failing the whole index, so it refuses an edit only when
+	 * the edit reaches it. A cell that may read cells its text does not name is assumed to be
+	 * reached by every edit on its page. Default `document`: such a cell fails the index.
+	 */
+	scope?: 'document' | 'affected';
+	/**
+	 * Follow what the evaluator cannot prove statically instead of refusing: a computed INDIRECT or
+	 * EVALCELL is resolved while evaluating, a function it cannot run keeps the cached result (and is
+	 * reported in `diagnostics`), and a cell of a grouped, instanced or connected shape that the edit
+	 * does not reach is read as an input. Set by `recalculateVisioCells`; other callers keep refusing.
+	 */
+	follow?: boolean;
+	/** Receives one entry per cell that kept its cache because of a cycle. */
+	diagnostics?: { code: string; message: string }[];
+	/** The plain text of a shape for `TheText` readers; recalculation fills it from the pages. */
+	textOf?: (pageId: string, shapeId: string) => string | undefined;
+	/** `follow` only: the cells the edit reaches; any other cell of an unsafe shape is an input. */
+	affected?: ReadonlySet<string>;
 }
 export interface IndexedCell extends VisioCellKey {
 	node?: Element;
 	formula?: ReturnType<typeof parseVisioFormula>;
 	dependencies: string[];
 	unsafe: boolean;
+	/** Why the cell cannot be evaluated, when its formula was indexed as unevaluable. */
+	refusal?: string;
+	/** The formula may read cells it does not name: any edit on its page may reach it. */
+	opaque?: boolean;
+	/** `follow` only: the formula cannot be run here; its cached result stands in. */
+	keepCache?: boolean;
+	/** `follow` only: the cell sits on an unsafe shape but is a plain input when no edit reaches it. */
+	fixedInput?: boolean;
 	unit: VisioFormulaValue['unit'];
 }
 export const key = (cell: VisioCellKey) =>
@@ -120,7 +156,11 @@ export function indexCells(
 							)) ||
 						children(node, 'Shapes').length > 0 ||
 						['1', 'true'].includes(attribute(node, 'Del') ?? '');
-					sheets.push({ node, shapeId, unsafe });
+					sheets.push({
+						node,
+						shapeId,
+						unsafe: options.groupResizeShapes?.has(node) ? false : unsafe,
+					});
 					visit(node, unsafe, true);
 				}
 		};
@@ -156,28 +196,67 @@ export function indexCells(
 					// (Visio's freshly dropped connector names its own sheet).
 					!(/^(BegTrigger|EndTrigger)$/.test(cell) && isNativeGlueCell(cell, source!))
 				) {
+					const lenient = options.scope === 'affected';
+					const unprovable = (message: string, opaque: boolean) => {
+						if (!lenient) fail('EDIT_UNKNOWN_DEPENDENCY', message);
+						item.unsafe = true;
+						item.refusal = message;
+						if (opaque) item.opaque = true;
+					};
 					try {
 						item.formula = parseVisioFormula(source!);
 						// A size measured from the shape's own text reads only the cells it names; the
 						// text itself is followed after text edits (edit-text-size.ts).
-						const plain = analyzeVisioFormula(item.formula);
+						const plain = analyzeVisioFormula(item.formula, {
+							shapeTextReads: true,
+							literalIndirect: true,
+						});
 						const analysis = (plain.dynamic && textSizeFormula(item.formula)) || plain;
-						if (analysis.dynamic)
-							fail(
-								'EDIT_DYNAMIC_DEPENDENCY',
-								'Dynamic ShapeSheet dependencies cannot be safely edited.',
+						const follows = options.follow === true && lenient;
+						const dynamicCalls = 'dynamicCalls' in analysis ? analysis.dynamicCalls : [];
+						const resolvable = dynamicCalls.every(
+							(name) => name === 'INDIRECT' || name === 'EVALCELL',
+						);
+						if (follows && analysis.unsupportedFunctions.length === 0 && resolvable) {
+							// Resolved per evaluation; the reads the text does not name make it page-wide.
+							if (analysis.dynamic) item.opaque = true;
+						} else if (
+							follows &&
+							(analysis.dynamic || analysis.unsupportedFunctions.length) &&
+							!textSizeFormula(item.formula) &&
+							// Drawn geometry data: a stale copy would draw the wrong outline.
+							!analysis.unsupportedFunctions.some((name) => name === 'POLYLINE' || name === 'NURBS')
+						) {
+							// DEPENDSON names its dependencies; the other dynamic functions may read more.
+							item.keepCache = true;
+							if (
+								dynamicCalls.some((name) => name !== 'DEPENDSON' && isClassifiedVisioFunction(name))
+							)
+								item.opaque = true;
+						} else if (analysis.dynamic) {
+							if (!lenient)
+								fail(
+									'EDIT_DYNAMIC_DEPENDENCY',
+									'Dynamic ShapeSheet dependencies cannot be safely edited.',
+								);
+							unprovable(
+								`${cell} on shape ${sheet.shapeId || 'page'} has dynamic ShapeSheet dependencies that cannot be followed.`,
+								'opaque' in analysis && analysis.opaque,
 							);
+						}
 						item.dependencies = analysis.references
 							.filter((ref) => !isBooleanLiteral(ref))
 							.map((ref) => key({ pageId, shapeId: ref.shapeId ?? sheet.shapeId, cell: ref.cell }));
 					} catch (error) {
-						fail(
-							'EDIT_UNKNOWN_DEPENDENCY',
+						unprovable(
 							`Cannot prove ShapeSheet dependency closure: ${error instanceof Error ? error.message : 'invalid formula'}`,
+							true,
 						);
 					}
 				}
 				if (source === 'Inh') item.unsafe = true;
+				else if (options.follow && sheet.unsafe && !deleted && !item.refusal)
+					item.fixedInput = true;
 				add(item);
 			};
 			const glue = connectors.has(sheet.shapeId);

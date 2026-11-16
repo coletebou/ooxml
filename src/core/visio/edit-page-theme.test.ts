@@ -172,6 +172,59 @@ describe('page theme edits', () => {
 		expect(custom!.style.fill).toBe('#123456');
 		expect((await parseVsdx(cleared.bytes)).pages[0]!.theme).toBeUndefined();
 	});
+	it('Colors changes only the colour scheme and keeps the other selections', async () => {
+		const themed = await editVsdx(await drawing(), [
+			{ type: 'set-page-theme', pageId: page, theme: 'harbor' },
+		]);
+		const colored = await editVsdx(themed.bytes, [
+			{ type: 'set-page-theme', pageId: page, colors: 'ember' },
+		]);
+		const cells = await pageSheet(colored.bytes);
+		expect(cells.get('ColorSchemeIndex')).toBe(String(visioBuiltInTheme('ember').schemeId));
+		for (const name of ['EffectSchemeIndex', 'ConnectorSchemeIndex', 'FontSchemeIndex'])
+			expect(cells.get(name)).toBe(String(visioBuiltInTheme('harbor').schemeId));
+		const document = await parseVsdx(colored.bytes);
+		expect(document.pages[0]!.shapes[0]!.style.fill).toBe('#d9480f');
+		expect(document.pages[0]!.shapes[1]!.style.fill).toBe('#123456');
+		expect(document.pages[0]!.theme).toMatchObject({ builtIn: 'ember' });
+		// The saved file reopens and edits again.
+		const again = await editVsdx(colored.bytes, [
+			{ type: 'set-page-theme', pageId: page, variant: 1 },
+		]);
+		expect((await parseVsdx(again.bytes)).pages[0]!.theme!.variant).toBe(1);
+		expect(() =>
+			snapshotPageTheme({ type: 'set-page-theme', pageId: page, colors: 'x' as never }),
+		).toThrow();
+		expect(() =>
+			snapshotPageTheme({ type: 'set-page-theme', pageId: page, theme: 'office', colors: 'ember' }),
+		).toThrow();
+	});
+	it('Embellishment writes only the page EmbellishmentIndex, alone in its transaction', async () => {
+		const drawn = await drawing();
+		const themed = await editVsdx(drawn, [
+			{ type: 'set-page-theme', pageId: page, theme: 'harbor' },
+		]);
+		const before = await pageSheet(themed.bytes);
+		const embellished = await editVsdx(themed.bytes, [
+			{ type: 'set-page-theme', pageId: page, embellishment: 'high' },
+		]);
+		const after = await pageSheet(embellished.bytes);
+		expect(after.get('EmbellishmentIndex')).toBe('3');
+		// The theme selectors and the shapes are untouched.
+		for (const name of ['ColorSchemeIndex', 'EffectSchemeIndex', 'ConnectorSchemeIndex'])
+			expect(after.get(name)).toBe(before.get(name));
+		await expect(
+			editVsdx(themed.bytes, [
+				{ type: 'set-page-theme', pageId: page, embellishment: 'low', variant: 1 },
+			]),
+		).rejects.toMatchObject({ code: 'INVALID_EDIT' });
+		await expect(
+			editVsdx(themed.bytes, [
+				{ type: 'set-page-theme', pageId: page, embellishment: 'huge' as 'low' },
+			]),
+		).rejects.toMatchObject({ code: 'INVALID_EDIT' });
+	});
+
 	it('refuses invalid commands, mixed transactions and variants without a theme', async () => {
 		expect(() => snapshotPageTheme({ type: 'set-page-theme', pageId: page })).toThrow();
 		expect(() =>

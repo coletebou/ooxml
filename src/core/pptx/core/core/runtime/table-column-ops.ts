@@ -14,6 +14,7 @@ import {
 	createDefaultXmlCell,
 	getTblFromRawXml,
 } from './table-structural-helpers';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Add Column
@@ -43,7 +44,7 @@ export function addTableColumn(
 	tableData: PptxTableData,
 	index: number,
 	rawXml?: XmlObject,
-): { tableData: PptxTableData; rawXml?: XmlObject } {
+): { tableData: PptxTableData; rawXml?: XmlObject | undefined } {
 	const colCount = tableData.columnWidths.length;
 	const clampedIndex = Math.max(0, Math.min(index, colCount));
 
@@ -155,7 +156,7 @@ export function addTableColumn(
 			// Update each a:tr
 			const xmlRows = ensureArray(tbl['a:tr'] as XmlObject | XmlObject[]);
 			for (let ri = 0; ri < xmlRows.length; ri++) {
-				const xmlRow = xmlRows[ri];
+				const xmlRow = at(xmlRows, ri);
 				const xmlCells = ensureArray(xmlRow['a:tc'] as XmlObject | XmlObject[]);
 
 				const newXmlCell = createDefaultXmlCell();
@@ -163,7 +164,7 @@ export function addTableColumn(
 				// Check if inside a horizontal merge
 				let insideMerge = false;
 				for (let c = 0; c < clampedIndex && c < xmlCells.length; c++) {
-					const xmlCell = xmlCells[c];
+					const xmlCell = at(xmlCells, c);
 					const gs = parseInt(String(xmlCell['@_gridSpan'] || '0'), 10);
 					if (gs > 1 && c + gs > clampedIndex && xmlCell['@_hMerge'] !== '1') {
 						insideMerge = true;
@@ -179,11 +180,11 @@ export function addTableColumn(
 
 				// Check if inside a vertical merge
 				for (let r = 0; r < ri; r++) {
-					const aboveCells = ensureArray(xmlRows[r]['a:tc'] as XmlObject | XmlObject[]);
+					const aboveCells = ensureArray(at(xmlRows, r)['a:tc'] as XmlObject | XmlObject[]);
 					// After the splice the col at clampedIndex is the new one,
 					// so we check the cell that used to be at clampedIndex (now at clampedIndex in the already-processed row).
 					if (clampedIndex < aboveCells.length) {
-						const aboveXmlCell = aboveCells[clampedIndex];
+						const aboveXmlCell = at(aboveCells, clampedIndex);
 						const rs = parseInt(String(aboveXmlCell['@_rowSpan'] || '0'), 10);
 						if (rs > 1 && r + rs > ri && aboveXmlCell['@_vMerge'] !== '1') {
 							newXmlCell['@_vMerge'] = '1';
@@ -230,7 +231,7 @@ export function removeTableColumn(
 	tableData: PptxTableData,
 	index: number,
 	rawXml?: XmlObject,
-): { tableData: PptxTableData; rawXml?: XmlObject } {
+): { tableData: PptxTableData; rawXml?: XmlObject | undefined } {
 	const colCount = tableData.columnWidths.length;
 	if (colCount <= 1) {
 		return { tableData, rawXml };
@@ -271,11 +272,12 @@ export function removeTableColumn(
 					// Move anchor to the next column and decrement gridSpan.
 					const nextColIdx = index + 1;
 					if (nextColIdx < adjustedCells.length) {
-						const nextCell = adjustedCells[nextColIdx];
+						const nextCell = at(adjustedCells, nextColIdx);
 						adjustedCells[nextColIdx] = {
 							...nextCell,
 							text: cell.text || nextCell.text,
 							textRuns: cell.text ? cell.textRuns : nextCell.textRuns,
+							textSegments: cell.text ? cell.textSegments : nextCell.textSegments,
 							paragraphs: cell.text ? cell.paragraphs : nextCell.paragraphs,
 							style: nextCell.style || cell.style,
 							gridSpan: gs - 1 > 1 ? gs - 1 : undefined,
@@ -325,12 +327,12 @@ export function removeTableColumn(
 			for (const [rowIndex, xmlRow] of xmlRows.entries()) {
 				const xmlCells = ensureArray(xmlRow['a:tc'] as XmlObject | XmlObject[]);
 				if (index < xmlCells.length) {
-					const xmlCell = xmlCells[index];
+					const xmlCell = at(xmlCells, index);
 
 					if (xmlCell['@_hMerge'] === '1') {
 						// Find anchor and decrement gridSpan
 						for (let c = index - 1; c >= 0; c--) {
-							const leftXmlCell = xmlCells[c];
+							const leftXmlCell = at(xmlCells, c);
 							if (leftXmlCell['@_hMerge'] !== '1') {
 								const gs = parseInt(String(leftXmlCell['@_gridSpan'] || '0'), 10);
 								if (gs > 2) {
@@ -347,7 +349,7 @@ export function removeTableColumn(
 							// Move anchor to next column
 							const nextColIdx = index + 1;
 							if (nextColIdx < xmlCells.length) {
-								const nextXmlCell = xmlCells[nextColIdx];
+								const nextXmlCell = at(xmlCells, nextColIdx);
 								delete nextXmlCell['@_hMerge'];
 								if (gs - 1 > 1) {
 									nextXmlCell['@_gridSpan'] = String(gs - 1);

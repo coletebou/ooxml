@@ -6,8 +6,8 @@ import type { PptxPresentationProperties, PptxCustomShow } from 'pptx-viewer-cor
  * all slides, a range, or a custom show.
  */
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 
+import { useTranslation } from '../i18n/use-translation';
 import { WebSelect, WebRadio } from './WebControls';
 
 // ---------------------------------------------------------------------------
@@ -59,13 +59,7 @@ export function ShowSlidesFieldset({
 					name='showSlides'
 					value='range'
 					checked={showSlidesMode === 'range'}
-					onChange={() =>
-						update({
-							showSlidesMode: 'range',
-							showSlidesFrom: draft.showSlidesFrom ?? 1,
-							showSlidesTo: draft.showSlidesTo ?? slideCount,
-						})
-					}
+					onChange={() => update({ showSlidesMode: 'range' })}
 					className='accent-primary'
 				/>
 				<span>{t('pptx.slideShow.fromTo')}</span>
@@ -116,12 +110,7 @@ export function ShowSlidesFieldset({
 							name='showSlides'
 							value='customShow'
 							checked={showSlidesMode === 'customShow'}
-							onChange={() =>
-								update({
-									showSlidesMode: 'customShow',
-									showSlidesCustomShowId: draft.showSlidesCustomShowId ?? customShows[0]?.id,
-								})
-							}
+							onChange={() => update({ showSlidesMode: 'customShow' })}
 							className='accent-primary'
 						/>
 						<span>{t('pptx.slideShow.customShow')}</span>

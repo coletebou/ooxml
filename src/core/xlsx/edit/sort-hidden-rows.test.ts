@@ -46,7 +46,11 @@ describe('sorting hidden rows', () => {
 			if (mode === 'column') session.sortByColumn(0, 1, true);
 			else session.sort(0, range('A1:B4'), [{ col: 1, descending: true }], true);
 			expectFilteredSort(workbook);
-			expect(sheet.autoFilter).toEqual(before.autoFilter);
+			// The sort is saved with the filter's `sortState`; the range and criteria stay.
+			expect({ ...sheet.autoFilter, sortState: undefined }).toEqual({
+				...before.autoFilter,
+				sortState: undefined,
+			});
 			const after = structuredClone(sheet);
 			session.undo();
 			expect(workbook.sheets[0]).toEqual(before);
@@ -69,8 +73,8 @@ describe('sorting hidden rows', () => {
 	it('preserves opaque loaded criteria without reapplying unsupported filters', async () => {
 		const { workbook, sheet } = setup();
 		const sourceXml =
-			'<filterColumn colId="0"><customFilters><customFilter operator="equal" val="keep"/></customFilters></filterColumn>';
-		sheet.autoFilter!.columns = [{ offset: 0, sourceXml }];
+			'<filterColumn colId="0"><iconFilter iconSet="3Arrows" iconId="1"/></filterColumn>';
+		sheet.autoFilter!.columns = [{ offset: 0, icon: { iconSet: '3Arrows', iconId: 1 }, sourceXml }];
 		const loaded = await loadXlsx(await saveXlsx(workbook));
 		const session = createEditSession(loaded, { autoRowHeight: false });
 		const before = structuredClone(loaded.sheets[0]!.autoFilter);
@@ -78,7 +82,7 @@ describe('sorting hidden rows', () => {
 		expect(loaded.sheets[0]!.autoFilter).toEqual(before);
 		expect([1, 2, 3].map((r) => getCell(loaded.sheets[0]!, r, 1)?.value)).toEqual([30, 50, 10]);
 		const saved = await loadXlsx(await saveXlsx(loaded));
-		expect(saved.sheets[0]!.autoFilter?.columns?.[0]?.sourceXml).toContain('operator="equal"');
+		expect(saved.sheets[0]!.autoFilter?.columns?.[0]?.sourceXml).toContain('iconSet="3Arrows"');
 		expect(saved.sheets[0]!.rowInfo.get(2)?.hidden).toBe(true);
 	});
 

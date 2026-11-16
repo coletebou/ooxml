@@ -1,6 +1,8 @@
 import type JSZip from 'jszip';
 
 import type { PptxCommentAuthor, XmlObject } from '../../types';
+import { at } from '../../../../geometry/indexed';
+import { isFiniteNumber } from '../../../../units/finite';
 
 export type PptxSaveMediaKind = 'image' | 'audio' | 'video';
 
@@ -8,8 +10,8 @@ export interface PptxSaveStateConfig {
 	zip: JSZip;
 	commentAuthorMap: Map<string, string>;
 	/** Full author details for round-trip preservation of initials, lastIdx, clrIdx. */
-	commentAuthorDetails?: Map<string, PptxCommentAuthor>;
-	commentAuthorsRootXml?: XmlObject;
+	commentAuthorDetails?: Map<string, PptxCommentAuthor> | undefined;
+	commentAuthorsRootXml?: XmlObject | undefined;
 	emuPerPx: number;
 }
 
@@ -19,7 +21,7 @@ export interface PptxCommentAuthorDescriptor {
 	initials: string;
 	lastCommentIndex: number;
 	colorIndex: number;
-	rawXml?: XmlObject;
+	rawXml?: XmlObject | undefined;
 }
 
 export class PptxSaveState {
@@ -34,6 +36,11 @@ export class PptxSaveState {
 	private readonly usedSlideNumbers = new Set<number>();
 
 	private readonly usedMediaPaths = new Set<string>();
+	/** New pictures' media parts in this save, by content (see `mediaPathForContent`). */
+	private readonly newMediaByContent = new Map<
+		string,
+		Array<{ bytes: Uint8Array; path: string }>
+	>();
 	private readonly usedInkPaths = new Set<string>();
 	private maxInkPartIndex = 0;
 
@@ -87,6 +94,27 @@ export class PptxSaveState {
 		return filePath;
 	}
 
+	/**
+	 * The media part for a NEW picture's bytes: the part an identical picture
+	 * already got in this save, or a fresh one. Pictures loaded from the deck
+	 * keep their own parts and never come through here.
+	 */
+	public mediaPathForContent(
+		bytes: Uint8Array,
+		extension: string,
+	): { path: string; reused: boolean } {
+		const key = `${extension.toLowerCase()}:${bytes.length}:${fnv1a(bytes)}`;
+		const candidates = this.newMediaByContent.get(key) ?? [];
+		const same = candidates.find((candidate) => sameBytes(candidate.bytes, bytes));
+		if (same) {
+			return { path: same.path, reused: true };
+		}
+		const path = this.nextMediaPath(extension);
+		candidates.push({ bytes, path });
+		this.newMediaByContent.set(key, candidates);
+		return { path, reused: false };
+	}
+
 	public getUsedMediaPaths(): Set<string> {
 		return this.usedMediaPaths;
 	}
@@ -133,7 +161,7 @@ export class PptxSaveState {
 	}
 
 	public toEmu(value: number | undefined, fallback = 0): number {
-		if (typeof value !== 'number' || !Number.isFinite(value)) {
+		if (typeof value !== 'number' || !isFiniteNumber(value)) {
 			return fallback;
 		}
 		return Math.round(value * this.emuPerPx);
@@ -163,7 +191,7 @@ export class PptxSaveState {
 		fallbackIndex: number,
 	): number {
 		const rawIdx = Number.parseInt(String(commentId || ''), 10);
-		const commentIdx = Number.isFinite(rawIdx) ? rawIdx : fallbackIndex;
+		const commentIdx = isFiniteNumber(rawIdx) ? rawIdx : fallbackIndex;
 		const previousMax = this.commentLastIdxByAuthorId.get(authorId) ?? -1;
 		this.commentLastIdxByAuthorId.set(authorId, Math.max(previousMax, commentIdx));
 		return commentIdx;
@@ -197,7 +225,7 @@ export class PptxSaveState {
 				}
 				// Fallback for newly created authors
 				const numericAuthorId = Number.parseInt(authorId, 10);
-				const colorIndex = Number.isFinite(numericAuthorId) ? Math.max(0, numericAuthorId) : index;
+				const colorIndex = isFiniteNumber(numericAuthorId) ? Math.max(0, numericAuthorId) : index;
 				return {
 					authorId,
 					authorName,
@@ -209,7 +237,7 @@ export class PptxSaveState {
 			.sort((left, right) => {
 				const leftId = Number.parseInt(String(left.authorId || ''), 10);
 				const rightId = Number.parseInt(String(right.authorId || ''), 10);
-				if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
+				if (isFiniteNumber(leftId) && isFiniteNumber(rightId)) {
 					return leftId - rightId;
 				}
 				return String(left.authorId || '').localeCompare(String(right.authorId || ''));
@@ -220,8 +248,8 @@ export class PptxSaveState {
 		zip.forEach((relativePath) => {
 			const slideMatch = relativePath.match(/^ppt\/slides\/slide(\d+)\.xml$/);
 			if (slideMatch) {
-				const numericValue = Number.parseInt(slideMatch[1], 10);
-				if (Number.isFinite(numericValue)) {
+				const numericValue = Number.parseInt(slideMatch[1] ?? '', 10);
+				if (isFiniteNumber(numericValue)) {
 					this.usedSlideNumbers.add(numericValue);
 				}
 			}
@@ -232,7 +260,10 @@ export class PptxSaveState {
 			const inkMatch = relativePath.match(/^ppt\/ink\/ink(\d+)\.xml$/u);
 			if (inkMatch) {
 				this.usedInkPaths.add(relativePath);
-				this.maxInkPartIndex = Math.max(this.maxInkPartIndex, Number.parseInt(inkMatch[1], 10));
+				this.maxInkPartIndex = Math.max(
+					this.maxInkPartIndex,
+					Number.parseInt(inkMatch[1] ?? '', 10),
+				);
 			}
 
 			const commentMatch = relativePath.match(/^ppt\/comments\/comment(\d+)\.xml$/);
@@ -241,8 +272,8 @@ export class PptxSaveState {
 			}
 
 			this.existingCommentPaths.add(relativePath);
-			const commentIndex = Number.parseInt(commentMatch[1], 10);
-			if (Number.isFinite(commentIndex)) {
+			const commentIndex = Number.parseInt(commentMatch[1] ?? '', 10);
+			if (isFiniteNumber(commentIndex)) {
 				this.maxCommentPartIndex = Math.max(this.maxCommentPartIndex, commentIndex);
 			}
 		});
@@ -259,7 +290,7 @@ export class PptxSaveState {
 			}
 
 			const numericAuthorId = Number.parseInt(authorId, 10);
-			if (Number.isFinite(numericAuthorId)) {
+			if (isFiniteNumber(numericAuthorId)) {
 				this.maxAuthorId = Math.max(this.maxAuthorId, numericAuthorId);
 			}
 		}
@@ -276,7 +307,7 @@ export class PptxSaveState {
 
 		return tokens
 			.slice(0, 2)
-			.map((token) => token[0].toUpperCase())
+			.map((token) => at(token, 0).toUpperCase())
 			.join('');
 	}
 }
@@ -335,3 +366,24 @@ export class PptxSaveStateBuilder {
 }
 
 export { PptxSaveState as PptxSaveSession, PptxSaveStateBuilder as PptxSaveSessionBuilder };
+
+function fnv1a(bytes: Uint8Array): number {
+	let hash = 0x811c9dc5;
+	for (const byte of bytes) {
+		hash ^= byte;
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+	if (a.length !== b.length) {
+		return false;
+	}
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) {
+			return false;
+		}
+	}
+	return true;
+}

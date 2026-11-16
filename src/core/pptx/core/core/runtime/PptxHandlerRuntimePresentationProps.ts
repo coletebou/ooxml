@@ -15,6 +15,7 @@ import {
 import { parseChartGradientFill } from '../../utils/chart-gradient-fill';
 import { parseChartLegendEntries } from '../../utils/chart-legend-serializer';
 import { parseChartTitleStyle } from '../../utils/chart-title-style-parser';
+import { hasLocalName } from '../../utils/chart-xml-presence';
 import { parseShowProperties } from './pptx-presentation-props-helpers';
 import { findChildByLocalName, parsePrintProperties } from './pptx-print-properties';
 import { parseViewProperties } from './pptx-view-props-helpers';
@@ -36,13 +37,13 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	protected async parsePresentationProperties(): Promise<PptxPresentationProperties | undefined> {
 		try {
 			// First find presentationPr relationship
-			const relsXml = await this.zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
-			if (!relsXml) {
+			const relsData = await this.readPartXml('ppt/_rels/presentation.xml.rels');
+			if (!relsData) {
 				return undefined;
 			}
-
-			const relsData = this.parser.parse(relsXml);
-			const rels = this.ensureArray(relsData?.Relationships?.Relationship);
+			const rels = this.ensureArray(
+				(relsData.Relationships as XmlObject | undefined)?.Relationship,
+			);
 			const prRel = rels.find(
 				(r: XmlObject) =>
 					String(r?.['@_Type'] || '').includes('presProps') ||
@@ -52,7 +53,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const prTarget = prRel ? String(prRel['@_Target'] || '') : 'presProps.xml';
 			const prPath = prTarget.startsWith('/') ? prTarget.substring(1) : `ppt/${prTarget}`;
 
-			const prXmlStr = await this.zip.file(prPath)?.async('string');
+			const prXmlStr = await this.readPartText(prPath);
 			if (!prXmlStr) {
 				return undefined;
 			}
@@ -117,7 +118,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	 */
 	protected async parseViewProperties(): Promise<PptxViewProperties | undefined> {
 		try {
-			const viewPropsXml = await this.zip.file('ppt/viewProps.xml')?.async('string');
+			const viewPropsXml = await this.readPartText('ppt/viewProps.xml');
 			if (!viewPropsXml) {
 				return undefined;
 			}
@@ -240,7 +241,11 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 		if (chartRoot) {
 			// Legend
-			const legend = this.xmlLookupService.getChildByLocalName(chartRoot, 'legend');
+			// A bare `<cx:legend/>` (all of CT_Legend is optional) reads as an empty string, so the
+			// key decides presence (found by the chartex parity harness).
+			const legend = hasLocalName(chartRoot, 'legend')
+				? (this.xmlLookupService.getChildByLocalName(chartRoot, 'legend') ?? {})
+				: undefined;
 			if (legend) {
 				style.hasLegend = true;
 				hasStyle = true;

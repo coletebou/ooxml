@@ -61,12 +61,9 @@ test('Data tab imports a CSV, links a dragged row, refreshes it and adds data gr
 			Array.from((node as VisioViewerElement).exportVsdx().bytes),
 		);
 		const shapes = (await parseVsdx(new Uint8Array(bytes))).pages[0]!.shapes;
-		return {
-			owner: shapes.find((item) => item.id === '1')!.rotation!.pinX,
-			graphic: shapes.find((item) =>
-				item.shapeData?.some((row) => row.name === '_ooxmlDataGraphic'),
-			)!.rotation!.pinX,
-		};
+		const owner = shapes.find((item) => item.id === '1')!;
+		// The callout is a member of the shape's group: its pin is inside the group.
+		return { owner: owner.rotation!.pinX, graphic: owner.children[0]!.rotation!.pinX };
 	};
 	const beforeMove = await positions();
 	await shape.click();
@@ -75,7 +72,8 @@ test('Data tab imports a CSV, links a dragged row, refreshes it and adds data gr
 		expect((await positions()).owner).toBeGreaterThan(beforeMove.owner),
 	).toPass();
 	const afterMove = await positions();
-	expect(afterMove.graphic - beforeMove.graphic).toBeCloseTo(afterMove.owner - beforeMove.owner);
+	// The callout moves with the shape by staying where it is inside the group.
+	expect(afterMove.graphic).toBeCloseTo(beforeMove.graphic);
 	await viewer.locator('.viewport').press('Control+z');
 	await expect(async () =>
 		expect((await positions()).owner).toBeCloseTo(beforeMove.owner),
@@ -128,6 +126,75 @@ test('Data tab imports a CSV, links a dragged row, refreshes it and adds data gr
 	await expect(viewer.locator('[data-status]')).toHaveText(/Removed data graphics/);
 	await expect(viewer.locator('svg.paper > g [data-shape-id]').first()).toBeAttached();
 	expect(errors).toEqual([]);
+});
+
+test('Link Data, a saved connection and Data Graphics Position and Auto Space', async ({
+	page,
+}) => {
+	await page.addInitScript(() => {
+		(window as unknown as { showOpenFilePicker: unknown }).showOpenFilePicker = async () => [
+			{
+				getFile: async () =>
+					new File(
+						[
+							'Name,Load' +
+								String.fromCharCode(10) +
+								'Import test,20' +
+								String.fromCharCode(10) +
+								'Other,80' +
+								String.fromCharCode(10),
+						],
+						'servers.csv',
+						{ type: 'text/csv' },
+					),
+			},
+		];
+	});
+	await page.setViewportSize({ width: 1600, height: 1000 });
+	await openDemo(page);
+	const viewer = page.locator('visio-viewer');
+	await page.locator('#file').setInputFiles({
+		name: 'Data.vsdx',
+		mimeType: 'application/vnd.ms-visio.drawing',
+		buffer: await createVsdxFixture('Data target'),
+	});
+	await expect(viewer.locator('svg.paper')).toContainText('Data target');
+	await viewer.getByRole('tab', { name: 'Data', exact: true }).click();
+	const ribbon = '[data-ribbon-tab]:not([data-contextual]) ';
+	// Link Data imports first when the drawing has no recordset, then opens the window.
+	await viewer.locator(`${ribbon}[command="link-data"] button`).click();
+	const pane = viewer.locator('.external-data');
+	await expect(pane.locator('tbody tr')).toHaveText(['Import test20', 'Other80']);
+	await pane.locator('tbody tr').nth(1).dragTo(viewer.locator('svg.paper [data-shape-id="1"]'));
+	await expect(viewer.locator('[data-status]')).toHaveText(/Linked shape 1 to row 2/);
+	await viewer.locator('svg.paper [data-shape-id="1"]').click();
+	await viewer.getByRole('button', { name: 'Data Graphics', exact: true }).click();
+	await viewer.locator('office-ui-menu-item[command="graphic-text"]').click();
+	await viewer.locator('.data-graphics-dialog [name="field"]').selectOption('Name');
+	await viewer.locator('.data-graphics-dialog [label="Apply"] button').click();
+	const saved = async () => {
+		const bytes = await viewer.evaluate((node) =>
+			Array.from((node as VisioViewerElement).exportVsdx().bytes),
+		);
+		return parseVsdx(new Uint8Array(bytes));
+	};
+	const gap = async () => {
+		const shapes = (await saved()).pages[0]!.shapes;
+		const owner = shapes.find((item) => item.id === '1')!;
+		return owner.children[0]!.rotation!.pinY - owner.height / 2;
+	};
+	await expect(async () => expect(await gap()).toBeLessThan(0)).toPass();
+	await viewer.getByRole('button', { name: 'Position', exact: true }).click();
+	await viewer.locator('office-ui-menu-item[command="graphic-position-top"]').click();
+	await expect(viewer.locator('[data-status]')).toHaveText(/Moved the data graphics/);
+	await expect(async () => expect(await gap()).toBeGreaterThan(0)).toPass();
+	await viewer.locator(`${ribbon}[command="graphic-auto-space"] button`).click();
+	await expect(viewer.locator('[data-status]')).toHaveText(/Spaced the data graphics/);
+	const document = await saved();
+	expect(document.dataRecordsets?.[0]).toMatchObject({
+		command: 'SELECT * FROM [servers.csv]',
+		connection: { id: '1' },
+	});
 });
 
 test('Define Shape Data adds a row from the Shape Data window', async ({ page }) => {

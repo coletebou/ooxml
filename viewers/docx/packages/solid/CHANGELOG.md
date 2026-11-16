@@ -7,6 +7,80 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.4.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.4.0) - 2026-11-13
+
+### Features
+
+- **docx:** Expose read aloud through the building blocks ([01dc2ed](https://github.com/ChristopherVR/ooxml/commit/01dc2edb2618a74273841147670dd2fd4976b128))
+- **docx:** Export the read aloud result types ([d33509f](https://github.com/ChristopherVR/ooxml/commit/d33509f5fbcd68d94c6e600c6b94cd0ad9b1fcba))
+- **docx:** Make read aloud stop on edit configurable ([cf73e1b](https://github.com/ChristopherVR/ooxml/commit/cf73e1bf4165f7244b336939f09c711a0f2c8cf4))
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.3.1](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.3.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.3.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.3.0) - 2026-11-05
+
+### Features
+
+- **docx:** Forward fileProviders through every binding ([cb585af](https://github.com/ChristopherVR/ooxml/commit/cb585af52665b172455ba592e74dae71a67c8c91))
+- **ui:** Expose openCloudFile on the word, excel and visio bindings ([b4837c7](https://github.com/ChristopherVR/ooxml/commit/b4837c76398c125755458861ce62679d7c179003))
+
+## [1.2.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.2.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [1.1.2](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.1.2) - 2026-10-29
+
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.1.1) - 2026-10-23
+
+### Other
+
+- Shared binding kit (wave6-1) ([98ab396](https://github.com/ChristopherVR/ooxml/commit/98ab396a11b31675c0266acd5242060412642bd3))
+- Word SmartArt editing (wave6-13) ([751ba15](https://github.com/ChristopherVR/ooxml/commit/751ba157ca578e8ff6b57371a243180101ed562e))
+- Word and Excel docs for wave 6 (docs6-4) ([da0f3e8](https://github.com/ChristopherVR/ooxml/commit/da0f3e83c59b8ff55104bd852cf46fa052c587b5))
+
+### Refactor
+
+- **docx:** Build the Word bindings on ooxml-ui/bindings ([90e8131](https://github.com/ChristopherVR/ooxml/commit/90e81310800081ad484e93a3bab25806a07bc3e4))
+
+### Documentation
+
+- **docs:** Describe word smartart editing and its limits ([7a1ef43](https://github.com/ChristopherVR/ooxml/commit/7a1ef43c5bc0ba910b0f2468516e3d3578158605))
+- Describe wave 6 chart and smartart editing in word and excel ([d212908](https://github.com/ChristopherVR/ooxml/commit/d212908f59be7f5da51ce5347b23a665e4cedb08))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.1.0) - 2026-10-22
+
+### Features
+
+- **docx:** Route save and open through host-owned storage ([ec27cd2](https://github.com/ChristopherVR/ooxml/commit/ec27cd28c4f594446e08b60ab05db2b64b72c683))
+- **docx:** Forward file, review and ribbon events through every binding ([feac0f1](https://github.com/ChristopherVR/ooxml/commit/feac0f1de2287f9549209c1b35c4b76bbe944257))
+- **docx:** Take the shared customization contract in <docx-editor> ([65f05d3](https://github.com/ChristopherVR/ooxml/commit/65f05d3d70cc28e6633f300fb4758aca7ba34184))
+- **embedding:** Land the host customization, read-only and storage contracts ([822a6a0](https://github.com/ChristopherVR/ooxml/commit/822a6a073840b9e9d1671476542322b28332dc42))
+
+### Bug Fixes
+
+- **docx:** Forward readOnly only when the prop changes ([fb2b324](https://github.com/ChristopherVR/ooxml/commit/fb2b3245789ffb8b05f93cd046d0beb397916b44))
+- **docx:** Report read-only with the lock and host switch ([735fb0d](https://github.com/ChristopherVR/ooxml/commit/735fb0d78ff18dc71eeeb83db2a76f26e423ba30))
+- **docx:** Honour find: false in Ctrl+F and the shortcut help ([f38d2fa](https://github.com/ChristopherVR/ooxml/commit/f38d2fae33cad0444e201ab99635d56a985c9b26))
+
+### Other
+
+- Integrate the customization contract into host storage ([629554b](https://github.com/ChristopherVR/ooxml/commit/629554b3030728bfe16e11ac8ae5b2530bb28a17))
+- Bring origin/main into the embedding work ([a3711a1](https://github.com/ChristopherVR/ooxml/commit/a3711a14049a2cd11b994e76eafec039db2dc2de))
+
+### Testing
+
+- **docx:** Assert the binding customization state inline ([e83b995](https://github.com/ChristopherVR/ooxml/commit/e83b995ee36701cd6c6842e04a2dba3589897c43))
+
 ## [1.0.1](https://github.com/ChristopherVR/ooxml/releases/tag/docx-solid-viewer@1.0.1) - 2026-10-22
 
 ### Documentation

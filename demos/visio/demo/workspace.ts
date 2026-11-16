@@ -1,8 +1,11 @@
 import { compatibilityNotes, compatibilityText } from '../../../viewers/visio/src/index';
 import type { ViewerCallbacks } from 'ooxml-ui/visio';
 import type { MountedViewer } from 'ooxml-ui/visio';
+import type { CloudFileProvider } from 'ooxml-core/embedding';
 import type { VisioDocument } from 'ooxml-core/visio';
 import { createSampleVsdx, demoDocument } from 'ooxml-core/visio/ui';
+import { pickCloudFile } from 'ooxml-demo-onedrive';
+import { createDemoFileProviders } from './cloud';
 import { wireWorkspaceShell } from './workspace-shell';
 import { wireWorkspaceTheme } from './workspace-theme';
 
@@ -15,6 +18,8 @@ export type WorkspaceViewer = Pick<
 export interface Workspace {
 	/** Pass these to the viewer, through the binding's own event API. */
 	readonly events: ViewerCallbacks;
+	/** The File > Open cloud places every demo binding passes as `fileProviders`. */
+	readonly fileProviders: readonly CloudFileProvider[];
 	/** What the binding mounts with; `attach` replaces it with the editable sample package. */
 	readonly initialDocument: VisioDocument;
 	/**
@@ -31,6 +36,7 @@ export interface Workspace {
  * the viewer with its own binding and attaches it here, so all six demos behave the same.
  */
 export function createWorkspace(doc: Document = document): Workspace {
+	const fileProviders = createDemoFileProviders();
 	const get = <T extends HTMLElement>(id: string): T => doc.getElementById(id) as T;
 	const fileName = get('file-name'),
 		fileState = get('file-state'),
@@ -42,6 +48,7 @@ export function createWorkspace(doc: Document = document): Workspace {
 	const revealWorkspace = wireWorkspaceShell(doc, {
 		browse: () => get<HTMLInputElement>('file').click(),
 		sample: () => void loadSample(),
+		onedrive: () => void openFromOneDrive(),
 	});
 
 	function refreshEditState(): void {
@@ -95,6 +102,26 @@ export function createWorkspace(doc: Document = document): Workspace {
 			revealWorkspace();
 			refreshEditState();
 			get('selection').textContent = 'Select a shape on the canvas to inspect it.';
+		} catch (cause) {
+			if (request !== requestId) return;
+			errorBox.hidden = false;
+			errorBox.textContent = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+	/** Start screen: pick a drawing in the shared OneDrive browser, then hand it to the viewer. */
+	async function openFromOneDrive(): Promise<void> {
+		const provider = fileProviders[0];
+		if (!provider) return;
+		const file = await pickCloudFile(provider, ['vsdx']);
+		if (!file || !viewer) return;
+		const request = ++requestId;
+		errorBox.hidden = true;
+		try {
+			await viewer.element.openCloudFile(file);
+			if (request !== requestId) return;
+			fileName.textContent = file.fileName;
+			revealWorkspace();
+			refreshEditState();
 		} catch (cause) {
 			if (request !== requestId) return;
 			errorBox.hidden = false;
@@ -176,15 +203,13 @@ export function createWorkspace(doc: Document = document): Workspace {
 		});
 		wireDrop((file) => void openFile(file));
 		const view = doc.defaultView!;
-		// `?share=<session>` presses File > Share > Start sharing on load, so frames built from different
-		// framework demos can join one session by name. The panel is the viewer's own; this only fills
-		// in the session name and starts it. Same-browser only: the session runs over a BroadcastChannel.
+		// `?share=<session>` joins that session on load, so frames built from different framework demos
+		// can share one drawing by name. Same-browser only: without a server the session runs over a
+		// BroadcastChannel. (The viewer's Share dialog does the same from an invitation link.)
 		const shareRoom = new URL(view.location.href).searchParams.get('share');
-		const shareRoot = mounted.element.shadowRoot;
-		const shareField = shareRoot?.querySelector<HTMLInputElement>('.share-room');
-		if (shareRoom && shareField) {
-			shareField.value = shareRoom;
-			shareRoot?.querySelector<HTMLButtonElement>('[data-share="start"]')?.click();
+		if (shareRoom) {
+			const viewer = mounted.element as HTMLElement & { collaboration: { roomId: string } | null };
+			viewer.collaboration = { roomId: shareRoom };
 		}
 		view.addEventListener('pagehide', (event) => {
 			if (event.persisted) {
@@ -243,5 +268,5 @@ export function createWorkspace(doc: Document = document): Workspace {
 		});
 	}
 
-	return { events, initialDocument: demoDocument, attach };
+	return { events, fileProviders, initialDocument: demoDocument, attach };
 }

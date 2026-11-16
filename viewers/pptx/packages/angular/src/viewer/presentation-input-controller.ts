@@ -9,7 +9,6 @@ import {
 	mapPresentationWheel,
 	openUrlInNewTab,
 	resolveOleVerbTarget,
-	resolvePresentationAction,
 	resolvePresentationClick,
 	runPresentationAction,
 	safeOpenUrl,
@@ -69,7 +68,7 @@ export interface PresentationInputDeps {
 	 * absent) means "always allow", matching `shouldConfirmExternalHyperlink`
 	 * with the option off.
 	 */
-	confirmExternalHyperlink?: (href: string) => boolean;
+	confirmExternalHyperlink?: (href: string) => boolean | Promise<boolean>;
 	/**
 	 * `ppaction://customshow?id=<id>[&return=true]`: run the named custom show.
 	 * The host resolves `customShowId` against its own custom-show registry (an
@@ -152,7 +151,7 @@ export class PresentationInputController {
 				break;
 			case 'pointerTool':
 				// PowerPoint's Ctrl+A "arrow" is the plain pointer: no active tool.
-				annotations.setTool(mapped.tool === 'arrow' ? 'none' : mapped.tool);
+				annotations.selectTool(mapped.tool === 'arrow' ? 'none' : mapped.tool);
 				break;
 			case 'eraseAnnotations':
 				annotations.clearAnnotations();
@@ -254,15 +253,9 @@ export class PresentationInputController {
 			slideCount: this.deps.slides().length,
 			elementId: closestElementId(target),
 		};
-		const { intent } = resolvePresentationAction(outcome.action, options);
-		if (
-			intent.kind === 'openUrl' &&
-			this.deps.confirmExternalHyperlink &&
-			!this.deps.confirmExternalHyperlink(intent.url)
-		) {
-			return 'action';
-		}
 		runPresentationAction(outcome.action, options, {
+			// A declined (or still pending) confirmation still consumes the click.
+			confirmUrl: this.deps.confirmExternalHyperlink,
 			goToSlide: (index) => this.deps.navigator.goToSlide(index),
 			move: (direction) => this.deps.navigator.navigate(direction > 0 ? 'next' : 'prev'),
 			endShow: () => this.deps.requestClose(),

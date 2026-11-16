@@ -7,6 +7,91 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.4.0](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.4.0) - 2026-11-13
+
+### Features
+
+- **visio:** Expose an awaited inline text commit ([8e3a23b](https://github.com/ChristopherVR/ooxml/commit/8e3a23b58cb054f8ab51f0e74e0f681bea47d659))
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.3.2](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.3.2) - 2026-11-09
+
+### Dependencies
+
+- **deps:** Bump the production-minor-and-patch group with 25 updates ([4046ca3](https://github.com/ChristopherVR/ooxml/commit/4046ca399665d485da35696889c0212cc6526f63))
+
+## [1.3.1](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.3.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.3.0](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.3.0) - 2026-11-05
+
+### Features
+
+- **visio:** Open drawings from cloud file providers ([f7563e7](https://github.com/ChristopherVR/ooxml/commit/f7563e70c8fbdb2475d7b211b94bf278b590de8c))
+- **ui:** Expose openCloudFile on the word, excel and visio bindings ([b4837c7](https://github.com/ChristopherVR/ooxml/commit/b4837c76398c125755458861ce62679d7c179003))
+
+### Bug Fixes
+
+- **deps:** Update emf-converter to 4.25.3 ([e51a619](https://github.com/ChristopherVR/ooxml/commit/e51a6192b3a531022b3677753e79b6a015233b9d))
+
+## [1.2.0](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.2.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [1.1.3](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.1.3) - 2026-11-03
+
+### Dependencies
+
+- **deps:** Bump the production-minor-and-patch group with 22 updates ([8e60b14](https://github.com/ChristopherVR/ooxml/commit/8e60b14e1d8ee3a1cb507670caa15a611632ef26))
+- **deps:** Merge production dependency updates ([#236](https://github.com/ChristopherVR/ooxml/issues/236)) ([7eb137b](https://github.com/ChristopherVR/ooxml/commit/7eb137b03906ded043ce0e4adf83e01fcdaa44a9))
+
+## [1.1.2](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.1.2) - 2026-10-26
+
+### Dependencies
+
+- **deps:** Bump production minor and patch dependencies ([#213](https://github.com/ChristopherVR/ooxml/issues/213)) ([3cfdd01](https://github.com/ChristopherVR/ooxml/commit/3cfdd016aa61cacb0540491c5ab13974e32f8e1e))
+
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.1.1) - 2026-10-23
+
+### Other
+
+- Shared binding kit (wave6-1) ([98ab396](https://github.com/ChristopherVR/ooxml/commit/98ab396a11b31675c0266acd5242060412642bd3))
+- Visio, Teams and package check docs (docs6-5) ([e6b2151](https://github.com/ChristopherVR/ooxml/commit/e6b2151824f447a53875592ee9f0a5f89f89cc69))
+
+### Refactor
+
+- **visio:** Build the Visio bindings on ooxml-ui/bindings ([70e9c6c](https://github.com/ChristopherVR/ooxml/commit/70e9c6c77505ef97f9100942aa149cfe26f1cc63))
+
+### Documentation
+
+- **visio:** Describe the shared binding kit, new props and chart editing ([ef66cf6](https://github.com/ChristopherVR/ooxml/commit/ef66cf68620585b6ed3ea070d5690cae2a258121))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.1.0) - 2026-10-22
+
+### Features
+
+- **visio:** Add file-command and host-owned storage to the viewer ([0c8e284](https://github.com/ChristopherVR/ooxml/commit/0c8e284015fe1cc1b895c840900482ba12f8cda4))
+- **visio:** Take the shared customization contract in <visio-viewer> ([3a6bb30](https://github.com/ChristopherVR/ooxml/commit/3a6bb305b8ac04f0942b40e8cdfbd887093c6112))
+- **visio:** Accept readOnly as the inverse of canEdit ([fbc325b](https://github.com/ChristopherVR/ooxml/commit/fbc325be8c9c12a7c2e4a3affd7af2428ba4ed49))
+- **embedding:** Land the host customization, read-only and storage contracts ([822a6a0](https://github.com/ChristopherVR/ooxml/commit/822a6a073840b9e9d1671476542322b28332dc42))
+
+### Bug Fixes
+
+- **visio:** Reset readOnly when the host stops passing it ([c3db6eb](https://github.com/ChristopherVR/ooxml/commit/c3db6eb272b248329afbca32f70a72965f3f9d04))
+
+### Other
+
+- Integrate the customization contract into host storage ([629554b](https://github.com/ChristopherVR/ooxml/commit/629554b3030728bfe16e11ac8ae5b2530bb28a17))
+- Bring origin/main into the embedding work ([a3711a1](https://github.com/ChristopherVR/ooxml/commit/a3711a14049a2cd11b994e76eafec039db2dc2de))
+
 ## [1.0.1](https://github.com/ChristopherVR/ooxml/releases/tag/visio-svelte-viewer@1.0.1) - 2026-10-22
 
 ### Documentation

@@ -30,8 +30,8 @@ export interface PptxViewOrigin {
 
 /** A horizontal or vertical drawing guide in slide coordinates. */
 export interface PptxViewGuide {
-	orientation?: 'horz' | 'vert';
-	position?: number;
+	orientation?: 'horz' | 'vert' | undefined;
+	position?: number | undefined;
 }
 
 /** Positive grid spacing from `p:gridSpacing`. */
@@ -48,7 +48,7 @@ export interface PptxRestoredRegion {
 	/** Size as a percentage of the available space (thousandths of a percent). */
 	sz: number;
 	/** Whether auto-adjust is enabled. */
-	autoAdjust?: boolean;
+	autoAdjust?: boolean | undefined;
 }
 
 /**
@@ -78,19 +78,19 @@ export interface PptxNormalViewProperties {
  */
 export interface PptxCommonSlideViewProperties {
 	/** Whether snap-to-grid is enabled. */
-	snapToGrid?: boolean;
+	snapToGrid?: boolean | undefined;
 	/** Whether snap-to-objects is enabled. */
-	snapToObjects?: boolean;
+	snapToObjects?: boolean | undefined;
 	/** Whether drawing guides are shown. */
-	showGuides?: boolean;
+	showGuides?: boolean | undefined;
 	/** Whether the application may vary the scale automatically. */
-	variableScale?: boolean;
+	variableScale?: boolean | undefined;
 	/** Drawing guides shown in this slide view. */
-	guides?: PptxViewGuide[];
+	guides?: PptxViewGuide[] | undefined;
 	/** View origin (scroll position). */
-	origin?: PptxViewOrigin;
+	origin?: PptxViewOrigin | undefined;
 	/** View scale. */
-	scale?: PptxViewScale;
+	scale?: PptxViewScale | undefined;
 }
 
 /**
@@ -110,11 +110,11 @@ export interface PptxViewProperties {
 	/** Notes text view properties. */
 	notesTextViewPr?: PptxCommonSlideViewProperties;
 	/** Sorter view scale. */
-	sorterViewPr?: { scale?: PptxViewScale };
+	sorterViewPr?: { scale?: PptxViewScale | undefined };
 	/** Notes view properties. */
 	notesViewPr?: PptxCommonSlideViewProperties;
 	/** Grid spacing in positive DrawingML coordinates. */
-	gridSpacing?: PptxGridSpacing;
+	gridSpacing?: PptxGridSpacing | undefined;
 	/** Raw XML preserved for lossless round-trip of unparsed attributes. */
-	rawXml?: Record<string, unknown>;
+	rawXml?: Record<string, unknown> | undefined;
 }

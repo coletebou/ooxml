@@ -4,6 +4,8 @@ import {
 	BACKSTAGE_NAV_CLASSES,
 	backstageNavEntries,
 	listBackstageRecentFiles,
+	CLOUD_OPEN_ACCEPT,
+	openPlacesLabels,
 } from 'ooxml-ui/pptx';
 import type {
 	BackstagePage,
@@ -12,14 +14,15 @@ import type {
 	ViewerRegionId,
 } from 'ooxml-ui/pptx';
 import React, { useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { LuArrowLeft, LuFolderOpen, LuSettings } from 'react-icons/lu';
 
 import { useToolbarVisibility } from '../../hooks/useToolbarVisibility';
+import { useTranslation } from '../../i18n/use-translation';
+import { useViewerCloudFiles } from '../viewer-cloud-files-context';
 import { useViewerCustomizationContext } from '../viewer-customization-context';
 import { useViewerStorage } from '../viewer-storage-context';
 import { ViewerRegion, useRegionRenderer } from '../ViewerRegion';
-import { WebSearch } from '../WebControls';
+import { WebOpenPlaces, WebSearch } from '../WebControls';
 import { AccountPage } from './AccountPage';
 import { BackstageCards } from './file-backstage-cards';
 import { BackstageNavIcon } from './file-backstage-icons';
@@ -27,7 +30,7 @@ import { BackstageNewGallery, BackstageRecentList } from './file-backstage-parts
 import type { FileSectionProps } from './file-backstage-parts';
 
 export function FileSection(p: FileSectionProps): React.ReactElement {
-	const { t } = useTranslation();
+	const { t, locale } = useTranslation();
 	const [requestedPage, setRequestedPage] = useState<string>('home');
 	// Host customisation hides nav pages; a hidden current page falls back to
 	// Home (or, when Home is hidden too, the first page still offered).
@@ -44,6 +47,9 @@ export function FileSection(p: FileSectionProps): React.ReactElement {
 	const { isHidden } = useToolbarVisibility(p.hiddenActions);
 	const exportHidden = isHidden('export');
 	const storage = useViewerStorage();
+	const cloud = useViewerCloudFiles();
+	const placeLabels = useMemo(() => openPlacesLabels(t), [t]);
+	const [placeId, setPlaceId] = useState<string>();
 	useEffect(() => {
 		void listBackstageRecentFiles(t, p.recentPresentationsCount, storage).then(setRecent);
 	}, [t, p.recentPresentationsCount, storage]);
@@ -74,6 +80,36 @@ export function FileSection(p: FileSectionProps): React.ReactElement {
 		| HostBackstageRegionId;
 	const builtInRegionRenderer = useRegionRenderer(regionId as ViewerRegionId);
 	const regionRenderer = hostPage ? hostPage.render : builtInRegionRenderer;
+	// The device half of File > Open (and the whole of Home's list): Browse and recent files.
+	const device = (
+		<>
+			<WebSearch
+				data-pptx-search-surface
+				data-pptx-search-input
+				className='mt-8 w-full max-w-[540px]'
+				value={query}
+				onInput={(event) =>
+					setQuery((event.currentTarget as HTMLElement & { value: string }).value)
+				}
+				placeholder={t('pptx.backstage.searchPlaceholder')}
+				aria-label={t('pptx.backstage.searchPlaceholder')}
+			/>
+			{page === 'open' && (
+				<button
+					type='button'
+					className='mt-4 inline-flex items-center gap-2 bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90'
+					onClick={() => run(p.onOpenFile)}
+				>
+					<LuFolderOpen /> {t('pptx.backstage.browseDevice')}
+				</button>
+			)}
+			<h2 className='mt-6 text-[16px] font-semibold'>{t('pptx.backstage.recentHeading')}</h2>
+			<BackstageRecentList
+				files={visibleRecent}
+				onOpen={(key) => run(() => p.onOpenRecentFile?.(key))}
+			/>
+		</>
+	);
 	return (
 		<div
 			className='fixed inset-0 z-[200] flex bg-background font-[Aptos,Segoe_UI,sans-serif] text-foreground max-md:flex-col'
@@ -154,40 +190,31 @@ export function FileSection(p: FileSectionProps): React.ReactElement {
 					<>
 						{(page === 'home' || page === 'new') && (
 							<BackstageNewGallery
-								onCreate={(templateId) => run(() => p.onCreatePresentation(templateId))}
+								onCreate={(templateId) =>
+									run(() => {
+										cloud.clear();
+										p.onCreatePresentation(templateId);
+									})
+								}
 							/>
 						)}
-						{(page === 'home' || page === 'open') && (
-							<>
-								<WebSearch
-									data-pptx-search-surface
-									data-pptx-search-input
-									className='mt-8 w-full max-w-[540px]'
-									value={query}
-									onInput={(event) =>
-										setQuery((event.currentTarget as HTMLElement & { value: string }).value)
-									}
-									placeholder={t('pptx.backstage.searchPlaceholder')}
-									aria-label={t('pptx.backstage.searchPlaceholder')}
-								/>
-								{page === 'open' && (
-									<button
-										type='button'
-										className='mt-4 inline-flex items-center gap-2 bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90'
-										onClick={() => run(p.onOpenFile)}
-									>
-										<LuFolderOpen /> {t('pptx.backstage.browseDevice')}
-									</button>
-								)}
-								<h2 className='mt-6 text-[16px] font-semibold'>
-									{t('pptx.backstage.recentHeading')}
-								</h2>
-								<BackstageRecentList
-									files={visibleRecent}
-									onOpen={(key) => run(() => p.onOpenRecentFile?.(key))}
-								/>
-							</>
-						)}
+						{(page === 'home' || page === 'open') &&
+							(page === 'open' ? (
+								<WebOpenPlaces
+									className='block max-w-[900px]'
+									providers={cloud.providers}
+									accept={CLOUD_OPEN_ACCEPT}
+									labels={placeLabels}
+									locale={locale}
+									selected={placeId}
+									onPlaceChange={setPlaceId}
+									onOpen={(file) => run(() => cloud.open(file))}
+								>
+									{device}
+								</WebOpenPlaces>
+							) : (
+								device
+							))}
 						{!(page === 'export' && exportHidden) && (
 							<BackstageCards page={page as BackstagePage} props={p} run={run} />
 						)}

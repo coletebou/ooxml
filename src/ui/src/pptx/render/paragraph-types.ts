@@ -102,6 +102,12 @@ export interface ParagraphRun {
 	 * `getTextReflectionWrapperStyle`.
 	 */
 	reflection?: ReflectionWrapperStyle;
+	/**
+	 * Set on a piece of a run the Find bar highlights (`current` for the current match), by
+	 * `highlightFindMatches` (`find-text-highlight.ts`). A binding wraps the run's content in
+	 * `<mark data-pptx-find-match>` styled with `findMatchMarkStyle`.
+	 */
+	findMatch?: 'match' | 'current';
 }
 
 /** A rendered paragraph: runs plus resolved bullet + hanging-indent metadata. */
@@ -128,6 +134,19 @@ export interface RenderParagraph {
 	spaceBeforePx?: number;
 	/** `margin-bottom` in px from this paragraph's `a:pPr > a:spcAft` (space after). */
 	spaceAfterPx?: number;
+	/**
+	 * How far (px) `paragraphStyle` moves the paragraph down (a relative `top`)
+	 * so its baselines sit where PowerPoint puts them in their line pitch. See
+	 * `resolveParagraphBaselineShift`. Already applied through
+	 * `paragraphStyle`; carried for code that models the layout (morph).
+	 */
+	baselineShiftPx?: number;
+	/**
+	 * Set when the baseline was placed from a stand-in font's metrics because
+	 * the paragraph's web font had not loaded; `paragraphStyle` then carries
+	 * the `--pptx-baseline-pending` marker `settleBaselines` places it again by.
+	 */
+	baselineProvisional?: boolean;
 	/**
 	 * `font-size` in px to set on the paragraph element so its CSS line boxes
 	 * are built from its OWN runs rather than the text body's default size.

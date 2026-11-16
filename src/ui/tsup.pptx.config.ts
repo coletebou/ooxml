@@ -7,8 +7,13 @@ export default defineConfig({
 		index: 'src/pptx/index.ts',
 		'theme/index': 'src/pptx/theme/index.ts',
 		'loader/index': 'src/pptx/loader/index.ts',
+		'onedrive/index': 'src/pptx/onedrive/index.ts',
 		'i18n/index': 'src/pptx/i18n/index.ts',
 		'ai/index': 'src/pptx/ai/index.ts',
+		// The SDK-free helpers the viewers' main entries import (ooxml-ui/pptx/ai/host, through
+		// the ./pptx/* export). It must stay a separate entry: the ai/index bundle reaches
+		// zod, the automation catalogue and a dynamic import of the ai SDK.
+		'ai/host': 'src/pptx/ai/host.ts',
 		'export/canvas-color-fix': 'src/pptx/export/canvas-color-fix.ts',
 		'export/handout-layout': 'src/pptx/export/handout-layout.ts',
 		'export/handout-master-chrome': 'src/pptx/export/handout-master-chrome.ts',

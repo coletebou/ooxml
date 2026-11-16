@@ -1,4 +1,8 @@
-import type { InlineTextEditSnapshot, ZoomNavigationTarget } from 'ooxml-ui/pptx';
+import type {
+	AbuttingEdgeBleed,
+	InlineTextEditSnapshot,
+	ZoomNavigationTarget,
+} from 'ooxml-ui/pptx';
 import type { PptxAction, PptxElement, PptxSlide, TextStyle } from 'pptx-viewer-core';
 
 import type { ShapeAdjustmentHandleDescriptor, TableCellEditorState } from '../../types';
@@ -6,6 +10,7 @@ import type { ElementAnimationState } from '../../utils/animation-timeline';
 import type { TableStyleContext } from '../../utils/table-parse';
 import type { FieldSubstitutionContext } from '../../utils/text-field-substitution';
 import type { ElementFindHighlights } from '../../utils/text-segment-helpers';
+import type { ElementRenderErrorHandler } from '../ElementErrorBoundary';
 
 export interface ConnectorRendererProps {
 	el: PptxElement;
@@ -36,6 +41,7 @@ export interface ConnectorRendererProps {
 
 export interface ElementRendererProps {
 	element: PptxElement;
+	onElementRenderError?: ElementRenderErrorHandler;
 	activeSlide?: PptxSlide | undefined;
 	isSelected: boolean;
 	isInlineEditing: boolean;
@@ -65,6 +71,11 @@ export interface ElementRendererProps {
 	templateEditing?: boolean;
 	/** Explicit z-index for document-order stacking (painter's algorithm). */
 	zIndex?: number;
+	/**
+	 * Grow this box under an abutting opaque box above it, closing the
+	 * anti-aliasing seam between the two (shared `resolveAbuttingEdgeBleeds`).
+	 */
+	edgeBleed?: AbuttingEdgeBleed;
 	imageAltText: string;
 	showResizeHandles: boolean;
 	renderInk: boolean;
@@ -82,7 +93,13 @@ export interface ElementRendererProps {
 	onInlineEditCommit: () => void;
 	onInlineEditCancel: () => void;
 	onTableCellSelect?: (cell: TableCellEditorState | null, elementId: string) => void;
-	onCommitCellEdit?: (elementId: string, rowIndex: number, colIndex: number, text: string) => void;
+	onCommitCellEdit?: (
+		elementId: string,
+		rowIndex: number,
+		colIndex: number,
+		text: string,
+		end?: import('ooxml-ui/pptx').TableCellEditEnd,
+	) => void;
 	/**
 	 * Commit a partial update to a SmartArt element from inline (on-canvas) node
 	 * editing. Wired to the same element-update path the inspector uses. When

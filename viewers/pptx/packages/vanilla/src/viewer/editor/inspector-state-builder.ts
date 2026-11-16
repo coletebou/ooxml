@@ -1,16 +1,9 @@
 import {
 	autoFitModeOf,
 	canInteractWithElement,
-	defaultGradientState,
-	getNonVisualDescriptionFields,
-	gradientStateOf,
-	hasGradientFill,
 	hasImageOverrides,
-	imageAdjustmentsStateOf,
-	imageCropStateOf,
 	isElementLocked,
 	shouldShowAccessibilitySection,
-	tableInspectorStateOf,
 	textAdvancedStateOf,
 	textWrapOf,
 } from 'ooxml-ui/pptx';
@@ -78,9 +71,6 @@ export function buildInspectorState(
 ): InspectorState {
 	const shape = shapeStyleOf(el);
 	const textAdvanced = el ? textAdvancedStateOf(el) : undefined;
-	const image = el ? imageAdjustmentsStateOf(el) : undefined;
-	const crop = el ? imageCropStateOf(el) : undefined;
-	const table = el ? tableInspectorStateOf(el) : undefined;
 	const tableCell =
 		el?.type === 'table' && selectedTableCell
 			? el.tableData?.rows[selectedTableCell.row]?.cells[selectedTableCell.column]
@@ -88,6 +78,7 @@ export function buildInspectorState(
 
 	return {
 		hasSelection: el !== undefined,
+		...(el ? { elementId: el.id } : {}),
 		isLocked: isElementLocked(el),
 		// G7: a:picLocks/@noCrop. G9: arrowheadsChangeable already existed on
 		// element-locks.ts but nothing consulted it in the vanilla inspector.
@@ -111,6 +102,7 @@ export function buildInspectorState(
 		oleIsLinked: el?.type === 'ole' && el.isLinked === true,
 		oleName: el?.type === 'ole' ? el.oleName : undefined,
 		oleElement: el?.type === 'ole' ? el : undefined,
+		...(el ? { selectedElement: el } : {}),
 		x: el?.x ?? 0,
 		y: el?.y ?? 0,
 		width: el?.width ?? 0,
@@ -126,37 +118,14 @@ export function buildInspectorState(
 		isConnector: el?.type === 'connector',
 		fillOpacity: shape.fillOpacity,
 		strokeOpacity: shape.strokeOpacity,
-		gradientEnabled: el !== undefined && hasGradientFill(el),
-		gradient: el ? gradientStateOf(el) : defaultGradientState(),
 		vAlign: textAdvanced?.vAlign ?? 'top',
 		textWrap: el ? textWrapOf(el) : 'square',
 		autoFitMode: el ? autoFitModeOf(el) : 'none',
-		characterSpacing: textAdvanced?.characterSpacing ?? 0,
-		lineSpacing: textAdvanced?.lineSpacing ?? 1,
-		lineSpacingExactPt: textAdvanced?.lineSpacingExactPt ?? null,
-		paragraphSpacingBefore: textAdvanced?.paragraphSpacingBefore ?? 0,
-		paragraphSpacingAfter: textAdvanced?.paragraphSpacingAfter ?? 0,
-		paragraphIndent: textAdvanced?.paragraphIndent ?? 0,
-		paragraphMarginLeft: textAdvanced?.paragraphMarginLeft ?? 0,
 		textDirection: textAdvanced?.textDirection ?? 'horizontal',
-		textRtl: textAdvanced?.rtl ?? false,
 		textStyle: el && 'textStyle' in el ? el.textStyle : undefined,
 		selectedTextRange,
-		imageBrightness: image?.brightness ?? 0,
-		imageContrast: image?.contrast ?? 0,
-		imageSaturation: image?.saturation ?? 0,
 		imageArtisticEffect:
 			el && isImageLikeElement(el) ? (el.imageEffects?.artisticEffect ?? 'none') : 'none',
-		imageTransparency:
-			el && isImageLikeElement(el) ? 100 - (el.imageEffects?.alphaModFix ?? 100) : 0,
-		imageBiLevel: el && isImageLikeElement(el) ? (el.imageEffects?.biLevel ?? 0) : 0,
-		imageDuotone1:
-			el && isImageLikeElement(el) ? (el.imageEffects?.duotone?.color1 ?? '#000000') : '#000000',
-		imageDuotone2:
-			el && isImageLikeElement(el) ? (el.imageEffects?.duotone?.color2 ?? '#ffffff') : '#ffffff',
-		imageColorWash: el && isImageLikeElement(el) ? el.imageEffects?.colorWash : undefined,
-		altText: el ? getNonVisualDescriptionFields(el).altText : '',
-		title: el ? getNonVisualDescriptionFields(el).title : '',
 		showAccessibilitySection: el !== undefined && shouldShowAccessibilitySection(el),
 		chartHighlightCell:
 			el?.type === 'chart' && chartPartSelection?.elementId === el.id
@@ -178,17 +147,6 @@ export function buildInspectorState(
 				? (el.posterFrameData ??
 					(el.posterFramePath ? mediaDataUrls.get(el.posterFramePath) : undefined))
 				: undefined,
-		cropLeft: crop?.cropLeft ?? 0,
-		cropTop: crop?.cropTop ?? 0,
-		cropRight: crop?.cropRight ?? 0,
-		cropBottom: crop?.cropBottom ?? 0,
-		tableHeaderRow: table?.firstRowHeader ?? false,
-		tableBandedRows: table?.bandedRows ?? false,
-		tableBandedColumns: table?.bandedColumns ?? false,
-		tableLastRow: el?.type === 'table' ? (el.tableData?.lastRow ?? false) : false,
-		tableFirstCol: el?.type === 'table' ? (el.tableData?.firstCol ?? false) : false,
-		tableLastCol: el?.type === 'table' ? (el.tableData?.lastCol ?? false) : false,
-		tableRtl: el?.type === 'table' ? (el.tableData?.rtl ?? false) : false,
 		tableStyleId: el?.type === 'table' ? (el.tableData?.tableStyleId ?? '') : '',
 		tableCellBackground:
 			el?.type === 'table'
@@ -198,7 +156,6 @@ export function buildInspectorState(
 			el?.type === 'table'
 				? (el.tableData?.rows[0]?.cells[0]?.style?.borderColor ?? '#000000')
 				: '#000000',
-		tableCellPadding: table?.cellPadding ?? 0,
 		selectedTableCell: tableCell ? selectedTableCell : null,
 		selectedTableCells: tableCell ? selectedTableCells : [],
 		tableCellStyle: tableCell?.style,

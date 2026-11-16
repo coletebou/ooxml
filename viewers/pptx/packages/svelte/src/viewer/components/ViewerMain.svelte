@@ -12,7 +12,13 @@
 	 * to stay owned by the component that constructed it.
 	 */
 	import type { Translator } from '../../i18n/translator';
-	import { computeGridSpacingPx, createGuide, moveGuide, removeGuide } from 'ooxml-ui/pptx';
+	import {
+		computeGridSpacingPx,
+		createGuide,
+		findTextHighlightsByElement,
+		moveGuide,
+		removeGuide,
+	} from 'ooxml-ui/pptx';
 	import type { PptxAiConfig } from 'ooxml-ui/pptx/ai';
 
 	import type { ViewerStateBag } from '../state/create-viewer-state-types';
@@ -108,6 +114,7 @@
 		current={viewer.current}
 		onselect={(index) => viewer.goTo(index)}
 		loading={stageShowsLoading(loader.loading, loader.loadOrigin, Boolean(vm.activeSlide))}
+		fontProgress={loader.fontProgress}
 		isEncrypted={loader.isEncrypted}
 		error={loader.error}
 		activeSlide={vm.activeSlide}
@@ -138,6 +145,7 @@
 		spellCheck={parityUi.preferences.spellCheck}
 		getzoomscale={() => vm.deck.getZoom()}
 		onpinchzoom={(scale) => vm.deck.setZoom(scale)}
+		dragpans={vm.deck.getMode() === 'preview'}
 		{onstageresize}
 		onstageholder={(el) => onstageholder(el)}
 		notesExpanded={vm.notesExpanded}
@@ -161,6 +169,11 @@
 		aiPickMode={ai ? vm.ai.panel.pickMode : false}
 		aiActive={ai ? vm.ai.panel.canvasAnimating : false}
 		aiHighlights={vm.ai.canvasHighlights}
+		findHighlights={findTextHighlightsByElement(
+			vm.findReplace.results,
+			vm.findReplace.index,
+			viewer.current,
+		)}
 		aiChangeBatch={ai ? vm.ai.panel.changeBatch : null}
 		onaipickelement={ai ? (elementId) => vm.ai.panel.addPick(viewer.current, elementId) : undefined}
 		onaskai={ai && editor.selectedElement ? () => vm.ai.panel.askAboutSelection() : undefined}

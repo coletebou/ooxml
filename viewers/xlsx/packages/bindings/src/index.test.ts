@@ -141,6 +141,7 @@ describe('props, attributes and defaults', () => {
 			showToolbar: false,
 			showFormulaBar: false,
 			authorName: 'Ada',
+			validateReplace: true,
 			hiddenActions: ['bold'],
 			themeColors,
 		});
@@ -150,12 +151,14 @@ describe('props, attributes and defaults', () => {
 		expect(element.getAttribute('show-toolbar')).toBe('false');
 		expect(element.getAttribute('show-formula-bar')).toBe('false');
 		expect(element.authorName).toBe('Ada');
+		expect(element.validateReplace).toBe(true);
 		expect(element.hiddenActions).toEqual(['bold']);
 		expect(element.themeColors).toEqual(themeColors);
 		binding.update({});
 		expect(element.showToolbar).toBe(true);
 		expect(element.showFormulaBar).toBe(true);
 		expect(element.authorName).toBe('Author');
+		expect(element.validateReplace).toBe(false);
 		expect(element.hiddenActions).toEqual([]);
 		expect(element.themeColors).toEqual({});
 		binding.destroy();
@@ -261,12 +264,14 @@ describe('events and handle methods', () => {
 		await binding.load(new Uint8Array([1]), 'a.xlsx');
 		await binding.download('b.xlsx');
 		binding.newWorkbook();
+		await binding.openCloudFile({ fileName: 'c.xlsx' } as never);
 		expect(calls.map((call) => call.method)).toEqual([
 			'save',
 			'saveBytes',
 			'load',
 			'download',
 			'newWorkbook',
+			'openCloudFile',
 		]);
 		expect(calls[1]?.args).toEqual(['csv']);
 		expect(calls[2]?.args).toEqual([new Uint8Array([1]), 'a.xlsx']);

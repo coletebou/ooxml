@@ -26,10 +26,19 @@ import { resolveMetricTrackingPx } from './text-metric-tracking';
 import { resolveTextOutlineDashCss } from './text-outline-dash';
 import { hollowTextFillStyle } from './text-run-hollow';
 import { authoredLetterSpacingPx, pieceLetterSpacing } from './text-run-spacing';
+import { trackingPendingStyle } from './text-tracking-settle';
 import { scaleFontSizeForAutoFit } from './text-style-helpers';
 
 /** A plain CSS style map (keys are CSS properties; binding-agnostic). */
 export type RunStyle = Record<string, string | number>;
+
+/** Apply the alpha retained in a resolved theme-colour reference to its text paint. */
+export function textRunColor(color: string, alpha: number | undefined): string {
+	if (alpha === undefined || !Number.isFinite(alpha) || alpha >= 1) {
+		return color;
+	}
+	return `color-mix(in srgb, ${color} ${Math.max(0, alpha) * 100}%, transparent)`;
+}
 
 /** Super/subscript glyphs render at ~65% of the run font size (matches React). */
 export const BASELINE_FONT_SCALE = 0.65;
@@ -101,6 +110,8 @@ function applyExtraRunProps(
 	if (letterSpacing !== undefined) {
 		style.letterSpacing = letterSpacing;
 	}
+	// Spacing measured against a stand-in face is redone in place when the webfont loads.
+	Object.assign(style, trackingPendingStyle(font, authoredLetterSpacingPx(s)));
 	// Kerning (`a:rPr/@kern`) is a THRESHOLD, not a boolean: see `resolveFontKerning`.
 	const fontKerning = resolveFontKerning(s.kerning, font.fontSizePx);
 	if (fontKerning !== undefined) {
@@ -237,7 +248,7 @@ export function segmentStyleToCss(
 		style.verticalAlign = baselineShift;
 	}
 	if (s.color) {
-		style.color = s.color;
+		style.color = textRunColor(s.color, s.colorRef?.alpha);
 	} else if (s.hyperlink) {
 		// PowerPoint paints a hyperlink in the theme's `hlink` colour. Core
 		// resolves that into `s.color` for nearly every deck, so this only fires

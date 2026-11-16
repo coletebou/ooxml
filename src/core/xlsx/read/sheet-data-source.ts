@@ -1,22 +1,23 @@
 // A worksheet's `<sheetData>` holds nearly all of its XML (every cell). Building a full DOM for it
 // dominated opening a large workbook, so the cell data is cut out of the part and read with the
-// lightweight fragment reader; the rest of the part (views, columns, formatting, ...) still goes
-// through the DOM. Only plain markup takes this path, with element prefixes declared on the root:
-// comments and CDATA sections may appear anywhere, but nested namespace declarations, processing
-// instructions in the cell data or anything else the light reader declines is parsed whole, as
-// before, so the result is the same either way.
-import {
-	LiteElement,
-	parseLiteFragment,
-	type LiteNamespaces,
-	type XmlElement,
-} from '../../xml/index';
+// lightweight fragment reader, one row at a time so that only the current row exists as elements;
+// the rest of the part (views, columns, formatting, ...) still goes through the DOM. Only plain
+// markup takes this path, with element prefixes declared on the root: comments and CDATA sections
+// may appear anywhere, but nested namespace declarations, processing instructions in the cell data
+// or anything else the light reader declines is parsed whole, as before, so the result is the same
+// either way. The strings of the shared strings part are read the same way (`rootChildren`).
+import { liteChildElements, type LiteNamespaces, type XmlElement } from '../../xml/index';
 
 export interface SplitSheetData {
 	/** The part with `<sheetData>` emptied, for the DOM parser. */
 	xml: string;
-	/** The cell data, readable through the same DOM subset as a parsed `<sheetData>`. */
-	sheetData: XmlElement;
+	/**
+	 * The children of `<sheetData>` (its rows), readable through the same DOM subset as parsed
+	 * ones and built one at a time while iterating. Markup the light reader declines throws a
+	 * `LiteDeclinedError` from the iteration, possibly after some rows: the part must then be
+	 * read whole.
+	 */
+	rows: Iterable<XmlElement>;
 }
 
 const ROOT = /^\uFEFF?(?:\s*<\?[^]*?\?>)?\s*<([A-Za-z_][\w.:-]*)((?:\s[^>]*)?)>/;
@@ -68,26 +69,78 @@ function blankComments(xml: string): string | undefined {
 	return pieces.join('');
 }
 
-/** Splits the cell data from a worksheet part, or undefined when the whole part must be parsed. */
-export function splitSheetData(xml: string): SplitSheetData | undefined {
-	// Tags are found in `plain` (comments and CDATA blanked); the parts are cut from `xml`.
+/** `parseXml` refuses a part holding these anywhere, even in a comment outside the root. */
+const DECLARATIONS = /<!DOCTYPE|<!ENTITY/i;
+
+/**
+ * The children of a part's root element (the strings of the shared strings part), read by the
+ * light reader one at a time like the rows of {@link SplitSheetData}, with the namespaces declared
+ * on the root; undefined when the part must go to the DOM parser (a declaration, a self-closing
+ * root, anything but whitespace, comments and an XML declaration around the root).
+ */
+export function rootChildren(xml: string): Iterable<XmlElement> | undefined {
+	if (DECLARATIONS.test(xml)) return undefined;
 	const plain = blankComments(xml);
 	if (plain === undefined) return undefined;
+	const namespaces = rootNamespaces(plain);
+	const root = ROOT.exec(plain.slice(0, 8192));
+	if (!namespaces || !root || (root[2] ?? '').trimEnd().endsWith('/')) return undefined;
+	const close = plain.lastIndexOf(`</${root[1] ?? ''}`);
+	if (close < root[0].length || !/^<\/[^\s>]+\s*>\s*$/.test(plain.slice(close))) return undefined;
+	const content = xml.slice(root[0].length, close);
+	return { [Symbol.iterator]: () => liteChildElements(content, namespaces) };
+}
+
+/** Where the cell data of a worksheet part starts, for the light reader. */
+export interface SheetDataStart {
+	/** The namespaces declared on the root, which the cell data's prefixes resolve through. */
+	namespaces: LiteNamespaces;
+	/** `sheetData` with its prefix, as its end tag names it. */
+	tagName: string;
+	/** The position just after the `<sheetData>` start tag. */
+	contentStart: number;
+}
+
+/** The `<sheetData>` start tag in `plain` (comments blanked), or undefined when it cannot be read. */
+function findSheetData(plain: string): SheetDataStart | undefined {
 	const namespaces = rootNamespaces(plain);
 	const open = OPEN.exec(plain);
 	if (!namespaces || !open) return undefined;
 	const prefix = (open[1] ?? '').slice(0, -1);
-	const ns = namespaces[prefix];
-	if (prefix && ns === undefined) return undefined;
+	if (prefix && namespaces[prefix] === undefined) return undefined;
 	const tagName = `${open[1] ?? ''}sheetData`;
 	const openEnd = plain.indexOf('>', open.index);
 	if (openEnd < 0) return undefined;
 	const attributes = plain.slice(open.index + tagName.length + 1, openEnd);
 	if (attributes.trimEnd().endsWith('/') || attributes.includes('xmlns')) return undefined;
-	const close = plain.indexOf(`</${tagName}`, openEnd);
-	if (close < 0 || OPEN.test(plain.slice(openEnd))) return undefined;
-	const container = new LiteElement(tagName, 'sheetData', ns || null);
-	const data = parseLiteFragment(xml.slice(openEnd + 1, close), container, namespaces);
-	if (!data) return undefined;
-	return { xml: xml.slice(0, openEnd + 1) + xml.slice(close), sheetData: data.asElement() };
+	return { namespaces, tagName, contentStart: openEnd + 1 };
+}
+
+/**
+ * The start of the cell data in `head`, the beginning of a worksheet part read in pieces:
+ * undefined while `head` does not reach the end of the `<sheetData>` start tag, `false` when the
+ * light reader cannot take the cell data and the part must be parsed whole.
+ */
+export function sheetDataStart(head: string): SheetDataStart | false | undefined {
+	const plain = blankComments(head);
+	if (plain === undefined) return undefined;
+	const open = OPEN.exec(plain);
+	if (!open || plain.indexOf('>', open.index) < 0) return undefined;
+	return findSheetData(plain) ?? false;
+}
+
+/** Splits the cell data from a worksheet part, or undefined when the whole part must be parsed. */
+export function splitSheetData(xml: string): SplitSheetData | undefined {
+	// Tags are found in `plain` (comments and CDATA blanked); the parts are cut from `xml`.
+	const plain = blankComments(xml);
+	const start = plain === undefined ? undefined : findSheetData(plain);
+	if (plain === undefined || !start) return undefined;
+	const { namespaces, tagName, contentStart } = start;
+	const close = plain.indexOf(`</${tagName}`, contentStart);
+	if (close < 0 || OPEN.test(plain.slice(contentStart - 1))) return undefined;
+	const data = xml.slice(contentStart, close);
+	return {
+		xml: xml.slice(0, contentStart) + xml.slice(close),
+		rows: { [Symbol.iterator]: () => liteChildElements(data, namespaces) },
+	};
 }

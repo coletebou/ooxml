@@ -10,6 +10,10 @@
  * @module pptx-types/theme
  */
 
+import type { DrawingEffectList } from '../../../drawingml/effect-model';
+import type { ThemeColorSlot } from '../../../drawingml/theme-model';
+import type { DrawingFill, DrawingLine } from '../../../drawingml/types';
+
 // ==========================================================================
 // Theme object model
 // ==========================================================================
@@ -38,10 +42,10 @@ export const THEME_COLOR_SCHEME_KEYS = [
 	'accent6',
 	'hlink',
 	'folHlink',
-] as const;
+] as const satisfies readonly ThemeColorSlot[];
 
 /**
- * Resolved hex values for the 12 theme colour slots.
+ * Resolved hex values for the 12 theme colour slots (the shared DrawingML `ThemeColorSlot`s).
  *
  * @example
  * ```ts
@@ -56,20 +60,7 @@ export const THEME_COLOR_SCHEME_KEYS = [
  * // => satisfies PptxThemeColorScheme
  * ```
  */
-export interface PptxThemeColorScheme {
-	dk1: string;
-	lt1: string;
-	dk2: string;
-	lt2: string;
-	accent1: string;
-	accent2: string;
-	accent3: string;
-	accent4: string;
-	accent5: string;
-	accent6: string;
-	hlink: string;
-	folHlink: string;
-}
+export type PptxThemeColorScheme = Record<ThemeColorSlot, string>;
 
 /**
  * A font-family triplet for major or minor theme fonts.
@@ -153,21 +144,30 @@ export interface PptxThemeFillStyle {
 	 *
 	 * `'group'` corresponds to `<a:grpFill/>` — a fill that inherits the
 	 * containing group shape's fill at render time. Captured for round-trip
-	 * preservation in `fmtScheme/fillStyleLst`.
+	 * preservation in `fmtScheme/fillStyleLst`. `'picture'` is an `<a:blipFill/>` entry: kept
+	 * at its index so later entries keep theirs, but not drawn (a reference falls back to its
+	 * colour).
 	 */
-	kind: 'solid' | 'gradient' | 'pattern' | 'none' | 'group';
+	kind: 'solid' | 'gradient' | 'pattern' | 'none' | 'group' | 'picture';
 	/** Pre-resolved colour (may be `undefined` when `phClr`-dependent). */
-	color?: string;
-	opacity?: number;
+	color?: string | undefined;
+	opacity?: number | undefined;
 	/** Gradient-specific fields (only present when `kind === "gradient"`). */
-	gradientStops?: Array<{ color: string; position: number; opacity?: number }>;
-	gradientAngle?: number;
-	gradientType?: 'linear' | 'radial';
-	gradientCss?: string;
+	gradientStops?:
+		| Array<{ color: string; position: number; opacity?: number | undefined }>
+		| undefined;
+	gradientAngle?: number | undefined;
+	gradientType?: 'linear' | 'radial' | undefined;
+	gradientCss?: string | undefined;
 	/** Pattern-specific fields (only present when `kind === "pattern"`). */
-	patternPreset?: string;
-	patternBackgroundColor?: string;
-	/** Raw XML node preserved for `phClr` re-resolution. */
+	patternPreset?: string | undefined;
+	patternBackgroundColor?: string | undefined;
+	/**
+	 * The entry as the shared DrawingML reader holds it (`ThemeFillStyle.fill`): style references
+	 * resolve and substitute `phClr` against it.
+	 */
+	fill?: DrawingFill | undefined;
+	/** Raw XML node (object tree) the gradient codec and table styles still read. */
 	rawNode?: unknown;
 }
 
@@ -190,13 +190,15 @@ export interface PptxThemeFillStyle {
 export interface PptxThemeLineStyle {
 	/** Line width in pixels (converted from EMU). */
 	width?: number;
-	color?: string;
-	opacity?: number;
+	color?: string | undefined;
+	opacity?: number | undefined;
 	dash?: string;
 	lineJoin?: 'round' | 'bevel' | 'miter';
-	lineCap?: 'flat' | 'rnd' | 'sq';
-	compoundLine?: 'sng' | 'dbl' | 'thickThin' | 'thinThick' | 'tri';
-	/** Raw XML node preserved for `phClr` re-resolution. */
+	lineCap?: 'flat' | 'rnd' | 'sq' | undefined;
+	compoundLine?: 'sng' | 'dbl' | 'thickThin' | 'thinThick' | 'tri' | undefined;
+	/** The `a:ln` as the shared DrawingML reader holds it; references resolve against it. */
+	line?: DrawingLine;
+	/** Raw XML node (object tree) the gradient codec and table styles still read. */
 	rawNode?: unknown;
 }
 
@@ -218,17 +220,17 @@ export interface PptxThemeLineStyle {
  * ```
  */
 export interface PptxThemeEffectStyle {
-	shadowColor?: string;
+	shadowColor?: string | undefined;
 	shadowBlur?: number;
 	shadowOffsetX?: number;
 	shadowOffsetY?: number;
-	shadowOpacity?: number;
-	glowColor?: string;
+	shadowOpacity?: number | undefined;
+	glowColor?: string | undefined;
 	glowRadius?: number;
-	glowOpacity?: number;
+	glowOpacity?: number | undefined;
 	softEdgeRadius?: number;
-	innerShadowColor?: string;
-	innerShadowOpacity?: number;
+	innerShadowColor?: string | undefined;
+	innerShadowOpacity?: number | undefined;
 	innerShadowBlur?: number;
 	innerShadowOffsetX?: number;
 	innerShadowOffsetY?: number;
@@ -243,12 +245,17 @@ export interface PptxThemeEffectStyle {
 	scene3d?: import('./three-d').Pptx3DScene;
 	/** 3D shape extrusion/bevel from `a:sp3d` on the effect style (idx 3 typically). */
 	shape3d?: import('./three-d').Pptx3DShape;
-	/** Raw XML node preserved for `phClr` re-resolution. */
+	/** The `a:effectLst` as the shared DrawingML reader holds it; references resolve against it. */
+	effects?: DrawingEffectList;
+	/** Raw XML node (object tree) the 3D settings and table styles are still read from. */
 	rawNode?: unknown;
 }
 
 /**
- * The full parsed format scheme from `a:fmtScheme` inside `a:themeElements`.
+ * The full parsed format scheme from `a:fmtScheme` inside `a:themeElements`: the pptx view of the
+ * shared `ThemeFormatScheme` (`drawingml/format-scheme`), read by `parseThemeFormatScheme`. Each
+ * entry carries its neutral half (`fill`, `line`, `effects`); `drawingFormatSchemeOf` gives the
+ * neutral matrices back.
  * Contains three fill style lists and one line/effect style list each,
  * at three intensity levels: subtle (idx 1), moderate (idx 2), intense (idx 3).
  *
@@ -272,7 +279,7 @@ export interface PptxThemeEffectStyle {
  */
 export interface PptxThemeFormatScheme {
 	/** The `@name` attribute of the format scheme. */
-	name?: string;
+	name?: string | undefined;
 	/** Fill styles at indices 1-3 (subtle, moderate, intense). */
 	fillStyles: PptxThemeFillStyle[];
 	/** Line styles at indices 1-3. */
@@ -303,10 +310,25 @@ export interface PptxTheme {
 	/** Theme name from `a:theme @name`. */
 	name?: string;
 	/** Resolved colour scheme. */
-	colorScheme?: PptxThemeColorScheme;
+	colorScheme?: PptxThemeColorScheme | undefined;
 	/** Resolved font scheme. */
-	fontScheme?: PptxThemeFontScheme;
+	fontScheme?: PptxThemeFontScheme | undefined;
 	/** Format scheme — fill, line, effect and background fill style matrices. */
+	formatScheme?: PptxThemeFormatScheme | undefined;
+}
+
+/**
+ * The colour, font and format schemes and the name one theme part of the package carries, read
+ * without changing the loaded theme (`PptxHandler.getThemePartSchemes`).
+ */
+export interface PptxThemePartSchemes {
+	/** The theme part's path in the package (e.g. `ppt/theme/theme2.xml`). */
+	path: string;
+	/** Theme name from `a:theme @name`, when present. */
+	name?: string;
+	colorScheme: PptxThemeColorScheme;
+	fontScheme: PptxThemeFontScheme;
+	/** The part's format scheme (`a:fmtScheme`), when it has one. */
 	formatScheme?: PptxThemeFormatScheme;
 }
 

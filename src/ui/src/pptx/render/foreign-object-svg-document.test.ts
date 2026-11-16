@@ -54,15 +54,20 @@ describe('buildForeignObjectSvgBody', () => {
 			const parsed = document.createElement('div');
 			parsed.innerHTML = body.bodyMarkup;
 			const exported = parsed.querySelector<HTMLElement>('#shape')!;
-			expect(exported.style.outline).toBe('none');
+			// The shorthand's serialisation differs between engines; the style is what carries `none`.
+			expect(exported.style.outlineStyle).toBe('none');
 			expect(exported.style.outlineOffset).toBe('0px');
-			expect(exported.style.boxShadow).toBe(shape.dataset.exportOriginalBoxShadow);
+			// Compared through the engine's own serialisation of the authored shadow list.
+			const authoredShadow = document.createElement('div');
+			authoredShadow.style.boxShadow = shape.dataset.exportOriginalBoxShadow!;
+			expect(exported.style.boxShadow).toBe(authoredShadow.style.boxShadow);
 			expect(exported.style.border).toBe(getComputedStyle(shape).border);
 			expect(exported.style.borderRadius).toBe('8px');
 			expect(exported.style.clipPath).toBe(shape.style.clipPath);
-			expect(exported.style.filter).toBe(shape.style.filter);
+			// Copied as computed, so compared with the computed value (colours resolve to rgb()).
+			expect(exported.style.filter).toBe(getComputedStyle(shape).filter);
 			expect(parsed.querySelector<HTMLElement>('#unmarked')!.style.boxShadow).toBe(
-				'4px 5px 6px black',
+				getComputedStyle(el.lastElementChild as HTMLElement).boxShadow,
 			);
 			expect(el.outerHTML).toBe(original);
 		} finally {
@@ -84,6 +89,19 @@ describe('buildForeignObjectSvgBody', () => {
 		expect(clone.querySelector('circle')).toBeNull();
 		expect(clone.querySelector('path')).not.toBeNull();
 		expect(clone.textContent).toBe('Keep');
+	});
+
+	it('treats the action badge and link tooltip as editor chrome no export draws', () => {
+		const clone = document.createElement('div');
+		clone.innerHTML =
+			'<div class="pptx-link-host">Shape<div class="pptx-action-indicator"><svg></svg></div>' +
+			'<div class="pptx-link-tooltip"><div>Go to slide 2</div></div></div>';
+		expect(isExportIgnoredElement(clone.querySelector('.pptx-action-indicator')!)).toBe(true);
+		expect(isExportIgnoredElement(clone.querySelector('.pptx-link-tooltip')!)).toBe(true);
+		expect(isExportIgnoredElement(clone.firstElementChild!)).toBe(false);
+		prepareExportClone(clone);
+		expect(clone.querySelector('.pptx-action-indicator, .pptx-link-tooltip')).toBeNull();
+		expect(clone.textContent).toBe('Shape');
 	});
 
 	it('omits marked HTML and SVG editor nodes without changing content or the live tree', async () => {

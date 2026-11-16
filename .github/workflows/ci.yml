@@ -2,8 +2,9 @@ name: CI
 
 # What runs is decided by scripts/ci-plan.mjs from the files the change touched: a docs edit runs
 # nothing, a docx change tests the affected files on as many runners as they need and checks only
-# docx-viewer, and a dependency or CI-config change (or the nightly run) runs everything. Pushes to
-# main are never cancelled by a later push: every commit gets its own verdict.
+# docx-viewer, and a dependency or CI-config change (or the nightly run) runs everything. A push to
+# main plans from the newest ancestor whose CI run succeeded, not from the previous push, so a newer
+# push may cancel an older run: its plan covers every commit nobody has verified yet.
 on:
   push:
     branches: [main]
@@ -40,10 +41,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
-  # PR plans include the whole branch, so a newer update supersedes them. Push plans cover only
-  # that push: cancelling one would leave its changes unchecked by the next incremental plan.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event_name == 'push' && 'push-main' || github.run_id }}
+  # PR plans include the whole branch, so a newer update supersedes them. Push plans start at the
+  # newest green commit (scripts/ci-base.mjs), so they include everything an earlier, cancelled push
+  # would have checked: cancelling one leaves nothing unchecked. A cancelled run is not green, so
+  # the next plan reaches back past it, and a failed lookup plans a full run rather than guess. The nightly and manual runs keep a group of their own.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 env:
   BUN_VERSION: 1.4.2
@@ -52,6 +55,10 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Reads which earlier CI runs succeeded, to pick the base of a push plan.
+      actions: read
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
       # The commit the other jobs check out: empty (the event's own) unless a run on the base.
@@ -79,7 +86,9 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.base }}
           SCOPE: ${{ inputs.scope || 'full' }}
           ON_BASE: ${{ inputs.on_base || false }}
-        run: node scripts/ci-plan.mjs --event "$EVENT" --base "$BASE" --scope "$SCOPE" --on-base "$ON_BASE"
+          GITHUB_TOKEN: ${{ github.token }}
+        # `--green-base` (pushes only) widens BASE to the newest successful ancestor commit.
+        run: node scripts/ci-plan.mjs --event "$EVENT" --base "$BASE" --scope "$SCOPE" --on-base "$ON_BASE" --green-base true
 
   lint:
     needs: plan
@@ -199,15 +208,6 @@ jobs:
           ref: ${{ needs.plan.outputs.ref }}
       - uses: ./.github/actions/setup
       - run: bun run build
-      # The package and boundary checks only matter when the core or the UI changed; a viewer-only
-      # change just needs the build output.
-      - if: fromJSON(needs.plan.outputs.plan).checks.core
-        run: bun run test:package
-      # The packed tarball's types resolve under NodeNext and bundlers (Are the Types Wrong).
-      - if: fromJSON(needs.plan.outputs.plan).checks.core
-        run: node scripts/check-package-types.mjs src/core
-      - if: fromJSON(needs.plan.outputs.plan).checks.core
-        run: node scripts/check-core-ui-boundary.mjs
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: core-dist
@@ -225,8 +225,30 @@ jobs:
           path: src/ui/dist
           retention-days: 1
 
-  # ooxml-ui's unit tests and package checks. The package is packed from the build job's core and
-  # ui output (`dist`), the same build the viewers run on.
+  # ooxml-ui's unit tests, in three shards (the suite took about nine minutes on one runner; Vitest
+  # shards the files of all its projects together).
+  ui-test:
+    name: ui test (${{ matrix.shard }}/3)
+    needs: [plan, build]
+    if: fromJSON(needs.plan.outputs.plan).checks.ui
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-dist
+          path: src/core/dist
+      - run: bun run --cwd src/ui test --shard=${{ matrix.shard }}/3
+
+  # ooxml-ui's package checks. The package is packed from the build job's core and ui output
+  # (`dist`), the same build the viewers run on; it does not wait for the tests.
   ui:
     needs: [plan, build]
     if: fromJSON(needs.plan.outputs.plan).checks.ui
@@ -240,7 +262,6 @@ jobs:
         with:
           name: core-dist
           path: src/core/dist
-      - run: bun run --cwd src/ui test
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ui-dist
@@ -354,13 +375,74 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The viewers' Playwright suites, one job per shard (docx, xlsx and visio in two, teams in one;
+  # a run narrowed to changed specs is one shard). The other check groups run in `viewers`.
+  viewer-browser:
+    name: viewer browser (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.total }})
+    needs: [plan, build]
+    if: |
+      !cancelled() && needs.build.result == 'success' &&
+      toJSON(fromJSON(needs.plan.outputs.plan).viewerBrowser) != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.plan).viewerBrowser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-dist
+          path: src/core/dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ui-dist
+          path: src/ui/dist
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.dir }}
+        run: bun x playwright install --with-deps chromium
+      # The cached browsers skip the download; the system libraries still need installing.
+      - name: Install Chromium system libraries
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: bun x playwright install-deps chromium
+      - name: Run the browser suite
+        working-directory: ${{ matrix.dir }}
+        env:
+          VERIFY: ${{ matrix.verify }}
+        run: |
+          while IFS= read -r command; do
+            echo "::group::$command"
+            bash -e -o pipefail -c "$command"
+            echo "::endgroup::"
+          done <<< "$VERIFY"
+      - name: Preserve browser test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: browser-test-results-${{ matrix.name }}-${{ matrix.shard }}
+          path: ${{ matrix.dir }}/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The PowerPoint viewer has more to check than the viewers job's ceiling fits: a ~20-minute unit
   # suite and a browser suite worth hours of runner time. So it gets its own jobs, laid out the way
   # pptx-viewer ran them: one build whose output the others download, a unit job per package, the
   # browser suite split by framework and shard, and the packaged-build smoke (see VIEWERS.pptx in
   # scripts/ci-plan.mjs).
   pptx-build:
-    name: pptx build and checks
+    name: pptx build
     needs: [plan, build]
     if: |
       !cancelled() && needs.build.result == 'success' &&
@@ -380,15 +462,45 @@ jobs:
         with:
           name: ui-dist
           path: src/ui/dist
-      - name: Build the packages, typecheck and check the packed bindings
+      - name: Build the packages
         working-directory: viewers/pptx
+        run: bun run build:packages
+      - name: Build browser demos once for every shard
+        if: fromJSON(needs.plan.outputs.plan).pptx.e2e.projects[0] != null
+        working-directory: viewers/pptx
+        env:
+          PPTX_E2E_PROJECTS: ${{ join(fromJSON(needs.plan.outputs.plan).pptx.e2e.projects, ',') }}
+        run: bun e2e-build.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: fromJSON(needs.plan.outputs.plan).pptx.e2e.projects[0] != null
+        with:
+          name: pptx-demo-dist
+          path: |
+            demos/pptx/demo-react/dist/
+            demos/pptx/demo-vue/dist/
+            demos/pptx/demo-angular/dist/
+            demos/pptx/demo-vanilla/dist/
+            demos/pptx/demo-svelte/dist/
+          retention-days: 1
+      # One immutable history snapshot is distributed to every shard in this run.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        if: fromJSON(needs.plan.outputs.plan).pptx.e2e.projects[0] != null
+        with:
+          path: .browser-timings/history.json
+          key: browser-timings-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: browser-timings-${{ runner.os }}-
+      - name: Ensure a cold timing baseline exists
+        if: fromJSON(needs.plan.outputs.plan).pptx.e2e.projects[0] != null
         run: |
-          bun run build:packages
-          bun run typecheck
-          bun run e2e:contract
-          bun run check:viewer-props
-          bun run test:binding-packages
-          bun run check:tree-shaking
+          mkdir -p .browser-timings
+          if [ ! -f .browser-timings/history.json ]; then echo '{"version":1,"tests":{}}' > .browser-timings/history.json; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: fromJSON(needs.plan.outputs.plan).pptx.e2e.projects[0] != null
+        with:
+          name: browser-timing-baseline
+          path: .browser-timings/history.json
+          include-hidden-files: true
+          retention-days: 1
       # The browser suite regenerates its fixture decks through the core's save pipeline, so a
       # core change that alters a save must commit the refreshed decks, or every later run
       # rewrites them and leaves the working tree dirty.
@@ -406,6 +518,54 @@ jobs:
             viewers/pptx/packages/angular/src/internal/shared-src/
             viewers/pptx/packages/angular/src/internal/version.ts
           retention-days: 1
+
+  core-package-checks:
+    needs: [plan, build]
+    if: fromJSON(needs.plan.outputs.plan).checks.core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-dist
+          path: src/core/dist
+      - run: bun run test:package
+      - run: node scripts/check-package-types.mjs src/core
+      - run: node scripts/check-core-ui-boundary.mjs
+
+  pptx-checks:
+    needs: [plan, pptx-build]
+    if: fromJSON(needs.plan.outputs.plan).pptx.run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-dist
+          path: src/core/dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ui-dist
+          path: src/ui/dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pptx-dist
+          path: viewers/pptx/packages
+      - name: Check types, contracts and packaged bindings
+        working-directory: viewers/pptx
+        run: |
+          bun run typecheck
+          bun run e2e:contract
+          bun run check:viewer-props
+          bun run test:binding-packages
+          bun run check:tree-shaking
 
   pptx-test:
     name: pptx test (${{ matrix.leg }})
@@ -449,7 +609,7 @@ jobs:
           esac
 
   pptx-e2e:
-    name: pptx e2e (${{ matrix.project }} ${{ matrix.shard }}/${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.total }})
+    name: pptx e2e (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.total }})
     needs: [plan, pptx-build]
     # The frameworks the change reaches (pptxPlan): its own binding, the parity reference (react)
     # for shared or engine code, all five for dependencies, CI and the nightly; or, when only spec
@@ -464,8 +624,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: ${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.projects }}
-        shard: ${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.shards }}
+        include: ${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -483,37 +642,63 @@ jobs:
         with:
           name: pptx-dist
           path: viewers/pptx/packages
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
       - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: viewers/pptx
         run: bun x playwright install --with-deps chromium
-      # Two attempts, as pptx-viewer ran it: a runner-level browser crash should not fail the run.
+      # The cached browsers skip the download; the system libraries still need installing.
+      - name: Install Chromium system libraries
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: viewers/pptx
+        run: bun x playwright install-deps chromium
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pptx-demo-dist
+          path: demos/pptx
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: browser-timing-baseline
+          path: .browser-timings
+      # Playwright retries a failed test once itself. A second attempt then runs only the failures
+      # Playwright recorded (`--last-failed`), or the whole shard again when the first attempt
+      # crashed before recording a report (a runner-level browser crash). Some touch and hover
+      # specs are timing-sensitive on a loaded runner; failing at once on them turned main red.
       - name: Run the browser suite
         working-directory: viewers/pptx
         env:
           PROJECT: ${{ matrix.project }}
           SHARD: ${{ matrix.shard }}
-          TOTAL: ${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.total }}
+          TOTAL: ${{ matrix.total }}
           # The changed spec files when only specs changed; empty runs every spec.
           SPECS: ${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.specs }}
+          PPTX_E2E_SERVE: preview
+          PPTX_E2E_SHARD: ${{ matrix.shard }}/${{ matrix.total }}
+          PPTX_E2E_SPECS: ${{ fromJSON(needs.plan.outputs.plan).pptx.e2e.specs }}
+          PPTX_E2E_REFERENCE_COVERS_PARITY: ${{ contains(fromJSON(needs.plan.outputs.plan).pptx.e2e.projects, 'react') && '1' || '0' }}
+          PPTX_E2E_FIXTURES_VERIFIED: '1'
         run: |
           retry_args=()
           for attempt in 1 2; do
             # SPECS is a space-separated list of spec file names, split on purpose.
             # shellcheck disable=SC2086
             bun run e2e -- $SPECS --project="$PROJECT" --project="$PROJECT-headless" \
-              --shard="$SHARD/$TOTAL" --workers=2 --reporter=list,html,github \
+              --workers=2 --pass-with-no-tests --reporter=list,html,github,../../scripts/browser-timing-reporter.mjs \
               "${retry_args[@]}" && exit 0
             status=$?
             echo "::warning::attempt $attempt of $PROJECT shard $SHARD/$TOTAL failed (exit $status)"
-            # Playwright clears its output on the next run. Keep the original traces even when
-            # the retry passes, so a flaky test or runner crash can still be investigated.
+            # Playwright clears its output on the next run. Keep the evidence of every attempt.
             evidence="ci-evidence/attempt-$attempt"
             mkdir -p "$evidence"
             for report in test-results playwright-report; do
               if [ -d "$report" ]; then cp -R "$report" "$evidence/"; fi
             done
-            # Avoid repeating a whole shard when Playwright recorded the failures.
-            # A crash before that report exists still retries the complete shard.
+            # Failures recorded in .last-run.json: run only those again, not the whole shard.
             if node -e 'try { const run = JSON.parse(require("node:fs").readFileSync("test-results/.last-run.json", "utf8")); process.exit(run.status !== "passed" && run.failedTests?.length > 0 ? 0 : 1); } catch { process.exit(1); }'; then
               retry_args=(--last-failed)
             else
@@ -521,7 +706,17 @@ jobs:
             fi
             if [ "$attempt" -lt 2 ]; then sleep 15; fi
           done
-          exit $status
+          exit "$status"
+      - name: Preserve timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: browser-timing-result-${{ matrix.project }}-${{ matrix.shard }}
+          path: |
+            viewers/pptx/test-results/timings.json
+            viewers/pptx/ci-evidence/attempt-*/test-results/timings.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Preserve the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -559,14 +754,27 @@ jobs:
         with:
           name: pptx-dist
           path: viewers/pptx/packages
-      - name: Build the demo bundles
+      # Shipping builds deliberately omit the product suite's VITE_PPTX_E2E_HANDLE hook.
+      - name: Build the production demo bundles
         run: |
           for demo in react vue angular vanilla svelte; do
             (cd "demos/pptx/demo-$demo" && bun run build)
           done
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
       - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: viewers/pptx
         run: bun x playwright install --with-deps chromium
+      # The cached browsers skip the download; the system libraries still need installing.
+      - name: Install Chromium system libraries
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: viewers/pptx
+        run: bun x playwright install-deps chromium
       - name: Run the packaged-build smoke
         working-directory: viewers/pptx
         run: bun run e2e:packaged -- --workers=2 --reporter=list,html,github
@@ -580,59 +788,30 @@ jobs:
             viewers/pptx/test-results/
           retention-days: 7
 
-  # The viewers that are still their own repository (none today; see CONSUMERS in ci-plan.mjs),
-  # linked to this change: the contract the shared elements and the format logic have to keep. It
-  # reports failures on the run but is not part of `ci-success`: a viewer that is red for its own
-  # reasons must not block this repository.
-  consumers:
-    name: external viewer (${{ matrix.name }})
-    needs: [plan, build]
-    if: |
-      !cancelled() && needs.build.result != 'failure' &&
-      toJSON(fromJSON(needs.plan.outputs.plan).consumers) != '[]'
+  browser-timings:
+    needs: [plan, pptx-e2e]
+    if: ${{ !cancelled() && needs.pptx-e2e.result == 'success' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.plan).consumers }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.plan.outputs.ref }}
-          path: ooxml
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.plan.outputs.ref }}
-          repository: ${{ matrix.repo }}
-          path: viewer
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-        working-directory: ooxml
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: core-dist
-          path: ooxml/src/core/dist
-        continue-on-error: true
+          name: browser-timing-baseline
+          path: .browser-timings/reports/000-baseline
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ui-dist
-          path: ooxml/src/ui/dist
-        continue-on-error: true
-      - name: Build what this change did not
-        run: |
-          [ -d ooxml/src/core/dist ] || (cd ooxml && bun run build)
-          [ -d ooxml/src/ui/dist ] || (cd ooxml/src/ui && bun run build)
-      - name: Link the viewer to this checkout
-        run: node ooxml/scripts/link-local.mjs viewer --no-build
-      - run: ${{ matrix.install }}
-        working-directory: viewer
-      - run: ${{ matrix.verify }}
-        working-directory: viewer
+          pattern: browser-timing-result-*
+          path: .browser-timings/reports
+      - run: node scripts/merge-browser-timings.mjs .browser-timings/reports .browser-timings/history.json
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .browser-timings/history.json
+          key: browser-timings-${{ runner.os }}-${{ github.run_id }}
 
   # The single check the `main` ruleset requires. Funnelling through one job keeps branch
   # protection stable when jobs are added or renamed (a required check that no longer exists blocks
@@ -652,10 +831,14 @@ jobs:
         test,
         build,
         ui,
+        ui-test,
         scripts,
         mcp,
         viewers,
+        viewer-browser,
         pptx-build,
+        pptx-checks,
+        core-package-checks,
         pptx-test,
         pptx-e2e,
         pptx-e2e-packaged,

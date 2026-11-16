@@ -54,6 +54,27 @@ describe('getTextBlockStyle', () => {
 		expect(getTextBlockStyle(el)['transform']).toBe('rotate(-30deg)');
 	});
 
+	// Issue #277: the container mirrors a flipped shape (`scaleX(-1)` /
+	// `scaleY(-1)`), and PowerPoint keeps its text readable. The shared text
+	// block style carries the compensation exactly once; composing it again here
+	// would cancel it and paint the text mirrored.
+	it('undoes the container flip once so text inside a flipped shape stays readable', () => {
+		const flipped = { ...textElement({}), flipHorizontal: true } as PptxElement;
+		expect(getTextBlockStyle(flipped)['transform']).toBe('scaleX(-1)');
+		expect(getTextBlockStyle(flipped)['transformOrigin']).toBe('center');
+		expect(getTextBlockStyle(textElement({}))['transform']).toBeUndefined();
+	});
+
+	it('composes body rotation, then flip compensation, then the 3D scene, as React does', () => {
+		const el = {
+			...textElement({ textBodyRotation: 90, textBodyScene3d: { cameraRotY: 600000 } }),
+			flipHorizontal: true,
+		} as PptxElement;
+		const transform = String(getTextBlockStyle(el)['transform']);
+		expect(transform).toMatch(/^rotate\(90deg\) scaleX\(-1\) matrix3d\(/u);
+		expect(transform.match(/scaleX\(-1\)/gu)).toHaveLength(1);
+	});
+
 	it('clamps `vertOverflow="ellipsis"` to a multi-line "…" truncation, not a plain clip', () => {
 		const el = {
 			...textElement({ fontSize: 24, vertOverflow: 'ellipsis' }),
@@ -267,13 +288,34 @@ describe('chart area outer shadow and glow on the chart container', () => {
 		} as unknown as PptxElement;
 	}
 
-	it('casts the shadow as a box-shadow and the glow as a drop-shadow, outside the frame', () => {
+	it('casts the shadow and the glow as box-shadows, outside the frame', () => {
 		const style = getShapeFillStrokeStyle(chart(SHADOW)) as Record<string, unknown>;
 		expect(String(style['boxShadow'])).toContain('rgba(0, 0, 0, 0.4)');
-		expect(String(style['filter'])).toContain('drop-shadow');
+		expect(String(style['boxShadow'])).toMatch(/0 0 [\d.]+px [\d.]+px rgba\(/);
 	});
 
 	it('leaves a chart without chart-area effects plain', () => {
 		expect(getShapeFillStrokeStyle(chart(undefined))).toStrictEqual({});
+	});
+});
+
+describe('getShapeFillStrokeStyle: centred outline on a clipped preset (issue #144)', () => {
+	const marker = (shapeStyle: Record<string, unknown>): PptxElement =>
+		({
+			id: 'm',
+			type: 'shape',
+			shapeType: 'flowChartOffpageConnector',
+			x: 0,
+			y: 0,
+			width: 15,
+			height: 26,
+			shapeStyle,
+		}) as unknown as PptxElement;
+
+	it('widens the clip so the outer half of the line is not cut off', () => {
+		const stroked = getShapeFillStrokeStyle(marker({ strokeColor: '#ffffff', strokeWidth: 4 }));
+		const bare = getShapeFillStrokeStyle(marker({ strokeWidth: 0 }));
+		expect(String(bare['clipPath'])).toContain('path(');
+		expect(String(stroked['clipPath']).length).toBeGreaterThan(String(bare['clipPath']).length);
 	});
 });

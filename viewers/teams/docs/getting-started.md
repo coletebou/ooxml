@@ -5,7 +5,7 @@ meetings with video and screen share over WebRTC, and Office files shared in the
 install one binding for your framework, point it at a server (or start without one), and get the
 full UI, or a raw hook to build your own.
 
-::: warning An early implementation
+::: warning Beta
 This is not Microsoft Teams and is not affiliated with Microsoft. There is **no end-to-end
 encryption**: whoever runs the server can read every message and file. See
 [Limitations](/limitations) before you rely on it.
@@ -106,7 +106,7 @@ Or plain markup, after calling `defineTeamsApp()` from `openteams-vanilla-viewer
 
 Every binding takes the same props: `workspaceId` (the shared room: letters, digits, `-` and `_`),
 `userName`, `userId` (a stable id; defaults to one remembered in this browser), `config`,
-`uploadFile` (where attachments go), `openers` (per-Office-type handlers), and three events:
+`uploadFile` (where attachments go), `openers` (per-Office-type handlers), `embeds` (viewer pages per file kind), `locale` (a BCP 47 tag such as `de`), and three events:
 ready, open file (call `preventDefault()` on it to open the file yourself) and config change
 (`onReady`, `onOpenFile`, `onConfigChange` in React, Solid, Svelte and vanilla; `@ready`,
 `@open-file`, `@config-change` in Vue; `(ready)`, `(openFile)`, `(configChange)` in Angular). See the
@@ -126,7 +126,7 @@ Local mode is what the [live demos](/demos) use. For anything with more than one
 server:
 
 ```bash
-npx openteams-server                    # the reference server on 127.0.0.1:8787
+npx openteams-server --insecure-dev     # local development only: 127.0.0.1:8787
 ```
 
 Then use `ws://127.0.0.1:8787/sync` and `ws://127.0.0.1:8787/signal` (or `wss://` behind TLS).

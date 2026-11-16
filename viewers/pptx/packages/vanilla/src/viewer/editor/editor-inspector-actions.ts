@@ -1,27 +1,19 @@
 import {
-	addGradientStopPatch,
 	applyStyleToSelectedSegments,
-	applyUniformCellPaddingPatch,
+	applyTextStyleUpdate,
 	autoFitModePatch,
 	buildOleObjectNamePatch,
 	elementLockTogglePatch,
-	gradientStatePatch,
-	imageAdjustmentsPatch,
-	imageCropPatch,
 	isElementLocked,
 	reflowSmartArtData,
 	remapTextToSegments,
-	removeGradientStopPatch,
-	tableInspectorPatch,
 	textAdvancedPatch,
-	textStylePatch,
 	textWrapPatch,
-	updateGradientStopPatch,
 	vAlignPatch,
 	switchSmartArtLayoutData,
 	withCellStyle,
 } from 'ooxml-ui/pptx';
-import type { GradientState, InlineTextSelection, TextAdvancedChanges } from 'ooxml-ui/pptx';
+import type { InlineTextSelection, TextAdvancedChanges } from 'ooxml-ui/pptx';
 import type {
 	PptxImageEffects,
 	PptxTableCellStyle,
@@ -36,19 +28,8 @@ import type {
 	TextStyle,
 	PptxElement,
 	PptxSmartArtData,
-	PptxSmartArtNodeStyle,
 } from 'pptx-viewer-core';
-import {
-	elementActionToPptxAction,
-	addSmartArtNode,
-	addSmartArtNodeAsChild,
-	removeSmartArtNode,
-	promoteSmartArtNode,
-	demoteSmartArtNode,
-	isImageLikeElement,
-	setSmartArtNodeStyle,
-	updateSmartArtNodeText,
-} from 'pptx-viewer-core';
+import { elementActionToPptxAction, isImageLikeElement } from 'pptx-viewer-core';
 
 import type { ApplyToSelected } from './editor-apply-to-selected';
 import { patchShapeStyle } from './editor-format-mutations';
@@ -81,23 +62,12 @@ export interface InspectorActions {
 	setTextAdvanced(patch: TextAdvancedChanges): void;
 	setTextStyle(patch: Partial<TextStyle>, selection?: InlineTextSelection | null): void;
 
-	setFillOpacity(opacity: number): void;
 	setStrokeOpacity(opacity: number): void;
-	setGradientFill(state: GradientState): void;
-	addGradientStop(color: string, position: number): void;
-	removeGradientStop(index: number): void;
-	updateGradientStop(index: number, changes: Partial<GradientState['stops'][number]>): void;
 
-	setImageBrightness(value: number): void;
-	setImageContrast(value: number): void;
-	setImageSaturation(value: number): void;
-	setImageCrop(edge: 'left' | 'top' | 'right' | 'bottom', value: number): void;
+	/** Apply a shared inspector descriptor's element patch to the selection. */
+	patchSelectedElement(patch: Partial<PptxElement>): void;
 	setImageEffects(patch: Partial<PptxImageEffects>): void;
 	setElementAction(trigger: 'click' | 'hover', action: ElementAction): void;
-	/** Set the selection's accessibility description (inspector Alt Text field). */
-	setAltText(text: string): void;
-	/** Set the selection's accessibility title (inspector Title field). */
-	setTitle(text: string): void;
 	/** Set the selected OLE element's Object Name (`p:oleObj/@name`). */
 	setOleName(name: string): void;
 	/** Patch an in-place OLE content edit (see `InspectorHandlers.setOleContent`). */
@@ -105,9 +75,6 @@ export interface InspectorActions {
 	setChartData(data: PptxChartData): void;
 	setMediaProperties(patch: Partial<MediaPptxElement>): void;
 
-	setTableHeaderRow(enabled: boolean): void;
-	setTableBandedRows(enabled: boolean): void;
-	setTableCellPadding(padding: number): void;
 	setTableOptions(patch: Partial<PptxTableData>, cellStyle?: Partial<PptxTableCellStyle>): void;
 	/** Replace the selection's whole table data (inspector data grid). */
 	setTableData(data: PptxTableData, rawXml?: XmlObject): void;
@@ -119,23 +86,10 @@ export interface InspectorActions {
 	mergeTableCells(cells: TableCellPosition[]): void;
 	splitTableCell(cell: TableCellPosition): void;
 
-	setSmartArtNodeText(nodeId: string, text: string): void;
-	setSmartArtNodeStyle(nodeId: string, patch: Partial<PptxSmartArtNodeStyle>): void;
-	mutateSmartArtNode(
-		nodeId: string,
-		action: 'add' | 'addChild' | 'remove' | 'promote' | 'demote',
-	): void;
 	replaceSmartArtData(data: PptxSmartArtData): void;
 	setSmartArtLayout(layout: SmartArtLayoutType): void;
 	setSmartArtColorScheme(scheme: SmartArtColorScheme): void;
 }
-
-const CROP_KEY = {
-	left: 'cropLeft',
-	top: 'cropTop',
-	right: 'cropRight',
-	bottom: 'cropBottom',
-} as const;
 
 export function createInspectorActions(applyToSelected: ApplyToSelected): InspectorActions {
 	return {
@@ -169,29 +123,16 @@ export function createInspectorActions(applyToSelected: ApplyToSelected): Inspec
 						...(liveText !== undefined ? { text: liveText } : {}),
 					};
 				}
-				return textStylePatch(el, patch);
+				// No selection: the whole text, body AND every run, the ribbon's update.
+				// A run is painted from its own style, so a body-only change to a run
+				// property (colour, outline, shadow, glow) never reached the slide.
+				return applyTextStyleUpdate(el, patch, null).patch;
 			}),
 
-		setFillOpacity: (opacity) =>
-			applyToSelected((el) => patchShapeStyle(el, { fillOpacity: opacity })),
 		setStrokeOpacity: (opacity) =>
 			applyToSelected((el) => patchShapeStyle(el, { strokeOpacity: opacity })),
-		setGradientFill: (state) => applyToSelected((el) => gradientStatePatch(el, state)),
-		addGradientStop: (color, position) =>
-			applyToSelected((el) => addGradientStopPatch(el, color, position)),
-		removeGradientStop: (index) =>
-			applyToSelected((el) => removeGradientStopPatch(el, index) ?? {}),
-		updateGradientStop: (index, changes) =>
-			applyToSelected((el) => updateGradientStopPatch(el, index, changes)),
 
-		setImageBrightness: (value) =>
-			applyToSelected((el) => imageAdjustmentsPatch(el, { brightness: value })),
-		setImageContrast: (value) =>
-			applyToSelected((el) => imageAdjustmentsPatch(el, { contrast: value })),
-		setImageSaturation: (value) =>
-			applyToSelected((el) => imageAdjustmentsPatch(el, { saturation: value })),
-		setImageCrop: (edge, value) =>
-			applyToSelected((el) => imageCropPatch(el, { [CROP_KEY[edge]]: value })),
+		patchSelectedElement: (patch) => applyToSelected(() => patch),
 		setImageEffects: (patch) =>
 			applyToSelected((el) =>
 				isImageLikeElement(el)
@@ -202,13 +143,6 @@ export function createInspectorActions(applyToSelected: ApplyToSelected): Inspec
 			applyToSelected(() => ({
 				[trigger === 'click' ? 'actionClick' : 'actionHover']: elementActionToPptxAction(action),
 			})),
-		// `altText` is a base-element field, so this works for every element type
-		// the accessibility checker can complain about, not just pictures.
-		setAltText: (text) => applyToSelected(() => ({ altText: text })),
-		// `title` similarly applies to every element kind that models it (a plain
-		// shape/text box/connector and every graphic-frame kind); a picture has
-		// no title field, so this is a no-op there (the field is hidden in the UI).
-		setTitle: (text) => applyToSelected(() => ({ title: text })),
 		setOleName: (name) =>
 			applyToSelected((el) => (el.type === 'ole' ? buildOleObjectNamePatch(name) : {})),
 		setOleContent: (patch) => applyToSelected((el) => (el.type === 'ole' ? patch : {})),
@@ -216,12 +150,6 @@ export function createInspectorActions(applyToSelected: ApplyToSelected): Inspec
 			applyToSelected((el) => (el.type === 'chart' ? { chartData: data } : {})),
 		setMediaProperties: (patch) => applyToSelected((el) => (el.type === 'media' ? patch : {})),
 
-		setTableHeaderRow: (enabled) =>
-			applyToSelected((el) => tableInspectorPatch(el, { firstRowHeader: enabled })),
-		setTableBandedRows: (enabled) =>
-			applyToSelected((el) => tableInspectorPatch(el, { bandedRows: enabled })),
-		setTableCellPadding: (padding) =>
-			applyToSelected((el) => applyUniformCellPaddingPatch(el, padding)),
 		setTableOptions: (patch, cellStyle) =>
 			applyToSelected((el) => {
 				if (el.type !== 'table' || !el.tableData) {
@@ -307,28 +235,6 @@ export function createInspectorActions(applyToSelected: ApplyToSelected): Inspec
 					: {},
 			),
 
-		setSmartArtNodeText: (nodeId, text) =>
-			applyToSelected((el) =>
-				smartArtPatch(el, (data) => updateSmartArtNodeText(data, nodeId, text)),
-			),
-		setSmartArtNodeStyle: (nodeId, patch) =>
-			applyToSelected((el) =>
-				smartArtPatch(el, (data) => setSmartArtNodeStyle(data, nodeId, patch)),
-			),
-		mutateSmartArtNode: (nodeId, action) =>
-			applyToSelected((el) =>
-				smartArtPatch(el, (data) =>
-					action === 'add'
-						? addSmartArtNode(data, 'New item')
-						: action === 'addChild'
-							? addSmartArtNodeAsChild(data, nodeId, 'New item')
-							: action === 'remove'
-								? removeSmartArtNode(data, nodeId)
-								: action === 'promote'
-									? promoteSmartArtNode(data, nodeId)
-									: demoteSmartArtNode(data, nodeId),
-				),
-			),
 		replaceSmartArtData: (data) => applyToSelected((el) => smartArtPatch(el, () => data)),
 		setSmartArtLayout: (layout) =>
 			applyToSelected((el) => smartArtPatch(el, (data) => switchSmartArtLayoutData(data, layout))),

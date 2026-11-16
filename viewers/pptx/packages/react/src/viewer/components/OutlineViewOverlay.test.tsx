@@ -23,7 +23,7 @@ import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // oxlint-disable-next-line prefer-ending-with-an-expect
-vi.mock<typeof import('react-i18next')>(import('react-i18next'), () => ({
+vi.mock<typeof import('../i18n/use-translation')>(import('../i18n/use-translation'), () => ({
 	useTranslation: () => ({ t: (key: string) => translationsEn[key] ?? key }),
 }));
 
@@ -245,6 +245,10 @@ describe('outline view overlay', () => {
 		press(rowInputs()[0], { key: 'Enter' });
 		expect(slides).toHaveLength(3);
 		expect(rowInputs()).toHaveLength(5);
+		// The caret lands on the new slide's title row once it has rendered.
+		expect(document.activeElement?.getAttribute(OUTLINE_ROW_ATTR)).toBe(
+			rowInputs()[3]!.getAttribute(OUTLINE_ROW_ATTR),
+		);
 	});
 
 	it('typing into a titleless slide creates its title', () => {

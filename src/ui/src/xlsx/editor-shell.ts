@@ -10,7 +10,13 @@ import {
 	type IterationSettings,
 } from './backstage';
 import type { EditorCore } from './editor-core';
-import { runFileCommand, templateInto, type FileChrome } from './editor-files';
+import {
+	openCloudFile,
+	reportError,
+	runFileCommand,
+	templateInto,
+	type FileChrome,
+} from './editor-files';
 import { emit, type FileCommand } from './events';
 import { installKeyboard, type ShellAction } from './keyboard';
 import {
@@ -31,8 +37,10 @@ import { editorStyleText } from './theme';
 import { createTitleBar, type SaveState, type TitleBar } from './title-bar';
 import { createToaster } from './toast';
 import { packagePassword } from './dialogs/package-password';
-import { createChartSeriesPane } from './chart-series-pane';
-import { createChartAreaPane } from './chart-area-pane';
+import { attachShareDialog, type ShareDialogController } from '../dialog/share-controller';
+import { createChartFormatPane } from './chart-format-pane';
+import { createChartExPane } from './chart-ex-pane';
+import { createSmartArtController } from './smartart-controller';
 
 /** Element properties the shell's options and customize pages change. */
 export interface ShellElement extends HTMLElement {
@@ -51,6 +59,8 @@ export interface Shell {
 	readonly chrome: FileChrome;
 	saveState(): SaveState;
 	fileCommand(command: FileCommand, fileName?: string): Promise<void>;
+	/** The Share dialog (Share button, File > Share, `element.share()`). */
+	readonly share: ShareDialogController;
 }
 
 function safeMount(name: string, mount: () => unknown): void {
@@ -72,9 +82,9 @@ export function buildShell(core: EditorCore): Shell {
 	let saveState: SaveState = 'saved';
 	const isHidden = (id: string) => core.isHidden(id);
 	const chrome: FileChrome = {
-		setSaveState(state) {
+		setSaveState(state, detail) {
 			saveState = state;
-			titleBar.setSaveState(state);
+			titleBar.setSaveState(state, detail);
 		},
 		fileNameChanged: () => titleBar.setFileName(core.fileName),
 	};
@@ -82,6 +92,8 @@ export function buildShell(core: EditorCore): Shell {
 		runFileCommand(core, command, fileName, {
 			chrome,
 			openBackstage: (page) => backstage.open(page),
+			// Over File > Share when it is open, as in Office; its summary follows the session.
+			openShare: () => share.open(),
 		});
 	const closeBackstage = () => {
 		backstage.close();
@@ -93,6 +105,12 @@ export function buildShell(core: EditorCore): Shell {
 		saveState: () => saveState,
 		fileCommand: (command, fileName) => void fileCommand(command, fileName),
 		newFromTemplate: (id) => templateInto(core, id, chrome),
+		fileProviders: () => core.fileProviders,
+		openCloudFile(file) {
+			void openCloudFile(core, file, chrome, closeBackstage).catch((cause) =>
+				reportError(core, cause),
+			);
+		},
 		close: closeBackstage,
 		options: () => ({
 			locale: core.locale,
@@ -100,9 +118,16 @@ export function buildShell(core: EditorCore): Shell {
 			author: core.authorName,
 			calculation: core.calculation,
 			iteration: core.iteration,
+			allowFontDownloads: core.webfonts.allowed(),
+			fontDownloadsLocked: core.webfonts.lock() !== undefined,
 		}),
 		setOption(key, raw) {
 			if (key === 'iteration') return core.setIterativeCalculation(raw as IterationSettings);
+			if (key === 'allowFontDownloads') {
+				if (core.webfonts.lock() === undefined) core.webfonts.setReaderAllows(raw === true);
+				return;
+			}
+			if (key === 'fontDownloadsLocked') return;
 			const value = String(raw);
 			if (key === 'locale') element.locale = value;
 			else if (key === 'theme')
@@ -132,7 +157,7 @@ export function buildShell(core: EditorCore): Shell {
 		},
 		share: {
 			state: () => core.collab.state(),
-			start: (roomId) => core.collab.start({ roomId }),
+			open: () => void fileCommand('share'),
 			stop: () => core.collab.stop(),
 		},
 		hiddenActions: () => core.hiddenActions,
@@ -197,8 +222,9 @@ export function buildShell(core: EditorCore): Shell {
 	const toaster = createToaster(doc, () => ctx.t('Close'));
 
 	const workspace = el(doc, 'div', 'xve-workspace');
-	const chartSeriesPane = createChartSeriesPane(ctx, () => chartAreaPane.close());
-	const chartAreaPane = createChartAreaPane(ctx, () => chartSeriesPane.close());
+	const chartFormatPane = createChartFormatPane(ctx);
+	const chartExPane = createChartExPane(ctx);
+	const smartArt = createSmartArtController(ctx);
 	const canvasRow = el(doc, 'div', 'xve-canvas-row');
 	const formulaRow = el(doc, 'div', 'xve-formula-row');
 	const gridHost = el(doc, 'div', 'xve-grid-host');
@@ -207,7 +233,7 @@ export function buildShell(core: EditorCore): Shell {
 	const emptyText = el(doc, 'p');
 	empty.append(emptyText);
 	workspace.append(formulaRow, gridHost, tabsRow, empty);
-	canvasRow.append(workspace, chartSeriesPane.element, chartAreaPane.element);
+	canvasRow.append(workspace, chartFormatPane.element, chartExPane.element, smartArt.element);
 	frame.append(
 		titleBar.element,
 		ribbon.element,
@@ -240,14 +266,17 @@ export function buildShell(core: EditorCore): Shell {
 			formulaRow,
 			gridHost,
 			tabsRow,
-			chartSeriesPane.element,
-			chartAreaPane.element,
+			chartFormatPane.element,
+			chartExPane.element,
+			smartArt.element,
 			statusBar.element,
 		].filter((region) => region.getClientRects().length);
 	const focusRegion = (region: HTMLElement) => {
 		if (region === ribbon.element) return ribbon.focus();
 		if (region === gridHost) return ctx.grid()?.focus();
-		region.querySelector<HTMLElement>('input, button:not(:disabled), [tabindex="0"]')?.focus();
+		(region.shadowRoot ?? region)
+			.querySelector<HTMLElement>('input, button:not(:disabled), [tabindex="0"]')
+			?.focus();
 	};
 	const actions = (action: ShellAction) => {
 		if (action === 'help') return help.open();
@@ -275,7 +304,25 @@ export function buildShell(core: EditorCore): Shell {
 		focusRegion(next);
 	};
 	installKeyboard(ctx, actions);
-	element.addEventListener('collaboration-change', () => backstage.refresh('share'));
+	const share = attachShareDialog({
+		container: root,
+		host: {
+			state: () => core.collab.state(),
+			start: (options) => core.collab.start(options),
+			stop: () => core.collab.stop(),
+		},
+		roomPrefix: 'book',
+		defaults: () => ({ userName: core.authorName }),
+		locale: () => core.locale,
+		note: () =>
+			ctx.t(
+				'Cell values, formulas, formats, sheets, rows, columns, merges and names are shared. Charts, pictures, comments, conditional formats, data validation, tables and page setup stay in this window.',
+			),
+	});
+	element.addEventListener('collaboration-change', () => {
+		backstage.refresh('share');
+		share.refresh();
+	});
 
 	core.shell = {
 		render() {
@@ -284,8 +331,9 @@ export function buildShell(core: EditorCore): Shell {
 			ribbonActions.refresh();
 			statusBar.refresh();
 			pageViews?.refresh();
-			chartSeriesPane.refresh();
-			chartAreaPane.refresh();
+			chartFormatPane.refresh();
+			chartExPane.refresh();
+			smartArt.refresh();
 			titleBar.setFileName(core.fileName);
 			if (core.dirty.dirty && saveState !== 'dirty' && saveState !== 'saving')
 				chrome.setSaveState('dirty');
@@ -301,8 +349,10 @@ export function buildShell(core: EditorCore): Shell {
 			ribbonActions.relocalize();
 			statusBar.relocalize();
 			backstage.relocalize();
-			chartSeriesPane.relocalize();
-			chartAreaPane.relocalize();
+			share.relocalize();
+			chartFormatPane.relocalize();
+			chartExPane.relocalize();
+			smartArt.relocalize();
 			core.requestRender();
 		},
 	};
@@ -315,5 +365,6 @@ export function buildShell(core: EditorCore): Shell {
 		chrome,
 		saveState: () => saveState,
 		fileCommand,
+		share,
 	};
 }

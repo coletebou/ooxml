@@ -6,7 +6,7 @@ partagés dans la conversation. Vous installez une intégration pour votre frame
 pointer vers un serveur (ou vous démarrez sans), et vous obtenez l’interface complète, ou un hook
 brut pour construire la vôtre.
 
-::: warning Une implémentation précoce
+::: warning Bêta
 Ce n’est pas Microsoft Teams et il n’est pas affilié à Microsoft. Il n’y a **pas de chiffrement de
 bout en bout** : quiconque exploite le serveur peut lire chaque message et chaque fichier. Consultez
 les [Limites](/fr/limitations) avant de vous y fier.
@@ -109,7 +109,8 @@ Ou simplement du balisage, après avoir appelé `defineTeamsApp()` depuis `opent
 Toutes les intégrations acceptent les mêmes propriétés : `workspaceId` (la salle partagée : lettres,
 chiffres, `-` et `_`), `userName`, `userId` (un identifiant stable ; par défaut, un identifiant
 mémorisé dans ce navigateur), `config`, `uploadFile` (la destination des pièces jointes), `openers`
-(des gestionnaires par type Office) et trois événements : prêt, ouverture de fichier (appelez
+(des gestionnaires par type Office), `embeds` (pages de visionneuse par type de fichier), `locale`
+(une étiquette BCP 47 comme `de`) et trois événements : prêt, ouverture de fichier (appelez
 `preventDefault()` dessus pour ouvrir le fichier vous-même) et changement de configuration
 (`onReady`, `onOpenFile`, `onConfigChange` en React, Solid, Svelte et JS natif ; `@ready`,
 `@open-file`, `@config-change` en Vue ; `(ready)`, `(openFile)`, `(configChange)` en Angular).
@@ -129,7 +130,7 @@ Le mode local est celui qu’utilisent les [démos en direct](/demos). Dès qu�
 navigateur, lancez un serveur :
 
 ```bash
-npx openteams-server                    # the reference server on 127.0.0.1:8787
+npx openteams-server --insecure-dev     # uniquement pour le développement local : 127.0.0.1:8787
 ```
 
 Utilisez ensuite `ws://127.0.0.1:8787/sync` et `ws://127.0.0.1:8787/signal` (ou `wss://` derrière
@@ -160,7 +161,7 @@ recherche, l’appel). Les actions comprennent `select`, `createChannel`, `send`
 `toggleMic`, `toggleCamera`, `toggleScreenShare` et `toggleHand`. La démo React montre les deux
 styles côte à côte.
 
-## Exécuter depuis les sources
+## Exécuter depuis les sources {#run-it-from-source}
 
 Nécessite Node 22+ et Bun. Ce dossier est `viewers/teams` du dépôt
 [`ooxml`](https://github.com/ChristopherVR/ooxml) : exécutez `bun install` à la racine du dépôt, puis les

@@ -1,13 +1,8 @@
 export const translations = {
-	'pptx.text3d.type': 'Type',
-	'pptx.text3d.width': 'Largeur',
-	'pptx.text3d.height': 'Hauteur',
 	'pptx.text3d.title': 'Texte 3D',
 	'pptx.text3d.extrusion': 'Extrusion 3D',
 	'pptx.text3d.depth': 'Profondeur (pts)',
-	'pptx.text3d.color': 'Couleur',
 	'pptx.text3d.topBevel': 'Biseau supérieur',
-	'pptx.text3d.bottomBevel': 'Biseau inférieur',
 	'pptx.text3d.material': 'Matériel',
 	'pptx.textEffects.title': 'Effets de texte',
 	'pptx.textEffects.shadow': 'Ombre du texte',
@@ -64,6 +59,12 @@ export const translations = {
 	'pptx.fonts.missingWarning':
 		'Les polices {{count}} sont introuvables et ne seront pas intégrées.',
 	'pptx.fonts.notFound': 'Pas trouvé',
+	'pptx.fonts.previewOnly': 'Aperçu et impression uniquement',
+	'pptx.fonts.previewOnlyReason':
+		"La licence de cette police n'autorise que l'affichage et l'impression. Elle reste dans ce fichier, mais n'est jamais incorporée dans un autre fichier.",
+	'pptx.fonts.restricted': 'Restreinte',
+	'pptx.fonts.restrictedReason':
+		"La licence de cette police n'autorise pas son incorporation : elle n'est donc pas utilisée pour l'affichage et une police de substitution est montrée. Ses données restent inchangées dans ce fichier.",
 	'pptx.fonts.scanning': 'Numérisation des polices...',
 	'pptx.fonts.usedFonts': 'Polices utilisées',
 	'pptx.text.title': 'Texte',
@@ -167,10 +168,8 @@ export const translations = {
 	'pptx.textAdvanced.lineSpacingExact': 'Interligne (exact)',
 	'pptx.textAdvanced.marginLeft': 'Marge gauche',
 	'pptx.textEffects.adjustment': 'Ajustement',
-	'pptx.textEffects.glowColor': 'Couleur de la lueur',
 	'pptx.textEffects.outline': 'Contour du texte',
 	'pptx.textEffects.outlineWidth': 'Épaisseur du contour',
-	'pptx.textEffects.shadowColor': "Couleur de l'ombre",
 	'pptx.textEffects.transform': 'Transformer',
 	'pptx.textFormatting.columns': 'Colonnes',
 	'pptx.textFormatting.columnSpacing': 'Espacement des colonnes',

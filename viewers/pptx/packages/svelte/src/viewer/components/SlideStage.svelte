@@ -14,14 +14,21 @@
 		deriveSlideFieldContext,
 		deviceStrokeStageStyle,
 		getSlideBackgroundStyle,
+		resolveStageEdgeBleeds,
+		stageKeepsElementIds,
+		stripElementIdMarkers,
 	} from 'ooxml-ui/pptx';
+	import type { Rendering3DFlags } from 'ooxml-ui/pptx';
 
 	import { useTranslator } from '../../i18n/context';
 	import { getFieldContextGetter, provideFieldContext } from '../state/field-context';
+	import { useRendering3DFlags } from '../state/rendering-3d-flags-context';
+	import { provideElementRenderSlide } from '../state/element-render-errors';
 	import { provideSlideElements } from '../state/slide-elements';
 	import { styleToString } from '../style';
 	import ActiveXOverlay from './ActiveXOverlay.svelte';
 	import CommentMarkersOverlay from './CommentMarkersOverlay.svelte';
+	import ElementBoundary from './ElementBoundary.svelte';
 	import ElementRenderer from './ElementRenderer.svelte';
 	import type { SlideStageProps } from './props';
 
@@ -37,6 +44,7 @@
 		editable = false,
 		selectedElementIds,
 		transparentBackground = false,
+		preserveElementIds = false,
 		ontablecellcommit,
 		onsmartartnodecommit,
 		onsmartartnodefill,
@@ -48,6 +56,13 @@
 	}: SlideStageProps = $props();
 
 	const t = useTranslator();
+	const getRendering3DFlags = useRendering3DFlags();
+
+	// Boxes that grow under an abutting opaque box to close the anti-aliasing
+	// seam (issue #141); the selection keeps its exact box while it is edited.
+	const edgeBleeds = $derived(
+		resolveStageEdgeBleeds(undefined, slide, selectedElementIds?.length ? new Set(selectedElementIds) : undefined),
+	);
 
 	// Re-point the deck-wide field context at THIS stage's slide before the
 	// element renderers read it: the date / header / footer / document-property
@@ -62,6 +77,8 @@
 	// can find the rest of its chain and render only its own slice of the
 	// overflow. Also a getter, for the same init-time capture reason as above.
 	provideSlideElements(() => slide?.elements);
+	// Element render errors on this stage report the slide it paints.
+	provideElementRenderSlide(() => slide?.id);
 
 	const stageStyle = $derived(
 		styleToString({
@@ -99,6 +116,13 @@
 		presenting: boolean;
 		/** True only for the live editing canvas; gates the action affordances. */
 		interactive: boolean;
+		/** False for a static stage; see `SlideStageProps.preserveElementIds`. */
+		keepElementIds: boolean;
+		/**
+		 * The 3D rendering options: one swaps an element's renderer (SmartArt,
+		 * charts) and mounts a new, marked node without changing `elements`.
+		 */
+		rendering3D: Rendering3DFlags;
 	}
 
 	// `presenting` travels as an action PARAMETER rather than being closed over:
@@ -110,6 +134,15 @@
 		let current = params;
 		function apply(): void {
 			queueMicrotask(() => {
+				if (!current.keepElementIds) {
+					// Static stage (rail, host thumbnail, sorter, preview): no element
+					// contract and no `data-element-id`, as in the other four bindings,
+					// so `[data-element-id]` queries only ever reach the canvas copy.
+					// Re-run on every slide change, which is when Svelte mounts new
+					// element nodes; Svelte does not re-add an unchanged attribute.
+					stripElementIdMarkers(node);
+					return;
+				}
 				applyRenderedElementAccessibility(node, current.elements, {
 					presenting: current.presenting,
 				});
@@ -143,14 +176,22 @@
      which only withhold the region role from thumbnail stages. -->
 <div
 	class="pptx-svelte-stage"
-	use:accessibleStage={{ elements: slide?.elements ?? [], presenting, interactive }}
+	use:accessibleStage={{
+		elements: slide?.elements ?? [],
+		presenting,
+		interactive,
+		keepElementIds: stageKeepsElementIds({ interactive, presenting, preserveElementIds }),
+		rendering3D: getRendering3DFlags(),
+	}}
 	style={stageStyle}
 	role={interactive ? 'region' : undefined}
 	aria-roledescription={interactive ? 'slide' : undefined}
 	aria-label={interactive ? t('pptx.canvas.slide') : undefined}
 >
 	{#each slide?.elements ?? [] as element, index (element.id)}
-		<ElementRenderer {element} {mediaDataUrls} zIndex={index} {presenting} {interactive} {editTemplateMode} {editingElementId} {editable} {selectedElementIds} {ontablecellcommit} {onsmartartnodecommit} {onsmartartnodefill} {onchartpointcommit} {ontableresizecolumns} {ontableresizerow} />
+		<ElementBoundary {element}>
+			<ElementRenderer {element} {mediaDataUrls} zIndex={index} edgeBleed={edgeBleeds.get(element.id)} {presenting} {interactive} {editTemplateMode} {editingElementId} {editable} {selectedElementIds} {ontablecellcommit} {onsmartartnodecommit} {onsmartartnodefill} {onchartpointcommit} {ontableresizecolumns} {ontableresizerow} />
+		</ElementBoundary>
 	{/each}
 	{#if slide?.activeXControls && slide.activeXControls.length > 0}
 		<ActiveXOverlay controls={slide.activeXControls} {canvasSize} />

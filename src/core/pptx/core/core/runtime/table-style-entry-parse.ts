@@ -17,7 +17,9 @@
  *
  * @module table-style-entry-parse
  */
-import { applyDrawingColorTransforms } from '../../color';
+import { applyColorTransformListTo } from '../../color/color-transforms';
+import { OBJECT_DRAWING_VIEW } from '../../color/object-drawing-view';
+import { readObjectGradient } from '../builders/PptxGradientStyleCodec';
 import type {
 	ParsedTableBackground,
 	ParsedTableStyleBorders,
@@ -111,6 +113,7 @@ export function parseTableBackground(
 	const schemeColor = schemeClr ? String(schemeClr['@_val'] || '').trim() || undefined : undefined;
 	const fill = schemeColor ? { schemeColor } : undefined;
 	const hasEffectLst = Boolean(tblBg['a:effectLst']);
+	const effectRef = parseTableBackgroundFillRef(tblBg['a:effectRef'] as XmlObject | undefined);
 	// `a:fillRef` is `a:fill`'s choice sibling in CT_TableBackgroundStyle: a
 	// style-matrix index (`@idx`) plus an optional colour-transform child,
 	// rather than an inline fill choice. Only present when `a:fill` is not.
@@ -118,12 +121,13 @@ export function parseTableBackground(
 	const fillRef = parseTableBackgroundFillRef(fillRefNode);
 	const resolvedFill =
 		fill ?? (fillRef ? resolveTableBackgroundFillRef(fillRef, formatScheme, colorMap) : undefined);
-	if (!resolvedFill && !hasEffectLst && !fillRef) {
+	if (!resolvedFill && !hasEffectLst && !fillRef && !effectRef) {
 		return undefined;
 	}
 	return {
 		...(resolvedFill ? { fill: resolvedFill } : {}),
 		...(fillRef ? { fillRef } : {}),
+		...(effectRef ? { effectRef } : {}),
 		...(hasEffectLst ? { hasEffectLst } : {}),
 	};
 }
@@ -174,10 +178,11 @@ export function resolveTableBackgroundFillRef(
 	}
 
 	if (overrideBase && fillDef.rawNode) {
-		const schemeClr = (fillDef.rawNode as XmlObject)['a:schemeClr'] as XmlObject | undefined;
-		const resolved = schemeClr
-			? applyDrawingColorTransforms(overrideBase, schemeClr)
-			: overrideBase;
+		const color = OBJECT_DRAWING_VIEW.color(fillDef.rawNode as XmlObject);
+		const resolved =
+			color?.kind === 'scheme'
+				? applyColorTransformListTo(overrideBase, color.transforms)
+				: overrideBase;
 		return { schemeColor: '', color: resolved };
 	}
 
@@ -200,29 +205,25 @@ function resolveFormatSchemeGradient(
 	if (!overrideBase) {
 		return undefined;
 	}
-	const gsLst = gradNode['a:gsLst'] as XmlObject | undefined;
-	const rawStops = gsLst?.['a:gs'];
-	const gsNodes = (Array.isArray(rawStops) ? rawStops : rawStops ? [rawStops] : []) as XmlObject[];
+	// The shared gradient reader over the object tree; only scheme-coloured (`phClr`) stops take
+	// the reference colour.
+	const read = readObjectGradient(gradNode);
 	const stops: ParsedTableStyleGradientStop[] = [];
-	for (const gs of gsNodes) {
-		const schemeClr = gs['a:schemeClr'] as XmlObject | undefined;
-		const color = schemeClr ? applyDrawingColorTransforms(overrideBase, schemeClr) : undefined;
-		if (!color) {
+	for (const stop of read.stops) {
+		if (stop.color?.kind !== 'scheme') {
 			continue;
 		}
-		const position = (parseInt(String(gs['@_pos'] || '0'), 10) || 0) / 1000;
-		stops.push({ position, fill: { schemeColor: '', color } });
+		const color = applyColorTransformListTo(overrideBase, stop.color.transforms);
+		stops.push({ position: (stop.position ?? 0) / 1000, fill: { schemeColor: '', color } });
 	}
 	if (stops.length === 0) {
 		return undefined;
 	}
-	const lin = gradNode['a:lin'] as XmlObject | undefined;
-	if (lin) {
-		const angRaw = parseInt(String(lin['@_ang'] || '0'), 10) || 0;
-		const angle = (((angRaw / 60000) % 360) + 360) % 360;
+	if (OBJECT_DRAWING_VIEW.child(gradNode, 'lin')) {
+		const angle = (((read.fill.angle ?? 0) % 360) + 360) % 360;
 		return { stops, angle, type: 'linear' };
 	}
-	if (gradNode['a:path'] !== undefined) {
+	if (read.hasPath) {
 		return { stops, type: 'radial' };
 	}
 	return { stops, type: 'linear' };
@@ -255,13 +256,33 @@ function parseTableBackgroundFillRef(
 }
 
 /**
+ * A section's `a:tcStyle/a:fillRef` (CT_TableStyleCellStyle's style-matrix
+ * choice beside `a:fill`, used by the built-in Light Style 2 header row)
+ * resolved against the theme's format scheme like `a:tblBg/a:fillRef`.
+ */
+function resolveTcStyleFillRef(
+	section: XmlObject | undefined,
+	themeContext: TableStyleThemeContext | undefined,
+): ParsedTableStyleFill | undefined {
+	const tcStyle = section?.['a:tcStyle'] as XmlObject | undefined;
+	if (!tcStyle || tcStyle['a:fill']) {
+		return undefined;
+	}
+	const fillRef = parseTableBackgroundFillRef(tcStyle['a:fillRef'] as XmlObject | undefined);
+	const fill = fillRef
+		? resolveTableBackgroundFillRef(fillRef, themeContext?.formatScheme, themeContext?.colorMap)
+		: undefined;
+	return fill ? { ...fill, fillRefSnapshot: JSON.stringify(fill) } : undefined;
+}
+
+/**
  * Theme context needed to resolve a `a:tblBg/a:fillRef` style-matrix
  * reference into a concrete fill. Optional everywhere it's threaded through:
  * callers with no theme in scope (tests, the built-in-style-catalogue
  * generator) simply leave an unresolved `tblBg` fillRef as a reference only.
  */
 export interface TableStyleThemeContext {
-	formatScheme?: PptxThemeFormatScheme;
+	formatScheme?: PptxThemeFormatScheme | undefined;
 	colorMap?: Record<string, string>;
 }
 
@@ -287,7 +308,9 @@ export function parseTableStyleEntry(
 	const cell3DProps: Partial<Record<`${TableStylePartName}Cell3D`, PptxTableCell3D>> = {};
 	for (const name of TABLE_STYLE_PART_SEQUENCE) {
 		const node = section(name);
-		const fill = parseTableStyleSectionFill(node, resolveImagePath);
+		const fill =
+			parseTableStyleSectionFill(node, resolveImagePath) ??
+			resolveTcStyleFillRef(node, themeContext);
 		if (fill) {
 			fills[`${name}Fill`] = fill;
 		}

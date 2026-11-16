@@ -6,6 +6,7 @@ import {
 	initializeInlineListDom,
 	attachInlineListController,
 } from 'ooxml-ui/pptx';
+import type { ListConversionScope } from 'ooxml-ui/pptx';
 import { remapTextToSegments } from 'ooxml-ui/pptx/render/remap-text';
 import { hasTextProperties } from 'pptx-viewer-core';
 import type { PptxElement, PptxSlide, TextSegment } from 'pptx-viewer-core';
@@ -13,12 +14,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { componentSource } from './component-source.test-support';
 import { EditorStateService } from './editor-state.service';
+import { ListConversionScopeService } from './list-conversion-scope.service';
 import { RibbonParagraphControlsComponent } from './ribbon-paragraph-controls.component';
 import {
 	patchTextStyle,
 	transformSelectedTextCase,
 	formatInlineListStyle,
 } from './ribbon-text-helpers';
+import { ViewerCanvasEditingService } from './viewer-canvas-editing.service';
 
 function textElement(): PptxElement {
 	return {
@@ -180,6 +183,79 @@ describe('patchTextStyle list commands', () => {
 		expect(elementBulletKind(svc.slides()[0].elements[0])).toBe('bullet');
 	});
 
+	it.each([
+		[undefined, ['bullet', 'numbered', 'bullet']],
+		['paragraph', ['bullet', 'numbered', 'bullet']],
+		['list', ['numbered', 'numbered', 'numbered']],
+	] as const)(
+		'Numbering at a caret in a 3-item bulleted list with listConversionScope=%s',
+		(scope, expected) => {
+			class Controls extends RibbonParagraphControlsComponent {
+				number(): void {
+					this.toggleList('numbered');
+				}
+			}
+			const source = textElement();
+			Object.assign(source, {
+				text: 'A\nB\nC',
+				textSegments: [
+					{ text: 'A', style: {}, bulletInfo: { char: '•' } },
+					{ text: '\n', style: {}, isParagraphBreak: true },
+					{ text: 'B', style: {}, bulletInfo: { char: '•' } },
+					{ text: '\n', style: {}, isParagraphBreak: true },
+					{ text: 'C', style: {}, bulletInfo: { char: '•' } },
+				],
+			});
+			const svc = service(source);
+			const seed = createInlineListSeed(source)!;
+			const root = document.createElement('div');
+			document.body.append(root);
+			initializeInlineListDom(root, seed);
+			const controller = attachInlineListController(root, seed);
+			try {
+				const node = root.children[1]!.firstElementChild!.firstChild!;
+				window.getSelection()!.setBaseAndExtent(node, 0, node, 0);
+				const read = controller.read();
+				if (read.kind !== 'supported') {
+					throw new Error(read.reason);
+				}
+				const scopeService = new ListConversionScopeService().bind(
+					signal<ListConversionScope | undefined>(scope),
+				);
+				const inlineEditing = {
+					readInlineSnapshot: () => read.snapshot,
+					formatInlineSnapshot: (next: typeof read.snapshot) =>
+						controller.format(next).kind === 'supported',
+				};
+				const controls = runInInjectionContext(
+					Injector.create({
+						providers: [
+							{ provide: EditorStateService, useValue: svc },
+							{ provide: ViewerCanvasEditingService, useValue: inlineEditing },
+							{ provide: ListConversionScopeService, useValue: scopeService },
+						],
+					}),
+					() => new Controls(),
+				);
+				Object.defineProperty(controls, 'canEdit', { value: signal(true) });
+				Object.defineProperty(controls, 'selectedElement', { value: signal(source) });
+				controls.number();
+				expect(
+					buildParagraphs(svc.slides()[0].elements[0]).map((paragraph) =>
+						paragraph.bulletMarker === undefined
+							? 'none'
+							: /^\d/.test(paragraph.bulletMarker)
+								? 'numbered'
+								: 'bullet',
+					),
+				).toStrictEqual(expected);
+			} finally {
+				controller.dispose();
+				root.remove();
+			}
+		},
+	);
+
 	it('creates markers for plain multiline text without segments', () => {
 		const source = textElement();
 		if (!hasTextProperties(source)) {
@@ -229,10 +305,10 @@ describe('patchTextStyle list commands', () => {
 		expect(elementBulletKind(svc.slides()[0].elements[0])).toBe('none');
 	});
 
-	it('keeps pending textarea content when creating a list', () => {
-		const editor = document.createElement('textarea');
+	it('keeps pending inline editor content when creating a list', () => {
+		const editor = document.createElement('div');
 		editor.dataset.inlineEditor = '';
-		editor.value = 'hello world, typed more';
+		editor.textContent = 'hello world, typed more';
 		document.body.appendChild(editor);
 		try {
 			const svc = service(textElement());
@@ -241,13 +317,13 @@ describe('patchTextStyle list commands', () => {
 			if (!hasTextProperties(result)) {
 				throw new Error('expected text');
 			}
-			expect(result.text).toBe(editor.value);
+			expect(result.text).toBe('hello world, typed more');
 			expect(
 				result.textSegments
 					?.slice(1)
 					.map((segment) => segment.text)
 					.join(''),
-			).toBe(editor.value);
+			).toBe('hello world, typed more');
 		} finally {
 			editor.remove();
 		}
@@ -339,14 +415,14 @@ describe('transformSelectedTextCase', () => {
 	});
 
 	it('reconciles against a live open inline editor before transforming case', () => {
-		// The inline-edit `<textarea data-inline-editor>` is uncontrolled: text
+		// The inline editor (`[data-inline-editor]`) is uncontrolled: text
 		// typed since the edit session began is not yet on the model's
 		// `textSegments`/`text`. Regression: previously the case transform ran
 		// against that stale snapshot, leaving anything typed since
 		// untransformed once the edit session committed.
-		const editor = document.createElement('textarea');
+		const editor = document.createElement('div');
 		editor.dataset.inlineEditor = '';
-		editor.value = 'hello world, typed more';
+		editor.textContent = 'hello world, typed more';
 		document.body.appendChild(editor);
 		try {
 			const svc = service(textElement()); // model still says "hello world"

@@ -7,6 +7,7 @@ import {
 	rasterizeElement,
 	rasterizeElementTiledToCanvas,
 	rasterizeElementTiles,
+	visibleTemplateElements,
 } from 'ooxml-ui/pptx';
 import type { PptxSlide } from 'pptx-viewer-core';
 
@@ -109,8 +110,22 @@ export interface RasterizeSlideController {
 		index: number,
 		scaleMultiplier?: number,
 	): Promise<RasterizeElementTilesResult>;
+	/**
+	 * Mount slide `index` on the off-screen stage and resolve once it has painted, for the
+	 * vector PDF export, which reads the stage itself. The html2canvas driver captures that stage.
+	 */
+	mountSlide(index: number): Promise<MountedCaptureSlide>;
 	/** Remove the off-screen capture stage from the DOM. */
 	destroy(): void;
+}
+
+/** A slide mounted on the capture stage, with the html2canvas driver for it. */
+export interface MountedCaptureSlide {
+	stage: HTMLElement;
+	html2canvasFallback: (
+		sourceRect: { x: number; y: number; width: number; height: number },
+		outputSize: { width: number; height: number },
+	) => Promise<HTMLCanvasElement>;
 }
 
 /**
@@ -176,11 +191,21 @@ export function createRasterizeSlide(deps: RasterizeSlideDeps): RasterizeSlideCo
 		}
 		disposePptxRenderStage(host);
 		host.replaceChildren();
+		// Paint what the editing canvas paints: the layout and master shapes behind the slide's own,
+		// and the theme and table styles their fills resolve against.
+		const template = visibleTemplateElements(
+			slide,
+			state.templateElementsBySlideId[slide.id] ?? [],
+		);
 		const stage = renderSlideStage({
 			document: deps.doc,
-			slide,
+			slide: template.length ? { ...slide, elements: [...template, ...slide.elements] } : slide,
 			canvasSize: state.canvasSize,
 			mediaDataUrls: state.mediaDataUrls,
+			colorScheme: state.colorScheme,
+			fontScheme: state.fontScheme,
+			formatScheme: state.formatScheme,
+			tableStyleMap: state.tableStyleMap,
 			// The capture stage renders outside the live render controller, so it
 			// has to build its own field context: without it an exported PNG/PDF
 			// prints the authored "Slide #" placeholder while the screen shows
@@ -196,6 +221,8 @@ export function createRasterizeSlide(deps: RasterizeSlideDeps): RasterizeSlideCo
 			areaChart3D: deps.getAreaChart3D(),
 			pieChart3D: deps.getPieChart3D(),
 			presenting: false,
+			// A capture copy, briefly in the document: it must not shadow the canvas.
+			exposeElementIds: false,
 		});
 		host.appendChild(stage);
 		await waitForFrame();
@@ -292,6 +319,10 @@ export function createRasterizeSlide(deps: RasterizeSlideDeps): RasterizeSlideCo
 		rasterizeSlide,
 		rasterizeSlideToRaster,
 		rasterizeSlideToTiles,
+		async mountSlide(index) {
+			const { stage, html2canvasFallback } = await mountStage(index, 1);
+			return { stage, html2canvasFallback };
+		},
 		destroy() {
 			disposePptxRenderStage(host);
 			host.remove();

@@ -6,7 +6,7 @@ import {
 	type VisioPageTheme,
 } from 'ooxml-core/visio';
 import type { OfficeGalleryState, OfficeUiGallery } from '../ribbon/gallery';
-import { emitRibbonAction } from './ribbon-action';
+import { emitRibbonAction, type VisioRibbonAction } from './ribbon-action';
 import { INLINE_GALLERY_STEPS, inlineGallery } from './ribbon-inline-galleries';
 import { menu, type CommandSpec } from './ribbon-parts';
 
@@ -14,22 +14,24 @@ export const THEMES_HINT =
 	'Apply a theme to the current page. Quick-styled shapes take its colours; text keeps its own font.';
 export const VARIANTS_HINT = "Pick one of the current theme's four colour variants.";
 export const NO_THEME_VARIANTS = 'Apply a theme to the page first.';
-/** Design > Variants > More: which theme parts can be changed separately. */
-export const VARIANT_OPTION_REASONS: readonly [id: string, label: string, reason: string][] = [
-	[
-		'theme-colors',
-		'Colors',
-		'Custom theme colour sets are not written yet; pick a theme or variant.',
-	],
-	[
-		'theme-fonts',
-		'Fonts',
-		'Theme fonts are written to the theme part, but text does not follow theme fonts yet.',
-	],
-	['theme-effects', 'Effects', 'Theme effect styles are not rendered yet.'],
-	['theme-connectors', 'Connectors', 'Theme connector styles cannot be chosen separately yet.'],
-	['theme-embellishment', 'Embellishment', 'Embellishment needs theme-driven shape geometry.'],
-];
+/**
+ * Design > Variants > More > Embellishment: the levels, each writing the page's EmbellishmentIndex.
+ * The decorative geometry is not drawn yet; see `ViewerThemes`.
+ */
+export const VARIANT_EMBELLISHMENTS = [
+	['low', 'Low'],
+	['medium', 'Medium'],
+	['high', 'High'],
+] as const;
+/** The scheme submenus of Variants > More, in Visio's order. */
+export const VARIANT_SCHEME_MENUS = [
+	['colors', 'theme-colors', 'Colors'],
+	['fonts', 'theme-fonts', 'Fonts'],
+	['effects', 'theme-effects', 'Effects'],
+	['connectors', 'theme-connectors', 'Connectors'],
+] as const;
+export type VariantScheme = (typeof VARIANT_SCHEME_MENUS)[number][0];
+export const schemeItemId = (scheme: VariantScheme, id: string) => `${scheme}-${id}`;
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 const color = (value: string) =>
@@ -157,18 +159,41 @@ export const themesGallery = (doc: Document) =>
 	gallery(doc, themesGalleryState(true, undefined), 'quickStyles', THEMES_HINT);
 export const variantsGallery = (doc: Document) =>
 	gallery(doc, variantsGalleryState(true, undefined), 'effects', VARIANTS_HINT);
-/** Variants > More: Colors, Fonts, Effects, Connectors and Embellishment, disabled with reasons. */
+/**
+ * Variants > More: Colors, Fonts, Effects and Connectors list the built-in themes (the page's
+ * current one is checked, see `ViewerThemes`); Embellishment lists its three levels.
+ */
 export function variantOptions(doc: Document) {
-	const items: CommandSpec[] = VARIANT_OPTION_REASONS.map(([id, label, unsupported]) => ({
-		id,
-		label,
-		unsupported,
-	}));
-	return menu(doc, {
+	const items: CommandSpec[] = [
+		...VARIANT_SCHEME_MENUS.map(([scheme, id, label]) => ({
+			id,
+			label,
+			items: VISIO_BUILT_IN_THEMES.map((theme) => ({
+				id: schemeItemId(scheme, theme.id),
+				label: theme.name,
+				checked: false,
+				action: { type: 'page-theme', [scheme]: theme.id } as VisioRibbonAction,
+			})),
+		})),
+		{
+			id: 'theme-embellishment',
+			label: 'Embellishment',
+			items: VARIANT_EMBELLISHMENTS.map(([level, label]) => ({
+				id: `embellishment-${level}`,
+				label,
+				checked: false,
+				action: { type: 'page-theme', embellishment: level } as VisioRibbonAction,
+			})),
+		},
+	];
+	const element = menu(doc, {
 		id: 'variant-options',
 		label: 'More Variants',
 		icon: 'settings',
 		size: 'small',
 		items,
 	});
+	// Like the galleries, enabled by the viewer once a diagram page can take a theme.
+	element.toggleAttribute('disabled', true);
+	return element;
 }

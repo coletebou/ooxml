@@ -6,6 +6,7 @@
 	 * composition bag.
 	 */
 	import { isActionHidden } from 'ooxml-ui/pptx';
+	import { controllerState } from '../state/controller-state';
 	import type { CollaborationConfig, ToolbarActionId } from 'ooxml-ui/pptx';
 
 	import CollaborationStatusIndicator from '../collab/components/CollaborationStatusIndicator.svelte';
@@ -31,6 +32,7 @@
 	// Stable controller references (the bag is built once and never reassigned).
 	// svelte-ignore state_referenced_locally
 	const { loader, viewer, editor, parityUi, collab, dialogs, autosaveCtl } = vm;
+	const saveProgress = controllerState(vm.saveProgress);
 </script>
 
 {#snippet collabStatus()}
@@ -49,6 +51,9 @@
 	zoomPercent={vm.effectivePercent}
 	isDirty={editor.dirty}
 	autosaveStatus={vm.autosaveActive ? autosaveCtl.status : undefined}
+	lastSavedAt={autosaveCtl.lastSavedAt}
+	saveProgress={saveProgress.current}
+	fontProgress={loader.fontProgress}
 	showNotes={showNotes && loader.slides.length > 0 && !isActionHidden('notes', hiddenActions)}
 	hideZoom={isActionHidden('zoom', hiddenActions)}
 	hideFullscreen={isActionHidden('fullscreen', hiddenActions)}

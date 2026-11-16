@@ -1,11 +1,11 @@
 ---
 title: MCP & Tools
-description: pptx-viewer-mcp provides 73 PPTX manipulation tools, Zod input schemas, an MCP server, and a Y.Doc collaboration codec - all built on pptx-viewer-core.
+description: pptx-viewer-mcp provides 74 PPTX manipulation tools, Zod input schemas, an MCP server, and a Y.Doc collaboration codec - all built on pptx-viewer-core.
 ---
 
 # MCP & Tools
 
-`pptx-viewer-mcp` (source lives in `packages/tools`) provides the tooling for driving PPTX edits from AI agents and collaborative runtimes: **73 tool functions**, **Zod schemas** for every tool input, an **MCP server**, and a **Y.Doc collaboration codec**. It is built entirely on top of [`pptx-viewer-core`](/core/).
+`pptx-viewer-mcp` (source lives in `packages/tools`) provides the tooling for driving PPTX edits from AI agents and collaborative runtimes: **74 tool functions**, **Zod schemas** for every tool input, an **MCP server**, and a **Y.Doc collaboration codec**. It is built entirely on top of [`pptx-viewer-core`](/core/).
 
 ::: tip Where this fits
 The tools take the [`PptxData` model](/guide/data-model) the core engine produces, mutate it as plain in-memory data, and hand it back. They add no file I/O or framework dependencies of their own - you (or the provided MCP server / execution pipeline) decide how to load and persist.
@@ -25,14 +25,14 @@ The package exposes four import paths:
 
 | Entry point               | Contents                                                                                                                        |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `pptx-viewer-mcp`         | The 73 tool functions + provider types + execution pipeline (`loadPresentation`, `savePresentation`, `executeToolWithContext`). |
+| `pptx-viewer-mcp`         | The 74 tool functions + provider types + execution pipeline (`loadPresentation`, `savePresentation`, `executeToolWithContext`). |
 | `pptx-viewer-mcp/schemas` | Zod schemas for every tool input.                                                                                               |
 | `pptx-viewer-mcp/codec`   | `PptxCodec` - the Y.Doc ↔ PPTX-bytes codec.                                                                                     |
 | `pptx-viewer-mcp/mcp`     | `createServer()` - programmatic MCP server factory.                                                                             |
 
-## The 73 tool functions
+## The 74 tool functions
 
-Every tool is a **pure function**: it receives a `ToolContext`, returns a `ToolResult`, and performs no file I/O. The first 67 are grouped by concern below; the six embedded-object tools follow the table.
+Every tool is a **pure function**: it receives a `ToolContext`, returns a `ToolResult`, and performs no file I/O. The first 68 are grouped by concern below; the six embedded-object tools follow the table.
 
 | Group                     | Count | Tools                                                                                                                                                                                                                                                                                                                   |
 | ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -45,6 +45,7 @@ Every tool is a **pure function**: it receives a `ToolContext`, returns a `ToolR
 | **Layout & template**     | 4     | `applyLayout`, `getLayouts`, `applyTemplateT`, `findPlaceholdersT`                                                                                                                                                                                                                                                      |
 | **Content**               | 5     | `findText`, `replaceText`, `manageComments`, `manageHyperlinks`, `manageSmartArt`                                                                                                                                                                                                                                       |
 | **Sections**              | 1     | `manageSections`                                                                                                                                                                                                                                                                                                        |
+| **Custom shows**          | 1     | `manageCustomShows`                                                                                                                                                                                                                                                                                                     |
 | **Metadata & properties** | 4     | `getMetadata`, `updateMetadata`, `getPresentationProperties`, `updatePresentationProperties`                                                                                                                                                                                                                            |
 | **Validation & repair**   | 3     | `runAccessibilityCheck`, `validatePresentation`, `repairPresentation`                                                                                                                                                                                                                                                   |
 | **Conversion & export**   | 5     | `convertToMarkdown`, `exportToSvg`, `exportSlideSvg`, `exportToJson`, `importFromJson`                                                                                                                                                                                                                                  |
@@ -128,7 +129,7 @@ Run the bundled MCP server so an MCP client (Claude Desktop, Cursor, etc.) can c
 }
 ```
 
-The binary is also installed as **`pptx-tools`** after a global install (`npm i -g pptx-viewer-mcp`). All 73 tools are exposed over stdio under their **snake_case** names - e.g. `get_slide`, `add_slide`, `batch_update_elements`, `convert_to_markdown`. Each MCP tool accepts a `filePath` parameter; the server handles loading and saving internally.
+The binary is also installed as **`pptx-tools`** after a global install (`npm i -g pptx-viewer-mcp`). All 74 tools are exposed over stdio under their **snake_case** names - e.g. `get_slide`, `add_slide`, `batch_update_elements`, `convert_to_markdown`. Each MCP tool accepts a `filePath` parameter; the server handles loading and saving internally.
 
 To embed the server programmatically rather than via the CLI, use the factory from the `/mcp` entry point:
 
@@ -136,7 +137,7 @@ To embed the server programmatically rather than via the CLI, use the factory fr
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServer } from 'pptx-viewer-mcp/mcp';
 
-const server = createServer(); // McpServer with all 73 tools registered
+const server = createServer(); // McpServer with all 74 tools registered
 await server.connect(new StdioServerTransport());
 ```
 

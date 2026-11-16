@@ -1,124 +1,94 @@
-/**
- * font-catalog.ts: grouping for the Home-tab font dropdown.
- *
- * PowerPoint splits its font list into headed groups: the two theme fonts
- * first (labelled "Headings" and "Body"), then any fonts embedded in the
- * presentation, then the full alphabetical catalogue. Reproducing that in five
- * bindings means five copies of the same dedup rules, so the grouping decision
- * is made once here and each binding only renders the returned sections.
- *
- * @module render/font-catalog
- */
+import {
+	findGoogleFontsFamily,
+	getGoogleFontsVariants,
+	resolveGoogleFontsFace,
+} from 'ooxml-core/text';
+import { buildFontCatalog as buildSharedCatalog } from '../../fonts/catalog';
+import type {
+	FontCatalogInput as SharedFontCatalogInput,
+	FontCatalogEntry as SharedFontCatalogEntry,
+	FontCatalogGroup as SharedFontCatalogGroup,
+} from '../../fonts/catalog';
 import { COMMON_FONT_FAMILIES } from './text-format-presets';
+export type { FontCatalogGroupId } from '../../fonts/catalog';
 
-/** Identifies a group so bindings can label and style it. */
-export type FontCatalogGroupId = 'theme' | 'embedded' | 'custom' | 'all';
-
-/** One selectable font. */
-export interface FontCatalogEntry {
-	/** The family name written into the run's `fontFamily`. */
+/** One supported upright Google Fonts weight, stored as a PowerPoint typeface. */
+export interface FontCatalogVariant {
+	/** The family name to write into the run's fontFamily, not a CSS stack. */
 	family: string;
-	/**
-	 * Which theme slot this family fills, for the "(Headings)" / "(Body)" hint
-	 * PowerPoint shows beside its two theme fonts. Absent for other entries.
-	 */
-	themeRole?: 'heading' | 'body';
+	/** The CSS weight selected by this name. */
+	weight: number;
 }
 
-/** A headed group of fonts. */
-export interface FontCatalogGroup {
-	id: FontCatalogGroupId;
-	/** i18n key for the group heading. */
-	labelKey: string;
+export interface FontCatalogEntry extends SharedFontCatalogEntry {
+	/** Supported upright weights, including the plain family for 400, when requested. */
+	variants?: readonly FontCatalogVariant[];
+}
+
+export interface FontCatalogGroup extends Omit<SharedFontCatalogGroup, 'entries'> {
 	entries: FontCatalogEntry[];
 }
 
-/** Inputs describing what the current deck and session make available. */
-export interface FontCatalogInput {
-	/** `a:fontScheme` major/minor latin faces from the active theme. */
-	themeFonts?: { heading?: string; body?: string };
-	/** Families embedded in the presentation via `p:embeddedFontLst`. */
-	embeddedFonts?: readonly string[];
-	/** Families the user registered this session from a local font file. */
-	customFonts?: readonly string[];
-	/** Overrides the built-in catalogue; defaults to {@link COMMON_FONT_FAMILIES}. */
-	allFonts?: readonly string[];
+export interface FontCatalogInput extends SharedFontCatalogInput {
+	/** Include supported Google Fonts weights. Defaults to false for compatibility. */
+	includeWeightVariants?: boolean;
 }
 
-const GROUP_LABEL_KEYS: Record<FontCatalogGroupId, string> = {
-	theme: 'pptx.font.group.theme',
-	embedded: 'pptx.font.group.embedded',
-	custom: 'pptx.font.group.custom',
-	all: 'pptx.font.group.all',
+const WEIGHT_NAMES: Readonly<Record<number, string>> = {
+	100: 'Thin',
+	200: 'ExtraLight',
+	300: 'Light',
+	500: 'Medium',
+	600: 'SemiBold',
+	700: 'Bold',
+	800: 'ExtraBold',
+	900: 'Black',
 };
 
 /**
- * Build the grouped font list for the Home-tab dropdown.
- *
- * A family promoted into the theme, embedded or custom group is removed from
- * the alphabetical group, so no family is offered twice and clicking either
- * copy would not produce different results.
- *
- * @returns Only the non-empty groups, in PowerPoint's order.
- *
- * @example
- * ```ts
- * const groups = buildFontCatalog({ themeFonts: { heading: "Aptos Display" } });
- * // => groups[0].id === "theme"
- * ```
+ * Group the PPTX picker fonts. Opt in to variants to receive only weights the
+ * bundled Google Fonts metadata supports. Local embedded/custom families and
+ * unknown names keep their own faces; their availability cannot be inferred.
+ * This runtime entry is DOM-free: ooxml-ui/pptx/render/font-catalog.
  */
 export function buildFontCatalog(input: FontCatalogInput = {}): FontCatalogGroup[] {
-	const themeEntries: FontCatalogEntry[] = [];
-	const claimed = new Set<string>();
-
-	const claim = (family: string | undefined): string | undefined => {
-		const trimmed = family?.trim();
-		if (!trimmed) {
-			return undefined;
-		}
-		const key = trimmed.toLowerCase();
-		if (claimed.has(key)) {
-			return undefined;
-		}
-		claimed.add(key);
-		return trimmed;
-	};
-
-	const heading = claim(input.themeFonts?.heading);
-	if (heading) {
-		themeEntries.push({ family: heading, themeRole: 'heading' });
-	}
-	const body = claim(input.themeFonts?.body);
-	if (body) {
-		themeEntries.push({ family: body, themeRole: 'body' });
-	}
-
-	const embedded = collect(input.embeddedFonts, claim);
-	const custom = collect(input.customFonts, claim);
-	const all = collect(input.allFonts ?? COMMON_FONT_FAMILIES, claim);
-
-	return [
-		{ id: 'theme' as const, entries: themeEntries },
-		{ id: 'embedded' as const, entries: embedded },
-		{ id: 'custom' as const, entries: custom },
-		{ id: 'all' as const, entries: all },
-	]
-		.filter((group) => group.entries.length > 0)
-		.map((group) => ({ ...group, labelKey: GROUP_LABEL_KEYS[group.id] }));
+	const groups = buildSharedCatalog({
+		...input,
+		allFonts: input.allFonts ?? COMMON_FONT_FAMILIES,
+		labelKeys: {
+			theme: 'pptx.font.group.theme',
+			embedded: 'pptx.font.group.embedded',
+			custom: 'pptx.font.group.custom',
+			all: 'pptx.font.group.all',
+		},
+	});
+	if (!input.includeWeightVariants) return groups;
+	const localFamilies = new Set(
+		[...(input.embeddedFonts ?? []), ...(input.customFonts ?? [])].map((name) =>
+			name.trim().replace(/\s+/gu, ' ').toLowerCase(),
+		),
+	);
+	return groups.map((group) => ({
+		...group,
+		entries: group.entries.map((entry) => {
+			const canonical = findGoogleFontsFamily(entry.family);
+			if (!canonical || localFamilies.has(canonical.toLowerCase())) return entry;
+			const variants = getGoogleFontsVariants(canonical)
+				.filter((face) => !face.italic)
+				.flatMap(({ weight }) => {
+					const family = weight === 400 ? entry.family : `${canonical} ${WEIGHT_NAMES[weight]}`;
+					// A catalogue family such as Archivo Black owns its name. Do not
+					// offer it as another family's weight when it resolves elsewhere.
+					const face = resolveGoogleFontsFace(family);
+					return face?.family === canonical && (face.weight ?? 400) === weight
+						? [{ family, weight }]
+						: [];
+				});
+			return variants.length ? { ...entry, variants } : entry;
+		}),
+	}));
 }
 
-/**
- * Resolve the family the font dropdown should display when nothing overrides
- * it on the selected element.
- *
- * A title placeholder inherits the theme's major font and everything else the
- * minor font, so showing a hardcoded "Segoe UI" misreported what the deck
- * would actually render.
- *
- * @param placeholderType - `p:ph/@type` of the selected element, if any.
- * @param themeFonts - The active theme's major/minor latin faces.
- * @param fallback - Used when the theme resolves neither face.
- */
 export function resolveDefaultFontFamily(
 	placeholderType: string | undefined,
 	themeFonts: { heading?: string; body?: string } | undefined,
@@ -128,18 +98,4 @@ export function resolveDefaultFontFamily(
 	const isHeading = normalized === 'title' || normalized === 'ctrtitle';
 	const preferred = isHeading ? themeFonts?.heading : themeFonts?.body;
 	return preferred?.trim() || themeFonts?.body?.trim() || themeFonts?.heading?.trim() || fallback;
-}
-
-function collect(
-	families: readonly string[] | undefined,
-	claim: (family: string | undefined) => string | undefined,
-): FontCatalogEntry[] {
-	const entries: FontCatalogEntry[] = [];
-	for (const family of families ?? []) {
-		const claimedFamily = claim(family);
-		if (claimedFamily) {
-			entries.push({ family: claimedFamily });
-		}
-	}
-	return entries;
 }

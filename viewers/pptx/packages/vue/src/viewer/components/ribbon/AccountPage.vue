@@ -11,6 +11,8 @@
 import {
 	AVATAR_COLOR_SWATCHES,
 	clearAllLocalViewerData,
+	connectedServicesLabels,
+	confirmDeleteDialog,
 	DEFAULT_VIEWER_PROFILE,
 	formatBackstageSize,
 	getLocalStorageUsageSummary,
@@ -19,16 +21,23 @@ import {
 	saveViewerProfile,
 } from 'ooxml-ui/pptx';
 import type { ViewerProfile } from 'ooxml-ui/pptx';
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { PPTX_VUE_VIEWER_VERSION } from '../../../version';
 import { useAccountAuth } from '../../composables/account-auth';
+import { useViewerCloudFiles } from '../../composables/viewer-cloud-files';
 import { useViewerStorage } from '../../composables/viewer-storage';
 
 const { t } = useI18n();
 
 const accountAuth = useAccountAuth();
+
+// Connected services: the host's `fileProviders` (nothing renders without them).
+const cloud = useViewerCloudFiles();
+const connectedLabels = computed(() =>
+	connectedServicesLabels((key, params) => (params ? t(key, params) : t(key))),
+);
 
 // ── Profile ───────────────────────────────────────────────────────────
 const profile = reactive<ViewerProfile>({
@@ -64,7 +73,7 @@ async function refreshUsage(): Promise<void> {
 }
 
 async function clearLocalData(): Promise<void> {
-	if (!window.confirm(t('pptx.account.storage.clearConfirm'))) {
+	if (!(await confirmDeleteDialog(t('pptx.account.storage.clearConfirm'), { t }))) {
 		return;
 	}
 	await clearAllLocalViewerData(storage());
@@ -182,6 +191,17 @@ onMounted(() => void refreshUsage());
 					{{ t('pptx.account.signIn.button') }}
 				</button>
 			</template>
+		</section>
+
+		<!-- Connected services (only with host `fileProviders`) -->
+		<section
+			v-if="cloud.providers().length > 0"
+			class="pptx-vue-account-section border border-border bg-card p-6 text-card-foreground"
+		>
+			<pptx-ui-connected-services
+				:providers.prop="cloud.providers()"
+				:labels.prop="connectedLabels"
+			/>
 		</section>
 	</div>
 </template>

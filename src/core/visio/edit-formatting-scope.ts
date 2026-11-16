@@ -6,6 +6,7 @@ import { indexCells } from './edit-recalculate-index';
 import { fail } from './package-common';
 import { isThemeLookupFormula } from './edit-formatting-cell-admission';
 import { isConnectedGlueCell, visioGlueTriggerTarget } from './edit-connector-glue';
+import { textReadFormula } from './edit-recalculate-text';
 import { textSizeFormula } from './edit-text-size-formula';
 import { independentTextFieldFormula } from './text-field-independent';
 
@@ -25,8 +26,16 @@ export async function assertFormattingDependencies(
 	 * instance's (through this view), and other masters, which cannot read this shape, are skipped.
 	 */
 	instanceView?: Element,
+	/** `textReads`: formulas that only read the text through text functions are recalculated by the caller. */
+	options: { textReads?: boolean } = {},
 ): Promise<void> {
-	indexCells(roots, { check });
+	// Formulas that cannot be followed on this page might read the formatted cells; other pages cannot.
+	for (const item of indexCells(roots, { check, scope: 'affected' }).values())
+		if (item.refusal && item.pageId === pageId)
+			fail(
+				'EDIT_UNKNOWN_DEPENDENCY',
+				`Cannot prove ShapeSheet dependency closure: ${item.refusal}`,
+			);
 	const shapeId = attribute(shape, 'ID')!;
 	const changedNames = new Set([...changed.keys()].map((name) => name.toLowerCase()));
 	const jumpOnly = [...changedNames].every((name) =>
@@ -109,12 +118,25 @@ export async function assertFormattingDependencies(
 				if (textEdit && localShapeId === shapeId && sourcePageId === pageId) continue;
 				analysis = sized;
 			}
+			if (
+				options.textReads &&
+				textEdit &&
+				!named &&
+				sourcePageId !== undefined &&
+				textReadFormula(source)
+			)
+				continue;
 			if (named && analysis.dynamic) {
 				if (mentions()) failure();
 				continue;
 			}
+			// A dynamic formula that names what it reads is judged by those names; one that may read
+			// anything refuses on the edited page and elsewhere only when it mentions a changed cell.
+			if (analysis.dynamic && analysis.opaque) {
+				if (sourcePageId === pageId || mentions()) failure();
+				continue;
+			}
 			if (
-				analysis.dynamic ||
 				analysis.references.some(
 					(ref) =>
 						changedNames.has(canonical(ref.cell)) &&
@@ -134,6 +156,9 @@ export async function assertFormattingDependencies(
 		const part = await pkg.readXml(path);
 		const master = part.localName === 'MasterContents';
 		if (instanceView && master) continue;
+		// A master's formulas read the master's own sheets; only the masters a shape inherits from
+		// (directly or through a group instance) can read the shape's cells.
+		if (master && !shape.hasAttribute('Master') && !shape.hasAttribute('MasterShape')) continue;
 		inspect(part, undefined, master);
 	}
 }

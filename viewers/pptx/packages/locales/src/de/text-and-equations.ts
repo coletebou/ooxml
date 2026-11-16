@@ -1,13 +1,8 @@
 export const translations = {
-	'pptx.text3d.type': 'Typ',
-	'pptx.text3d.width': 'Breite',
-	'pptx.text3d.height': 'Höhe',
 	'pptx.text3d.title': '3D-Text',
 	'pptx.text3d.extrusion': '3D-Extrusion',
 	'pptx.text3d.depth': 'Tiefe (pt)',
-	'pptx.text3d.color': 'Farbe',
 	'pptx.text3d.topBevel': 'Obere Abschrägung',
-	'pptx.text3d.bottomBevel': 'Untere Abschrägung',
 	'pptx.text3d.material': 'Material',
 	'pptx.textEffects.title': 'Texteffekte',
 	'pptx.textEffects.shadow': 'Textschatten',
@@ -64,6 +59,12 @@ export const translations = {
 	'pptx.fonts.missingWarning':
 		'{{count}}-Schriftart(en) konnten nicht gefunden werden und werden nicht eingebettet.',
 	'pptx.fonts.notFound': 'Nicht gefunden',
+	'pptx.fonts.previewOnly': 'Nur Vorschau und Druck',
+	'pptx.fonts.previewOnlyReason':
+		'Die Lizenz dieser Schriftart erlaubt nur Anzeige und Druck. Sie bleibt in dieser Datei, wird aber nie in eine andere Datei eingebettet.',
+	'pptx.fonts.restricted': 'Eingeschränkt',
+	'pptx.fonts.restrictedReason':
+		'Die Lizenz dieser Schriftart erlaubt kein Einbetten. Sie wird daher nicht zur Anzeige verwendet, und eine Ersatzschrift wird gezeigt. Ihre Schriftdaten bleiben unverändert in dieser Datei.',
 	'pptx.fonts.scanning': 'Schriftarten werden gescannt...',
 	'pptx.fonts.usedFonts': 'Verwendete Schriftarten',
 	'pptx.text.title': 'Text',
@@ -167,10 +168,8 @@ export const translations = {
 	'pptx.textAdvanced.lineSpacingExact': 'Zeilenabstand (genau)',
 	'pptx.textAdvanced.marginLeft': 'Linker Rand',
 	'pptx.textEffects.adjustment': 'Anpassung',
-	'pptx.textEffects.glowColor': 'Leuchtfarbe',
 	'pptx.textEffects.outline': 'Textkontur',
 	'pptx.textEffects.outlineWidth': 'Konturbreite',
-	'pptx.textEffects.shadowColor': 'Schattenfarbe',
 	'pptx.textEffects.transform': 'Transformieren',
 	'pptx.textFormatting.columns': 'Spalten',
 	'pptx.textFormatting.columnSpacing': 'Spaltenabstand',

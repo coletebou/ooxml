@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils';
 import { Font, Glyph, Path } from 'opentype.js';
 import type { PptxElement, PptxEmbeddedFont } from 'pptx-viewer-core';
 import { describe, expect, it } from 'vitest';
+import { nextTick } from 'vue';
 
 import { glyphOutlineFontCache } from '../utils/glyph-outline-cache';
 import WordArtText from './WordArtText.vue';
@@ -66,6 +67,19 @@ function representativeTextEl(node: Element): Element {
 	return node.tagName.toLowerCase() === 'g' ? (node.querySelector('text') ?? node) : node;
 }
 
+/** Far wider than its box at the default font size, so it must wrap. */
+const LONG_PARAGRAPH =
+	'The quick brown fox jumps over the lazy dog and then keeps on running far away';
+
+/** Distinct unwarped baselines (`y`) among the glyphs: one per wrapped row. */
+function glyphRowCount(root: ParentNode): number {
+	return new Set(
+		[...root.querySelectorAll('svg > text, svg > g[data-glyph-slices] > text')].map((t) =>
+			t.getAttribute('y'),
+		),
+	).size;
+}
+
 function warpedText(overrides: Partial<PptxElement> = {}): PptxElement {
 	return {
 		type: 'text',
@@ -128,11 +142,47 @@ describe('wordArtText', () => {
 	it('renders nothing for a non-warped preset', () => {
 		const wrapper = mount(WordArtText, {
 			props: {
-				element: warpedText({ textStyle: { textWarpPreset: 'textPlain' } }),
+				element: warpedText({ textStyle: { textWarpPreset: 'textNoShape' } }),
 				zIndex: 0,
 			},
 		});
 		expect(wrapper.find('svg').exists()).toBeFalsy();
+	});
+
+	it('renders textPlain through the glyph envelope, one glyph per character', () => {
+		const wrapper = mount(WordArtText, {
+			props: {
+				element: warpedText({ textStyle: { textWarpPreset: 'textPlain' } }),
+				zIndex: 0,
+			},
+		});
+		expect(wrapper.find('textPath').exists()).toBeFalsy();
+		const glyphTexts = logicalGlyphElements(wrapper.element).map(representativeTextEl);
+		expect(glyphTexts.map((t) => t.textContent).join('')).toBe('Hello');
+	});
+
+	it('wraps a long textPlain paragraph into several rows, but keeps a single word on one', () => {
+		const long = mount(WordArtText, {
+			props: {
+				element: warpedText({ text: LONG_PARAGRAPH, textStyle: { textWarpPreset: 'textPlain' } }),
+				zIndex: 0,
+			},
+		});
+		expect(glyphRowCount(long.element)).toBeGreaterThan(1);
+		// A word far wider than its small square box stays whole on one row.
+		const word = mount(WordArtText, {
+			props: {
+				element: warpedText({
+					text: 'schedule',
+					width: 40,
+					height: 40,
+					textStyle: { textWarpPreset: 'textPlain' },
+				}),
+				zIndex: 0,
+			},
+		});
+		expect(glyphRowCount(word.element)).toBe(1);
+		expect(logicalGlyphElements(word.element)).toHaveLength('schedule'.length);
 	});
 
 	it('renders nothing when no warp preset is set', () => {
@@ -303,10 +353,10 @@ describe('wordArtText', () => {
 		expect(bareGlyphs.length + glyphGroups.length).toBe('MMM'.length);
 	});
 
-	it('renders a true SVG textPath (not a CSS transform) for a former "simple" preset', () => {
+	it('renders the per-glyph envelope (not a CSS transform) for a former "simple" preset', () => {
 		// textSlantUp/textFadeRight/textCascadeUp etc. moved from the CSS-transform
-		// `simple` family to true SVG textPath once their generators became
-		// single-line-safe.
+		// `simple` family to a shared textPath, and then to the measured two-path
+		// glyph envelope (PowerPoint draws them as a top and bottom path).
 		const wrapper = mount(WordArtText, {
 			props: {
 				element: warpedText({ textStyle: { textWarpPreset: 'textSlantUp' } }),
@@ -314,7 +364,8 @@ describe('wordArtText', () => {
 			},
 		});
 		expect(wrapper.find('svg.pptx-vue-wordart').exists()).toBeTruthy();
-		expect(wrapper.find('textPath').exists()).toBeTruthy();
+		expect(wrapper.find('textPath').exists()).toBeFalsy();
+		expect(wrapper.findAll('svg > text').length).toBeGreaterThan(0);
 		expect(wrapper.find('.pptx-vue-wordart-css').exists()).toBeFalsy();
 	});
 
@@ -329,13 +380,12 @@ describe('wordArtText', () => {
 		expect(wrapper.find('.pptx-vue-wordart-css').exists()).toBeFalsy();
 	});
 
-	it('renders warped <path> outlines (not <text>) once the font is registered in the outline cache', () => {
+	it('repaints mounted glyphs as warped <path> outlines once the outline font is ready', async () => {
 		const embedded: PptxEmbeddedFont = {
 			name: 'WarpOutlineVueTestFont',
 			dataUrl: '',
 			rawFontData: buildTestFont(),
 		};
-		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
 		const wrapper = mount(WordArtText, {
 			props: {
 				element: warpedText({
@@ -348,6 +398,12 @@ describe('wordArtText', () => {
 				zIndex: 0,
 			},
 		});
+		// The font arrives after the glyphs mounted (a deferred parser load or a
+		// webfont fetch): the cache notification alone must repaint them.
+		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
+		await glyphOutlineFontCache.preload();
+		await Promise.resolve();
+		await nextTick();
 		const paths = wrapper.findAll('svg > path');
 		expect(paths).toHaveLength('Hello'.length);
 		expect(wrapper.find('svg > text').exists()).toBeFalsy();
@@ -355,5 +411,27 @@ describe('wordArtText', () => {
 			expect(p.attributes('d')?.startsWith('M')).toBeTruthy();
 			expect(p.attributes('fill')).toBe('#123456');
 		}
+	});
+
+	it('puts the lines of an Arch Up block on ellipses 1.2 em apart, the last on the base ellipse', () => {
+		const wrapper = mount(WordArtText, {
+			props: {
+				element: warpedText({
+					textStyle: { textWarpPreset: 'textArchUp', fontSize: 20 },
+					textSegments: [
+						{ text: 'Top', style: {} },
+						{ text: '', style: {}, isParagraphBreak: true },
+						{ text: 'Bottom', style: {} },
+					],
+				}),
+				zIndex: 0,
+			},
+		});
+		const radii = wrapper
+			.findAll('defs path')
+			.map((path) => Number(/A ([\d.]+),/u.exec(path.attributes('d') ?? '')?.[1]));
+		expect(radii).toHaveLength(2);
+		expect(radii[1]).toBe(100);
+		expect(radii[0]).toBeCloseTo(124, 5);
 	});
 });

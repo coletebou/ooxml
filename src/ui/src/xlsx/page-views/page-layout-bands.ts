@@ -4,6 +4,7 @@
 import {
 	composeHeaderFooter,
 	headerFooterKey,
+	headerFooterPicture,
 	pageHeaderFooter,
 	renderHeaderFooterRuns,
 	splitHeaderFooter,
@@ -11,8 +12,10 @@ import {
 	type HeaderFooterSection,
 	type PageViewLayout,
 	type PageViewPage,
+	workbookFontFamily,
 } from 'ooxml-core/xlsx';
 import type { EditorContext } from 'ooxml-core/xlsx/ui';
+import { headerFooterImageSize, headerFooterImageUrl } from '../header-image';
 
 const SECTIONS: readonly HeaderFooterSection[] = ['left', 'center', 'right'];
 const SECTION_LABELS = {
@@ -57,6 +60,7 @@ export function renderBand(
 		file: o.fileName,
 		date: o.date,
 		locale: o.ctx.locale(),
+		themeColors: o.ctx.workbook()!.theme.colors,
 	});
 	const empty = !value;
 	for (const section of SECTIONS) {
@@ -66,18 +70,41 @@ export function renderBand(
 		cell.style.textAlign = section;
 		const runs = rendered.sections[section];
 		for (const run of runs) {
+			if (run.picture) {
+				const workbook = o.ctx.workbook()!;
+				const image = headerFooterPicture(sheet, kind, section, page.number, number);
+				const url = image ? headerFooterImageUrl(workbook, image) : undefined;
+				if (image && url) {
+					const img = o.doc.createElement('img');
+					const { width, height } = headerFooterImageSize(
+						image,
+						setup.scaleWithDoc === false ? 1 : o.layout.scale,
+					);
+					img.src = url;
+					img.alt = '';
+					img.style.cssText = `width:${width}px;height:${height}px;vertical-align:top`;
+					cell.append(img);
+				}
+				continue;
+			}
 			const span = o.doc.createElement('span');
 			span.textContent = run.text;
 			const { style } = run;
-			if (style.font) span.style.fontFamily = style.font;
+			if (style.font) span.style.fontFamily = workbookFontFamily(style.font);
 			if (style.size) span.style.fontSize = `${(style.size / 11) * size}px`;
 			if (style.color) span.style.color = style.color;
 			if (style.bold) span.style.fontWeight = '700';
 			if (style.italic) span.style.fontStyle = 'italic';
-			const lines = [style.underline && 'underline', style.strike && 'line-through'].filter(
-				Boolean,
-			);
+			const lines = [
+				(style.underline || style.doubleUnderline) && 'underline',
+				style.strike && 'line-through',
+			].filter(Boolean);
 			if (lines.length) span.style.textDecoration = lines.join(' ');
+			if (style.doubleUnderline) span.style.textDecorationStyle = 'double';
+			if (style.superscript || style.subscript) {
+				span.style.verticalAlign = style.superscript ? 'super' : 'sub';
+				span.style.fontSize = `${((style.size ?? 11) / 11) * size * 0.7}px`;
+			}
 			cell.append(span);
 		}
 		if (empty && section === 'center') {

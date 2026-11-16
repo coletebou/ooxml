@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { Lock, LockOpen } from 'lucide-vue-next';
-import { elementLockTogglePatch, isElementLocked } from 'ooxml-ui/pptx';
+import { ELEMENT_GEOMETRY_SECTIONS, elementLockTogglePatch, isElementLocked } from 'ooxml-ui/pptx';
 import type { PptxElement } from 'pptx-viewer-core';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import InspectorFields from './InspectorFields.vue';
+
 /**
  * ArrangePanel: position, size, rotation, flip controls and element lock toggle.
+ * X / Y / W / H / rotation are the shared `ELEMENT_GEOMETRY_SECTIONS`
+ * descriptors drawn by the generic {@link InspectorFields} renderer.
  *
  * Applicable to every element (all carry `x`/`y`/`width`/`height`/`rotation`
  * and the flip flags). Emits SHALLOW patches that the parent merges onto the
@@ -15,7 +19,14 @@ import { useI18n } from 'vue-i18n';
 const props = defineProps<{
 	element: PptxElement;
 	canEdit?: boolean;
+	/**
+	 * The Format pane section drawn: `arrange` (lock, flips) or
+	 * `sizePosition` (X / Y / W / H / rotation); omitted, both.
+	 */
+	part?: 'arrange' | 'sizePosition';
 }>();
+const showArrange = computed(() => props.part !== 'sizePosition');
+const showGeometry = computed(() => props.part !== 'arrange');
 
 const emit = defineEmits<{
 	update: [patch: Partial<PptxElement>];
@@ -23,11 +34,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const x = computed(() => Math.round(props.element.x ?? 0));
-const y = computed(() => Math.round(props.element.y ?? 0));
-const width = computed(() => Math.round(props.element.width ?? 0));
-const height = computed(() => Math.round(props.element.height ?? 0));
-const rotation = computed(() => Math.round(props.element.rotation ?? 0));
 const flipHorizontal = computed(() => Boolean(props.element.flipHorizontal));
 const flipVertical = computed(() => Boolean(props.element.flipVertical));
 
@@ -42,37 +48,6 @@ function toggleLock(): void {
 	emit('update', { locks: elementLockTogglePatch(!isLocked.value) } as Partial<PptxElement>);
 }
 
-const MIN_SIZE = 1;
-
-function toNumber(value: string): number | undefined {
-	const n = Number(value);
-	return Number.isFinite(n) ? n : undefined;
-}
-
-function onPos(field: 'x' | 'y', value: string): void {
-	const n = toNumber(value);
-	if (n === undefined) {
-		return;
-	}
-	emit('update', { [field]: n } as Partial<PptxElement>);
-}
-
-function onSize(field: 'width' | 'height', value: string): void {
-	const n = toNumber(value);
-	if (n === undefined) {
-		return;
-	}
-	emit('update', { [field]: Math.max(n, MIN_SIZE) } as Partial<PptxElement>);
-}
-
-function onRotation(value: string): void {
-	const n = toNumber(value);
-	if (n === undefined) {
-		return;
-	}
-	emit('update', { rotation: n });
-}
-
 function onFlipHorizontal(checked: boolean): void {
 	emit('update', { flipHorizontal: checked });
 }
@@ -84,7 +59,7 @@ function onFlipVertical(checked: boolean): void {
 
 <template>
 	<div class="pptx-vue-arrange flex flex-col gap-2 text-xs">
-		<div class="flex items-center justify-between">
+		<div v-if="showArrange" class="flex items-center justify-between">
 			<span class="text-muted-foreground font-medium">{{ t('pptx.arrange.positionSize') }}</span>
 			<button
 				type="button"
@@ -99,64 +74,15 @@ function onFlipVertical(checked: boolean): void {
 				<LockOpen v-else class="w-3.5 h-3.5 text-muted-foreground" />
 			</button>
 		</div>
-		<div class="pptx-vue-arrange-grid grid grid-cols-2 gap-2">
-			<label class="pptx-vue-arrange-field flex flex-col gap-1">
-				<span class="pptx-vue-arrange-label text-muted-foreground">{{ t('pptx.arrange.x') }}</span>
-				<input
-					type="number"
-					class="pptx-vue-arrange-input bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-					:value="x"
-					@input="onPos('x', ($event.target as HTMLInputElement).value)"
-				/>
-			</label>
-			<label class="pptx-vue-arrange-field flex flex-col gap-1">
-				<span class="pptx-vue-arrange-label text-muted-foreground">{{ t('pptx.arrange.y') }}</span>
-				<input
-					type="number"
-					class="pptx-vue-arrange-input bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-					:value="y"
-					@input="onPos('y', ($event.target as HTMLInputElement).value)"
-				/>
-			</label>
-			<label class="pptx-vue-arrange-field flex flex-col gap-1">
-				<span class="pptx-vue-arrange-label text-muted-foreground">{{
-					t('pptx.arrange.width')
-				}}</span>
-				<input
-					type="number"
-					class="pptx-vue-arrange-input bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-					:min="MIN_SIZE"
-					:value="width"
-					@input="onSize('width', ($event.target as HTMLInputElement).value)"
-				/>
-			</label>
-			<label class="pptx-vue-arrange-field flex flex-col gap-1">
-				<span class="pptx-vue-arrange-label text-muted-foreground">{{
-					t('pptx.arrange.height')
-				}}</span>
-				<input
-					type="number"
-					class="pptx-vue-arrange-input bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-					:min="MIN_SIZE"
-					:value="height"
-					@input="onSize('height', ($event.target as HTMLInputElement).value)"
-				/>
-			</label>
-		</div>
+		<InspectorFields
+			v-if="showGeometry"
+			:sections="ELEMENT_GEOMETRY_SECTIONS"
+			:target="element"
+			:disabled="!props.canEdit"
+			@patch="(patch) => emit('update', patch as Partial<PptxElement>)"
+		/>
 
-		<label class="pptx-vue-arrange-field flex flex-col gap-1">
-			<span class="pptx-vue-arrange-label text-muted-foreground">{{
-				t('pptx.arrange.rotation')
-			}}</span>
-			<input
-				type="number"
-				class="pptx-vue-arrange-input bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-				:value="rotation"
-				@input="onRotation(($event.target as HTMLInputElement).value)"
-			/>
-		</label>
-
-		<div class="pptx-vue-arrange-flips grid grid-cols-2 gap-2">
+		<div v-if="showArrange" class="pptx-vue-arrange-flips grid grid-cols-2 gap-2">
 			<label class="pptx-vue-arrange-check inline-flex items-center gap-2 text-foreground">
 				<pptx-ui-checkbox
 					:checked="flipHorizontal"

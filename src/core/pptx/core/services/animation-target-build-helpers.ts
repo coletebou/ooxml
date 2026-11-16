@@ -153,7 +153,7 @@ export function extractAnimationTarget(cTn: XmlObject): PptxAnimationTarget | un
 export interface PptxGraphicBuildEntry {
 	shapeId: string;
 	groupId: string;
-	uiExpand?: boolean;
+	uiExpand?: boolean | undefined;
 	build: PptxGraphicBuild;
 	rawXml?: XmlObject;
 }
@@ -176,7 +176,7 @@ export function extractSmartArtBuilds(
 /** Parse `p:bldOleChart` entries from the slide build list. */
 export function extractOleChartBuilds(
 	bldLst: XmlObject | undefined,
-): Array<{ spid: string; grpId: string; bld: string; animBg?: boolean }> {
+): Array<{ spid: string; grpId: string; bld: string; animBg?: boolean | undefined }> {
 	if (!bldLst) {
 		return [];
 	}

@@ -162,4 +162,93 @@ describe('svelte slides controller: layout changes', () => {
 		expect(editor.slides[0]?.layoutPath).toBe(nextLayoutPath);
 		expect(editor.templateElementsBySlideId.a).toStrictEqual(nextArtwork);
 	});
+
+	describe('and Undo', () => {
+		const L1 = 'ppt/slideLayouts/slideLayout1.xml';
+		const L2 = 'ppt/slideLayouts/slideLayout2.xml';
+		const L3 = 'ppt/slideLayouts/slideLayout3.xml';
+
+		/** The core contract: the slide at `index` is replaced in the array it is given, and returned. */
+		function inPlaceEditor() {
+			const handler = {
+				applyLayoutToSlide: vi.fn(
+					async (index: number, layoutPath: string, slides: PptxSlide[]) => {
+						const updated = { ...slides[index]!, layoutPath, layoutName: 'Remapped' };
+						slides[index] = updated;
+						return updated;
+					},
+				),
+				getTemplateElementsForSlide: vi.fn().mockResolvedValue([]),
+			};
+			const editor = new EditorState({
+				getCurrent: () => 0,
+				getHandler: () => handler as unknown as PptxHandler,
+			});
+			editor.editable = true;
+			editor.setSlides([{ ...slide('a'), layoutPath: L1 }, slide('b')]);
+			return { editor, handler };
+		}
+
+		it('one Undo takes back one layout pick', async () => {
+			const { editor } = inPlaceEditor();
+			await editor.slidesOps.applyLayout(L2);
+			await editor.slidesOps.applyLayout(L3);
+			expect(editor.slides[0]?.layoutPath).toBe(L3);
+			editor.undo();
+			expect(editor.slides[0]?.layoutPath).toBe(L2);
+			editor.undo();
+			expect(editor.slides[0]?.layoutPath).toBe(L1);
+			expect(editor.canUndo).toBeFalsy();
+			editor.redo();
+			expect(editor.slides[0]?.layoutPath).toBe(L2);
+		});
+
+		it('keeps an edit made to the new slide while its layout loads', async () => {
+			let layoutArrives: () => void = () => {};
+			const handler = {
+				applyLayoutToSlide: vi.fn(
+					async (index: number, layoutPath: string, slides: PptxSlide[]) => {
+						await new Promise<void>((resolve) => {
+							layoutArrives = resolve;
+						});
+						return { ...slides[index]!, layoutPath, layoutName: 'Remapped' };
+					},
+				),
+				getTemplateElementsForSlide: vi
+					.fn()
+					.mockResolvedValue([{ id: 'layout-art', type: 'shape' } as PptxElement]),
+			};
+			const editor = new EditorState({
+				getCurrent: () => 0,
+				getHandler: () => handler as unknown as PptxHandler,
+			});
+			editor.editable = true;
+			editor.setSlides([{ ...slide('a'), layoutPath: L1 }, slide('b')]);
+
+			editor.slidesOps.insertSlideFromLayout(L2);
+			await vi.waitFor(() => expect(handler.applyLayoutToSlide).toHaveBeenCalledOnce());
+			const typed = { id: 'typed', type: 'shape' } as PptxElement;
+			editor.commitSlides(
+				editor.slides.map((each, index) => (index === 1 ? { ...each, elements: [typed] } : each)),
+			);
+			layoutArrives();
+			const inserted = () => editor.slides[1];
+			await vi.waitFor(() =>
+				expect(editor.templateElementsBySlideId[inserted()!.id]).toHaveLength(1),
+			);
+			expect(inserted()?.elements.map((element) => element.id)).toStrictEqual(['typed']);
+			expect(inserted()?.layoutName).toBeUndefined();
+		});
+
+		it('one Undo takes back a new slide from a layout', async () => {
+			const { editor, handler } = inPlaceEditor();
+			expect(editor.slidesOps.insertSlideFromLayout(L2)).toBe(1);
+			await vi.waitFor(() => expect(handler.getTemplateElementsForSlide).toHaveBeenCalledOnce());
+			await vi.waitFor(() => expect(editor.slides[1]?.layoutName).toBe('Remapped'));
+			expect(editor.slides).toHaveLength(3);
+			editor.undo();
+			expect(editor.slides.map((each) => each.id)).toStrictEqual(['a', 'b']);
+			expect(editor.canUndo).toBeFalsy();
+		});
+	});
 });

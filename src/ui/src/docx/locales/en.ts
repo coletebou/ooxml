@@ -1,5 +1,8 @@
+import { enSplitCells } from './split-cells';
 import { enObjects } from './objects';
 import { enShapes } from './shapes';
+import { enSmartArt } from './smartart';
+import { enCharts } from './charts';
 import { enOptions } from './options';
 import { enColumns } from './columns';
 import { enMultilevelList } from './multilevel-list';
@@ -7,6 +10,12 @@ import { enFontAdvanced } from './font-advanced';
 import { enLigatures } from './ligatures';
 import { enNavigation } from './navigation';
 import { enDropCap } from './drop-cap';
+import { enFindStories } from './find-stories';
+import { enPasteOptions } from './paste-options';
+import { enPicture } from './picture';
+import { enPictureWatermark } from './picture-watermark';
+import { enConvertNotes } from './convert-notes';
+import { enDocumentInspector } from './document-inspector';
 import { enLineNumbers } from './line-numbers';
 import { enApp } from './en-app';
 import { enTableProperties } from './table-properties';
@@ -23,13 +32,22 @@ export const en = {
 	...enTableProperties,
 	...enLineNumbers,
 	...enDropCap,
+	...enFindStories,
+	...enPasteOptions,
+	...enPicture,
+	...enPictureWatermark,
+	...enConvertNotes,
+	...enDocumentInspector,
 	...enNavigation,
 	...enColumns,
+	...enSplitCells,
 	...enMultilevelList,
 	...enFontAdvanced,
 	...enLigatures,
 	...enObjects,
 	...enShapes,
+	...enSmartArt,
+	...enCharts,
 } as const;
 
 export type LocalizationKey = keyof typeof en;

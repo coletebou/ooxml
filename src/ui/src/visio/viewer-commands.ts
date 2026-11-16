@@ -1,3 +1,4 @@
+import type { VisioPageReorder } from 'ooxml-core/visio';
 import type { VisioGridSteps } from 'ooxml-core/visio/ui';
 import type { ViewerController, ViewerState } from './controller';
 import { planDeleteSelection } from './viewer-delete';
@@ -35,6 +36,9 @@ import { ViewerColorMenus } from './viewer-color-menus';
 import { ViewerFormatPane } from './viewer-format-pane';
 import { ViewerReview } from './viewer-review';
 import { ViewerDiagramParts } from './viewer-diagram-parts';
+import { ViewerOrgChart } from './viewer-org-chart';
+import { ViewerPictureFormat } from './viewer-picture-format';
+import { ViewerSwimlanes, swimlaneSelection } from './viewer-swimlanes';
 import { ViewerData } from './viewer-data';
 import { ViewerLayoutCommands } from './viewer-layout-commands';
 import { ViewerTextFeatures } from './viewer-text-features';
@@ -100,6 +104,9 @@ export class ViewerCommands {
 	#formatPane: ViewerFormatPane;
 	#review: ViewerReview;
 	#parts: ViewerDiagramParts;
+	#picture: ViewerPictureFormat;
+	#swimlanes: ViewerSwimlanes;
+	#orgChart: ViewerOrgChart;
 	#data: ViewerData;
 	readonly layoutCommands: ViewerLayoutCommands;
 	#textFeatures: ViewerTextFeatures;
@@ -146,6 +153,21 @@ export class ViewerCommands {
 			host.controller,
 			(run, message) => void this.#edit(run, message),
 			() => host.reveal('edit', true),
+		);
+		this.#picture = new ViewerPictureFormat(
+			host.root,
+			host.controller,
+			(run, message) => void this.#edit(run, message),
+		);
+		this.#swimlanes = new ViewerSwimlanes(
+			host.root,
+			host.controller,
+			(run, message) => void this.#edit(run, message),
+		);
+		this.#orgChart = new ViewerOrgChart(
+			host.root,
+			host.controller,
+			(run, message) => void this.#edit(run, message),
 		);
 		this.#data = new ViewerData(host.root, host.controller, host.announce, (run, message) => {
 			void this.#edit(run, message);
@@ -235,6 +257,11 @@ export class ViewerCommands {
 			flipSelection: (axis) => this.#transform({ type: 'flip', axis }),
 			changeShape: (shape) => this.#changeShape.run(shape),
 			insertDiagramPart: (action) => this.#parts.run(action),
+			container: (command) => this.#parts.container(command),
+			containerOptions: (action) => this.#parts.containerOptions(action),
+			picture: (action) => this.#picture.run(action),
+			swimlane: (action) => this.#swimlanes.run(action),
+			orgChart: (action) => this.#orgChart.run(action),
 			formatSelection: (action) => this.#formatting.run(action),
 			formatPainter: (mode) => this.#painter.run(mode),
 			arrangeSelection: (action) => this.#arrangement.run(action.operation),
@@ -277,9 +304,9 @@ export class ViewerCommands {
 			review: (action) => this.#review.run(action),
 		};
 	}
-	/** The page's grid lines while View > Grid is on (Snap to Grid), else 0. */
+	/** Page grid spacing; Snap & Glue controls snapping independently of View > Grid. */
 	get gridStep(): VisioGridSteps | 0 {
-		return this.#grid ? this.#pageSetup.rulerGrid.steps() : 0;
+		return this.#pageSetup.rulerGrid.steps();
 	}
 	get tool(): CanvasTool {
 		return this.#tool;
@@ -330,6 +357,12 @@ export class ViewerCommands {
 						feature: launcher === 'font-dialog' ? 'text-dialog' : 'paragraph-dialog',
 					});
 			},
+			options,
+		);
+		// A page tab dragged to a new place in the page tab bar is one reorder-page edit.
+		root.addEventListener(
+			'office-tab-reorder',
+			(event) => this.#reorderPage((event as CustomEvent<{ id: string; index: number }>).detail),
 			options,
 		);
 		// First, so its handles take the pointer before shape and marquee gestures.
@@ -429,9 +462,26 @@ export class ViewerCommands {
 	#delete(): void {
 		const state = this.host.controller.state;
 		if (this.#tool === 'connection-point' && this.#points.deleteSelected()) return;
+		// Deleting a selected swimlane takes its shapes with it and closes the gap.
+		const lane = swimlaneSelection(state);
+		if (lane?.isLane && state.selectedShapes.length === 1) {
+			this.#swimlanes.run({ type: 'swimlane', command: 'delete' });
+			return;
+		}
 		const plan = planDeleteSelection(state);
 		if (!plan || !this.#canEdit(state)) return;
 		void this.#edit(() => this.host.controller.applyEdits(plan.edits), plan.message);
+	}
+	#reorderPage(detail: { id: string; index: number }): void {
+		const state = this.host.controller.state;
+		const page = state.document?.pages[Number(detail.id)];
+		if (!page || !this.#canEdit(state)) return;
+		const command: VisioPageReorder = {
+			type: 'reorder-page',
+			pageId: page.id,
+			index: detail.index,
+		};
+		void this.#edit(() => this.host.controller.applyEdits([command]), 'Moved the page.');
 	}
 	#insertPage(): void {
 		const state = this.host.controller.state;
@@ -609,6 +659,9 @@ export class ViewerCommands {
 		this.#formatting.render(state);
 		this.#changeShape.render(state);
 		this.#parts.render(state);
+		this.#picture.render(state);
+		this.#swimlanes.render(state);
+		this.#orgChart.render(state);
 		this.#painter.render(state);
 		this.#insert.render(state);
 		this.#themes.render(state);

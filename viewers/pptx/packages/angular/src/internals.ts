@@ -71,7 +71,6 @@ export * from './viewer/chart-waterfall-map';
 
 // ── SmartArt internals (2D authoring helpers + the opt-in 3D renderer) ──
 export { SmartArt3DRendererComponent } from './viewer/smart-art-3d-renderer.component';
-export { SmartArtPreviewComponent } from './viewer/smart-art-preview.component';
 export { SmartArtPropertiesComponent } from './viewer/smart-art-properties.component';
 // `DEFAULT_PALETTE` here is the SmartArt node palette; it collides with the
 // chart palette of the same name re-exported via `chart-renderer-helpers`
@@ -90,7 +89,6 @@ export {
 } from './viewer/smart-art-drawing';
 export * from './viewer/smart-art-inline-edit';
 export * from './viewer/smart-art-insert-helpers';
-export * from './viewer/smart-art-node-style-helpers';
 export * from './viewer/smart-art-properties-helpers';
 export * from './viewer/smart-art-renderer-helpers';
 
@@ -99,6 +97,8 @@ export * from './viewer/table-cell-style';
 export * from './viewer/table-data-helpers';
 export * from './viewer/table-properties-helpers';
 export * from './viewer/table-renderer-helpers';
+export * from './viewer/table-style-context';
+export * from './viewer/slides-panel-contexts';
 
 // ── Ribbon (toolbar sub-sections composed by RibbonComponent) ──
 // `RibbonComponent` itself is a curated export (see `viewer/index.ts` /
@@ -106,7 +106,6 @@ export * from './viewer/table-renderer-helpers';
 // building blocks it composes for its own template.
 export { RibbonAnimationsSectionComponent } from './viewer/ribbon-animations-section.component';
 export { RibbonArrangeSectionComponent } from './viewer/ribbon-arrange-section.component';
-export { RibbonColorPopoverComponent } from './viewer/ribbon-color-popover.component';
 export { RibbonDesignSectionComponent } from './viewer/ribbon-design-section.component';
 export { RibbonDrawingGroupComponent } from './viewer/ribbon-drawing-group.component';
 export { RibbonDrawSectionComponent } from './viewer/ribbon-draw-section.component';
@@ -165,6 +164,11 @@ export { ColorChangedImageComponent } from './viewer/color-changed-image.compone
 export * from './viewer/color-changed-image-helpers';
 export * from './viewer/eyedropper';
 
+// ── AI assistant internals ──
+// Backs `createAiAssistant` of the `pptx-angular-viewer/ai` secondary entry point, which can
+// import only package entries; it takes a config only. Import `createAiAssistant` instead.
+export { createAiAssistantHandle } from './viewer/ai-assistant-registry';
+
 // ── Mobile chrome internals ──
 export * from './viewer/mobile-chrome-helpers';
 
@@ -173,8 +177,7 @@ export { CustomShowsComponent } from './viewer/custom-shows.component';
 export * from './viewer/custom-shows-helpers';
 export { ExportProgressModalComponent } from './viewer/export-progress-modal.component';
 export { FollowModeBarComponent } from './viewer/follow-mode-bar.component';
-export { InsertSmartArtDialogComponent } from './viewer/insert-smart-art-dialog.component';
-export type { SmartArtInsertEvent } from './viewer/insert-smart-art-dialog.component';
+export { InsertDialogsHostComponent } from './viewer/insert-dialogs-host.component';
 export { NotesToolbarComponent } from './viewer/notes-toolbar.component';
 export { RemoteSelectionOverlayComponent } from './viewer/remote-selection-overlay.component';
 export { SelectionPaneComponent } from './viewer/selection-pane.component';

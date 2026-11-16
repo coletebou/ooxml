@@ -8,6 +8,7 @@ import {
 	output,
 	signal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import {
 	BACKSTAGE_NAV,
@@ -19,9 +20,12 @@ import {
 	formatBackstageSize,
 	isActionHidden,
 	listBackstageRecentFiles,
+	CLOUD_OPEN_ACCEPT,
+	openPlacesLabels,
 } from 'ooxml-ui/pptx';
 import type {
 	AccountAuthConfig,
+	CloudOpenedFile,
 	BackstageCardId,
 	BackstageNavEntry,
 	BackstagePage,
@@ -30,6 +34,7 @@ import type {
 	ViewerRegionId,
 	ToolbarActionId,
 } from 'ooxml-ui/pptx';
+import { map, merge, of, startWith } from 'rxjs';
 
 import { AccountPageComponent } from './account-page.component';
 import { BackstageNavIconComponent } from './backstage-nav-icon.component';
@@ -215,6 +220,32 @@ export class RibbonFileSectionComponent {
 			? this.recent().filter((file) => `${file.name} ${file.location}`.toLowerCase().includes(q))
 			: this.recent();
 	});
+	/** Changes on language or dictionary updates so the place labels follow the viewer. */
+	private readonly translations = toSignal(
+		this.translate
+			? merge(this.translate.onLangChange, this.translate.onTranslationChange).pipe(
+					map(() => Date.now()),
+					startWith(0),
+				)
+			: of(0),
+		{ initialValue: 0 },
+	);
+	/** The shared places element: "This device" is its content, each `fileProviders` entry a tab. */
+	protected readonly openAccept = CLOUD_OPEN_ACCEPT;
+	protected readonly placeLabels = computed(() => {
+		this.translations();
+		return openPlacesLabels(this.t ?? ((key: string) => key));
+	});
+	protected readonly locale = computed(() => {
+		this.translations();
+		return this.translate?.currentLang() ?? undefined;
+	});
+	/** The tabs belong to File > Open; Home lists the device files alone. */
+	protected readonly placeProviders = computed(() =>
+		this.currentPage() === 'open' ? (this.fileIO?.fileProviders() ?? []) : [],
+	);
+	/** The place the user picked. */
+	protected readonly placeId = signal<string | undefined>(undefined);
 	protected readonly size = formatBackstageSize;
 	protected readonly actions = computed(() =>
 		this.pageActions(this.currentPage() as BackstagePage),
@@ -258,6 +289,12 @@ export class RibbonFileSectionComponent {
 
 	protected create(templateId: string): void {
 		this.createPresentation.emit(templateId);
+		this.close.emit();
+	}
+
+	/** A file opened in a cloud place: load it with its own storage, then close the backstage. */
+	protected openCloudFile(file: CloudOpenedFile): void {
+		this.fileIO?.openCloudFile(file);
 		this.close.emit();
 	}
 

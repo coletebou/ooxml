@@ -1,4 +1,5 @@
 import type { DocumentProperties } from './core-properties';
+import type { DocumentPropertySet } from '../opc/properties/types';
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
 import { defaultStyleCatalogs } from './default-styles';
 import type { StJcTable, StNumberFormat } from './generated/wml-simple-types';
@@ -16,7 +17,13 @@ export type {
 import type { Paragraph } from './model-paragraph';
 export type * from './content-control-model';
 export type * from './form-field-model';
-export type { HyperlinkInfo, InlineImage, PicturePlacement, WatermarkSpec } from './inline-model';
+export type {
+	HyperlinkInfo,
+	InlineImage,
+	PicturePlacement,
+	PictureWatermarkSpec,
+	WatermarkSpec,
+} from './inline-model';
 import type { Note, SectionProperties } from './section-model';
 export type {
 	HeaderFooterContent,
@@ -75,10 +82,24 @@ export interface Table {
 	id: string;
 	/** Whether row, cell and paragraph structure can be edited without losing unsupported table XML. */
 	structureEditable?: boolean;
+	/**
+	 * Set on a table that is not rectangular (merged cells, nested tables) but whose cells tile its
+	 * grid and carry no XML the merge-aware structure editors (table-structure.ts) cannot keep.
+	 */
+	restructurable?: boolean;
 	rows: TableCell[][];
 	/** `w:tblGrid/w:gridCol` widths in twips, one per grid column. */
 	grid?: Twips[];
 	widthTwips?: Twips;
+	/** A percentage `w:tblW` (`type="pct"`) as a fraction of the text column; read-only layout input. */
+	widthPercent?: number;
+	/**
+	 * `w:tblLayout`: `fixed` keeps the grid, `autofit` (the default when the element is absent)
+	 * sizes the columns from their content. Set by the parser; tables the editor creates have none.
+	 */
+	layout?: 'fixed' | 'autofit';
+	/** `w:tblpPr`: the table floats at this position and text wraps around it (read-only). */
+	floating?: import('./table-model').TableFloatingPosition;
 	alignment?: 'left' | 'center' | 'right';
 	/** The exact `w:tblPr/w:jc` value (`ST_JcTable`, including `start`/`end`); `alignment` is derived from it. */
 	justification?: StJcTable;
@@ -116,6 +137,16 @@ export interface DocumentModel {
 	sections?: SectionProperties[];
 	/** Package properties from `docProps/core.xml` (title, author, tags...). */
 	properties?: DocumentProperties;
+	/**
+	 * Every core, extended and custom property the package was loaded with, read-only: what
+	 * DOCPROPERTY fields show (the editable core fields in `properties` take their place).
+	 */
+	packageProperties?: DocumentPropertySet;
+	/**
+	 * Package metadata Inspect Document reports and removes: extended and custom properties,
+	 * custom XML data, the attached template, the reviewer list and the privacy settings.
+	 */
+	packageInformation?: import('./package-information').PackageInformation;
 	/** Whether `settings.xml` requests separate even-page headers/footers (`w:evenAndOddHeaders`). */
 	evenAndOddHeaders?: boolean;
 	/** `w:autoHyphenation` in settings.xml: Word hyphenates words at line ends. */
@@ -125,6 +156,17 @@ export interface DocumentModel {
 	footnotes?: Note[];
 	/** Saved Word layout compatibility mode; native mode15 footnotes use independent columns. */
 	compatibilityMode?: number;
+	/**
+	 * `w:compat/w:doNotUseHTMLParagraphAutoSpacing`. Absent, Word leaves the larger of the space after
+	 * a paragraph and the space before the next (and gives `w:beforeAutospacing` 14 pt); set, it adds
+	 * them and reads the twips. Measured the same in compatibility modes 12, 14 and 15 except pageBreakBefore.
+	 */
+	doNotUseHtmlParagraphAutoSpacing?: boolean;
+	/**
+	 * Document-wide kinsoku settings from settings.xml (`w:strictFirstAndLastChars`,
+	 * `w:noLineBreaksBefore`, `w:noLineBreaksAfter`); read only, settings.xml is saved as loaded.
+	 */
+	kinsoku?: import('../text/kinsoku').KinsokuSettings;
 	/** Custom separator stories, including explicitly empty separators. */
 	footnoteSeparators?: { separator?: Note; continuationSeparator?: Note };
 	endnotes?: Note[];
@@ -156,6 +198,15 @@ export interface PendingMediaPart {
 	bytes: Uint8Array;
 	contentType: string;
 }
+/** Options of a save. */
+export interface SaveOptions {
+	/**
+	 * Stamps `dcterms:modified` (and `cp:lastModifiedBy` when `author` is given) in
+	 * `docProps/core.xml` of a package whose content changed. Off unless given (a save keeps every
+	 * other part byte for byte); `at` fixes the time. The editor element saves with it on.
+	 */
+	modified?: { at?: Date; author?: string };
+}
 export interface LoadedDocument {
 	model: DocumentModel;
 	/** Original image/media bytes keyed by package part name, kept off the JSON model so diffs stay small.
@@ -166,6 +217,14 @@ export interface LoadedDocument {
 	save(
 		model?: DocumentModel,
 		pendingMedia?: ReadonlyMap<string, PendingMediaPart>,
+		options?: SaveOptions,
+	): Promise<Uint8Array>;
+	/** Present when the document was converted from another format (a Word 97-2003 .doc): saves the
+	 *  full model as a .docx, where `save` keeps the source format and refuses what it cannot write. */
+	saveDocx?(
+		model?: DocumentModel,
+		pendingMedia?: ReadonlyMap<string, PendingMediaPart>,
+		options?: SaveOptions,
 	): Promise<Uint8Array>;
 }
 export function createDocument(): DocumentModel {

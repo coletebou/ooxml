@@ -1,6 +1,6 @@
 # 快速开始
 
-docx-viewer 由一个 `<docx-editor>` Web Component 和六个轻量的框架适配器组成。本页将安装适配器、挂载编辑器，并加载和保存文档。它是一个早期实现：并不等同于 Microsoft Word，也不是无损导出（参见[支持路线图](/parity-roadmap)）。
+docx-viewer 由一个 `<docx-editor>` Web Component 和六个轻量的框架适配器组成。本页将安装适配器、挂载编辑器，并加载和保存文档。它依据[稳定性策略](https://github.com/ChristopherVR/ooxml/blob/main/docs/stability.md)属于稳定版，并提供[保留保证](/preservation)，但并不等同于 Microsoft Word（参见[支持路线图](/parity-roadmap)）。
 
 ## 1. 安装
 
@@ -58,7 +58,7 @@ export function Editor() {
 
 ## 3. 加载和保存文件
 
-组件引用（或原生 JS 的句柄）提供 `load(bytes)` 和 `save()`。加载时会识别 DOCX 和旧版 `.doc`；不支持受密码保护的文件。
+组件引用（或原生 JS 的句柄）提供 `load(bytes)` 和 `save()`。加载时会识别 DOCX 和旧版 `.doc`。受密码保护的文件只能通过 `ooxml-core/docx/load` 中的 `loadDocument(bytes, { password })` 打开；元素的 `load()` 不接受密码，因此会将此类文件报告为 `document-error`。
 
 ```ts
 const bytes = new Uint8Array(await file.arrayBuffer());
@@ -76,7 +76,8 @@ const blob = await editor.save(); // Blob of the serialized .docx
 - 要在仓库克隆中运行演示（需要 Bun）：
 
 ```bash
-bun install
+bun install          # from the repository root
+cd viewers/docx
 bun run demo
 ```
 

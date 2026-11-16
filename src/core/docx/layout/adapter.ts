@@ -1,4 +1,5 @@
-import type { Block, DocumentModel, Paragraph, SectionProperties, TextRun } from '../index';
+import { scriptLayoutRuns } from './script-fonts';
+import type { Block, DocumentModel, Paragraph, SectionProperties, TextRun, Twips } from '../index';
 import {
 	computeListLabels,
 	dateFieldResult,
@@ -18,10 +19,20 @@ import { shapeSvg } from '../shape-svg';
 import type { ShapeSpec } from '../shape-model';
 import { DEFAULT_FONT_SIZE_PT, ptToPx } from './units';
 import { docxChartPaint } from '../chart-paint';
+import { pictureBulletSizePt } from '../numbering-picture';
 import { definedProps } from '../defined-props';
+import { kinsokuLanguage } from '../../text/kinsoku';
+import { resolveEastAsiaLanguage } from '../run-language';
 import { symbolOnly, symbolSegments } from '../special-characters';
 import { formFieldDisplayText } from '../form-fields';
 import { adaptTable } from './adapt-table';
+import {
+	addsParagraphSpacing,
+	attachesFootnotesToBodyColumns,
+	compatibilityProfile,
+	keepsSpaceBeforePageBreak,
+	usesModernFootnoteLayout,
+} from '../compatibility';
 import { foldDropCaps } from './adapt-drop-cap';
 import { groupParagraphBorders, paragraphBox } from './adapt-paragraph-box';
 import { endnoteParagraphs, noteLabels, paragraphFootnotes } from './adapt-notes';
@@ -56,6 +67,8 @@ const EQUATION_NOTE =
 const NEXT_COLUMN_NOTE = 'A "next column" section break is laid out as a continuous section break.';
 
 const twipsToPx = twipsToPixels;
+/** Word gives `beforeAutospacing` and `afterAutospacing` 14 pt (measured in spacing-probe.json). */
+const HTML_AUTO_SPACING_TWIPS = twips(280);
 
 /** A paragraph holding only a display equation (`m:oMathPara`) is centred, as in Word. */
 function isDisplayEquationParagraph(paragraph: Paragraph): boolean {
@@ -71,9 +84,9 @@ function shapeChart(
 	widthPx: number,
 	heightPx: number,
 	theme: DocumentModel['theme'],
-): { chart?: { svg: string; label: string } } {
+): { chart?: { svg: string; label: string; shape: true } } {
 	const svg = shapeSvg(shape, widthPx, heightPx, theme);
-	return svg ? { chart: { svg, label: 'Shape' } } : {};
+	return svg ? { chart: { svg, label: 'Shape', shape: true } } : {};
 }
 
 function sectionBreak(
@@ -96,6 +109,12 @@ export function adaptDocumentModel(
 	const reviewMode = options.reviewDisplayMode ?? 'all';
 	const visibleModel = visibleReviewModel(model, reviewMode);
 	const catalog = model.paragraphStyles;
+	const compatibility = compatibilityProfile(model);
+	const addParagraphSpacing = addsParagraphSpacing(compatibility);
+	const keepSpaceBeforePageBreak = keepsSpaceBeforePageBreak(compatibility);
+	/** HTML auto spacing is 14 pt when the compatibility option is off; otherwise the twips are used. */
+	const autoSpaced = (auto: boolean | undefined, twipsValue: Twips | undefined) =>
+		auto && !addParagraphSpacing ? HTML_AUTO_SPACING_TWIPS : twipsValue;
 	const noted = new Set<string>();
 	const reportOnce = (message: string) => {
 		if (!noted.has(message)) {
@@ -135,7 +154,11 @@ export function adaptDocumentModel(
 			return { text: run.text, hidden: true, sourceLength: reviewSourceLength(run) };
 		const { formatting, family, color } = effective(run, paragraphStyleId);
 		const equation = run.equation
-			? equationObject(run.equation.omml, ptToPx(formatting.fontSize ?? DEFAULT_FONT_SIZE_PT))
+			? equationObject(
+					run.equation.omml,
+					ptToPx(formatting.fontSize ?? DEFAULT_FONT_SIZE_PT),
+					Boolean(run.equation.display),
+				)
 			: undefined;
 		if (run.equation && !equation) reportOnce(EQUATION_NOTE);
 		// DATE and TIME update when Word paginates for display or printing.
@@ -179,9 +202,11 @@ export function adaptDocumentModel(
 						heightPx: 1,
 						noteSeparator: run.noteSeparator,
 					}
-				: image && !image.anchored
+				: // A picture watermark floats behind the page text and takes no room in the header.
+					image && !image.anchored && !image.pictureWatermark
 					? {
 							partName: image.partName,
+							...(image.pictureFill ? { pictureFill: image.pictureFill } : {}),
 							contentType: image.contentType,
 							widthPx: image.widthPx,
 							heightPx: image.heightPx,
@@ -224,6 +249,15 @@ export function adaptDocumentModel(
 			...(formatting.strike || formatting.doubleStrike ? { strike: true } : {}),
 			...(run.break ? { breakAfter: run.break } : {}),
 			...(script ? { script } : {}),
+			...definedProps({
+				kinsokuLanguage: kinsokuLanguage(
+					resolveEastAsiaLanguage(run, {
+						runCatalog: model.characterStyles,
+						paragraphCatalog: catalog,
+						paragraphStyleId,
+					}),
+				),
+			}),
 		};
 	}
 	const labels = computeListLabels(model);
@@ -232,10 +266,22 @@ export function adaptDocumentModel(
 		const first = adaptRun(paragraph.runs[0] ?? { text: '' }, paragraph.style);
 		const marker = label.markerFormat;
 		const suffix = label.suffix === 'tab' ? '\t' : label.suffix === 'space' ? ' ' : '';
+		const pictureWidthPx = label.picture
+			? (pictureBulletSizePt(
+					label.picture,
+					marker?.fontSizeHalfPoints ? marker.fontSizeHalfPoints / 2 : (first.fontSizePt ?? 11),
+				).widthPt *
+					4) /
+				3
+			: undefined;
 		return {
 			text: `${displayListLabel(label.text)}${suffix}`,
 			synthetic: true,
-			marker: { length: displayListLabel(label.text).length, alignment: label.alignment ?? 'left' },
+			marker: {
+				length: displayListLabel(label.text).length,
+				alignment: label.alignment ?? 'left',
+				...(pictureWidthPx !== undefined ? { widthPx: pictureWidthPx } : {}),
+			},
 			...definedProps({
 				bold: marker?.bold ?? first.bold,
 				italic: marker?.italic ?? first.italic,
@@ -258,12 +304,22 @@ export function adaptDocumentModel(
 	function adaptParagraphOnly(paragraph: Paragraph, markLabel?: string): LayoutParagraph {
 		const resolved = catalog ? resolveParagraphFormatting(paragraph, catalog) : paragraph;
 		const label = labels.get(paragraph.id);
-		// Numbering level indents apply unless the paragraph or its style sets its own.
-		const ownFirstLine =
-			resolved.firstLineTwips !== undefined || resolved.hangingTwips !== undefined;
+		// Numbering level indents apply unless the paragraph or its style sets its own. A paragraph
+		// numbered directly (`w:numPr`) takes the level's indents over its style's (Word draws the
+		// text of a List Paragraph at the level's indent, not the style's 720 twips): only the
+		// paragraph's own indents beat the level.
+		const levelWins = Boolean(label && paragraph.numbering);
+		const indents = levelWins ? paragraph : resolved;
+		const ownFirstLine = indents.firstLineTwips !== undefined || indents.hangingTwips !== undefined;
 		// A symbol that shares its run with text is drawn in its own font, the text in the run's.
 		const runs = paragraph.runs.flatMap((run) =>
-			symbolSegments(run).map((segment) => adaptRun(segment, paragraph.style, markLabel)),
+			symbolSegments(run).flatMap((segment) => {
+				const adapted = adaptRun(segment, paragraph.style, markLabel);
+				// Fields, note markers and symbol codes have their own display/source rules.
+				if (segment.field || segment.noteReference || segment.noteMark || symbolOnly(segment))
+					return [adapted];
+				return scriptLayoutRuns(adapted, effective(segment, paragraph.style).formatting, theme);
+			}),
 		);
 		const visible = visibleReviewParagraph(paragraph, reviewMode);
 		const footnotes = paragraphFootnotes(visible, visibleModel, noteLabel, adaptParagraph);
@@ -292,16 +348,19 @@ export function adaptDocumentModel(
 			...definedProps({
 				align: resolved.align ?? (isDisplayEquationParagraph(paragraph) ? 'center' : undefined),
 				direction: resolved.direction,
-				spacingBeforeTwips: resolved.spacingBeforeTwips,
-				spacingAfterTwips: resolved.spacingAfterTwips,
+				spacingBeforeTwips: autoSpaced(resolved.spacingBeforeAuto, resolved.spacingBeforeTwips),
+				spacingAfterTwips: autoSpaced(resolved.spacingAfterAuto, resolved.spacingAfterTwips),
 				lineSpacingTwips: resolved.lineSpacingTwips,
 				lineSpacingRule: resolved.lineSpacingRule,
-				indentLeftTwips: resolved.indentLeftTwips ?? label?.indentLeftTwips,
+				indentLeftTwips:
+					indents.indentLeftTwips ??
+					label?.indentLeftTwips ??
+					(levelWins ? resolved.indentLeftTwips : undefined),
 				indentRightTwips: resolved.indentRightTwips,
 				indentStartTwips: resolved.indentStartTwips,
 				indentEndTwips: resolved.indentEndTwips,
-				firstLineTwips: ownFirstLine ? resolved.firstLineTwips : label?.firstLineTwips,
-				hangingTwips: ownFirstLine ? resolved.hangingTwips : label?.hangingTwips,
+				firstLineTwips: ownFirstLine ? indents.firstLineTwips : label?.firstLineTwips,
+				hangingTwips: ownFirstLine ? indents.hangingTwips : label?.hangingTwips,
 				styleId: paragraph.style,
 			}),
 			...(resolved.pageBreakBefore ? { pageBreakBefore: true } : {}),
@@ -309,6 +368,11 @@ export function adaptDocumentModel(
 			...(resolved.keepLines ? { keepLines: true } : {}),
 			...(resolved.widowControl === false ? { widowControl: false } : {}),
 			...(resolved.contextualSpacing ? { contextualSpacing: true } : {}),
+			...(resolved.kinsoku === false ? { kinsoku: false as const } : {}),
+			...(resolved.autoSpaceDE === false ? { autoSpaceDE: false as const } : {}),
+			...(resolved.autoSpaceDN === false ? { autoSpaceDN: false as const } : {}),
+			...(resolved.overflowPunct === false ? { overflowPunct: false as const } : {}),
+			...(model.kinsoku ? { kinsokuSettings: model.kinsoku } : {}),
 		};
 	}
 	function adaptBlock(block: Block): LayoutBlock {
@@ -348,8 +412,8 @@ export function adaptDocumentModel(
 			)
 		: undefined;
 	const sections = model.sections;
-	const modernFootnoteSeparator = model.compatibilityMode === 15;
-	const legacyFootnoteColumns = model.compatibilityMode === 12 || model.compatibilityMode === 14;
+	const modernFootnoteSeparator = usesModernFootnoteLayout(compatibility);
+	const legacyFootnoteColumns = attachesFootnotesToBodyColumns(compatibility);
 	if (
 		!modernFootnoteSeparator &&
 		!legacyFootnoteColumns &&
@@ -371,6 +435,8 @@ export function adaptDocumentModel(
 						marginLeftPx: model.page.marginLeft,
 					},
 					...(footnoteSeparators ? { footnoteSeparators } : {}),
+					...(addParagraphSpacing ? { addParagraphSpacing: true } : {}),
+					...(keepSpaceBeforePageBreak ? { keepSpaceBeforePageBreak: true } : {}),
 					...(modernFootnoteSeparator ? { modernFootnoteSeparator: true } : {}),
 					...(legacyFootnoteColumns ? { legacyFootnoteColumns: true } : {}),
 					blocks: blocks.filter((block) => !folded.has(block)),
@@ -461,6 +527,8 @@ export function adaptDocumentModel(
 						},
 					}
 				: {}),
+			...(addParagraphSpacing ? { addParagraphSpacing: true } : {}),
+			...(keepSpaceBeforePageBreak ? { keepSpaceBeforePageBreak: true } : {}),
 			...(sectionStart && { break: sectionStart }),
 			...(section.verticalAlign ? { verticalAlign: section.verticalAlign } : {}),
 			// Empty text break markers share the preceding line. The mandatory
@@ -481,5 +549,14 @@ export function adaptDocumentModel(
 			}),
 		};
 	});
-	return { sections: result };
+	// Word collapses the first paragraph's space before with the previous section's last space after.
+	return {
+		sections: result.map((section, index) => {
+			const last = result[index - 1]?.blocks.at(-1);
+			const after = last?.kind === 'paragraph' ? last.spacingAfterTwips : undefined;
+			return !addParagraphSpacing && after
+				? { ...section, leadingSpacingAfterPx: twipsToPx(after) }
+				: section;
+		}),
+	};
 }

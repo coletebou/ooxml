@@ -156,14 +156,15 @@ describe('chart edits reach the saved package', () => {
 		});
 		const before = await text(await JSZip.loadAsync(deck), 'ppt/charts/chart1.xml');
 		expect(before).not.toContain('<c:title');
-		expect(before).toContain('<c:autoTitleDeleted val="1">');
+		expect(before).toMatch(/<c:autoTitleDeleted val="1"\s*\/?>/u);
 
 		const saved = await editAndSave(deck, (chart) => {
 			chart.title = 'Added later';
 		});
 		const xml = await text(saved.zip, 'ppt/charts/chart1.xml');
 		expect(xml).toContain('<a:t>Added later</a:t>');
-		expect(xml).toContain('<c:autoTitleDeleted val="0">');
+		// The title edit is saved through the shared chart writer, which closes empty elements.
+		expect(xml).toMatch(/<c:autoTitleDeleted val="0"\s*\/?>/u);
 		expect(xml.indexOf('<c:title>')).toBeGreaterThan(-1);
 		expect(xml.indexOf('<c:title>')).toBeLessThan(xml.indexOf('<c:autoTitleDeleted'));
 		expect(xml.indexOf('<c:autoTitleDeleted')).toBeLessThan(xml.indexOf('<c:plotArea>'));
@@ -182,7 +183,7 @@ describe('chart edits reach the saved package', () => {
 		});
 		const xml = await text(saved.zip, 'ppt/charts/chart1.xml');
 		expect(xml).not.toContain('<c:title');
-		expect(xml).toContain('<c:autoTitleDeleted val="1">');
+		expect(xml).toMatch(/<c:autoTitleDeleted val="1"\s*\/?>/u);
 		expect((await reload(saved)).title).toBeUndefined();
 	});
 
@@ -202,7 +203,7 @@ describe('chart edits reach the saved package', () => {
 		expect(xml).toContain('<cx:pt idx="3">12</cx:pt>');
 		expect(xml).toContain('<cx:v>Deals</cx:v>');
 		expect(xml).toContain('<a:t>Pipeline</a:t>');
-		expect(xml).toContain('<a:srgbClr val="FF0000">');
+		expect(xml).toMatch(/<a:srgbClr val="FF0000"\s*\/?>/u);
 		expect(xml).toContain('formatCode="0.0"');
 		expect(xml).toContain('uniqueId="{00000001-0000-0000-0000-000000000000}"');
 		expect(xml).toContain('uri="vendor-roundtrip"');

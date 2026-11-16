@@ -9,8 +9,14 @@ const shot = async (page: Page, name: string): Promise<void> => {
 	if (shotsDir) await page.screenshot({ path: join(shotsDir, `${name}.png`) });
 };
 
-async function open(context: BrowserContext, name: string, room: string): Promise<Page> {
+async function open(
+	context: BrowserContext,
+	name: string,
+	room: string,
+	clock = false,
+): Promise<Page> {
 	const page = await context.newPage();
+	if (clock) await page.clock.install();
 	await page.goto(`/?local=1&name=${name}&room=${room}`);
 	await expect(page.getByRole('heading', { name: '# General', exact: true })).toBeVisible({
 		timeout: 15_000,
@@ -154,7 +160,6 @@ test('calendar: week view, scheduling, details, join and .ics', async ({ browser
 	await form.getByRole('textbox', { name: 'Title', exact: true }).fill('Design sync v2');
 	await form.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(agenda(bob)).toContainText('Design sync v2');
-	ada.once('dialog', (dialog) => void dialog.accept());
 	await agenda(ada)
 		.getByRole('button', { name: /^Design sync v2/u })
 		.first()
@@ -163,6 +168,7 @@ test('calendar: week view, scheduling, details, join and .ics', async ({ browser
 	await cancelling.getByRole('button', { name: 'Cancel meeting' }).click();
 	await cancelling.getByRole('radio', { name: 'All events in the series', exact: true }).check();
 	await cancelling.getByRole('button', { name: 'Cancel meeting' }).click();
+	await ada.getByRole('alertdialog').getByRole('button', { name: 'OK', exact: true }).click();
 	await expect.poll(() => count(bob, 'meetings')).toBe(0);
 	await context.close();
 });
@@ -191,11 +197,12 @@ test('calendar: a reminder shows five minutes ahead, but not in Do not disturb',
 	test.setTimeout(90_000);
 	const room = `calrem-${Date.now()}`;
 	const context = await browser.newContext();
-	const ada = await open(context, 'Ada', room);
+	const ada = await open(context, 'Ada', room, true);
 	await scheduleMeeting(ada, { title: 'Standup', startIn: 40 });
 	await expect(ada.locator('.activity-toast')).toHaveCount(0);
 	// A second meeting inside the window: the 15 second check announces it with a toast.
 	await scheduleMeeting(ada, { title: 'Starting soon', startIn: 4 });
+	await ada.clock.runFor(15_000);
 	const toast = ada.locator('.activity-toast', { hasText: 'Starting soon' });
 	await expect(toast).toBeVisible({ timeout: 25_000 });
 	await expect(toast).toContainText('Starts in');
@@ -209,7 +216,7 @@ test('calendar: a reminder shows five minutes ahead, but not in Do not disturb',
 		(document.querySelector('teams-app') as unknown as TeamsApp).client!.setAvailability('dnd'),
 	);
 	await scheduleMeeting(ada, { title: 'Quiet one', startIn: 3 });
-	await ada.waitForTimeout(18_000);
+	await ada.clock.runFor(18_000);
 	await expect(ada.locator('.activity-toast', { hasText: 'Quiet one' })).toHaveCount(0);
 	await context.close();
 });

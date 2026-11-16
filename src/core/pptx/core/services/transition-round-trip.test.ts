@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import type { XmlObject, PptxSlideTransition } from '../types';
 import { PptxSlideTransitionService } from './PptxSlideTransitionService';
 import { PptxXmlLookupService } from './PptxXmlLookupService';
+import { xmlFixture } from '../../test-support/access';
 
 function createService(): PptxSlideTransitionService {
 	const xmlLookupService = new PptxXmlLookupService();
@@ -151,6 +152,30 @@ describe('pptxSlideTransitionService round-trip', () => {
 		};
 
 		const xml = service.buildSlideTransitionXml(transition);
+		expect(xml).toBeUndefined();
+	});
+
+	it('writes a bare transition for type "none" with a timed advance', () => {
+		const xml = service.buildSlideTransitionXml({
+			type: 'none',
+			durationMs: 1000,
+			advanceOnClick: true,
+			advanceAfterMs: 5000,
+		});
+		expect(xml).toEqual({ '@_advClick': '1', '@_advTm': '5000' });
+	});
+
+	it('writes a bare transition for type "none" that disables click advance', () => {
+		const xml = service.buildSlideTransitionXml({ type: 'none', advanceOnClick: false });
+		expect(xml).toEqual({ '@_advClick': '0' });
+	});
+
+	it('writes nothing for type "none" with only default advance settings', () => {
+		const xml = service.buildSlideTransitionXml({
+			type: 'none',
+			durationMs: 1000,
+			advanceOnClick: true,
+		});
 		expect(xml).toBeUndefined();
 	});
 
@@ -309,7 +334,7 @@ describe('pptxSlideTransitionService round-trip', () => {
 	it.each(['cube', 'flip', 'rotate', 'orbit'] as const)(
 		'parses p14 %s transition with @dir',
 		(name) => {
-			const slideXml: XmlObject = {
+			const slideXml = xmlFixture({
 				'p:sld': {
 					'p:transition': {
 						'p:extLst': {
@@ -320,7 +345,7 @@ describe('pptxSlideTransitionService round-trip', () => {
 						},
 					},
 				},
-			};
+			});
 			const parsed = service.parseSlideTransition(slideXml);
 			expect(parsed!.type).toBe(name);
 			expect(parsed!.direction).toBe('l');

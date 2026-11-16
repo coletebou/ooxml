@@ -120,6 +120,8 @@ export const schema = new Schema({
 				sections: { default: null },
 				sectionParts: { default: null },
 				noteParts: { default: null },
+				/** Document properties and package information as JSON (`document-information-attr.ts`). */
+				documentInformation: { default: null },
 				...commentHistoryAttributes,
 			},
 		},
@@ -161,6 +163,11 @@ export const schema = new Schema({
 				widowControl: { default: null },
 				contextualSpacing: { default: null },
 				suppressLineNumbers: { default: null },
+				/** East Asian typography toggles (`w:kinsoku`...): true, false or null = no element; read-only. */
+				kinsoku: { default: null },
+				autoSpaceDE: { default: null },
+				autoSpaceDN: { default: null },
+				overflowPunct: { default: null },
 				/** `w:framePr` drop cap: `{ style, lines }` on the frame paragraph holding the initial. */
 				dropCap: { default: null },
 				/** `w:pBdr` (object) and shading fill; read-only, drawn around the paragraph. */
@@ -170,6 +177,8 @@ export const schema = new Schema({
 				tabStops: { default: null },
 				/** Read-only bookmark names starting in this paragraph; not user-editable. */
 				bookmarks: { default: [] },
+				/** Editable ranges (`w:permStart`/`w:permEnd`) in this paragraph; read-only. */
+				permissions: { default: null },
 				/** Block-level content control (`w:sdt`) around this paragraph, as an object. */
 				contentControl: { default: null },
 			},
@@ -180,7 +189,8 @@ export const schema = new Schema({
 						align: (el as HTMLElement).style.textAlign || null,
 						direction: (el as HTMLElement).dir || (el as HTMLElement).style.direction || null,
 						id: (el as HTMLElement).dataset.id || '',
-						style: '',
+						// Set by the Word clipboard reader to a style the document defines.
+						style: (el as HTMLElement).dataset.docxParagraphStyle || '',
 						spacingBeforeTwips: null,
 						spacingAfterTwips: null,
 						lineSpacingTwips: null,
@@ -261,12 +271,21 @@ export const schema = new Schema({
 			attrs: {
 				id: { default: '' },
 				structureEditable: { default: true },
+				/** Merged or nested table whose rows, columns and cells the structure commands can edit. */
+				restructurable: { default: false },
+				/** The table's `w:tblGrid` widths as JSON, kept so column edits reach the model. */
+				grid: { default: null },
 				widthTwips: { default: null },
 				alignment: { default: null },
 				indentTwips: { default: null },
 				borders: { default: null },
 				/** Default cell margins (`w:tblCellMar`) as JSON. */
 				cellMargins: { default: null },
+				/**
+				 * The margins a side takes when the table sets none (its style chain, then the default
+				 * table style) as JSON. Shown by the dialogs; never written back.
+				 */
+				inheritedCellMargins: { default: null },
 				/** The block-level content control around the table (`w:sdt` around `w:tbl`). */
 				contentControl: { default: null },
 			},
@@ -274,7 +293,8 @@ export const schema = new Schema({
 			toDOM: (node) => ['table', { style: tableStyle(node.attrs) }, ['tbody', 0]],
 		},
 		tableRow: {
-			content: 'tableCell+',
+			// A row whose cells all continue vertical merges from above holds no cell of its own.
+			content: 'tableCell*',
 			/** Row formatting travels with the row during structural edits and undo. */
 			attrs: { heightPx: { default: null }, properties: { default: null } },
 			parseDOM: [{ tag: 'tr' }],
@@ -291,6 +311,8 @@ export const schema = new Schema({
 				sourceCellKey: { default: '' },
 				colspan: { default: 1 },
 				rowspan: { default: 1 },
+				/** First-paragraph ids (JSON) of the continuation cells a vertical merge has below this cell. */
+				continueKeys: { default: null },
 				widthTwips: { default: null },
 				verticalAlign: { default: null },
 				shadingFill: { default: null },

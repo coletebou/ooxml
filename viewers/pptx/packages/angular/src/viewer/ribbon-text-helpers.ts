@@ -5,7 +5,11 @@ import {
 	setElementBullets,
 	transformInlineListCase,
 } from 'ooxml-ui/pptx';
-import type { ElementBulletPatch, InlineTextEditSnapshot } from 'ooxml-ui/pptx';
+import type {
+	ElementBulletPatch,
+	InlineTextEditSnapshot,
+	ListStyleUpdateOptions,
+} from 'ooxml-ui/pptx';
 import { INLINE_EDITOR_SELECTOR } from 'ooxml-ui/pptx/render/context-menu-target';
 import { textStylePatch } from 'ooxml-ui/pptx/render/inspector-helpers';
 import { remapTextToSegments } from 'ooxml-ui/pptx/render/remap-text';
@@ -23,23 +27,19 @@ import type { PptxElement, TextStyle } from 'pptx-viewer-core';
 import type { EditorStateService } from './editor-state.service';
 
 /**
- * The live (uncommitted) plain text of the open inline-edit `<textarea
- * data-inline-editor>`, or `undefined` when none is open. The textarea is
- * UNCONTROLLED (see `slide-canvas.component.ts`): typing updates its own
- * `.value` and only publishes to collaboration broadcast on input, never the
- * model, so `element.textSegments`/`.text` can be stale relative to what is
- * on screen for the whole edit session, not just mid-keystroke.
+ * The live (uncommitted) plain text of the open inline editor
+ * (`[data-inline-editor]`), or `undefined` when none is open. The editor is
+ * UNCONTROLLED (see `slide-canvas.component.ts`): typing changes its own DOM
+ * and only publishes to collaboration broadcast on input, never the model, so
+ * `element.textSegments`/`.text` can be stale relative to what is on screen
+ * for the whole edit session, not just mid-keystroke.
  */
 function currentInlineEditorText(): string | undefined {
 	if (typeof document === 'undefined') {
 		return undefined;
 	}
 	const editor = document.querySelector<HTMLElement>(INLINE_EDITOR_SELECTOR);
-	return editor instanceof HTMLTextAreaElement
-		? editor.value
-		: editor
-			? readEditableText(editor)
-			: undefined;
+	return editor ? readEditableText(editor) : undefined;
 }
 
 /** The selection's text style, or null when the element carries no text props. */
@@ -52,12 +52,17 @@ export function isTextElement(el: PptxElement | null): boolean {
 	return el !== null && hasTextProperties(el);
 }
 
-/** Merge `patch` into the selection's text style and commit via the editor. */
+/**
+ * Merge `patch` into the selection's text style and commit via the editor.
+ * `options.listConversionScope` decides how far a bare caret's list switch
+ * reaches (default `'paragraph'`; see `ListConversionScopeService`).
+ */
 export function formatInlineListStyle(
 	el: PptxElement,
 	patch: Partial<TextStyle>,
 	draft: InlineTextEditSnapshot,
 	formatSnapshot: (snapshot: InlineTextEditSnapshot) => boolean,
+	options?: ListStyleUpdateOptions,
 ): (ElementBulletPatch & { text: string }) | undefined {
 	if (!hasTextProperties(el) || draft.elementId !== el.id || !draft.textSegments) {
 		return undefined;
@@ -72,6 +77,7 @@ export function formatInlineListStyle(
 		{ ...el, text: draft.text, textSegments: draft.textSegments },
 		patch,
 		selection.selection,
+		options,
 	);
 	if (!changes?.textSegments || !formatSnapshot({ ...draft, textSegments: changes.textSegments })) {
 		return undefined;
@@ -86,6 +92,7 @@ export function patchTextStyle(
 	patch: Partial<TextStyle>,
 	snapshot?: InlineTextEditSnapshot,
 	formatSnapshot?: (snapshot: InlineTextEditSnapshot) => boolean,
+	options?: ListStyleUpdateOptions,
 ): void {
 	if (!el || !hasTextProperties(el)) {
 		return;
@@ -96,7 +103,7 @@ export function patchTextStyle(
 		return;
 	}
 	if (draft && formatSnapshot) {
-		const changes = formatInlineListStyle(el, patch, draft, formatSnapshot);
+		const changes = formatInlineListStyle(el, patch, draft, formatSnapshot, options);
 		if (changes) {
 			editor.updateElement(slideIndex, el.id, changes);
 		}

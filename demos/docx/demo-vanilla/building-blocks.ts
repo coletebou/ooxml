@@ -1,13 +1,20 @@
 import { createDocument } from '../../../viewers/docx/packages/core/src/index';
 import type { BuildingBlockOptions } from '../../../viewers/docx/packages/bindings/src/building-blocks';
 import type { NativeHarness } from './building-blocks-types';
+import { mountHostReadAloud } from './read-aloud-controls';
 const host = document.querySelector<HTMLElement>('#native-host')!;
 const model = createDocument();
 model.blocks = [
 	{ type: 'paragraph', id: 'native-paragraph', runs: [{ text: 'Native Word composition' }] },
 ];
-const initial: BuildingBlockOptions = { documentModel: model, canEdit: true };
-const framework = new URLSearchParams(location.search).get('framework') ?? 'vue';
+const query = new URLSearchParams(location.search);
+// `?stopOnEdit=1` turns on `readAloud.stopOnEdit`; without it Read Aloud keeps going through edits.
+const initial: BuildingBlockOptions = {
+	documentModel: model,
+	canEdit: true,
+	...(query.has('stopOnEdit') && { readAloud: { stopOnEdit: true } }),
+};
+const framework = query.get('framework') ?? 'vue';
 async function mountNative() {
 	if (window.nativeWord) await window.nativeWord.destroy();
 	if (!host.isConnected) document.body.append(host);
@@ -255,4 +262,5 @@ async function mountNative() {
 	}
 }
 window.remountNativeWord = mountNative;
+mountHostReadAloud(host);
 void mountNative();

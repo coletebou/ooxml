@@ -12,6 +12,7 @@ import type { PptxElement, GroupPptxElement } from '../../types/elements';
 import type { PptxCoreProperties, PptxAppProperties } from '../../types/metadata';
 import type { PptxData, PptxSlide } from '../../types/presentation';
 import type { PptxTheme } from '../../types/theme';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -66,7 +67,7 @@ export interface PresentationDiff {
 	/** Whether the theme changed between presentations. */
 	themeChanged: boolean;
 	/** Property-level theme changes (colors, fonts, name). */
-	themeChanges?: PropertyChange[];
+	themeChanges?: PropertyChange[] | undefined;
 	/** Property-level metadata changes (core + app properties). */
 	metadataChanges: PropertyChange[];
 	/** Summary counts. */
@@ -522,16 +523,16 @@ export function diffPresentations(a: PptxData, b: PptxData): PresentationDiff {
 	// Build slide ID -> index maps
 	const slideMapA = new Map<string, number>();
 	for (let i = 0; i < a.slides.length; i++) {
-		slideMapA.set(a.slides[i].id, i);
+		slideMapA.set(at(a.slides, i).id, i);
 	}
 	const slideMapB = new Map<string, number>();
 	for (let i = 0; i < b.slides.length; i++) {
-		slideMapB.set(b.slides[i].id, i);
+		slideMapB.set(at(b.slides, i).id, i);
 	}
 
 	// Slides removed (in A but not in B)
 	for (let i = 0; i < a.slides.length; i++) {
-		const slide = a.slides[i];
+		const slide = at(a.slides, i);
 		if (!slideMapB.has(slide.id)) {
 			slideChanges.push({
 				slideIndex: i,
@@ -543,7 +544,7 @@ export function diffPresentations(a: PptxData, b: PptxData): PresentationDiff {
 
 	// Slides added (in B but not in A)
 	for (let i = 0; i < b.slides.length; i++) {
-		const slide = b.slides[i];
+		const slide = at(b.slides, i);
 		if (!slideMapA.has(slide.id)) {
 			slideChanges.push({
 				slideIndex: i,
@@ -555,13 +556,14 @@ export function diffPresentations(a: PptxData, b: PptxData): PresentationDiff {
 
 	// Slides modified (in both A and B)
 	for (let i = 0; i < a.slides.length; i++) {
-		const slideA = a.slides[i];
+		const slideA = at(a.slides, i);
 		const idxB = slideMapB.get(slideA.id);
 		if (idxB === undefined) {
 			continue;
 		}
 
-		const slideB = b.slides[idxB];
+		// `slideMapB` maps ids to indices of `b.slides`.
+		const slideB = at(b.slides, idxB);
 		const slideDiff = diffSlides(slideA, slideB, i);
 
 		// Only include if there are actual changes

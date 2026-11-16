@@ -1,12 +1,22 @@
-import type { PptxElement, PptxHeaderFooter, PptxSlide } from 'pptx-viewer-core';
+import { createEditorHistoryController, crossedHistoryTheme, historyTheme } from 'ooxml-ui/pptx';
+import type { EditorHistoryController, HistoryTheme } from 'ooxml-ui/pptx';
+import type {
+	PptxElement,
+	PptxHeaderFooter,
+	PptxSlide,
+	PptxSlideMaster,
+	PptxTheme,
+} from 'pptx-viewer-core';
 import { useRef, useState, useCallback, useEffect } from 'react';
 
 import type { CanvasSize, EditorHistorySnapshot } from '../types';
 import { cloneHistorySnapshot, cloneSlide, cloneTemplateElementsBySlideId } from '../utils/clone';
 import {
+	differsOnlyInMasterSet,
 	recordExplicitSlideUpdate,
 	serializeHistoryDocument as serializeDocument,
 } from './explicit-slide-history';
+import { useController } from './useController';
 import { usePointerReleaseWakeup } from './usePointerReleaseWakeup';
 
 // ---------------------------------------------------------------------------
@@ -26,7 +36,8 @@ export interface EditorHistoryInput {
 	error: string | null;
 	/**
 	 * Undo-stack depth (File > Options > Advanced > "Maximum number of undos",
-	 * resolved via the shared `resolveHistoryDepth`). Defaults to 120.
+	 * resolved via the shared `resolveHistoryDepth`). Defaults to the shared
+	 * `DEFAULT_EDITOR_HISTORY_DEPTH`.
 	 */
 	maxHistoryEntries?: number;
 	hasActivePointerInteraction: () => boolean;
@@ -43,6 +54,22 @@ export interface EditorHistoryInput {
 	 * Slide or a notes edit left the flag false and crash recovery never ran.
 	 */
 	onDirty?: () => void;
+	/**
+	 * The deck's theme. Its colour scheme, font scheme and name are recorded with every snapshot,
+	 * so a theme pick is an undo step like any other edit.
+	 */
+	theme?: PptxTheme | undefined;
+	/**
+	 * The slide masters. The theme part each one uses is recorded with the theme, so a theme
+	 * applied by path is an undo step too, and its Undo points the masters back.
+	 */
+	slideMasters?: readonly PptxSlideMaster[] | undefined;
+	/**
+	 * Put a recorded theme back (an undo or redo crossing a theme change). The slides come back
+	 * with the snapshot; the theme has to be written to the handler's theme part too, which this
+	 * hook cannot reach, so the theme handlers do it.
+	 */
+	onRestoreTheme?: (theme: HistoryTheme) => void;
 	// Setters for applying snapshots
 	setSlides: (slides: PptxSlide[]) => void;
 	setCanvasSize: (size: CanvasSize) => void;
@@ -55,7 +82,17 @@ export interface EditorHistoryInput {
 }
 
 export interface EditorHistoryResult {
-	commitSlides: (slides: PptxSlide[], label?: string, beforeSlides?: PptxSlide[]) => void;
+	/**
+	 * Commit `slides` as one undo step. Pass `nextSlideMasters` when the same commit replaces the
+	 * slide masters (a slide paste brings its own): the step's after state records their theme
+	 * parts, so the masters arriving a render later are not read as a second step.
+	 */
+	commitSlides: (
+		slides: PptxSlide[],
+		label?: string,
+		beforeSlides?: PptxSlide[],
+		nextSlideMasters?: readonly PptxSlideMaster[],
+	) => void;
 	canUndo: boolean;
 	canRedo: boolean;
 	undoLabel: string | undefined;
@@ -64,20 +101,36 @@ export interface EditorHistoryResult {
 	handleRedo: () => void;
 	resetHistory: () => void;
 	/**
+	 * Drop the undo and redo steps that would bring back a state `reaches` matches, with the steps
+	 * behind them: a Slide Master view command removed a layout the package cannot get back.
+	 */
+	forgetHistory: (reaches: (snapshot: EditorHistorySnapshot) => boolean) => void;
+	/** Route Undo and Redo through a room's history while attached (returns the detach). */
+	attachCollaboration: EditorHistoryController<EditorHistorySnapshot>['attachCollaboration'];
+	/**
 	 * Pause (`true`) and resume (`false`) change tracking. A gallery hover preview swaps the
 	 * slides in for a moment; while tracking is held that is neither an undo step nor an edit, and
 	 * when the original is back the tracker sees no change.
 	 */
 	holdTracking: (held: boolean) => void;
 	markDirty: () => void;
+	/**
+	 * A save landed and left the document clean: the deck as it is now is the baseline. Saving
+	 * writes the saved identity (slide numbers, relationship ids) back onto the slides, which the
+	 * tracker must not later report as an edit.
+	 */
+	markSaved: () => void;
+	/**
+	 * Run `apply` without arming the undo tracker: the edits it makes show at
+	 * once but are no undo step and leave the dirty flag alone, and the next
+	 * committed edit records the state from before them. A colour picker drag
+	 * applies its shades this way (shared `createLiveColorInput`), so the drag
+	 * is one undo step when it settles. Synchronous: only edits made inside
+	 * `apply` are exempt.
+	 */
+	withoutUndoStep: (apply: () => void) => void;
 	buildHistorySnapshot: (actionLabel?: string) => EditorHistorySnapshot;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const DEFAULT_MAX_HISTORY_ENTRIES = 120;
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -91,10 +144,13 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 		templateElementsBySlideId,
 		loading,
 		error,
-		maxHistoryEntries = DEFAULT_MAX_HISTORY_ENTRIES,
+		maxHistoryEntries,
 		hasActivePointerInteraction,
 		pointerCommitNonce,
 		onDirty,
+		theme,
+		slideMasters,
+		onRestoreTheme,
 		setSlides,
 		setCanvasSize,
 		setActiveSlideIndex,
@@ -105,8 +161,13 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 
 	// -- Refs ---------------------------------------------------------------
 
-	const historyPastRef = useRef<EditorHistorySnapshot[]>([]);
-	const historyFutureRef = useRef<EditorHistorySnapshot[]>([]);
+	/**
+	 * The shared undo/redo controller: one stack and one default depth for every
+	 * binding. This hook keeps only React's change detection (below), which
+	 * decides WHEN a snapshot is recorded; the stack itself is shared.
+	 */
+	const [history] = useState(() => createEditorHistoryController<EditorHistorySnapshot>());
+	const historyState = useController(history);
 	const lastHistorySnapshotRef = useRef<EditorHistorySnapshot | null>(null);
 	const lastHistorySerializedRef = useRef<string>('');
 	/**
@@ -121,10 +182,6 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 
 	// -- State --------------------------------------------------------------
 
-	const [canUndo, setCanUndo] = useState(false);
-	const [canRedo, setCanRedo] = useState(false);
-	const [undoLabel, setUndoLabel] = useState<string | undefined>(undefined);
-	const [redoLabel, setRedoLabel] = useState<string | undefined>(undefined);
 	/**
 	 * Monotonic counter bumped by every `markDirty()` call, i.e. by every local
 	 * edit-commit choke point in the editor.
@@ -153,27 +210,26 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 
 	// -- Helpers ------------------------------------------------------------
 
-	const updateHistoryAvailability = useCallback(() => {
-		setCanUndo(historyPastRef.current.length > 0);
-		setCanRedo(historyFutureRef.current.length > 0);
-		const pastTop = historyPastRef.current[historyPastRef.current.length - 1];
-		setUndoLabel(pastTop?.actionLabel);
-		const futureTop = historyFutureRef.current[historyFutureRef.current.length - 1];
-		setRedoLabel(futureTop?.actionLabel);
-	}, []);
+	useEffect(() => {
+		if (maxHistoryEntries !== undefined) {
+			history.setMaxDepth(maxHistoryEntries);
+		}
+	}, [history, maxHistoryEntries]);
 
 	const buildHistorySnapshot = useCallback(
 		(actionLabel?: string): EditorHistorySnapshot => {
+			const recordedTheme = historyTheme(theme, slideMasters);
 			return {
 				width: canvasSize.width,
 				height: canvasSize.height,
 				activeSlideIndex,
 				slides: slides.map(cloneSlide),
 				templateElementsBySlideId: cloneTemplateElementsBySlideId(templateElementsBySlideId),
+				...(recordedTheme ? { theme: recordedTheme } : {}),
 				...(actionLabel ? { actionLabel } : {}),
 			};
 		},
-		[activeSlideIndex, canvasSize, slides, templateElementsBySlideId],
+		[activeSlideIndex, canvasSize, slideMasters, slides, templateElementsBySlideId, theme],
 	);
 
 	const applyHistorySnapshot = useCallback(
@@ -220,67 +276,102 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 		onDirtyRef.current = onDirty;
 	}, [onDirty]);
 
+	/** Depth of {@link withoutUndoStep} calls in progress; `markDirty` is a no-op inside one. */
+	const untrackedDepthRef = useRef(0);
+
 	const markDirty = useCallback(() => {
+		if (untrackedDepthRef.current > 0) {
+			return;
+		}
 		setEditCommitNonce((previous) => previous + 1);
 		onDirtyRef.current?.();
+	}, []);
+
+	const onRestoreThemeRef = useRef(onRestoreTheme);
+	useEffect(() => {
+		onRestoreThemeRef.current = onRestoreTheme;
+	}, [onRestoreTheme]);
+	/** Moving from `current` to `target` crosses a theme change: put the target's theme back. */
+	const restoreTheme = useCallback(
+		(current: EditorHistorySnapshot, target: EditorHistorySnapshot) => {
+			const crossed = crossedHistoryTheme(current.theme, target.theme);
+			if (crossed) {
+				onRestoreThemeRef.current?.(crossed);
+			}
+		},
+		[],
+	);
+
+	const withoutUndoStep = useCallback((apply: () => void) => {
+		untrackedDepthRef.current += 1;
+		try {
+			apply();
+		} finally {
+			untrackedDepthRef.current -= 1;
+		}
 	}, []);
 
 	// -- Stack navigation ---------------------------------------------------
 
 	const handleUndo = useCallback(() => {
-		const previousSnapshot = historyPastRef.current.pop();
-		if (!previousSnapshot) {
+		if (!history.getSnapshot().canUndo) {
+			return;
+		}
+		const currentSnapshot = buildHistorySnapshot();
+		const result = history.undo(currentSnapshot);
+		if (!result) {
 			return;
 		}
 
-		const currentSnapshot = buildHistorySnapshot(previousSnapshot.actionLabel);
-		historyFutureRef.current.push(currentSnapshot);
 		isApplyingHistoryRef.current = true;
-		const nextSnapshot = cloneHistorySnapshot(previousSnapshot);
+		const nextSnapshot = cloneHistorySnapshot(result.snapshot);
 		lastHistorySnapshotRef.current = cloneHistorySnapshot(nextSnapshot);
 		lastHistorySerializedRef.current = serializeDocument(nextSnapshot);
 		applyHistorySnapshot(nextSnapshot);
-		updateHistoryAvailability();
+		restoreTheme(currentSnapshot, nextSnapshot);
 		unlockHistoryTracking();
 		markDirty();
 	}, [
 		applyHistorySnapshot,
 		buildHistorySnapshot,
+		history,
 		markDirty,
+		restoreTheme,
 		unlockHistoryTracking,
-		updateHistoryAvailability,
 	]);
 
 	const handleRedo = useCallback(() => {
-		const nextSnapshot = historyFutureRef.current.pop();
-		if (!nextSnapshot) {
+		if (!history.getSnapshot().canRedo) {
+			return;
+		}
+		const currentSnapshot = buildHistorySnapshot();
+		const result = history.redo(currentSnapshot);
+		if (!result) {
 			return;
 		}
 
-		const currentSnapshot = buildHistorySnapshot(nextSnapshot.actionLabel);
-		historyPastRef.current.push(currentSnapshot);
 		isApplyingHistoryRef.current = true;
-		const targetSnapshot = cloneHistorySnapshot(nextSnapshot);
+		const targetSnapshot = cloneHistorySnapshot(result.snapshot);
 		lastHistorySnapshotRef.current = cloneHistorySnapshot(targetSnapshot);
 		lastHistorySerializedRef.current = serializeDocument(targetSnapshot);
 		applyHistorySnapshot(targetSnapshot);
-		updateHistoryAvailability();
+		restoreTheme(currentSnapshot, targetSnapshot);
 		unlockHistoryTracking();
 		markDirty();
 	}, [
 		applyHistorySnapshot,
 		buildHistorySnapshot,
+		history,
 		markDirty,
+		restoreTheme,
 		unlockHistoryTracking,
-		updateHistoryAvailability,
 	]);
 
 	// -- Reset --------------------------------------------------------------
 
 	const resetHistory = useCallback(
 		(initialSnapshot?: EditorHistorySnapshot | null) => {
-			historyPastRef.current = [];
-			historyFutureRef.current = [];
+			history.clear();
 			if (initialSnapshot) {
 				const clonedInitial = cloneHistorySnapshot(initialSnapshot);
 				lastHistorySnapshotRef.current = clonedInitial;
@@ -289,9 +380,8 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 				lastHistorySnapshotRef.current = null;
 				lastHistorySerializedRef.current = '';
 			}
-			updateHistoryAvailability();
 		},
-		[updateHistoryAvailability],
+		[history],
 	);
 
 	// -- Cleanup timer on unmount -------------------------------------------
@@ -371,11 +461,12 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 
 		const previousSnapshot = lastHistorySnapshotRef.current;
 		// Both snapshots are already isolated from live state; transfer ownership.
-		if (!previousSnapshot) {
+		// A master added or removed with nothing else changed is no undo step either: the
+		// snapshot only records which masters exist because each one's theme part is recorded.
+		if (!previousSnapshot || differsOnlyInMasterSet(previousSnapshot, snapshot)) {
 			lastHistorySnapshotRef.current = snapshot;
 			lastHistorySerializedRef.current = serialized;
 			lastCheapHashRef.current = cheapHash;
-			updateHistoryAvailability();
 			return;
 		}
 
@@ -385,15 +476,10 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 		// first snapshot after a load takes the `!previousSnapshot` branch above
 		// and so never reports dirty.
 		onDirtyRef.current?.();
-		historyPastRef.current.push(previousSnapshot);
-		while (historyPastRef.current.length > Math.max(1, maxHistoryEntries)) {
-			historyPastRef.current.shift();
-		}
-		historyFutureRef.current = [];
+		history.record(previousSnapshot, previousSnapshot.actionLabel);
 		lastHistorySnapshotRef.current = snapshot;
 		lastHistorySerializedRef.current = serialized;
 		lastCheapHashRef.current = cheapHash;
-		updateHistoryAvailability();
 	}, [
 		activeSlideIndex,
 		buildHistorySnapshot,
@@ -403,50 +489,62 @@ export function useEditorHistory(input: EditorHistoryInput): EditorHistoryResult
 		editCommitNonce,
 		error,
 		hasActivePointerInteraction,
+		history,
 		loading,
-		maxHistoryEntries,
 		pointerCommitNonce,
 		pointerReleaseNonce,
 		slides,
-		updateHistoryAvailability,
 	]);
 
 	// -- Public API ---------------------------------------------------------
 
-	const commitSlides = (nextSlides: PptxSlide[], label?: string, beforeSlides = slides): void => {
+	const commitSlides = (
+		nextSlides: PptxSlide[],
+		label?: string,
+		beforeSlides = slides,
+		nextSlideMasters?: readonly PptxSlideMaster[],
+	): void => {
 		const before = { ...buildHistorySnapshot(), slides: beforeSlides.map(cloneSlide) };
-		const after = { ...before, slides: nextSlides.map(cloneSlide) };
-		recordExplicitSlideUpdate(
-			historyPastRef.current,
-			historyFutureRef.current,
-			lastHistorySnapshotRef.current,
-			before,
-			label,
-			maxHistoryEntries,
-		);
+		const { theme: beforeTheme, ...unthemed } = before;
+		const afterTheme = nextSlideMasters ? historyTheme(theme, nextSlideMasters) : beforeTheme;
+		const after: EditorHistorySnapshot = {
+			...unthemed,
+			slides: nextSlides.map(cloneSlide),
+			...(afterTheme ? { theme: afterTheme } : {}),
+		};
+		recordExplicitSlideUpdate(history, lastHistorySnapshotRef.current, before, label);
 		lastHistorySnapshotRef.current = cloneHistorySnapshot(after);
 		lastHistorySerializedRef.current = serializeDocument(after);
 		isApplyingHistoryRef.current = false;
 		setSlides(nextSlides);
 		onDirtyRef.current?.();
-		updateHistoryAvailability();
 	};
 
 	const holdTracking = useCallback((held: boolean) => {
 		trackingHeldRef.current = held;
 	}, []);
 
+	const markSaved = useCallback(() => {
+		const snapshot = buildHistorySnapshot();
+		lastHistorySnapshotRef.current = snapshot;
+		lastHistorySerializedRef.current = serializeDocument(snapshot);
+	}, [buildHistorySnapshot]);
+
 	return {
 		commitSlides,
 		holdTracking,
-		canUndo,
-		canRedo,
-		undoLabel,
-		redoLabel,
+		canUndo: historyState.canUndo,
+		canRedo: historyState.canRedo,
+		undoLabel: historyState.undoLabel,
+		redoLabel: historyState.redoLabel,
 		handleUndo,
 		handleRedo,
 		resetHistory,
+		forgetHistory: history.forget,
+		attachCollaboration: history.attachCollaboration,
 		markDirty,
+		markSaved,
+		withoutUndoStep,
 		buildHistorySnapshot,
 	};
 }

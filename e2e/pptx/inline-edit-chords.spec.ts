@@ -64,4 +64,20 @@ test.describe('inline edit chords', () => {
 		await expect(page.locator('[data-inline-editor]')).toBeHidden();
 		await expect(slideStage(page)).toContainText('SOURCE DONE');
 	});
+
+	test('Escape ends the edit and keeps the typed text through the next edit', async ({ page }) => {
+		await editSource(page);
+		await page.keyboard.press('ControlOrMeta+End');
+		await page.keyboard.type(' FIRST');
+		await page.keyboard.press('Escape');
+		await expect(page.locator('[data-inline-editor]')).toBeHidden();
+		await expect(slideStage(page)).toContainText('SOURCE FIRST');
+		await elementWithText(page, 'SOURCE FIRST').dblclick();
+		await expect(page.locator('[data-inline-editor]')).toBeVisible();
+		// End would stop at the end of the first wrapped line, not of the text.
+		await page.keyboard.press('ControlOrMeta+End');
+		await page.keyboard.type(' SECOND');
+		await page.keyboard.press('Escape');
+		await expect(slideStage(page)).toContainText('SOURCE FIRST SECOND');
+	});
 });

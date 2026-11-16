@@ -21,7 +21,7 @@ function checkPrefixes(
 	issues: ValidationIssue[],
 ): void {
 	for (const token of value.trim().split(/\s+/).filter(Boolean)) {
-		const prefix = token.includes(':') ? token.split(':')[0] : token;
+		const prefix = token.includes(':') ? (token.split(':')[0] ?? '') : token;
 		if (!ns.has(prefix)) {
 			add(
 				issues,
@@ -41,7 +41,7 @@ function checkAlternate(
 	issues: ValidationIssue[],
 ): void {
 	for (const match of xml.matchAll(new RegExp(`<${qualifier}Choice\\b([^>]*)>`, 'g'))) {
-		const requires = match[1].match(/\bRequires\s*=\s*["']([^"']*)["']/)?.[1].trim();
+		const requires = (match[1] ?? '').match(/\bRequires\s*=\s*["']([^"']*)["']/)?.[1]?.trim();
 		if (!requires) {
 			add(
 				issues,
@@ -119,7 +119,7 @@ export function validateMce(xml: string, path: string, issues: ValidationIssue[]
 			'g',
 		);
 		for (const match of xml.matchAll(directives)) {
-			checkPrefixes(match[2], `MCE ${match[1]}`, ns, path, issues);
+			checkPrefixes(match[2] ?? '', `MCE ${match[1]}`, ns, path, issues);
 		}
 		checkAlternate(xml, qualifier, ns, path, issues);
 	}

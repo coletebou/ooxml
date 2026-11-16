@@ -29,6 +29,7 @@ import type { DrawingTool } from '../../types-ui';
 import type { ElementAnimationState } from '../../utils/animation-timeline';
 import type { TableStyleContext } from '../../utils/table-parse';
 import type { FieldSubstitutionContext } from '../../utils/text-field-substitution';
+import type { ElementRenderErrorHandler } from '../ElementErrorBoundary';
 import type { OutlineAuthoringProps } from './OutlineAuthoringLayer';
 import type { RulerUnit } from './ruler-utils';
 
@@ -66,6 +67,8 @@ export function getElementIdFromEvent(e: React.MouseEvent): string | null {
 /* ------------------------------------------------------------------ */
 
 export interface SlideCanvasProps {
+	/** Reports an element omitted after a React render/lifecycle error; defaults to console.error. */
+	onElementRenderError?: ElementRenderErrorHandler;
 	/** The viewer-owned live channel; absent for static/custom non-collaborative canvases. */
 	livePatcher?: CollaborationLivePatcher;
 	registerInlineEditReader?: (elementId: string, read: () => InlineListReadResult) => () => void;
@@ -121,7 +124,13 @@ export interface SlideCanvasProps {
 		elementId: string,
 	) => void;
 	/** Called when an edited table cell should be committed. */
-	onCommitCellEdit?: (elementId: string, rowIndex: number, colIndex: number, text: string) => void;
+	onCommitCellEdit?: (
+		elementId: string,
+		rowIndex: number,
+		colIndex: number,
+		text: string,
+		end?: import('ooxml-ui/pptx').TableCellEditEnd,
+	) => void;
 	/**
 	 * Commit a partial update to a SmartArt element from inline (on-canvas) node
 	 * editing. Routed to the same element-update path the inspector uses (undo/redo
@@ -139,7 +148,7 @@ export interface SlideCanvasProps {
 	/** Called when a table row is resized. */
 	onResizeTableRow?: (elementId: string, rowIndex: number, newHeight: number) => void;
 	/** Find & Replace results (all matches across all slides). */
-	findResults?: Array<{
+	findResults?: ReadonlyArray<{
 		slideIndex: number;
 		elementId: string;
 		segmentIndex: number;

@@ -18,7 +18,22 @@ export { describeCollaborationShellState } from 'ooxml-ui/pptx';
  * system (types, defaults, CSS-variable helpers, Vermilion presets).
  */
 export { PowerPointViewer } from './viewer/component';
+// The slide thumbnail rail, for a host composing its own shell beside
+// `SlideCanvas` (also exported, with the other building blocks, from
+// `pptx-svelte-viewer/viewer`).
+export { SlidesPane } from './viewer/components/typed-exports';
+// One slide drawn as `SlidesPane` draws it, for a host that keeps its own thumbnail strip.
+export { SlideThumbnail } from './viewer/components/typed-exports';
+export type { SlideThumbnailProps } from './viewer/components/slide-thumbnail-props';
+export { createSlidesPaneProps } from './viewer/components/slides-pane-props';
+export type {
+	CreateSlidesPanePropsOptions,
+	SlidesPaneLayoutGalleryRequest,
+	SlidesPaneProps,
+	SlidesPaneTableStyleContext,
+} from './viewer/components/slides-pane-props';
 export type { ViewportFitOptions, ViewportFitPadding } from 'ooxml-ui/pptx';
+export type { ListConversionScope } from 'ooxml-ui/pptx';
 export { createImageElementFromFile } from 'ooxml-ui/pptx';
 export type {
 	ExportGifOptions,
@@ -56,6 +71,8 @@ export type {
 	PptxAiUIMessage,
 	PptxAiWritePolicy,
 } from 'ooxml-ui/pptx/ai';
+// `createAiAssistant` is exported from `pptx-svelte-viewer/ai`.
+export type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 export type { AutosaveStatus } from './viewer/state/autosave.svelte';
 // Autosave recovery helpers (shared IndexedDB store). The viewer now OFFERS a
 // pre-crash snapshot back itself on load ("Recover unsaved changes?", see the
@@ -161,3 +178,28 @@ export {
 	VIEWER_FEATURE_IDS,
 	VIEWER_PANEL_IDS,
 } from 'ooxml-ui/pptx';
+
+// ── Building blocks ────────────────────────────────────────────────────
+// Compose a custom PowerPoint shell: `createViewerBuildingBlocks(() => options)` plus the
+// canvas, compact toolbar and slides pane blocks, with host-owned workflows in `actions`.
+export {
+	BuildingBlocksCanvas,
+	BuildingBlocksSlidesPane,
+	BuildingBlocksToolbar,
+	createViewerBuildingBlocks,
+} from './building-blocks';
+export type {
+	BuildingBlocksCanvasProps,
+	BuildingBlocksSlidesPaneProps,
+	BuildingBlocksToolbarProps,
+	ViewerBuildingBlocks,
+	ViewerBuildingBlocksOptions,
+	ViewerBuildingBlocksState,
+} from './building-blocks';
+export type {
+	BuildingBlockRequest,
+	BuildingBlockResult,
+	ViewerBuildingBlockActions,
+} from 'ooxml-ui/pptx';
+// The reporter every viewer and building-blocks entry takes as `onElementRenderError`.
+export type { ElementRenderErrorContext, ElementRenderErrorHandler } from 'ooxml-ui/pptx';

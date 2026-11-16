@@ -51,7 +51,17 @@ export class EditorElementController {
 	}
 
 	patchGeometry(id: string, box: ElementBoxPatch): void {
-		this.#editor.replaceActiveElements(this.#patched(id, box as Partial<PptxElement>));
+		this.previewElement(id, box as Partial<PptxElement>);
+	}
+
+	/**
+	 * Merge `patch` into `id` WITHOUT history, the dirty flag or a change event:
+	 * a live frame its caller commits later as one undo step (a gesture frame, or
+	 * a shade of a colour picker drag, which shared `createLiveColorInput` puts
+	 * back before its one committed edit).
+	 */
+	previewElement(id: string, patch: Partial<PptxElement>): void {
+		this.#editor.replaceActiveElements(this.#patched(id, patch));
 	}
 
 	deleteSelected(): void {
@@ -204,7 +214,7 @@ export class EditorElementController {
 		if (!target) {
 			return;
 		}
-		const text = this.#editor.transformCommittedText(rawText);
+		const text = this.#editor.transformCommittedText(rawText, (target as { text?: string }).text);
 		this.#editor.pushHistory();
 		// `a:spAutoFit`: grow/shrink the shape to the text's natural content
 		// height, the way PowerPoint does. See `resolveInlineTextAutoFitHeight`

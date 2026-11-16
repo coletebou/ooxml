@@ -10,10 +10,17 @@
 import type { PptxTableCell, PptxTableCellParagraph } from 'ooxml-core/pptx';
 
 import { resolveParagraphIndent } from './bullet-list';
+import type { FontBoxMeasure } from './paragraph-baseline';
+import { armBaselineSettle } from './paragraph-baseline-settle';
 import { resolveParagraphSpacing } from './paragraph-spacing';
+import { cellBaselinePlacement } from './table-cell-baseline';
 import type { CellTextRun, TableCellCss } from './table-style';
 import { DEFAULT_LINE_HEIGHT } from './text-line-height';
-import { resolveCssTextAlign, resolveTextAlignLast } from './text-paragraph-style';
+import {
+	resolveCssTextAlign,
+	resolveTextAlignLast,
+	DISTRIBUTED_TEXT_JUSTIFY,
+} from './text-paragraph-style';
 
 /** One paragraph of a cell: its block CSS and the runs inside it. */
 export interface CellParagraphBlock {
@@ -25,10 +32,24 @@ export interface CellParagraphBlock {
 interface ParagraphLayout {
 	css: TableCellCss;
 	runLineHeight?: number;
+	/** The paragraph's own space before (px), which the PREVIOUS block's margin carries. */
+	spaceBeforePx?: number;
 }
 
 /** An empty paragraph still takes a line, as it does in PowerPoint. */
 const BLANK_LINE: CellTextRun = { text: '', isLineBreak: true };
+
+/** What a caller can tell {@link cellParagraphBlocks} about the cell it paints. */
+export interface CellBlockOptions {
+	cellCss?: TableCellCss | undefined;
+	defaultFontPt?: number | undefined;
+	measure?: FontBoxMeasure | undefined;
+}
+
+/** Whether a paragraph's runs hold any text (an empty paragraph keeps the browser's blank line). */
+function hasContentRuns(runs: readonly CellTextRun[]): boolean {
+	return runs.some((run) => run.text !== '' && !run.isLineBreak);
+}
 
 /** Split runs at their paragraph markers. */
 function groupRuns(runs: readonly CellTextRun[]): CellTextRun[][] {
@@ -83,6 +104,7 @@ function paragraphLayoutCss(
 		const textAlignLast = resolveTextAlignLast(paragraph?.align);
 		if (textAlignLast !== undefined) {
 			css.textAlignLast = textAlignLast;
+			css.textJustify = DISTRIBUTED_TEXT_JUSTIFY;
 		}
 	}
 	if (paragraph?.rtl !== undefined) {
@@ -114,9 +136,32 @@ function paragraphLayoutCss(
 	if (spacing.spaceAfterPx !== undefined) {
 		css.marginBlockEnd = `${spacing.spaceAfterPx}px`;
 	}
-	return spacing.runLineHeight === undefined
-		? { css }
-		: { css, runLineHeight: spacing.runLineHeight };
+	const layout: ParagraphLayout = { css };
+	if (spacing.runLineHeight !== undefined) {
+		layout.runLineHeight = spacing.runLineHeight;
+	}
+	if (spacing.spaceBeforePx !== undefined) {
+		layout.spaceBeforePx = spacing.spaceBeforePx;
+	}
+	return layout;
+}
+
+/**
+ * Move each paragraph's own space before onto the previous block's
+ * `margin-block-end`. PowerPoint adds a paragraph's `spcAft` and the next
+ * one's `spcBef`; the cell stacks its blocks in normal flow, where two
+ * adjacent margins would collapse to the larger, so the sum goes on one side.
+ */
+function addSpaceBefore(layouts: ParagraphLayout[]): void {
+	for (let index = 1; index < layouts.length; index++) {
+		const before = layouts[index].spaceBeforePx;
+		if (before === undefined) {
+			continue;
+		}
+		const previous = layouts[index - 1].css;
+		const after = Number.parseFloat(String(previous.marginBlockEnd ?? '0')) || 0;
+		previous.marginBlockEnd = `${after + before}px`;
+	}
 }
 
 /** A paragraph's alignment, with PowerPoint's default. */
@@ -153,10 +198,12 @@ function needsBlocks(
 	paragraphs: readonly (PptxTableCellParagraph | undefined)[],
 	follows: readonly boolean[],
 	layouts: readonly ParagraphLayout[],
+	placed: readonly boolean[],
 ): boolean {
 	return follows.some(
 		(followsCell, index) =>
 			!followsCell ||
+			placed[index] === true ||
 			paragraphs[index]?.rtl === true ||
 			layouts[index].css.marginInlineStart !== undefined ||
 			layouts[index].css.textIndent !== undefined ||
@@ -173,11 +220,19 @@ function needsBlocks(
  * one remaining paragraph.
  *
  * @param cell - The cell being painted.
+ * @param options - `cellCss`, the cell's resolved style (its font and line
+ *   height, which a paragraph without its own inherits), and `defaultFontPt`,
+ *   the table's default text size: with them a paragraph is moved onto
+ *   PowerPoint's baselines (see `table-cell-baseline`). `measure` replaces the
+ *   canvas font measurement in tests.
  * @returns One block per paragraph, or `undefined` when the cell has no
  *   paragraph layout or nothing in it needs blocks, in which case the binding
  *   draws its runs as before.
  */
-export function cellParagraphBlocks(cell: PptxTableCell): CellParagraphBlock[] | undefined {
+export function cellParagraphBlocks(
+	cell: PptxTableCell,
+	options: CellBlockOptions = {},
+): CellParagraphBlock[] | undefined {
 	const { paragraphs } = cell;
 	if (!paragraphs || paragraphs.length === 0) {
 		return undefined;
@@ -191,11 +246,51 @@ export function cellParagraphBlocks(cell: PptxTableCell): CellParagraphBlock[] |
 	const layouts = groups.map((_, index) =>
 		paragraphLayoutCss(paragraphs[index], follows[index], index === 0, index === groups.length - 1),
 	);
-	if (!needsBlocks(paragraphs, follows, layouts)) {
+	addSpaceBefore(layouts);
+	// Exact line spacing: the runs must not grow the line, as in shape text.
+	const laidOut = groups.map((group, index) => {
+		const { runLineHeight } = layouts[index];
+		return runLineHeight === undefined
+			? group
+			: group.map((run) => ({ ...run, lineHeight: runLineHeight }));
+	});
+	// Placed from the runs as they are laid out, line heights included.
+	const placements = groups.map((group, index) =>
+		hasContentRuns(group)
+			? cellBaselinePlacement({
+					runs: laidOut[index],
+					lineHeight: layouts[index].css.lineHeight,
+					strutPt: strutFontSizePt(group),
+					cellCss: options.cellCss,
+					defaultFontPt: options.defaultFontPt,
+					measure: options.measure,
+				})
+			: undefined,
+	);
+	if (
+		!needsBlocks(
+			paragraphs,
+			follows,
+			layouts,
+			placements.map((placement) => placement !== undefined),
+		)
+	) {
 		return undefined;
 	}
 	return groups.map((group, index) => {
-		const { css, runLineHeight } = layouts[index];
+		const { css } = layouts[index];
+		const placement = placements[index];
+		if (placement) {
+			Object.assign(css, placement.style);
+			if (placement.extentDelta !== undefined && index === groups.length - 1) {
+				// The cell ends at the last line's baseline plus descent, not at its pitch.
+				const after = Number.parseFloat(String(css.marginBlockEnd ?? '0')) || 0;
+				css.marginBlockEnd = `${Math.round((after + placement.extentDelta) * 100) / 100}px`;
+			}
+			if (placement.provisional) {
+				armBaselineSettle();
+			}
+		}
 		const hasContent = group.some((run) => run.text !== '' || run.isLineBreak);
 		if (!hasContent) {
 			const endPt = paragraphs[index]?.endParaFontSize;
@@ -208,11 +303,6 @@ export function cellParagraphBlocks(cell: PptxTableCell): CellParagraphBlock[] |
 		if (strutPt !== undefined) {
 			css.fontSize = `${strutPt}pt`;
 		}
-		// Exact line spacing: the runs must not grow the line, as in shape text.
-		const runs =
-			runLineHeight === undefined
-				? group
-				: group.map((run) => ({ ...run, lineHeight: runLineHeight }));
-		return { css, runs };
+		return { css, runs: laidOut[index] };
 	});
 }

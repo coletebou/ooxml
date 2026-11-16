@@ -7,8 +7,8 @@ import type { ToolContext, ToolResult } from '../types';
 export function getPresentationProperties(ctx: ToolContext): ToolResult<{
 	properties: PptxPresentationProperties | undefined;
 	slideCount: number;
-	width?: number;
-	height?: number;
+	width?: number | undefined;
+	height?: number | undefined;
 }> {
 	return {
 		pptxData: ctx.pptxData,
@@ -25,21 +25,30 @@ export function getPresentationProperties(ctx: ToolContext): ToolResult<{
 // ── updatePresentationProperties ─────────────────────────────────────────────
 
 export interface UpdatePresentationPropertiesParams {
-	showType?: 'presented' | 'browsed' | 'kiosk';
-	loopContinuously?: boolean;
-	showWithNarration?: boolean;
-	showWithAnimation?: boolean;
-	advanceMode?: 'manual' | 'useTimings';
-	showSlidesMode?: 'all' | 'customShow' | 'range';
-	showSlidesFrom?: number;
-	showSlidesTo?: number;
-	penColor?: string;
+	showType?: 'presented' | 'browsed' | 'kiosk' | undefined;
+	loopContinuously?: boolean | undefined;
+	showWithNarration?: boolean | undefined;
+	showWithAnimation?: boolean | undefined;
+	advanceMode?: 'manual' | 'useTimings' | undefined;
+	showSlidesMode?: 'all' | 'customShow' | 'range' | undefined;
+	showSlidesFrom?: number | undefined;
+	showSlidesTo?: number | undefined;
+	showSlidesCustomShowId?: string | undefined;
+	penColor?: string | undefined;
 }
 
 export function updatePresentationProperties(
 	ctx: ToolContext,
 	params: UpdatePresentationPropertiesParams,
 ): ToolResult<{ properties: PptxPresentationProperties }> {
+	const showId =
+		params.showSlidesCustomShowId ?? ctx.pptxData.presentationProperties?.showSlidesCustomShowId;
+	const showMode = params.showSlidesMode ?? ctx.pptxData.presentationProperties?.showSlidesMode;
+	if (
+		(params.showSlidesCustomShowId !== undefined || showMode === 'customShow') &&
+		!ctx.pptxData.customShows?.some((show) => show.id === showId)
+	)
+		throw new Error('showSlidesCustomShowId must identify an existing custom show.');
 	if (!ctx.pptxData.presentationProperties) {
 		(
 			ctx.pptxData as { presentationProperties: PptxPresentationProperties }
@@ -70,6 +79,9 @@ export function updatePresentationProperties(
 	}
 	if (params.showSlidesTo !== undefined) {
 		pp.showSlidesTo = params.showSlidesTo;
+	}
+	if (params.showSlidesCustomShowId !== undefined) {
+		pp.showSlidesCustomShowId = params.showSlidesCustomShowId;
 	}
 	if (params.penColor !== undefined) {
 		pp.penColor = params.penColor;

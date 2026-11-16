@@ -121,6 +121,7 @@ export function createHomeTab(doc: Document, t: Translator, deps: HomeTabDeps): 
 				mediaDataUrls: new Map<string, string>(),
 				registry: createDefaultRegistry(),
 				t,
+				exposeElementIds: false,
 			}),
 	});
 	const font: FontGroup = createFontGroup(doc, t, {
@@ -232,7 +233,8 @@ export function createHomeTab(doc: Document, t: Translator, deps: HomeTabDeps): 
 			clipboard.update({ hasSelection, hasClipboard, editable, formatPainterActive });
 			slides.update({ editable, slideCount, layouts, layoutPreviews, currentLayoutPath });
 			font.update({
-				canFormat,
+				// A selected table formats its selected cells' runs (PowerPoint).
+				canFormat: canFormat || selectedElement?.type === 'table',
 				editable,
 				text,
 				themeFonts,

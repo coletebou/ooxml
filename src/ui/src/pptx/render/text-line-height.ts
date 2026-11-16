@@ -31,6 +31,18 @@ export interface LineHeightSource {
 export const DEFAULT_LINE_HEIGHT = 1.2;
 
 /**
+ * An exact line pitch (`a:spcPts`) as PowerPoint lays it out: whole points,
+ * half up. A 14.3pt authored pitch lays out at 14pt (18.67px), 14.5pt at 15pt
+ * and 10.5pt at 11pt, measured on 8-line paragraphs of PowerPoint 16 exports
+ * (10.2 to 15.5pt in 0.1 and 0.5pt steps; the pitch stays unrounded in pixels,
+ * so 14pt is 18.67px and the baselines round one by one).
+ */
+export function exactPitchPoints(points: number): number {
+	const whole = Math.round(points);
+	return whole > 0 ? whole : points;
+}
+
+/**
  * Resolve a CSS `line-height` value from a TextStyle's spacing fields.
  *
  * - If `lineSpacingExactPt` is set (exact point mode from `a:lnSpc > a:spcPts`),
@@ -54,7 +66,7 @@ export function resolveLineHeight(
 	hasItalicRuns: boolean,
 ): string | number {
 	if (typeof textStyle?.lineSpacingExactPt === 'number' && textStyle.lineSpacingExactPt > 0) {
-		return `${textStyle.lineSpacingExactPt}pt`;
+		return `${exactPitchPoints(textStyle.lineSpacingExactPt)}pt`;
 	}
 	void hasItalicRuns;
 	// `a:spcPct` multiplies PowerPoint's single-spacing pitch, it does not
@@ -70,22 +82,20 @@ export function resolveLineHeight(
  * stacked on PowerPoint's {@link DEFAULT_LINE_HEIGHT} single-spacing pitch,
  * or that base itself when no multiplier is set.
  *
- * `compatLineSpacing` (`a:bodyPr/@compatLnSpc`) selects PowerPoint's legacy
- * (97-2003) line-spacing algorithm instead of the newer "exact" one this
- * function otherwise models. ECMA-376 (§21.1.2.1.1) describes the legacy
- * algorithm as computing line height directly from the run's own font
- * metrics rather than layering an extra single-spacing pitch on top, so
- * `a:spcPct` is applied to the multiplier alone here (no COM measurement of
- * `compatLnSpc` specifically backs the 1.2 constant the non-compat branch
- * uses; this is a spec-reasoned approximation, not a measured one).
+ * `compatLineSpacing` (`a:bodyPr/@compatLnSpc`) changes nothing here. It was
+ * once modelled as "the multiplier alone, no 1.2 pitch", which was never
+ * measured and painted every body of the older Office themes (whose master
+ * sets `compatLnSpc="1"`) about 17% too tight. PowerPoint 16 static exports
+ * of Calibri, Arial and Verdana at 28pt with `compatLnSpc` 0 and 1 and
+ * `lnSpc` unset, 90% and 150% all lay out at 1.2x the font size times the
+ * multiplier with the flag on (44.8, 40.3 and 67.2px at 37.3px). The
+ * parameter stays so callers keep their signature.
  */
 export function proportionalLineHeight(
 	lineSpacing: number | undefined,
 	compatLineSpacing = false,
 ): number {
-	if (compatLineSpacing) {
-		return typeof lineSpacing === 'number' && lineSpacing > 0 ? lineSpacing : 1;
-	}
+	void compatLineSpacing;
 	return typeof lineSpacing === 'number' && lineSpacing > 0
 		? lineSpacing * DEFAULT_LINE_HEIGHT
 		: DEFAULT_LINE_HEIGHT;

@@ -3,6 +3,7 @@ import type JSZip from 'jszip';
 import { PptxXmlBuilder } from '../../builders/fluent';
 import {
 	PptxData,
+	PptxEmbeddedFont,
 	PptxSlide,
 	PptxSlideMaster,
 	PptxCompatibilityWarning,
@@ -18,6 +19,7 @@ import { loadThemeVariants } from '../../utils/theme-variants';
 import { parsePresentationSmartTags } from '../../utils/smart-tags-parser';
 import { stripParentDirSegments } from '../../utils/strip-parent-dir-segments';
 import { PptxLoadDataBuilder } from '../builders';
+import { PptxLoadLimitError } from '../load-limits';
 import type { PptxHandlerLoadOptions } from '../types';
 import {
 	rememberSlideBackgroundOrigin,
@@ -25,8 +27,11 @@ import {
 	slideBackgroundOrigin,
 } from './authored-slide-background';
 import { enrichEmptyPlaceholderPrompts } from './layout-switch-placeholder-prompts';
+import type { LoadPartReader } from './load-part-reader';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeLoadSession';
+import { resolveTemplateImages } from './resolve-template-images';
 import { recordSlideFingerprints } from './slide-fingerprint';
+import { isFiniteNumber } from '../../../../units/finite';
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	protected async buildLoadData(
@@ -39,6 +44,10 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		},
 		slidesWithWarnings: PptxSlide[],
 		slideMasters: PptxSlideMaster[],
+		embedded: {
+			list: ReturnType<typeof parseEmbeddedFontList>;
+			fonts: PptxEmbeddedFont[];
+		},
 	): Promise<PptxData> {
 		const headerFooter = this.extractHeaderFooter();
 		const presentationProperties = await this.parsePresentationProperties();
@@ -48,8 +57,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const customShows = this.parseCustomShows();
 		const tableStyleMap = await this.parseTableStyles();
 		const tableStylesDefaultId = this.loadedTableStylesDefaultId;
-		const embeddedFontList = parseEmbeddedFontList(this.presentationData);
-		const embeddedFonts = await this.getEmbeddedFonts(embeddedFontList);
+		const { list: embeddedFontList, fonts: embeddedFonts } = embedded;
 		// Preserve for automatic re-embedding during save
 		this.loadedEmbeddedFonts = embeddedFonts;
 		this.loadedEmbeddedFontList = embeddedFontList;
@@ -59,7 +67,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const handoutMatch =
 			presentationProperties?.printProperties?.printWhat?.match(/^handouts([123469])$/u);
 		if (handoutMaster && handoutMatch) {
-			handoutMaster.slidesPerPage = Number.parseInt(handoutMatch[1], 10);
+			handoutMaster.slidesPerPage = Number.parseInt(handoutMatch[1] ?? '', 10);
 		}
 		await this.enrichAuxiliaryMasterElements(notesMaster, 'p:notesMaster');
 		await this.enrichAuxiliaryMasterElements(handoutMaster, 'p:handoutMaster');
@@ -201,7 +209,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const obj = node as Record<string, unknown>;
 			if ('@_id' in obj) {
 				const id = parseInt(String(obj['@_id']), 10);
-				if (Number.isFinite(id) && id > max) {
+				if (isFiniteNumber(id) && id > max) {
 					max = id;
 				}
 			}
@@ -266,6 +274,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	 * or resolve images.  Create a new `PptxHandler` instance instead.
 	 */
 	dispose(): void {
+		this.endPartReads();
 		this.revokeBlobUrls();
 		this.imageDataCache.clear();
 		this.slideMap.clear();
@@ -303,7 +312,31 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	async load(data: ArrayBuffer, options: PptxHandlerLoadOptions = {}): Promise<PptxData> {
-		await this.initializeLoadSession(data, options);
+		// Each load owns its reader, so a load that settles late never closes the
+		// reader of a newer load.
+		let reader: LoadPartReader | undefined;
+		try {
+			await this.initializeLoadSession(data, options);
+			reader = this.beginPartReads();
+			try {
+				return await this.loadInitializedSession(options.onSlidesParsed);
+			} catch (error) {
+				// A slide or shape limit stops the load after the session replaced the
+				// archive: release what was parsed so far (Blob URLs, caches, the
+				// archive) instead of leaving a half-loaded deck behind.
+				if (error instanceof PptxLoadLimitError) {
+					this.dispose();
+				}
+				throw error;
+			}
+		} finally {
+			this.endPartReads(reader);
+		}
+	}
+
+	private async loadInitializedSession(
+		onSlidesParsed?: PptxHandlerLoadOptions['onSlidesParsed'],
+	): Promise<PptxData> {
 		await this.detectAndPreserveVbaProject();
 		this.detectDigitalSignatureParts();
 		await this.parseCustomXmlParts();
@@ -318,7 +351,15 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// the pre-warning ones, so handing them straight back to `save()`
 		// fingerprints identically.
 		recordSlideFingerprints(this.savedSlideFingerprints, slidesWithWarnings);
-		return this.buildLoadData(presentationState, slidesWithWarnings, slideMasters);
+		// Read here rather than with the rest of the deck so a host's
+		// `onSlidesParsed` sees which families the deck embeds.
+		const embeddedFontList = parseEmbeddedFontList(this.presentationData);
+		const embeddedFonts = await this.getEmbeddedFonts(embeddedFontList);
+		onSlidesParsed?.({ slides: slidesWithWarnings, embeddedFonts });
+		return this.buildLoadData(presentationState, slidesWithWarnings, slideMasters, {
+			list: embeddedFontList,
+			fonts: embeddedFonts,
+		});
 	}
 
 	/**
@@ -438,7 +479,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (slideXml && this.extractShowMasterShapes(slideXml) === false) {
 			return [];
 		}
-		return this.getLayoutElements(slideId);
+		return resolveTemplateImages(await this.getLayoutElements(slideId), (path) =>
+			this.getImageData(path),
+		);
 	}
 
 	/**
@@ -491,7 +534,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			} else {
 				// Layout not yet in cache -- try to load from ZIP
 				try {
-					const layoutXmlStr = await this.zip.file(lp)?.async('string');
+					const layoutXmlStr = await this.readPartText(lp);
 					if (layoutXmlStr) {
 						const layoutXmlObj = this.parser.parse(layoutXmlStr) as XmlObject;
 						this.layoutXmlMap.set(lp, layoutXmlObj);
@@ -543,7 +586,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// Verify the target layout exists
 		let layoutXml = this.layoutXmlMap.get(layoutPath);
 		if (!layoutXml) {
-			const layoutXmlStr = await this.zip.file(layoutPath)?.async('string');
+			const layoutXmlStr = await this.readPartText(layoutPath);
 			if (!layoutXmlStr) {
 				throw new Error(`Layout not found: ${layoutPath}`);
 			}
@@ -586,7 +629,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				// No existing layout rel -- add one
 				const maxRId = rels.reduce((max: number, r: XmlObject) => {
 					const id = parseInt(String(r['@_Id'] || 'rId0').replace('rId', ''), 10);
-					return Number.isFinite(id) && id > max ? id : max;
+					return isFiniteNumber(id) && id > max ? id : max;
 				}, 0);
 				layoutRelId = `rId${maxRId + 1}`;
 				rels.push({

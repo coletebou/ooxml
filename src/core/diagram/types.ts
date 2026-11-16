@@ -13,8 +13,12 @@ import type {
 	DrawingTextRun,
 	DrawingTextSpacing,
 } from '../drawingml/types';
+import type { DrawingRichTextBody } from '../drawingml/text-model';
+import type { DrawingEffectList } from '../drawingml/effect-model';
+import type { DrawingScene3D, DrawingText3DValues } from '../drawingml/text-3d-model';
 
 export type { AttributeReader } from '../drawingml/types';
+import type { DiagramNeutralTextParagraph } from './text/node-text-neutral';
 
 // The DrawingML primitives a diagram uses are the neutral `drawingml` types under their
 // historical diagram names, kept so the public `ooxml-core/diagram` API does not change.
@@ -114,6 +118,8 @@ export interface DiagramIssue {
 
 /** A `dgm:pt` of the data model. */
 export interface DiagramPoint {
+	fill?: DrawingFill;
+	line?: DrawingLine;
 	modelId: string;
 	/** `node` (the schema default), `doc`, `asst`, `pres`, `parTrans`, `sibTrans`. */
 	type: string;
@@ -121,6 +127,11 @@ export interface DiagramPoint {
 	paragraphs: string[];
 	/** The paragraphs joined by a newline. */
 	text: string;
+	/**
+	 * The `dgm:t` paragraphs on the neutral DrawingML text model (runs, breaks, fields and their
+	 * properties), for `projectDiagramNodeTextNeutral`; absent when the point has no text body.
+	 */
+	textParagraphs?: DiagramNeutralTextParagraph[];
 	connectionId?: string;
 	/** `dgm:prSet` identifiers that tie a presentation point to its data point and layout node. */
 	presAssocId?: string;
@@ -138,6 +149,8 @@ export interface DiagramPoint {
 
 /** A parsed `dgm:dataModel`. */
 export interface DiagramDataModel {
+	generatedCache?: true;
+	generatedCacheDigest?: string;
 	points: DiagramPoint[];
 	connections: DiagramConnection[];
 	/** Content points (not `doc`, `pres`, `parTrans`, `sibTrans`) in document order. */
@@ -189,6 +202,7 @@ export interface DiagramStyleRef {
 }
 
 export interface DiagramStyleLabel {
+	requires3d?: boolean;
 	name: string;
 	line?: DiagramStyleRef;
 	fill?: DiagramStyleRef;
@@ -198,6 +212,12 @@ export interface DiagramStyleLabel {
 	hasScene3d: boolean;
 	/** The label carries a non-empty `dgm:sp3d` (bevel, extrusion, material). */
 	hasShape3d: boolean;
+	/** The label's `dgm:scene3d` as `a:scene3d`, when it is not the default front view. */
+	scene3dXml?: string;
+	/** The label's non-empty `dgm:sp3d` as `a:sp3d`. */
+	shape3dXml?: string;
+	/** The label's text 3D (`dgm:txPr` children: `a:scene3d`, `a:sp3d`), as a body carries it. */
+	text3dXml?: string;
 }
 
 /** A parsed `dgm:styleDef` (quick style). */
@@ -224,6 +244,11 @@ export interface DiagramStyleReference {
 
 /** A shape of the cached `dsp:drawing`, renderer-neutral. Geometry in EMU, angles in degrees. */
 export interface DiagramDrawingShape {
+	sourceLayoutRole?: string;
+	/** Semantic association carried only by a generated layout, not by source cached parts. */
+	sourceNodeId?: string;
+	sourceStyleLabel?: string;
+	foldedNodeIds?: string[];
 	/** `dsp:sp/@modelId`: the presentation point this shape was laid out from. */
 	modelId: string;
 	frame: DiagramFrame;
@@ -237,16 +262,45 @@ export interface DiagramDrawingShape {
 	paths?: DiagramPath[];
 	fill?: DiagramFill;
 	line?: DiagramLine;
+	/** Colour of the first outer shadow (`a:effectLst/a:outerShdw`), unresolved. */
+	shadowColor?: DiagramColor;
+	effects?: DrawingEffectList;
 	style?: DiagramStyleReference;
+	/** Flattened text summary (runs per paragraph), as charts read it. */
 	text?: DiagramTextBody;
+	/** The `dsp:txBody` on the neutral rich text model (body, list style, paragraphs, runs). */
+	body?: DrawingRichTextBody;
 	/** `dsp:txXfrm`: the independent text rectangle. */
 	textFrame?: DiagramFrame;
 	/** The shape carries `a:scene3d` or `a:sp3d`; not modelled, kept only in the source part. */
 	has3d: boolean;
+	/**
+	 * Generated shapes only: the quick-style label's 3D properties, which a generated cache
+	 * writes into the shape as Office does (`a:scene3d`, `a:sp3d`). A spatial camera of the whole
+	 * diagram stays in the quick-style part; Office's own cache does not carry it either.
+	 */
+	shape3d?: { scene3dXml?: string; shape3dXml?: string; text3dXml?: string };
+	/** The shape's own `a:scene3d` and `a:sp3d` as values, read from a cached drawing. */
+	view3d?: DiagramShape3dView;
+}
+
+/** A shape's 3D: the camera and light of its own scene, and its bevels, extrusion and material. */
+export interface DiagramShape3dView {
+	scene?: DrawingScene3D;
+	shape?: DrawingText3DValues;
 }
 
 /** A parsed `dsp:drawing`: the layout the producing application last computed, cached in the package. */
 export interface DiagramDrawing {
+	/** Known host frame: retain layout padding when painting an interpreted drawing. */
+	extentEmu?: { width: number; height: number };
+	/** Cached drawing relationship id to internal image package part. External media is never resolved. */
+	pictureParts?: Record<string, string>;
+	/**
+	 * The diagram's spatial camera (`dgm:styleDef/dgm:scene3d` of its quick style), when it turns
+	 * the diagram away from the front view. Office keeps it in the quick-style part, not in the cache.
+	 */
+	scene3d?: DrawingScene3D;
 	shapes: DiagramDrawingShape[];
 	issues: DiagramIssue[];
 }

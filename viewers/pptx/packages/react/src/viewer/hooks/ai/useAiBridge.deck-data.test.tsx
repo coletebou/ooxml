@@ -11,7 +11,7 @@ import type { ParsedTableStyleMap, PptxSlide, PptxViewProperties } from 'pptx-vi
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UseAiBridgeInput } from './useAiBridge';
 import { useAiBridge } from './useAiBridge';
@@ -47,6 +47,7 @@ function baseInput(overrides: Partial<UseAiBridgeInput> = {}): UseAiBridgeInput 
 		pinnedFocus: null,
 		handlerRef: { current: null },
 		sections: [],
+		customShows: [],
 		presentationProperties: {},
 		customProperties: [],
 		coreProperties: undefined,
@@ -59,6 +60,7 @@ function baseInput(overrides: Partial<UseAiBridgeInput> = {}): UseAiBridgeInput 
 		setActiveSlideIndex: () => {},
 		setCanvasSize: () => {},
 		setSections: () => {},
+		setCustomShows: () => {},
 		setPresentationProperties: () => {},
 		setCustomProperties: () => {},
 		setCoreProperties: () => {},
@@ -138,6 +140,23 @@ describe('useAiBridge deck-data metadata parity', () => {
 		]);
 	});
 
+	it('applyDeckData commits changed custom shows through the setter', () => {
+		const setCustomShows = vi.fn();
+		let captured: ReturnType<typeof useAiBridge> | null = null;
+		function Probe(): null {
+			captured = useAiBridge(baseInput({ setCustomShows }));
+			return null;
+		}
+		act(() => root.render(<Probe />));
+		act(() => {
+			captured?.applyDeckData?.(
+				(data) => ({ ...data, customShows: [{ id: '0', name: 'Short', slideRIds: ['rId2'] }] }),
+				'custom shows',
+			);
+		});
+		expect(setCustomShows).toHaveBeenCalledWith([{ id: '0', name: 'Short', slideRIds: ['rId2'] }]);
+	});
+
 	it('applyDeckData is a no-op for unchanged metadata fields', () => {
 		let setViewPropertiesCalls = 0;
 		let captured: ReturnType<typeof useAiBridge> | null = null;
@@ -159,5 +178,49 @@ describe('useAiBridge deck-data metadata parity', () => {
 		});
 
 		expect(setViewPropertiesCalls).toBe(0);
+	});
+});
+
+describe('useAiBridge on the shared bridge', () => {
+	it('leaves the deck clean when an AI deck edit changes nothing', () => {
+		let dirty = 0;
+		let captured: ReturnType<typeof useAiBridge> | null = null;
+		function Probe(): null {
+			captured = useAiBridge(
+				baseInput({
+					markDirty: () => {
+						dirty += 1;
+					},
+				}),
+			);
+			return null;
+		}
+		act(() => root.render(<Probe />));
+		act(() => {
+			captured?.applyDeckData?.((data) => data, 'noop');
+		});
+		expect(dirty).toBe(0);
+	});
+
+	it('composes two slide updates made in one tick', () => {
+		let state = slides();
+		let captured: ReturnType<typeof useAiBridge> | null = null;
+		function Probe(): null {
+			captured = useAiBridge(
+				baseInput({
+					slides: state,
+					setSlides: (next) => {
+						state = typeof next === 'function' ? next(state) : next;
+					},
+				}),
+			);
+			return null;
+		}
+		act(() => root.render(<Probe />));
+		act(() => {
+			captured?.applySlidesUpdate((deck) => [...deck, { ...deck[0], id: 'b' } as PptxSlide], 'one');
+			captured?.applySlidesUpdate((deck) => [...deck, { ...deck[0], id: 'c' } as PptxSlide], 'two');
+		});
+		expect(state.map((s) => s.id).slice(-2)).toEqual(['b', 'c']);
 	});
 });

@@ -32,15 +32,32 @@ l'[architecture](/fr/architecture) pour la répartition des modules.
 
 Chaque binding accepte les mêmes propriétés et signale les mêmes événements (le contrat est `ViewerProperties` et `ViewerEvents` dans `ooxml-ui/visio` ; les [bindings](/bindings) listent les formes natives).
 
-| Surface    | Contrat                                                                                                                                                                |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Propriétés | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `ribbonAddIns`, `collaboration`                                                                             |
-| Événements | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change` |
+| Surface    | Contrat                                                                                                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Propriétés | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `readOnly`, `ribbonAddIns`, `collaboration`, `storage`, `fileProviders`, `customization`                                    |
+| Événements | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change`, `file-command` |
 
 - `canEdit` (booléen) est l'autorisation de modification. Le visualiseur complet est modifiable par défaut et `canEdit: false` le met en lecture seule ; les [blocs de construction](/building-blocks) sont en lecture seule tant que l'hôte ne passe pas `true`. Un dessin sans octets de paquet (un modèle passé comme `document`, un ancien `.vsd`) est en lecture seule quelle que soit la valeur de `canEdit`.
 - `document-change` fournit `{ document, dirty, kind }`. `kind` vaut `edit`, `undo` ou `redo` pour les modifications de cette fenêtre, `remote` quand la modification d'un collaborateur a été appliquée, et `save` après `markClean()`.
 - `markClean()` (sur `viewer.controller` et sur les blocs de construction) déclare enregistré le contenu actuel. Un hôte qui enregistre `exportVsdx()` lui-même l'appelle ensuite : `edit.dirty` passe à `false`, un `document-change` de type `save` est émis, et les modifications et annulations suivantes sont mesurées à partir de ce point. Il ne fait rien pour un dessin qui ne peut pas être réenregistré.
 - `collaboration` (`VisioCollaborationOptions | null`) partage le dessin ouvert dans une salle tant qu'elle est définie. `collaboration-change` fournit un `CollaborationState` quand le partage démarre ou s'arrête et quand l'état, la synchronisation ou les personnes changent. Sur l'élément (`viewer.element` d'un handle), `collaborationState` lit l'état actuel, et `reconnectCollaboration()` et `stopCollaboration()` agissent dessus. Voir [Collaboration](/fr/collaboration).
+
+## Membres réservés à l'élément {#element-only-members}
+
+Ces membres de `<visio-viewer>` ne font pas partie du contrat de liaison partagé (voir [bindings](/bindings)) ; utilisez-les sur l'élément.
+
+| Membre                         | Type                                | Description                                                                                                                                                                                             |
+| ------------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `googleFonts`                  | `GoogleFontsOption \| undefined`    | Repli de police web pour les polices de dessin non installées : `false` (désactivé), `{ baseUrl }` (un miroir CSS2), ou non défini pour le choix du Centre de gestion de la confidentialité du lecteur. |
+| `pdfFonts`                     | `readonly PdfFontFile[]`            | Fichiers TrueType fournis par l'hôte, que Fichier > Exporter > PDF intègre sous forme de sous-ensembles. Rien n'est fourni.                                                                             |
+| `createFromTemplate(template)` | `Promise<void>`                     | Crée un dessin à partir d'un modèle de Fichier > Nouveau (Dessin vierge, diagrammes de flux, organigramme).                                                                                             |
+| `openBackstage(page?)`         | `void`                              | Ouvre le backstage Fichier de Visio à une page (Infos par défaut).                                                                                                                                      |
+| `closeBackstage()`             | `void`                              | Quitte le backstage Fichier et revient au dessin.                                                                                                                                                       |
+| `startPresentation()`          | `void`                              | Lance le mode Présentation sur la page de premier plan actuelle (F5).                                                                                                                                   |
+| `exitPresentation()`           | `void`                              | Quitte le mode Présentation ; la page, le zoom et la sélection ne changent pas.                                                                                                                         |
+| `presenting`                   | `boolean` (lecture seule)           | Vrai tant que le mode Présentation est actif.                                                                                                                                                           |
+| `fileName`                     | `string` (lecture seule)            | Nom du dernier fichier local ouvert, ou vide pour les octets, les modèles et les dessins fermés.                                                                                                        |
+| `renderWarnings`               | `readonly string[]` (lecture seule) | Avertissements signalés par le dernier rendu de page.                                                                                                                                                   |
 
 ## Sélectionner des formes {#select-shapes}
 
@@ -220,6 +237,77 @@ const customization = {
 
 `edit: false` est un verrouillage en lecture seule à part entière, à côté de l’interrupteur de lecture seule de l’hôte et d’un rôle de collaboration `viewer` : aucun ne lève un autre. Les capacités sont une politique d’interface, pas une protection du document. Le remplacement de régions (boîte d’options, volets) n’est pas encore proposé pour Visio. Tous les produits réunis : [guide d’intégration](https://github.com/ChristopherVR/ooxml/blob/main/docs/embedding.md).
 
+## Attendre la validation du texte en ligne {#awaited-text-commit}
+
+`commitTextEdit(): Promise<TextEditOutcome>` applique le texte en cours de saisie dans une forme du
+canevas monté, afin qu'un Enregistrer de l'hôte l'exporte. Elle ne se résout qu'une fois la
+modification du brouillon terminée. Une validation déjà lancée par une perte de focus ou Échap est
+attendue, pas relancée. Le déroulement est décrit dans [Enregistrer pendant la modification du texte d'une forme](building-blocks.md#saving-while-editing-text).
+
+Où elle est disponible :
+
+| Surface                                                                                      | Appel                         |
+| -------------------------------------------------------------------------------------------- | ----------------------------- |
+| `ViewerController` (la prop `handle` de React le reçoit, et `viewer.controller` d'un handle) | `controller.commitTextEdit()` |
+| Résultat de `useViewerBuildingBlocks` de React                                               | `commitTextEdit()`            |
+| Résultat de `useViewerBuildingBlocks` de Vue                                                 | `commitTextEdit()`            |
+| Résultat de `createViewerBuildingBlocks` de Solid et Svelte                                  | `commitTextEdit()`            |
+| `createViewerBuildingBlocks` d'Angular (le service `ViewerBuildingBlocks`)                   | `commitTextEdit()`            |
+| Résultat de `createViewerBuildingBlocks` de Vanilla                                          | `commitTextEdit()`            |
+
+Le canevas enregistre son committer auprès de `ViewerController.registerTextCommitter` ; les hôtes
+ne l'appellent pas. `ViewerController.destroyed` vaut `true` après `destroy()`.
+
+Les types sont exportés depuis `ooxml-ui/visio`, avec `TextEditCommitter` :
+
+```ts
+interface TextEditIdentity {
+	readonly sourceGeneration: number;
+	readonly documentGeneration: number;
+	readonly pageId?: string;
+	readonly shapeId?: string;
+}
+
+type TextEditOutcome =
+	| (TextEditIdentity & { readonly status: 'committed'; readonly text: string })
+	| (TextEditIdentity & { readonly status: 'unchanged'; readonly reason: 'no-draft' | 'same-text' })
+	| (TextEditIdentity & {
+			readonly status: 'refused';
+			readonly reason: 'read-only' | 'rejected';
+			readonly message: string;
+			readonly text: string;
+	  })
+	| (TextEditIdentity & {
+			readonly status: 'cancelled';
+			readonly reason: 'stale-document' | 'superseded' | 'destroyed';
+			readonly text?: string;
+	  });
+```
+
+`sourceGeneration` est la génération de la source chargée (celle du brouillon, s'il y en avait un) et
+`documentGeneration` la génération du document accepté au moment de la décision. `pageId` et
+`shapeId` sont présents lorsqu'un brouillon existait.
+
+| `status`    | `reason`         | Champs                  | Quand il survient                                                                                                                                                                                                      |
+| ----------- | ---------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `committed` |                  | `text`                  | Le brouillon a été appliqué comme une seule modification annulable par le chemin de modification habituel ; la validation et annuler/rétablir ne changent pas.                                                         |
+| `unchanged` | `no-draft`       |                         | Aucun brouillon n'était ouvert, ou aucun canevas n'est monté.                                                                                                                                                          |
+| `unchanged` | `same-text`      |                         | Le brouillon est identique au texte de la forme.                                                                                                                                                                       |
+| `refused`   | `read-only`      | `message`, `text`       | Le dessin est en lecture seule au moment de la validation, ou l'est devenu pendant que le brouillon était ouvert. `message` vaut « The drawing is read-only. ».                                                        |
+| `refused`   | `rejected`       | `message`, `text`       | La modification a échoué à la validation. `message` est le message de l'éditeur et `text` conserve le brouillon pour récupération.                                                                                     |
+| `cancelled` | `stale-document` | `text`                  | La source chargée a changé pendant que le brouillon était ouvert ou pendant la modification. Un brouillon écarté par un chargement est renvoyé une fois, avec son ancien `sourceGeneration`, et n'est jamais appliqué. |
+| `cancelled` | `superseded`     | `text`                  | Une autre modification a remplacé celle-ci pendant son exécution.                                                                                                                                                      |
+| `cancelled` | `destroyed`      | `text` (avec brouillon) | Le contrôleur a été détruit : un appel sur un contrôleur détruit renvoie ce résultat sans `text`, et un brouillon en cours est annulé avec son `text`.                                                                 |
+
+N'enregistrez que lorsque `status` vaut `committed` ou `unchanged` :
+
+```ts
+const outcome = await controller.commitTextEdit();
+if (outcome.status === 'refused') showError(outcome.message, outcome.text);
+else if (outcome.status === 'cancelled') showError(`Not saved: ${outcome.reason}`, outcome.text);
+else save(controller.exportVsdx().bytes);
+```
+
 ## Export SVG statique {#static-svg-export}
 
 `exportPageSvg(model, pageIndex, { maxBytes })` et la méthode `exportSvg()` de chaque handle monté ou natif
@@ -233,8 +321,7 @@ Le plafond UTF-8 est de 16 Mio ; les appelants peuvent l'abaisser. Des contrôle
 peuvent rejeter un contenu dont la sérialisation finale serait plus petite. Les polices ne sont pas
 intégrées et le texte et la mise en page restent approximatifs. Les dimensions physiques de la page sont
 préservées ; les rastériseurs en aval doivent plafonner leurs dimensions de sortie et la surface en pixels
-avant d'allouer une surface d'image. L'export PDF, l'export bitmap et la mise en page d'impression restent
-non implémentés.
+avant d'allouer une surface d'image. Cette fonction écrit uniquement du SVG ; Fichier > Exporter dans le visualiseur écrit des pages-images en PNG et PDF. La mise en page d'impression reste non implémentée.
 
 Des tests de pixels secondaires facultatifs sous Linux s'exécutent avec
 `node scripts/test-svg-rasterization.mjs` après le build, en utilisant Python 3 du système,
@@ -326,7 +413,7 @@ mise en forme et de géométrie ci-dessous ont leurs propres règles d'admission
 native couvrent des cas enregistrés précis, décrits dans le
 [registre de vérification](/verification) ; elles n'établissent pas une fidélité générale.
 
-## Mise en forme et disposition expérimentales {#experimental-formatting-and-arrangement}
+## Mise en forme et disposition {#experimental-formatting-and-arrangement}
 
 Le ruban Accueil et `applyEdits()` partagent les commandes `format-text`, `format-shape` et
 `reorder-shape`. La mise en forme du texte comprend les familles de polices enregistrées, la taille
@@ -377,7 +464,7 @@ la distribution selon les centres et préserve l'ordre de sélection en cas d'é
 calques et connecteurs collés restent hors de sa portée d'admission. Ces actions
 partagent l'historique, la conservation de la sélection et le téléchargement/la réouverture VSDX avec les autres modifications.
 
-## Duplication expérimentale {#experimental-duplication}
+## Duplication {#experimental-duplication}
 
 `duplicateSelection(): Promise<void>` sur le contrôleur et sur chaque handle monté ou natif
 duplique les formes sélectionnées admises de la page courante. Le menu Coller de l'onglet Accueil, le menu contextuel de la forme,
@@ -436,7 +523,7 @@ Le cœur sans DOM exporte `captureVisioClipboard`, `serializeVisioClipboard`,
 `deserializeVisioClipboard`, la modification `paste-shapes` et le constructeur de commandes
 `visioPasteCommand(page, clipboard, offset?)`.
 
-## Édition expérimentale de la géométrie {#experimental-geometry-editing}
+## Édition de la géométrie {#experimental-geometry-editing}
 
 Les commandes de géométrie partagées exposent la création d'un rectangle, le déplacement, le redimensionnement et la suppression
 sûre. Chaque handle de framework natif ou monté transmet aussi

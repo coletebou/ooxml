@@ -119,6 +119,10 @@ If you're building for Vue, Angular, Svelte, or vanilla JS instead, use the matc
 
 See the [project README](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) for the full monorepo overview, architecture, and a per-package documentation index.
 
+## Privacy and network use
+
+Parsing, editing and saving happen locally and never upload the file. Linked (external) pictures and media are not fetched unless you pass `allowExternalImages: true`. Node signature inspection checks certificate revocation with the OCSP responder named in each certificate. Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 [Apache-2.0](https://github.com/ChristopherVR/ooxml/blob/main/viewers/pptx/LICENSE). Please keep the [`NOTICE`](https://github.com/ChristopherVR/ooxml/blob/main/viewers/pptx/NOTICE) file with redistributions.
@@ -199,3 +203,12 @@ npx @christophervr/pptx-viewer --pm pnpm                           # force a pac
 - Any unrecognised flag, unknown target id, or invalid `--pm` value exits with a one-line error (`✘ Error: ...`) and a non-zero status instead of a stack trace.
 - Interrupting the interactive checklist with Ctrl-C exits with status `130`.
 - Requires Node.js 18+ to run at all; see the Angular note above for its own, stricter minimum.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#powerpoint-pptx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

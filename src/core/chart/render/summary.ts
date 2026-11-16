@@ -3,6 +3,8 @@
 // charts extend it with their anchor and legacy colours; Word and PowerPoint build it from a
 // `ChartSpace` (`chartSummaryFromSpace`).
 import type { ChartMarkerSummary } from './chart-view-markers';
+import type { ChartManualLayout } from '../manual-layout';
+import type { ChartDataTable } from '../model-chrome';
 import type { ChartAxis } from '../model';
 import type { DrawingColor, DrawingFill, DrawingLine } from '../../drawingml/types';
 import type { DataLabelFlagLevel } from '../data-label-text';
@@ -32,10 +34,16 @@ export type ChartSummaryType =
 	| 'waterfall'
 	| 'histogram'
 	| 'treemap'
-	| 'sunburst';
+	| 'sunburst'
+	| 'funnel'
+	| 'boxWhisker'
+	| 'regionMap';
 
 /** One cascade level of a series' data labels: its content switches, placement and format. */
 export interface ChartSummaryLabelLevel extends DataLabelFlagLevel {
+	layout?: ChartManualLayout;
+	showLeaderLines?: boolean;
+	leaderLine?: DrawingLine;
 	/** `c:delete`: the label (or, at series and group level, every label) is suppressed. */
 	deleted?: boolean;
 	/** `c:dLblPos`: `ctr`, `inEnd`, `inBase`, `outEnd`, `bestFit`, `t`, `b`, `l`, `r`. */
@@ -55,6 +63,12 @@ export interface ChartSummaryDataLabels {
 }
 
 export interface ChartSummarySeries extends ChartMarkerSummary {
+	regionMap?: import('../region-map/types').RegionMapOptions;
+	boxWhisker?: import('../ex/model').ChartExLayoutProperties;
+	hidden?: boolean;
+	smooth?: boolean;
+	showLine?: boolean;
+	line?: DrawingLine;
 	name?: string;
 	/** Formula reference for the series name (`Sheet1!$B$1`). */
 	nameRef?: string;
@@ -77,6 +91,10 @@ export interface ChartSummarySeries extends ChartMarkerSummary {
 	fill?: DrawingFill;
 	/** Non-solid individual point fills; solid point overrides use pointColors. */
 	pointFills?: Record<number, DrawingFill>;
+	/** A bar or column picture fill stacks along the bar (`c:pictureOptions/c:pictureFormat`). */
+	pictureStack?: boolean;
+	/** `stackScale`: the value-axis units one stacked picture stands for (`c:pictureStackUnit`). */
+	pictureStackUnit?: number;
 	/** Opaque imported DrawingML effect list, retained during chart regeneration. */
 	effectsXml?: string;
 	/** Data labels the painter draws at each point (`c:dLbls`). */
@@ -132,6 +150,8 @@ export interface ChartSummaryGroup {
 /** The binning of a histogram summary: `cx:binning` plus whether bars aggregate by category. */
 export interface HistogramSummaryOptions extends HistogramOptions {
 	aggregateByCategory?: boolean | undefined;
+	/** A pareto chart: bars in descending order and a cumulative percentage line (`paretoLine`). */
+	pareto?: { lineColor?: DrawingColor | undefined } | undefined;
 }
 
 /** Bubble display options of `c:bubbleChart`: scale (percent), what the size represents, negatives. */
@@ -151,8 +171,12 @@ export interface HierarchySummaryOptions {
 }
 
 export interface ChartSummary<S extends ChartSummarySeries = ChartSummarySeries> {
+	funnelGapWidth?: number;
 	chartType: ChartSummaryType;
 	/** Native axes and the primary plot group IDs, retained for shared rendering. */
+	dataTable?: ChartDataTable;
+	date1904?: boolean;
+	plotLayout?: ChartManualLayout;
 	axes?: ChartAxis[];
 	axisIds?: number[];
 	/** Bar/column grouping. */
@@ -171,6 +195,8 @@ export interface ChartSummary<S extends ChartSummarySeries = ChartSummarySeries>
 	histogram?: HistogramSummaryOptions;
 	/** Stock: the formatting of its `c:stockChart`. */
 	stock?: StockSummaryStyle;
+	/** 3-D charts (`c:view3D` of a bar3D, line3D, area3D, pie3D or surface3D group): the view the painter projects. */
+	view3D?: import('./chart-3d-projection').Chart3DViewInput;
 	/** Bubble: the display options of its `c:bubbleChart`. */
 	bubble?: BubbleSummaryOptions;
 	/** Treemap and sunburst: the category levels of its `cx:strDim`. */

@@ -56,7 +56,7 @@ export interface ParsedTransitionDetails {
 	spokes?: number;
 	pattern?: string;
 	thruBlk?: boolean;
-	morphOption?: PptxMorphOption;
+	morphOption?: PptxMorphOption | undefined;
 	rawSoundAction?: XmlObject;
 	rawExtLst?: XmlObject;
 }
@@ -250,6 +250,35 @@ export function applyTransitionAttributes(node: XmlObject, transition: PptxSlide
 	if (validUnsignedInteger(transition.advanceAfterMs)) {
 		node['@_advTm'] = String(transition.advanceAfterMs);
 	}
+}
+
+/**
+ * The bare `<p:transition .../>` for a slide with no visual effect (`type:
+ * 'none'`) that still carries advance settings or a sound, or `undefined` when
+ * it carries none. ECMA-376 makes the effect child optional, and PowerPoint
+ * writes exactly this element for Transitions > None with Advance Slide >
+ * After ticked; dropping it lost the timed advance on save. `spd` and `dur`
+ * describe an effect, so they are not written without one.
+ */
+export function buildEffectlessTransition(
+	transition: PptxSlideTransition,
+	localName: (key: string) => string,
+): XmlObject | undefined {
+	const node: XmlObject = {};
+	if (typeof transition.advanceOnClick === 'boolean') {
+		node['@_advClick'] = transition.advanceOnClick ? '1' : '0';
+	}
+	if (validUnsignedInteger(transition.advanceAfterMs)) {
+		node['@_advTm'] = String(transition.advanceAfterMs);
+	}
+	const soundAction = buildTransitionSound(transition, localName);
+	if (soundAction) {
+		node['p:sndAc'] = soundAction;
+	}
+	// `advClick="1"` alone is the schema default, the same as no element.
+	const meaningful =
+		node['@_advTm'] !== undefined || node['@_advClick'] === '0' || node['p:sndAc'] !== undefined;
+	return meaningful ? node : undefined;
 }
 
 export function buildTransitionSound(

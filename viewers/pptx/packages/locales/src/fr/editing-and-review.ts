@@ -150,7 +150,6 @@ export const translations = {
 	'pptx.hyperlinkDialog.apply': 'Appliquer',
 	'pptx.linkTooltip.followLink': 'Ctrl+Cliquez pour suivre le lien',
 	'pptx.linkTooltip.presentationMode': 'Actif en mode présentation',
-	'pptx.properties.title': 'Propriétés du document',
 	'pptx.properties.titleLabel': 'Titre',
 	'pptx.properties.author': 'Auteur',
 	'pptx.properties.subject': 'Sujet',
@@ -195,8 +194,6 @@ export const translations = {
 	'pptx.review.translate': 'Traduire',
 	'pptx.review.translateTooltip': 'Traduire le texte sélectionné',
 	'pptx.shortcuts.action.cancelTextEdit': "Annuler l'édition de texte en ligne / fermer les menus",
-	'pptx.shortcuts.action.clearSelection':
-		"Effacer la sélection / fermer les menus / annuler l'édition",
 	'pptx.shortcuts.action.commitTextEdit': "Valider l'édition de texte en ligne",
 	'pptx.shortcuts.action.copyElement': "Copier l'élément sélectionné",
 	'pptx.shortcuts.action.cutElement': "Couper l'élément sélectionné",
@@ -207,7 +204,6 @@ export const translations = {
 	'pptx.shortcuts.action.nudgeElementLarge': "Déplacer largement l'élément sélectionné",
 	'pptx.shortcuts.action.pasteElement': "Coller l'élément",
 	'pptx.shortcuts.action.prevSlide': 'Diapositive précédente (sans sélection)',
-	'pptx.shortcuts.action.redoAlternate': 'Rétablir (alternative)',
 	'pptx.shortcuts.action.selectAll': 'Sélectionner tous les éléments',
 	'pptx.shortcuts.action.zoomCanvas': 'Zoomer sur le plan de travail',
 	'pptx.shortcuts.close': 'Fermer',
@@ -262,6 +258,7 @@ export const translations = {
 	'pptx.hyperlink.actionOleVerb': "Action de l'objet",
 	'pptx.hyperlink.actionRunProgram': 'Exécuter un programme',
 	'pptx.colorPicker.recentColors': 'Couleurs récentes',
+	'pptx.colorPicker.recentColor': 'Couleur récente {{hex}}',
 	'pptx.colorPicker.customColors': 'Couleurs personnalisées',
 	'pptx.comments.mentionPlaceholder': "Tapez @ pour mentionner quelqu'un",
 	'pptx.comments.mentionSuggestions': 'Personnes',
@@ -322,6 +319,10 @@ export const translations = {
 		"Un son de transition de diapositive n'a pas pu être enregistré et a été ignoré.",
 	'pptx.compatibility.diagramRelationshipIdsIncomplete':
 		"Il manque à ce diagramme SmartArt certaines références internes, il pourrait donc ne pas s'afficher exactement comme conçu.",
+	'pptx.compatibility.embeddedFontRestricted':
+		"La licence d'une police incorporée n'autorise pas son utilisation : une police de substitution est affichée. Ses données restent dans le fichier.",
+	'pptx.compatibility.embeddedFontNotEmbeddable':
+		"Une police n'a pas été incorporée, car sa licence n'autorise pas son incorporation dans une présentation modifiable.",
 	'pptx.compatibility.exportBackendUnavailable':
 		"L'exportation vers ce format n'est pas disponible dans l'environnement actuel.",
 } as const;

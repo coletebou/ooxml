@@ -1,6 +1,7 @@
 /** Shared building blocks and the host interface of the File backstage pages. */
 import type { WorkbookProperties } from 'ooxml-core/xlsx';
 import type { EditorContext } from 'ooxml-core/xlsx/ui';
+import type { CloudFileProvider, CloudOpenedFile } from 'ooxml-core/embedding';
 import type { FileCommand } from '../events';
 import { ribbonIcon } from '../ribbon/icons';
 import type { SaveState } from '../title-bar';
@@ -18,6 +19,10 @@ export interface EditorOptions {
 	author: string;
 	calculation: CalculationMode;
 	iteration: IterationSettings;
+	/** Trust Center: download missing fonts (the host's locked value, or the reader's choice). */
+	allowFontDownloads?: boolean;
+	/** The host set `googleFonts`, so the font download toggle is read-only. */
+	fontDownloadsLocked?: boolean;
 }
 
 /** What the File view needs from the editor; every value is read when a page opens. */
@@ -27,6 +32,10 @@ export interface BackstageHost {
 	saveState(): SaveState;
 	fileCommand(command: FileCommand, fileName?: string): void;
 	newFromTemplate(id: TemplateId): void;
+	/** Cloud places File > Open offers besides this device. */
+	fileProviders?(): readonly CloudFileProvider[];
+	/** Opens a file the user picked in a cloud place (the host closes the backstage). */
+	openCloudFile?(file: CloudOpenedFile): void;
 	close(): void;
 	options(): EditorOptions;
 	setOption<K extends keyof EditorOptions>(key: K, value: EditorOptions[K]): void;

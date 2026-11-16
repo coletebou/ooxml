@@ -25,6 +25,7 @@ import { fail } from './package-common';
 import { visioFormulaCachedValue } from './formula';
 import {
 	assertVisioShapeUnreferenced,
+	freezeVisioCells,
 	recalculateVisioCells,
 	type VisioCellKey,
 } from './edit-recalculate';
@@ -55,6 +56,7 @@ export function applyGeometryEdit(
 	edit: VisioGeometryEdit,
 	check: () => void,
 	masterMoveProof: MasterMoveProof = emptyMasterMoveProof(),
+	diagnostics?: { code: string; message: string }[],
 ): readonly string[] {
 	const masterMovePins = masterMoveProof.pins,
 		masterDimensions = masterMoveProof.dimensions;
@@ -68,7 +70,11 @@ export function applyGeometryEdit(
 	// Connectors glued to an edited 2D shape follow it; an edited connector is unglued first.
 	const glue = edit.type.startsWith('create-')
 		? { connectors: [] }
-		: glueParticipants(root, edit.shapeId);
+		: glueParticipants(
+				root,
+				edit.shapeId,
+				edit.type === 'move-shape' || edit.type === 'resize-shape' || edit.type === 'rotate-shape',
+			);
 	const glueShapes = new Set<Element>(
 		glue.connector
 			? [glue.connector.shape]
@@ -175,8 +181,12 @@ export function applyGeometryEdit(
 		if (edit.type === 'delete-shape') {
 			unlocked('LockDelete');
 			releaseDeletedGlue(roots, new Map([[edit.pageId, new Set([edit.shapeId])]]));
-			assertVisioShapeUnreferenced(roots, edit.pageId, edit.shapeId, { check });
+			const frozen = assertVisioShapeUnreferenced(roots, edit.pageId, edit.shapeId, {
+				check,
+				freeze: true,
+			});
 			shape.parentNode!.removeChild(shape);
+			freezeVisioCells(frozen);
 			return [edit.pageId];
 		}
 		if (edit.type === 'rotate-shape' || edit.type === 'flip-shape') {
@@ -323,6 +333,7 @@ export function applyGeometryEdit(
 	if (!changed.length) return [];
 	const affectedPages = recalculateVisioCells(roots, changed, {
 		check,
+		...(diagnostics ? { diagnostics } : {}),
 		masterMovePins,
 		lineEditShapes,
 		glueShapes,

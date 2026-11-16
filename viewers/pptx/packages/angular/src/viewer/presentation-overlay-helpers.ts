@@ -8,6 +8,7 @@ import {
 	previousShowSlideIndex,
 	resolveAutoAdvanceDelayMs,
 	resolveShowSlideIndexes,
+	resolveTransitionDurationMs,
 	stopAllPersistentAudio,
 } from 'ooxml-ui/pptx';
 import type { AuthoredSlideRange, CanvasSize, ShowOrderCustomShow } from 'ooxml-ui/pptx';
@@ -73,6 +74,50 @@ export function resolveSlideAutoAdvanceMs(
 		return undefined;
 	}
 	return resolveAutoAdvanceDelayMs(slide, { useTimings });
+}
+
+/**
+ * The auto-advance delay to arm when the show ENTERS a slide: the authored
+ * {@link resolveSlideAutoAdvanceMs} counted from the end of the slide's own
+ * entry transition, as PowerPoint counts `After`. Arming the bare authored
+ * time cut a 0 s slide's entry transition short (issue #141). Re-arming later
+ * (after an animation build, or when a hidden tab returns) uses the authored
+ * time alone.
+ */
+export function resolveSlideEntryAutoAdvanceMs(
+	slide: PptxSlide | undefined,
+	useTimings: boolean,
+	endOfShow: boolean,
+): number | undefined {
+	const after = resolveSlideAutoAdvanceMs(slide, useTimings, endOfShow);
+	return after === undefined ? undefined : after + resolveTransitionDurationMs(slide?.transition);
+}
+
+/** The part of the show navigator the entry auto-advance schedules on. */
+export interface AutoAdvanceScheduler {
+	armAutoAdvance(delayMs: number | undefined): void;
+}
+
+/**
+ * Arm the timed auto-advance for the slide the show just entered: the body of
+ * the overlay's slide-change effect, kept outside the component so it can be
+ * driven with a fake navigator. Re-armed on every slide change; the navigator
+ * cancels the previous slide's pending timer first, so a manual advance can
+ * never leave a stale timer running that skips the slide the presenter just
+ * moved to.
+ *
+ * Without this the show is not merely missing an auto-advance: a slide
+ * authored `advClick="0" advTm="…"` (PowerPoint's "on click OFF, after N")
+ * is advanced ONLY by this timer, and `shouldBlockClickAdvance` swallows every
+ * click on it, so the show would sit on that slide for ever.
+ */
+export function armSlideEntryAutoAdvance(
+	navigator: AutoAdvanceScheduler,
+	slide: PptxSlide | undefined,
+	useTimings: boolean,
+	endOfShow: boolean,
+): void {
+	navigator.armAutoAdvance(resolveSlideEntryAutoAdvanceMs(slide, useTimings, endOfShow));
 }
 
 /**

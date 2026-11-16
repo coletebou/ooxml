@@ -1,3 +1,4 @@
+import { at } from '../../../geometry/indexed';
 /**
  * editor-history.ts: Generic undo/redo history stack.
  *
@@ -45,13 +46,22 @@ export interface UndoRedoResult<T> {
 // Options
 // ---------------------------------------------------------------------------
 
+/**
+ * The one default undo depth every binding uses (File > Options > Advanced >
+ * "Maximum number of undos"). The viewer options default and the history
+ * controller in `ooxml-ui/pptx` both read this constant. PowerPoint itself
+ * ships with 20 (range 3 to 150); this viewer keeps its documented default of
+ * 100 within the same range.
+ */
+export const DEFAULT_EDITOR_HISTORY_DEPTH = 100;
+
 export interface EditorHistoryOptions {
 	/**
 	 * Maximum number of past entries kept on the undo stack.
 	 * When exceeded, the oldest entry is silently dropped.
-	 * @default 100
+	 * @default DEFAULT_EDITOR_HISTORY_DEPTH (100)
 	 */
-	maxDepth?: number;
+	maxDepth?: number | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +83,7 @@ export class EditorHistory<T> {
 	private readonly _future: HistoryEntry<T>[] = [];
 
 	constructor(options?: EditorHistoryOptions) {
-		this._maxDepth = options?.maxDepth ?? 100;
+		this._maxDepth = options?.maxDepth ?? DEFAULT_EDITOR_HISTORY_DEPTH;
 	}
 
 	/**
@@ -110,7 +120,7 @@ export class EditorHistory<T> {
 			return undefined;
 		}
 
-		return this._past[this._past.length - 1].label;
+		return at(this._past, this._past.length - 1).label;
 	}
 
 	/**
@@ -123,7 +133,7 @@ export class EditorHistory<T> {
 			return undefined;
 		}
 
-		return this._future[this._future.length - 1].label;
+		return at(this._future, this._future.length - 1).label;
 	}
 
 	/** Number of entries currently on the undo (past) stack. */
@@ -207,5 +217,36 @@ export class EditorHistory<T> {
 	clear(): void {
 		this._past.length = 0;
 		this._future.length = 0;
+	}
+
+	/**
+	 * Drop every step that would bring back a state `reaches` matches, keeping
+	 * both stacks linear: on the undo stack the newest matching entry and every
+	 * older one go, on the redo stack the nearest matching entry and every one
+	 * beyond it. Use it after a change the stack cannot reverse (a command that
+	 * removed a part from the package), so that no undo or redo returns to a
+	 * state that needs what is gone.
+	 */
+	forget(reaches: (snapshot: T) => boolean): void {
+		dropThroughLastMatch(this._past, reaches);
+		dropThroughLastMatch(this._future, reaches);
+	}
+}
+
+/**
+ * Remove `entries[0..k]`, where `k` is the highest index whose snapshot
+ * `reaches` matches. Both stacks pop from the end, so that is the match the
+ * next undo (or redo) would reach first, and everything behind it.
+ */
+function dropThroughLastMatch<T>(
+	entries: HistoryEntry<T>[],
+	reaches: (snapshot: T) => boolean,
+): void {
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry !== undefined && reaches(entry.snapshot)) {
+			entries.splice(0, index + 1);
+			return;
+		}
 	}
 }

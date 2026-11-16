@@ -1,6 +1,7 @@
 import { syncRibbonAddIns } from '../ribbon/add-in-tabs';
 import { refitRibbon } from './ribbon-overflow';
 import { applyShellLabels } from './shell-labels';
+import type { CollaborativeEditor } from 'ooxml-core/collab';
 import type { DocumentModel } from 'ooxml-core/docx';
 import { createDocument } from 'ooxml-core/docx';
 import type { EditorCore } from './editor-core';
@@ -10,6 +11,7 @@ import type { RibbonActionId } from 'ooxml-core/docx/ui';
 import { editorStyleText } from './styles';
 import { runRibbonCommand } from './editor-commands';
 import { createSearchPanel } from './search-panel';
+import { closeStoryWhenFindBlurs, editorSearchStories } from './search-story-host';
 import { createPrintLayoutController } from './print-layout-view';
 import { createPrintEditingBridge } from './print-editing';
 import { attachPrintNoteEditing } from './print-note-editing';
@@ -28,6 +30,8 @@ import { applyViewOptions } from './view-options';
 import { wordRegionContext } from './customization-apply';
 import { attachEditorInteractions } from './editor-interactions';
 import { attachCanvasClick } from './canvas-click';
+import { createChartFormatPane } from './chart-format-pane';
+import { fontDownloadOptions, setFontDownloads } from './docx-webfonts';
 
 /** Element-level operations the chrome needs; they stay on the element because they are public API. */
 export interface ShellApi {
@@ -56,7 +60,12 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 		newDocument: () => api.setDocumentModel(createDocument()),
 		load: (bytes) => api.load(bytes),
 		save: () => api.saveBytes(),
-		storage: () => core.storage,
+		storage: () => core.cloudFile?.storage ?? core.storage,
+		fileProviders: () => core.fileProviders,
+		useCloudFile: (file) => {
+			core.cloudFile = { storage: file.storage, canEdit: file.canEdit };
+			core.reportReadOnly();
+		},
 		saveStateChanged: (state) => {
 			if (state !== 'saving') core.dirtyState.set(state === 'dirty');
 		},
@@ -69,6 +78,17 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 		},
 		toggleComments: () => shell.review?.handleComments('toggle'),
 		collaborating: () => core.collab.active,
+		share: () => {
+			const editor = element as unknown as CollaborativeEditor;
+			return {
+				state: () => editor.collaborationState,
+				start: (options) => {
+					editor.collaboration = options;
+				},
+				stop: () => editor.stopCollaboration(),
+			};
+		},
+		userName: () => core.reviewAuthor,
 		setViewMode: (mode) => core.pages.setViewMode(mode),
 		setZoom: (percent) => core.pages.setZoom(percent),
 		options: () => ({
@@ -79,9 +99,11 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 			showRuler: Boolean(shell.canvas?.querySelector('.dve-ruler')),
 			showMarks: shell.paper?.hasAttribute('data-show-marks') ?? false,
 			showThumbnails: core.viewOptions.showThumbnails,
+			...fontDownloadOptions(core.webfonts),
 		}),
 		setOption: (key, value) => {
-			if (key === 'spellCheck') {
+			if (key === 'allowFontDownloads') setFontDownloads(core, value === 'true');
+			else if (key === 'spellCheck') {
 				if (core.view) core.view.dom.spellcheck = value === 'true';
 				core.refreshControls();
 			} else if (key === 'showThumbnails')
@@ -103,6 +125,7 @@ function createChrome(core: EditorCore, api: ShellApi): EditorChrome {
 		customization: () => core.viewOptions.customization,
 		regionContext: (region) => wordRegionContext(core, region),
 		reportError: (error) => dispatchDocumentError(element, error),
+		inspectDocument: () => core.formatDialogs.open('inspectDocument'),
 	});
 }
 
@@ -177,8 +200,11 @@ export function buildShell(core: EditorCore, api: ShellApi): void {
 	});
 	shell.searchPanel = createSearchPanel({
 		getView: () => core.view,
-		onClose: () => core.view?.focus(),
+		stories: editorSearchStories(core),
+		// A story Find opened keeps the caret, as closing Word's Find dialog leaves you in it.
+		onClose: () => core.targetView()?.focus(),
 	});
+	closeStoryWhenFindBlurs(core, shell.searchPanel.element);
 	shell.headings = new HeadingNavigator({
 		model: () => core.model,
 		view: () => core.view,
@@ -214,11 +240,20 @@ export function buildShell(core: EditorCore, api: ShellApi): void {
 	core.formatDialogs.setLocale(core.locale);
 	const body = document.createElement('div');
 	body.className = 'dve-body';
+	shell.chartFormat = createChartFormatPane({
+		view: () => core.targetView(),
+		theme: () => core.model.theme,
+		locale: () => core.locale,
+		canEdit: () => core.canEditBody(),
+	});
 	body.append(
 		shell.navigator.element,
 		shell.headings.element,
 		canvas,
+		core.inserts.smartArt.pane,
 		review.commentsPanel.element,
+		shell.chartFormat.element,
+		core.formatDialogs.restrictEditingPane,
 	);
 	frame.append(toolbar, shell.searchPanel.element, body);
 	const chrome = createChrome(core, api);
@@ -227,8 +262,10 @@ export function buildShell(core: EditorCore, api: ShellApi): void {
 	frame.append(
 		core.inserts.linkDialog.element,
 		core.inserts.pictureDialog.element,
-		...core.formatDialogs.elements,
+		core.inserts.smartArt.dialog.element,
+		...core.formatDialogs.elements.filter((el) => el !== core.formatDialogs.restrictEditingPane),
 		core.inserts.pictureInput,
+		core.inserts.bulletInput,
 	);
 	if (core.pendingFileName) chrome.fileName = core.pendingFileName;
 	root.append(style, frame);

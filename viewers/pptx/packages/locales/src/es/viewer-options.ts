@@ -166,6 +166,11 @@ export const translations = {
 	'pptx.options.advanced.printHiddenSlides': 'Imprimir diapositivas ocultas',
 	'pptx.options.advanced.printScaleToFit': 'Ajustar al tamaño del papel',
 	'pptx.options.advanced.printFrameSlides': 'Enmarcar diapositivas',
+	'pptx.options.advanced.pdf': 'Guardar como PDF',
+	'pptx.options.advanced.pdfIncludeHiddenSlides': 'Incluir diapositivas ocultas',
+	'pptx.options.advanced.pdfSlidesAsPictures': 'Guardar las diapositivas como imágenes',
+	'pptx.options.advanced.pdfSlidesAsPicturesInfo':
+		'Escribe cada diapositiva como una sola imagen, como hacían las versiones anteriores de este visor. El texto del PDF no se podrá seleccionar ni buscar. Déjelo desactivado para guardar las formas y el texto como gráficos vectoriales con las fuentes incrustadas.',
 	'pptx.options.ribbon.label': 'Personalizar cinta de opciones',
 	'pptx.options.ribbon.description': 'Personalice la cinta de opciones.',
 	'pptx.options.ribbon.tabsTitle': 'Pestañas principales',
@@ -235,5 +240,9 @@ export const translations = {
 		'Permitir contenido externo (imágenes y medios remotos)',
 	'pptx.options.trust.allowExternalContentInfo':
 		'Cuando está desactivado, solo se muestra el contenido incrustado en el archivo.',
+	'pptx.options.trust.allowFontDownloads':
+		'Descargar fuentes que no están instaladas ni incrustadas (Google Fonts)',
+	'pptx.options.trust.allowFontDownloadsInfo':
+		'Cuando está activado, el navegador se conecta a fonts.googleapis.com y fonts.gstatic.com (o al servidor de fuentes de su organización) para obtener las fuentes que faltan. Cuando está desactivado, el texto usa fuentes instaladas, incrustadas o sustitutas, por lo que los saltos de línea pueden diferir de PowerPoint.',
 	'pptx.options.trust.confirmHyperlinks': 'Confirmar antes de abrir hipervínculos externos',
 };

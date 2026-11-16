@@ -1,0 +1,290 @@
+import { SuiteOneDrive } from './cloud-files.js';
+import { mountCloudBrowser } from './cloud-browser.js';
+import { resolveCloudOptions } from './cloud-options.js';
+import { takeLaunchLink } from './launch-link.js';
+
+let labels;
+/** The shared save progress text (the same as in every product), loaded with the file browser. */
+const saveProgressText = async (step) =>
+	(await (labels ??= import('ooxml-ui/controls'))).saveProgressLabel(step);
+import { $, choose, download, escape, notify, task } from './ui.js';
+
+/** Shared shell controls for Word, Excel, PowerPoint and Visio, including standalone apps. */
+export function mountOneDrive({ store, sessions, open, refresh, showView, isActive }) {
+	const options = resolveCloudOptions();
+	const label = options.label;
+	const message = (text) => text.replaceAll('OneDrive', () => label);
+	const html = (text) => text.replaceAll('OneDrive', () => escape(label));
+	const cloud = new SuiteOneDrive({
+		...options,
+		store,
+		changed: () => {
+			void refresh();
+		},
+		adopted: (doc) => sessions.reload(doc),
+		dirty: (id) => sessions.isDirty(id),
+		notice: (text) => notify(message(text)),
+		// A save to OneDrive can take a while: show each step in the status bar of the open file.
+		progress: (doc, step) => {
+			if (!isActive?.(doc.id)) return;
+			const state = $('save-state');
+			if (!step) {
+				state.removeAttribute('aria-busy');
+				void refresh();
+				return;
+			}
+			state.setAttribute('aria-busy', 'true');
+			void saveProgressText(step).then((text) => {
+				if (state.getAttribute('aria-busy')) state.textContent = message(text);
+			});
+		},
+		// Reopening a file whose edits on this device never reached OneDrive, while OneDrive has a
+		// newer version: the user chooses; nothing is replaced silently.
+		stale: ({ doc }) =>
+			new Promise((resolve) => {
+				const content = document.createElement('div');
+				content.id = 'onedrive-stale';
+				content.innerHTML =
+					html(`<p><strong>${escape(doc.name)}</strong> has edits on this device that were never saved to OneDrive, and OneDrive now has a newer version.</p>
+				<p>Keep your edits to go on where you left off (Save combines them with the newer version where possible), or open the OneDrive version; your edits are then kept as a separate file in your library.</p>
+				<div class="cloud-recovery-actions"><button data-stale="keep" class="primary">Keep my edits</button><button data-stale="latest">Open the OneDrive version</button></div>`);
+				const dialog = choose(message('Edits on this device'), content);
+				let done = false;
+				const finish = (choice) => {
+					if (done) return;
+					done = true;
+					dialog.removeEventListener('close', closed);
+					dialog.close();
+					resolve(choice);
+				};
+				const closed = () => finish('keep');
+				dialog.addEventListener('close', closed);
+				content.addEventListener('click', (event) => {
+					const choice = event.target.closest('[data-stale]')?.dataset.stale;
+					if (choice) finish(choice);
+				});
+			}),
+		conflict:
+			options.resolveConflict ??
+			(({ doc, conflict }) =>
+				new Promise((resolve) => {
+					const content = document.createElement('div');
+					content.id = 'onedrive-conflict';
+					content.innerHTML = `<p>Some edits in <strong>${escape(doc.name)}</strong> could not be combined automatically. Independent changes are merged during Save; the remaining changes overlap or cannot be matched safely. Your edits are saved on this device.</p>
+				<p>The OneDrive version is ${escape(conflict.remote.file.name)}. Saving a copy keeps the original unchanged. Opening the latest first keeps your edits as a separate file in your library.</p>
+				<details id="onedrive-conflict-details"><summary>Details</summary><div class="cloud-conflict-details">Loading...</div></details>
+				<div class="cloud-recovery-actions"><button data-cloud-recovery="copy" class="primary">Save my edits as a OneDrive copy</button><button data-cloud-recovery="latest">Keep local copy and open latest</button><button data-cloud-recovery="download">Download my edits</button><button data-cloud-recovery="download-latest">Download latest OneDrive version</button><button data-cloud-recovery="cancel">Keep editing</button></div>`;
+					content.innerHTML = html(content.innerHTML);
+					showConflictDetails(content.querySelector('#onedrive-conflict-details'), conflict);
+					content.querySelector('[data-cloud-recovery="copy"]').disabled =
+						!options.client?.saveCopy;
+					if (conflict.remote.file.kind !== doc.kind) {
+						content.querySelector('[data-cloud-recovery="latest"]').disabled = true;
+						const note = document.createElement('p');
+						note.textContent =
+							'The cloud file changed format. Save your edits as a separate cloud copy before reopening that link.';
+						content.append(note);
+					}
+					const dialog = choose('Resolve overlapping edits', content);
+					let done = false;
+					const finish = (action) => {
+						if (done) return;
+						done = true;
+						dialog.removeEventListener('close', closed);
+						dialog.close();
+						resolve(action);
+					};
+					const closed = () => finish('cancel');
+					dialog.addEventListener('close', closed);
+					content.addEventListener('click', (event) => {
+						const action = event.target.closest('[data-cloud-recovery]')?.dataset.cloudRecovery;
+						if (action === 'download') download(doc);
+						else if (action === 'download-latest')
+							download({
+								name: conflict.remote.file.name.replace(/(\.[^.]+)$/u, ' (OneDrive version)$1'),
+								bytes: conflict.remote.bytes,
+							});
+						else if (action) finish(action);
+					});
+				})),
+	});
+	cloud.showOpen = ({ link = '' } = {}) => {
+		const content = document.createElement('form');
+		content.id = 'onedrive-open-form';
+		content.innerHTML = cloud.configured()
+			? '<p>Open a Word, Excel, PowerPoint or Visio file using your Microsoft access. Save updates the connected file. Live Microsoft coauthoring is not enabled.</p><label>OneDrive sharing link<input id="onedrive-link" name="link" type="url" required autocomplete="off" spellcheck="false" /></label><button id="onedrive-open-submit" class="primary">Open from OneDrive</button>'
+			: '<p>Microsoft sign-in has not been connected by your host or administrator. Ask them to enable OneDrive access. You can continue opening files from this device.</p>';
+		if (options.id !== 'onedrive' && cloud.configured())
+			content.innerHTML =
+				'<p>Open a connected Office document. Save updates the same file.</p><label>File link or reference<input id="onedrive-link" name="link" required autocomplete="off" spellcheck="false" /></label><button class="primary">Open</button>';
+		content.innerHTML = html(content.innerHTML);
+		const input = content.querySelector('#onedrive-link');
+		if (input && link) input.value = link;
+		content.onsubmit = (event) => {
+			event.preventDefault();
+			const button = content.querySelector('button');
+			button.disabled = true;
+			void task(async () => {
+				try {
+					const doc = await cloud.open(new FormData(content).get('link').trim());
+					$('dialog').close();
+					await open(doc.id, undefined, { focus: true });
+					await refresh();
+				} catch {
+					notify(
+						message('OneDrive could not open this file. Check sign-in, the link and your access.'),
+					);
+				} finally {
+					button.disabled = false;
+				}
+			});
+		};
+		choose(message('Open from OneDrive'), content);
+	};
+	cloud.showShare = (doc, { unsaved = false } = {}) => {
+		const content = document.createElement('form');
+		content.id = 'onedrive-share-form';
+		content.innerHTML = `<p>Share the connected OneDrive file. The existing link keeps current permissions. Creating a new view or edit link grants the access you select; tenant policy may restrict it. This does not upload another Teams attachment or enable Microsoft coauthoring.</p><label>Access<select name="type"><option value="existing">Existing link, keep current permissions</option><option value="view">Create view link</option><option value="edit">Create edit link</option></select></label><label>New link scope<select name="scope"><option value="organization">People in your organization</option><option value="anonymous">Anyone with the link</option></select></label><button class="primary">Get OneDrive link</button><label>Link<input id="onedrive-share-link" readonly /></label>`;
+		const choices =
+			options.shareChoices ??
+			(options.id === 'onedrive' && options.client?.share
+				? null
+				: [{ label: 'Existing link, keep permissions', options: { type: 'existing' } }]);
+		if (choices) {
+			content.innerHTML = `<p>Choose who can access this file.</p><label>Access<select name="choice">${choices.map((choice, index) => `<option value="${index}">${escape(choice.label)}</option>`).join('')}</select></label><button class="primary">Get link</button><label>Link<input id="onedrive-share-link" readonly /></label>`;
+			content.querySelector('button').disabled = choices.length === 0;
+		}
+		if (unsaved)
+			content.insertAdjacentHTML(
+				'afterbegin',
+				'<p class="cloud-share-unsaved" role="note">Your latest edits are only on this device. People with the link see the version in OneDrive until you save.</p>',
+			);
+		content.innerHTML = html(content.innerHTML);
+		content.onsubmit = (event) => {
+			event.preventDefault();
+			const button = content.querySelector('button');
+			button.disabled = true;
+			void task(async () => {
+				try {
+					const data = new FormData(content);
+					content.querySelector('#onedrive-share-link').value = await cloud.share(
+						await store.get(doc.id),
+						choices
+							? choices[Number(data.get('choice'))].options
+							: { type: data.get('type'), scope: data.get('scope') },
+					);
+					notify(message('OneDrive link ready. Copy it to share with the intended recipients.'));
+				} catch {
+					notify(
+						message(
+							'The OneDrive link could not be created. Check sign-in, sharing permissions and organization policy.',
+						),
+					);
+				} finally {
+					button.disabled = false;
+				}
+			});
+		};
+		choose(message('Share in OneDrive'), content);
+	};
+	const browser = options.fileProvider
+		? mountCloudBrowser({ cloud, options, open, refresh })
+		: undefined;
+	/** The browsing view when the host can list files; otherwise the link dialog (or its notice). */
+	cloud.showFiles = async () => {
+		if (!browser) return cloud.showOpen();
+		await showView();
+		await browser.show();
+	};
+	cloud.hasBrowser = Boolean(browser);
+	$('open-onedrive').textContent = message(browser ? 'Browse OneDrive' : 'Open from OneDrive');
+	$('open-onedrive').onclick = () => void task(cloud.showFiles);
+	openLaunchLink(options, cloud, message);
+	mountConnectedServices(options.fileProvider);
+	return cloud;
+}
+
+/**
+ * Account > Connected services: the shared `<office-ui-connected-services>` list in the account
+ * menu, so the user links (signs in to) or unlinks the host's storage there as well as from the
+ * OneDrive view. It uses the provider's own signIn and signOut. The menu is re-rendered with the
+ * profile, so the element is put back each time the menu opens.
+ */
+function mountConnectedServices(provider) {
+	const menu = $('account-menu');
+	if (!provider || !menu) return;
+	let element;
+	menu.addEventListener('beforetoggle', (event) => {
+		if (event.newState !== 'open') return;
+		void import('ooxml-ui/controls').then(({ defineConnectedServices }) => {
+			defineConnectedServices();
+			if (!element) {
+				element = document.createElement('office-ui-connected-services');
+				element.className = 'account-services';
+				element.setAttribute('heading-level', '3');
+				element.providers = [provider];
+			}
+			if (!menu.contains(element)) menu.querySelector('.account-actions')?.after(element);
+		});
+	});
+}
+
+/**
+ * A launch with `?open=<link>` (the installed app's share target or web+ooxml: handler): show the
+ * Open dialog with the link filled in. The user confirms, which also gives sign-in its click.
+ */
+function openLaunchLink(options, cloud, message) {
+	const taken = takeLaunchLink(options.launchLinks, location.href);
+	if (!taken) return;
+	history.replaceState(history.state, '', taken.href);
+	if (taken.link) cloud.showOpen({ link: taken.link });
+	else notify(message('This link cannot be opened from OneDrive here.'));
+}
+
+/**
+ * The conflict dialog's Details: why combining stopped and which parts of the package changed in
+ * OneDrive and on this device since the file was opened. Computed when first expanded.
+ */
+function showConflictDetails(details, conflict) {
+	if (!details) return;
+	const body = details.querySelector('.cloud-conflict-details');
+	const list = (title, names) =>
+		names.length
+			? `<p>${escape(title)}</p><ul>${names.map((name) => `<li><code>${escape(name)}</code></li>`).join('')}</ul>`
+			: '';
+	const describe = (diff) => [
+		...diff.changed.map((n) => `${n} (changed)`),
+		...diff.added.map((n) => `${n} (added)`),
+		...diff.removed.map((n) => `${n} (removed)`),
+	];
+	details.addEventListener(
+		'toggle',
+		() => {
+			void (async () => {
+				try {
+					const { diffOpcPackages } = await import('ooxml-core/opc');
+					const [remote, local] = await Promise.all([
+						diffOpcPackages(conflict.base.bytes, conflict.remote.bytes),
+						diffOpcPackages(conflict.base.bytes, conflict.local),
+					]);
+					const remoteParts = describe(remote);
+					const localParts = describe(local);
+					const both = remoteParts.filter((name) => localParts.includes(name));
+					body.innerHTML = [
+						conflict.issues?.length
+							? list('Why the edits were not combined:', conflict.issues)
+							: '',
+						remoteParts.length
+							? list('Changed in OneDrive since you opened the file:', remoteParts)
+							: '<p>OneDrive reported a newer version, but its content matches what you opened.</p>',
+						list('Changed on this device:', localParts),
+						list('Changed in both:', both),
+					].join('');
+				} catch (error) {
+					body.textContent = `Details are unavailable: ${error instanceof Error ? error.message : String(error)}`;
+				}
+			})();
+		},
+		{ once: true },
+	);
+}

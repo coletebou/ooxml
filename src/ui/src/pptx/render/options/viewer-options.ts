@@ -1,3 +1,4 @@
+import { DEFAULT_EDITOR_HISTORY_DEPTH } from '../editor-history';
 import type { ToolbarTabId } from '../toolbar-actions';
 import type { ViewerPreferences } from '../viewer-preferences';
 
@@ -137,6 +138,10 @@ export interface ViewerAdvancedOptions {
 	printHiddenSlides: boolean;
 	printScaleToFit: boolean;
 	printFrameSlides: boolean;
+	/** File > Save as PDF: include slides marked hidden (PowerPoint's "Include hidden slides"). */
+	pdfIncludeHiddenSlides: boolean;
+	/** File > Save as PDF: one picture per slide (the earlier export) instead of vector pages. */
+	pdfSlidesAsPictures: boolean;
 }
 
 export interface ViewerRibbonOptions {
@@ -155,6 +160,8 @@ export interface ViewerQuickAccessOptions {
 export interface ViewerTrustOptions {
 	openInProtectedView: boolean;
 	allowExternalContent: boolean;
+	/** Download fonts that are neither installed nor embedded (the Google Fonts fallback). */
+	allowFontDownloads: boolean;
 	confirmExternalHyperlinks: boolean;
 }
 
@@ -219,7 +226,7 @@ export const DEFAULT_VIEWER_OPTIONS: ViewerOptions = {
 	advanced: {
 		autoSelectEntireWord: true,
 		allowTextDragAndDrop: true,
-		maximumUndoSteps: 100,
+		maximumUndoSteps: DEFAULT_EDITOR_HISTORY_DEPTH,
 		useSmartCutAndPaste: true,
 		showPasteOptionsButton: true,
 		imageDefaultResolution: 'highFidelity',
@@ -245,6 +252,8 @@ export const DEFAULT_VIEWER_OPTIONS: ViewerOptions = {
 		printHiddenSlides: false,
 		printScaleToFit: false,
 		printFrameSlides: false,
+		pdfIncludeHiddenSlides: false,
+		pdfSlidesAsPictures: false,
 	},
 	ribbon: { hiddenTabIds: [] },
 	quickAccess: {
@@ -256,6 +265,7 @@ export const DEFAULT_VIEWER_OPTIONS: ViewerOptions = {
 	trust: {
 		openInProtectedView: false,
 		allowExternalContent: true,
+		allowFontDownloads: true,
 		confirmExternalHyperlinks: true,
 	},
 };

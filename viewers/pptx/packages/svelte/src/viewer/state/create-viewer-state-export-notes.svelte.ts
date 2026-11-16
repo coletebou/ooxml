@@ -1,4 +1,11 @@
-import type { FieldSubstitutionContext, MobileSheetKey } from 'ooxml-ui/pptx';
+import { choosePdfExportSelection } from 'ooxml-ui/pptx';
+import type {
+	CompatibilityWarningToast,
+	FieldSubstitutionContext,
+	MobileSheetKey,
+	PdfExportSettings,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import type { TextSegment } from 'pptx-viewer-core';
 
 import type { Translator } from '../../i18n/translator';
@@ -8,6 +15,7 @@ import { createExportWiring } from '../export/export-wiring.svelte';
 import type { ExportWiring } from '../export/export-wiring.svelte';
 import { buildDeckExportData } from './deck-export-data';
 import type { PresentationLoader } from './presentation-loader.svelte';
+import { renderContextSourceFor } from './render-context';
 import type { ViewerState } from './viewer-state.svelte';
 
 export interface ExportNotesClusterDeps {
@@ -31,6 +39,8 @@ export interface ExportNotesClusterDeps {
 	getIncludeHiddenSlides(): boolean;
 	/** Options > Advanced > "High quality" raster scale for the print fallback path. */
 	getPrintHighQuality(): boolean;
+	/** Options > Advanced > Save as PDF. Defaults to vector pages without hidden slides. */
+	getPdfExportSettings?(): PdfExportSettings;
 	getRootEl(): HTMLDivElement | undefined;
 	/** Whether in-place editing is on (gates whether notes edits are history-tracked). */
 	getEditable(): boolean;
@@ -42,6 +52,10 @@ export interface ExportNotesClusterDeps {
 	/** Host-supplied source file name, used to name the deck-JSON download. */
 	getFileName?(): string | undefined;
 	onnotesupdate?: (notes: string) => void;
+	/** Show the PDF approximation notice in the compatibility toast stack. */
+	notify?(toast: CompatibilityWarningToast): void;
+	/** The host's `onpdfexportreport`. */
+	onpdfexportreport?(result: VectorPdfExportResult): void;
 }
 
 export interface ExportNotesCluster {
@@ -68,6 +82,7 @@ export function buildExportNotesCluster(deps: ExportNotesClusterDeps): ExportNot
 		getSlides: () => editor.renderedSlides,
 		getCanvasSize: () => loader.canvasSize,
 		getMediaDataUrls: () => loader.mediaDataUrls,
+		getRenderContext: () => renderContextSourceFor(loader),
 		getCurrent: () => viewer.current,
 		getTranslator: () => deps.t,
 		getSmartArt3D: deps.getSmartArt3D,
@@ -79,13 +94,24 @@ export function buildExportNotesCluster(deps: ExportNotesClusterDeps): ExportNot
 		getImageResolutionScale: deps.getImageResolutionScale,
 		getIncludeHiddenSlides: deps.getIncludeHiddenSlides,
 		getPrintHighQuality: deps.getPrintHighQuality,
+		getPdfExportSettings: () => deps.getPdfExportSettings?.(),
 		getFieldContext: () => deps.getFieldContext?.(),
 		getDeckData: () => buildDeckExportData(editor, loader),
 		getFileName: () => deps.getFileName?.(),
+		notify: (toast) => deps.notify?.(toast),
+		onPdfExportReport: (result) => deps.onpdfexportreport?.(result),
 	});
 	const exportUi = new ExportUiState({
 		controller: exportWiring.controller,
 		getTranslator: () => deps.t,
+		// Mounted in the viewer root so the dialog inherits the viewer theme.
+		choosePdfSelection: () =>
+			choosePdfExportSelection(deps.getRootEl(), {
+				settings: deps.getPdfExportSettings?.() ?? { mode: 'vector', includeHiddenSlides: false },
+				slides: editor.renderedSlides,
+				currentSlide: viewer.current,
+				translate: (key, params) => deps.t(key, params),
+			}),
 	});
 
 	let notesExpanded = $state(false);

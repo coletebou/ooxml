@@ -1,7 +1,10 @@
 import {
+	connectorNeedsPath,
+	connectorSnapTransform,
+	connectorSquareCapPath,
+	connectorStrandScreenWidth,
 	connectorWrapperTransform,
 	getSelectionOutlineColor,
-	screenStrokeWidth,
 	svgLineCap,
 } from 'ooxml-ui/pptx';
 import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
@@ -76,6 +79,7 @@ const ConnectorElementRendererMemo: React.FC<ConnectorRendererProps> = /* @__PUR
 			dashType,
 			Math.max(strokeWidth, 1),
 			ss?.customDashSegments,
+			ss?.lineCap,
 		);
 		const startArrow = ss?.connectorStartArrow;
 		const endArrow = ss?.connectorEndArrow;
@@ -86,7 +90,7 @@ const ConnectorElementRendererMemo: React.FC<ConnectorRendererProps> = /* @__PUR
 
 		const compoundOffsets = getCompoundLineOffsets(compoundLine, strokeWidth);
 		const compoundWidths = getCompoundLineWidths(compoundLine, strokeWidth);
-		const strokeCap = svgLineCap(ss?.lineCap);
+		const strokeCap = svgLineCap(ss?.lineCap, dashArray !== undefined);
 
 		const textEl = hasTextProperties(el) ? el : undefined;
 		const connectorText = textEl?.text?.trim() ?? '';
@@ -104,6 +108,24 @@ const ConnectorElementRendererMemo: React.FC<ConnectorRendererProps> = /* @__PUR
 				};
 
 		const hitTargetWidth = Math.max(strokeWidth * 3, 14);
+		// A dashed square-cap line overshoots at its two ends only (shared `dash-square-cap`).
+		const paintPathData =
+			connectorSquareCapPath(
+				pathGeometry.pathData,
+				ss,
+				strokeWidth,
+				compoundOffsets.length > 1 ||
+					(!!startArrow && startArrow !== 'none') ||
+					(!!endArrow && endArrow !== 'none'),
+			) ?? pathGeometry.pathData;
+		// A single horizontal / vertical straight line is snapped to the device grid
+		// the way PowerPoint's export does it (shared `device-pixel-stroke`).
+		const snapTransform = connectorSnapTransform(
+			el,
+			!connectorNeedsPath(shapeEl?.shapeType),
+			compoundOffsets.length,
+			strokeWidth,
+		);
 		const selColor = selClr === 'blue-400' ? '#60a5fa' : '#3b82f6';
 		const lineShadow = buildLineShadowCss(el);
 		const lineGlow = buildLineGlowFilter(el);
@@ -229,7 +251,8 @@ const ConnectorElementRendererMemo: React.FC<ConnectorRendererProps> = /* @__PUR
 					{compoundOffsets.map((offset, idx) => (
 						<path
 							key={idx}
-							d={pathGeometry.pathData}
+							data-pptx-line=''
+							d={paintPathData}
 							fill='none'
 							stroke={strokePaint}
 							strokeWidth={Math.max(compoundWidths[idx] ?? strokeWidth, 1)}
@@ -251,12 +274,14 @@ const ConnectorElementRendererMemo: React.FC<ConnectorRendererProps> = /* @__PUR
 							style={{
 								pointerEvents: 'none',
 								// Never under one device pixel on screen (shared `device-pixel-stroke`).
-								strokeWidth: screenStrokeWidth(Math.max(compoundWidths[idx] ?? strokeWidth, 1)),
+								strokeWidth: connectorStrandScreenWidth(compoundWidths, strokeWidth, idx),
 								...(offset !== 0
 									? {
 											transform: `translate(0, ${offset}px)`,
 										}
-									: {}),
+									: snapTransform
+										? { transform: snapTransform }
+										: {}),
 							}}
 						/>
 					))}

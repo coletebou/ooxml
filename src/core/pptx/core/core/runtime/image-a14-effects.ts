@@ -13,6 +13,7 @@ import {
 	numberAttrByLocalName,
 	percent100k,
 } from './image-a14-xml';
+import { isFiniteNumber } from '../../../../units/finite';
 
 export { A14_IMAGE_PROPS_EXT_URI } from './image-a14-xml';
 
@@ -69,7 +70,7 @@ export interface A14ImageExtension {
 	/** Every numeric attribute of the artistic effect, raw and un-normalised. */
 	artisticParams?: Record<string, number>;
 	/** PowerPoint "Remove Background" state. */
-	backgroundRemoval?: PptxBackgroundRemoval;
+	backgroundRemoval?: PptxBackgroundRemoval | undefined;
 	/** `a14:imgLayer/@r:embed`: relationship id of the pristine original image. */
 	originalImageRelId?: string;
 	/** `a14:sharpenSoften`, raw. */
@@ -88,31 +89,8 @@ export interface A14ImageExtension {
  * percentage in 1/1000ths of a percent, so it is divided by 1000 to land on the
  * 0..100 scale {@link A14ImageExtension.artisticRadius} uses.
  */
-export const ARTISTIC_PRIMARY_ATTRIBUTE: Readonly<Record<string, string>> = {
-	artisticBlur: 'radius',
-	artisticCement: 'crackSpacing',
-	artisticChalkSketch: 'pressure',
-	artisticCrisscrossEtching: 'pressure',
-	artisticCutout: 'numberOfShades',
-	artisticFilmGrain: 'grainSize',
-	artisticGlass: 'scaling',
-	artisticGlowDiffused: 'intensity',
-	artisticGlowEdges: 'smoothness',
-	artisticLightScreen: 'gridSize',
-	artisticLineDrawing: 'pencilSize',
-	artisticMarker: 'size',
-	// Spelled "Mosiaic" in the schema; Microsoft's typo is part of the format.
-	artisticMosiaicBubbles: 'pressure',
-	artisticPaintBrush: 'brushSize',
-	artisticPaintStrokes: 'intensity',
-	artisticPastelsSmooth: 'scaling',
-	artisticPencilGrayscale: 'pencilSize',
-	artisticPencilSketch: 'pressure',
-	artisticPhotocopy: 'detail',
-	artisticPlasticWrap: 'smoothness',
-	artisticTexturizer: 'scaling',
-	artisticWatercolorSponge: 'brushSize',
-};
+export { ARTISTIC_PRIMARY_ATTRIBUTE } from '../../../../drawingml/picture-artistic';
+import { ARTISTIC_PRIMARY_ATTRIBUTE } from '../../../../drawingml/picture-artistic';
 
 /** Attributes that never describe the effect's size/strength. */
 const NON_SIZE_ATTRIBUTES = new Set(['trans', 'visible']);
@@ -160,7 +138,7 @@ function collectParams(node: XmlObject): Record<string, number> {
 			continue;
 		}
 		const parsed = Number(node[key]);
-		if (Number.isFinite(parsed)) {
+		if (isFiniteNumber(parsed)) {
 			params[localName(key.slice(2))] = parsed;
 		}
 	}
@@ -177,7 +155,11 @@ function artisticRadiusOf(name: string, params: Record<string, number>): number 
 	if (key === undefined) {
 		return undefined;
 	}
+	// `key` is one of `params`' own keys (checked above).
 	const value = params[key];
+	if (value === undefined) {
+		return undefined;
+	}
 	// `radius` is an absolute value; every other parameter is a 1/1000th percent.
 	return key === 'radius' ? value : value / 1000;
 }

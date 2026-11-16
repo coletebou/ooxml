@@ -1,6 +1,5 @@
 import { DestroyRef, Injectable, computed, inject, signal, untracked } from '@angular/core';
-import { XMLParser } from 'fast-xml-parser';
-import JSZip from 'jszip';
+import { TranslateService } from '@ngx-translate/core';
 import {
 	DEFAULT_CANVAS_HEIGHT,
 	DEFAULT_CANVAS_WIDTH,
@@ -13,6 +12,11 @@ import {
 	describeFontEmbedding,
 	overlayInlineTextSnapshot,
 	overlayMasterViewInlineSnapshot,
+	pptxLoadErrorMessage,
+	prefetchDeckWebfonts,
+	prepareDeckWebfonts,
+	resolveAllowExternalContent,
+	resolveGoogleFontsCss2Base,
 	resolveMediaElementSource,
 	resolveSlideSizeSelection,
 	resolveTableCellImageUrls,
@@ -25,7 +29,10 @@ import type {
 	CanvasSize,
 	DeckSaveIntent,
 	DeckSaveState,
+	DeckWebfontProgress,
+	GoogleFontsOption,
 	PendingInlineTextEdit,
+	PptxLoadLimits,
 	SlideSizeEmu,
 } from 'ooxml-ui/pptx';
 import type {
@@ -52,15 +59,14 @@ import type {
 	PptxThemeOption,
 	PptxViewProperties,
 	ParsedTableStyleMap,
-	XmlObject,
 } from 'pptx-viewer-core';
 import {
 	EncryptedFileError,
-	decodeXmlEntities,
-	parseSignatureXml,
+	parseSignaturesFromBuffer as parseCoreSignatures,
 	PptxHandler,
 } from 'pptx-viewer-core';
 
+import { GOOGLE_WEBFONTS_LINK_ID } from './google-webfonts.service';
 import { ViewerOptionsService } from './viewer-options.service';
 
 /**
@@ -83,6 +89,37 @@ import { ViewerOptionsService } from './viewer-options.service';
 @Injectable()
 export class LoadContentService {
 	private pendingInlineEditReader?: () => PendingInlineTextEdit | undefined;
+	private hostAllowExternalContentReader?: () => boolean | undefined;
+	private hostLimitsReader?: () => PptxLoadLimits | undefined;
+	/** The host `limits` input, read (untracked) at the start of each load. */
+	bindHostLimits(reader: () => PptxLoadLimits | undefined): void {
+		this.hostLimitsReader = reader;
+	}
+	private hostGoogleFontsReader?: () => GoogleFontsOption | undefined;
+	/**
+	 * The effective `googleFonts` policy (host input, else Trust Center >
+	 * "Download fonts"), read (untracked) when a load waits for its webfonts.
+	 */
+	bindHostGoogleFonts(reader: () => GoogleFontsOption | undefined): void {
+		this.hostGoogleFontsReader = reader;
+	}
+	/** The host `allowExternalContent` input; when set it overrides the Trust Center option per load. */
+	bindHostAllowExternalContent(reader: () => boolean | undefined): void {
+		this.hostAllowExternalContentReader = reader;
+	}
+
+	/**
+	 * Whether the next deck this viewer loads may reference linked http(s)
+	 * content: the host `allowExternalContent` input when set, otherwise the
+	 * Trust Center option. Read untracked, so calling it never subscribes.
+	 */
+	resolveAllowExternalImages(): boolean {
+		return untracked(() => {
+			const host = this.hostAllowExternalContentReader?.();
+			const options = this.optionsService?.options();
+			return options ? resolveAllowExternalContent(host, options) : host === true;
+		});
+	}
 	/** Viewer-scoped current list session. Saving never commits or blurs it. */
 	bindPendingInlineEdit(reader: () => PendingInlineTextEdit | undefined): void {
 		this.pendingInlineEditReader = reader;
@@ -218,6 +255,8 @@ export class LoadContentService {
 	readonly digitalSignatureCount = signal(0);
 	/** True while a load is in flight. */
 	readonly loading = signal(false);
+	/** Webfont download progress while a load waits for the deck's fonts (after a short delay). */
+	readonly fontProgress = signal<DeckWebfontProgress | null>(null);
 	/** Error message from the last failed load, or null. */
 	readonly error = signal<string | null>(null);
 	/** True when the file is password-protected and could not be opened. */
@@ -238,6 +277,18 @@ export class LoadContentService {
 	private readonly optionsService: ViewerOptionsService | null = (() => {
 		try {
 			return inject(ViewerOptionsService);
+		} catch {
+			return null;
+		}
+	})();
+
+	/**
+	 * Optional, for the same reason as {@link optionsService}: localizes the
+	 * load-error text for a deck over a load limit when present.
+	 */
+	private readonly translate: TranslateService | null = (() => {
+		try {
+			return inject(TranslateService);
 		} catch {
 			return null;
 		}
@@ -375,6 +426,7 @@ export class LoadContentService {
 
 		try {
 			this.loading.set(true);
+			this.fontProgress.set(null);
 			this.error.set(null);
 			this.isEncrypted.set(false);
 
@@ -407,12 +459,62 @@ export class LoadContentService {
 			// re-parsed the deck from its original bytes, which re-seeded the
 			// editor and threw away unsaved edits and the undo history. The option
 			// is a load-time input, exactly as in React (`[content]` deps only).
-			const allowExternalImages = untracked(
-				() => this.optionsService?.options().trust.allowExternalContent ?? false,
-			);
-			const parsed = await newHandler.load(buffer as ArrayBuffer, { allowExternalImages });
+			// The host `allowExternalContent` input wins over the option when set.
+			const allowExternalImages = this.resolveAllowExternalImages();
+			// The host `limits` input, read untracked for the same reason.
+			const limits = untracked(() => this.hostLimitsReader?.());
+			// ── The deck's Google Fonts webfonts ─────
+			// Started as soon as core has parsed the slides (`onSlidesParsed`), so the
+			// download runs while the rest of the deck loads and media resolves;
+			// awaited before the deck is shown, which it holds back only briefly (see
+			// deck-webfont-readiness.ts). Nothing after that point changes slide text,
+			// so these slides name the same faces (and stylesheet) as the committed ones.
+			let webfonts: Promise<unknown> | undefined;
+			const startWebfonts = (
+				deckSlides: PptxSlide[],
+				deckEmbeddedFonts: PptxEmbeddedFont[],
+			): void => {
+				if (typeof document === 'undefined' || token !== this.renderToken) {
+					return;
+				}
+				webfonts = prepareDeckWebfonts({
+					document,
+					linkId: GOOGLE_WEBFONTS_LINK_ID,
+					slides: deckSlides,
+					embeddedFonts: deckEmbeddedFonts,
+					googleFontsBase: resolveGoogleFontsCss2Base(
+						untracked(() => this.hostGoogleFontsReader?.()),
+					),
+					onProgress: (progress) => {
+						if (token === this.renderToken) {
+							this.fontProgress.set(progress);
+						}
+					},
+				});
+			};
+			// Start the stylesheet for the fonts the deck declares from its bytes, before parsing even
+			// reaches the slides (`prefetchDeckWebfonts`); `startWebfonts` then adds the exact one.
+			if (typeof document !== 'undefined') {
+				prefetchDeckWebfonts({
+					document,
+					linkId: GOOGLE_WEBFONTS_LINK_ID,
+					bytes: buffer as ArrayBuffer,
+					googleFontsBase: resolveGoogleFontsCss2Base(
+						untracked(() => this.hostGoogleFontsReader?.()),
+					),
+				});
+			}
+			const parsed = await newHandler.load(buffer as ArrayBuffer, {
+				allowExternalImages,
+				limits,
+				onSlidesParsed: (deck) => startWebfonts([...deck.slides], [...deck.embeddedFonts]),
+			});
 			if (token !== this.renderToken) {
 				return;
+			}
+			// A JSON document is imported without the slide hook.
+			if (!webfonts) {
+				startWebfonts(parsed.slides, parsed.embeddedFonts ?? []);
 			}
 
 			// ── Resolve media Blob URLs (audio/video + poster frames) ──
@@ -500,6 +602,8 @@ export class LoadContentService {
 				newHandler.getImageData(path),
 			);
 
+			await webfonts;
+
 			// Commit reactive state.
 			if (token !== this.renderToken) {
 				return;
@@ -584,7 +688,7 @@ export class LoadContentService {
 			// main chunk). Only commit if this load is still current.
 			this.signatures.set([]);
 			if (parsed.hasDigitalSignatures) {
-				const sigs = await parseSignaturesFromBuffer(sigBuffer);
+				const sigs = await parseCoreSignatures(sigBuffer);
 				if (token === this.renderToken) {
 					this.signatures.set(sigs);
 				}
@@ -594,40 +698,30 @@ export class LoadContentService {
 				if (err instanceof EncryptedFileError) {
 					this.isEncrypted.set(true);
 				} else {
-					this.error.set(err instanceof Error ? err.message : String(err));
+					const translate = this.translate;
+					this.error.set(
+						translate
+							? pptxLoadErrorMessage(err, (key, params) => translate.instant(key, params))
+							: err instanceof Error
+								? err.message
+								: String(err),
+					);
 				}
 			}
 		} finally {
 			resources.releaseIfUncommitted();
 			if (token === this.renderToken) {
+				this.fontProgress.set(null);
 				this.loading.set(false);
 			}
 		}
 	}
 
 	/**
-	 * Point the presentation (first master, or every master) at another theme
-	 * part in the package, mirroring React's `handleApplyTheme`. Updates the
-	 * in-memory ZIP for save round-trip and the `slideMasters` signal so the
-	 * change is visible to consumers; callers mark the editor dirty.
-	 */
-	async setPresentationTheme(themePath: string, applyToAllMasters: boolean): Promise<void> {
-		if (!this.handler) {
-			return;
-		}
-		await this.handler.setPresentationTheme(themePath, applyToAllMasters);
-		this.slideMasters.update((masters) =>
-			masters.map((master, index) =>
-				applyToAllMasters || index === 0 ? { ...master, themePath } : master,
-			),
-		);
-	}
-
-	/**
 	 * Adopt a new handler + fully-resolved `PptxData` from a Slide Master view
 	 * CRUD action (`applyMasterViewCrudAction`'s insert/duplicate/delete/rename
-	 * layout or master). Unlike {@link setPresentationTheme}, those functions
-	 * perform ZIP surgery and reload through a FRESH `PptxHandler` (see
+	 * layout or master). Unlike a theme switch (`theme-by-path-commit.ts`), those
+	 * functions perform ZIP surgery and reload through a FRESH `PptxHandler` (see
 	 * `master-layout-crud`'s module doc) rather than mutating this one in
 	 * place, so the loaded handler itself must be swapped, not just the
 	 * derived signals.
@@ -666,54 +760,10 @@ export class LoadContentService {
 	}
 }
 
-/**
- * Parse digital signatures from a `.pptx` ZIP buffer (best-effort; returns an
- * empty array when there are none or parsing fails). Mirrors the Vue port's
- * `parseSignaturesFromBuffer`.
- *
- * `jszip`/`fast-xml-parser` are imported statically on purpose: `PptxHandler`
- * (imported above) already pulls both into the same chunk, so a dynamic import
- * here cannot move them anywhere. It only made bundlers emit
- * INEFFECTIVE_DYNAMIC_IMPORT.
- *
- * The parser options mirror core's loader parser rather than taking
- * fast-xml-parser's defaults, identically to the Vue copy. fast-xml-parser
- * decodes the five predefined entities but NOT numeric character references,
- * so a certificate DN written `CN=M&#xFC;ller CA` was rendered verbatim in the
- * signatures panel instead of `CN=Müller CA` - and non-ASCII signer names are
- * exactly the ones a producer escapes that way. `processEntities: false` then
- * takes DTD handling out of a path that reads attacker-supplied bytes (nothing
- * was exploitable at fast-xml-parser 5.9.2, which expands no entities and
- * rejects external ones, so this is forward-stability) and stops a package
- * carrying a large DTD entity, which the default rejects with a size-cap
- * throw, from collapsing every signature to "none found" via the catch below.
- *
- * Vue and Angular are the only bindings that read signatures at all; React,
- * Svelte and Vanilla render no signature panel, so this pair is the whole
- * surface. Both copies must move together until it is lifted into core.
- */
-export async function parseSignaturesFromBuffer(buffer: ArrayBuffer): Promise<ParsedSignature[]> {
-	try {
-		const zip = await JSZip.loadAsync(buffer);
-		const parser = new XMLParser({
-			ignoreAttributes: false,
-			attributeNamePrefix: '@_',
-			parseAttributeValue: false,
-			parseTagValue: false,
-			processEntities: false,
-			tagValueProcessor: (_tagName: string, tagValue: string) => decodeXmlEntities(tagValue),
-			attributeValueProcessor: (_attrName: string, attrValue: string) =>
-				decodeXmlEntities(attrValue),
-		});
-		const result: ParsedSignature[] = [];
-		for (const path of Object.keys(zip.files)) {
-			if (path.startsWith('_xmlsignatures/') && path.endsWith('.xml')) {
-				const xml = await zip.files[path].async('string');
-				result.push(parseSignatureXml(parser.parse(xml) as XmlObject, path));
-			}
-		}
-		return result;
-	} catch {
-		return [];
-	}
+// Signature parsing is shared in the core (`ooxml-core/pptx`); kept exported here for callers and tests.
+// A local function, not a re-export: re-exporting an external binding breaks the CommonJS bundle.
+export function parseSignaturesFromBuffer(
+	buffer: Parameters<typeof parseCoreSignatures>[0],
+): ReturnType<typeof parseCoreSignatures> {
+	return parseCoreSignatures(buffer);
 }

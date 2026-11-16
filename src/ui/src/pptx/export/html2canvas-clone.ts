@@ -29,6 +29,9 @@ import { preprocessCssForCapture } from './css-preprocessing';
  * `original` is the live element handed to html2canvas; `doc` and `clonedEl`
  * are what its `onclone` callback receives. Order matters:
  *
+ * 0. The clone's linked style sheets finish loading (see
+ *    `clonedStyleSheetsLoaded`), and the cloned element keeps the live
+ *    element's layout width (see `html2canvasCaptureScope`).
  * 1. 3D views settle on the live tree, then each cloned view is replaced by an
  *    `<img>` of its canvas plus its DOM overlay. This runs first, while the
  *    live and cloned trees still pair up in document order.
@@ -42,9 +45,138 @@ export async function prepareHtml2CanvasClone(
 	doc: Document,
 	clonedEl: HTMLElement,
 ): Promise<void> {
+	await clonedStyleSheetsLoaded(original.ownerDocument, doc);
 	await settleThreeViews(original);
+	pinCapturedSize(original, clonedEl);
 	snapshotThreeViewsIntoClone(original, clonedEl);
 	prepareExportClone(clonedEl);
 	await normalizeColorsForCapture(doc, clonedEl);
 	preprocessCssForCapture(clonedEl);
+}
+
+/** How long a capture waits for the clone's style sheets before it paints with what it has. */
+export const CLONE_STYLE_SHEET_TIMEOUT_MS = 5_000;
+
+const LINKED_STYLE_SHEETS = 'link[rel~="stylesheet"]';
+
+/**
+ * Wait until the clone's linked style sheets apply, then for the fonts they declare.
+ *
+ * html2canvas-pro copies a `<style>` by its rules but a `<link rel="stylesheet">` as the bare
+ * element, so its iframe fetches and parses the sheet again, and it calls `onclone` once the
+ * document is complete without waiting for that. A capture could then lay the clone out before
+ * the host page's sheets applied (usually the first capture of a page; later ones reuse the cached
+ * sheet in time), and anything styled by them painted differently in that export alone. Only
+ * sheets that loaded in the live page are awaited, so one that failed there costs nothing, and
+ * the wait is bounded.
+ */
+export async function clonedStyleSheetsLoaded(
+	liveDocument: Document,
+	cloneDocument: Document,
+	timeoutMs = CLONE_STYLE_SHEET_TIMEOUT_MS,
+): Promise<void> {
+	const loaded = new Set(
+		[...liveDocument.querySelectorAll<HTMLLinkElement>(LINKED_STYLE_SHEETS)]
+			.filter((link) => link.sheet)
+			.map((link) => link.href),
+	);
+	const pending = [...cloneDocument.querySelectorAll<HTMLLinkElement>(LINKED_STYLE_SHEETS)].filter(
+		(link) => !link.sheet && !link.disabled && loaded.has(link.href),
+	);
+	if (pending.length === 0) return;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, timeoutMs);
+	});
+	const settled = Promise.all(
+		pending.map(
+			(link) =>
+				new Promise<void>((resolve) => {
+					link.addEventListener('load', () => resolve(), { once: true });
+					link.addEventListener('error', () => resolve(), { once: true });
+				}),
+		),
+	);
+	try {
+		await Promise.race([settled.then(() => cloneDocument.fonts?.ready), timeout]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/** One step up the flattened tree html2canvas clones: a slotted node's slot, a parent, or a host. */
+function composedParent(node: Node): Node | null {
+	const slot = (node as Element | Text).assignedSlot;
+	if (slot) return slot;
+	const parent = node.parentNode;
+	return parent?.nodeType === 11 && (parent as ShadowRoot).host
+		? (parent as ShadowRoot).host
+		: parent;
+}
+
+const STYLE_SOURCES = 'style, link[rel~="stylesheet"]';
+
+/** Whether a style sheet sits in `node` or in a node one of its slots shows. */
+function holdsStyleSource(node: Element): boolean {
+	if (node.matches(STYLE_SOURCES) || node.querySelector(STYLE_SOURCES)) return true;
+	return [...node.querySelectorAll('slot')].some((slot) =>
+		slot.assignedElements().some((assigned) => holdsStyleSource(assigned)),
+	);
+}
+
+/**
+ * The `ignoreElements` every binding hands html2canvas-pro.
+ *
+ * html2canvas-pro clones the whole document, every element and open shadow root, before it paints
+ * the one element it captures. Under a viewer with its chrome mounted that clone is most of a
+ * capture (seconds, all on the main thread), and nothing outside the captured element is painted.
+ * This keeps the captured element's subtree (through shadow roots and slots), the chain of its
+ * ancestors, whose styles it inherits, and every style sheet with the path to it (the clone lays
+ * ordinary elements out again from those rules, fonts included). The other children of each
+ * ancestor stay as empty shells, so sibling selectors and their own sizes still apply; only their
+ * contents are skipped. A shell left without its contents can be narrower than it was, so
+ * `prepareHtml2CanvasClone` keeps the captured element at its live width. `ignore`, a caller's own
+ * predicate, still applies.
+ */
+export function html2canvasCaptureScope(
+	captured: Element,
+	ignore?: (node: Element) => boolean,
+): (node: Element) => boolean {
+	const ancestors = new Set<Node>();
+	for (let node = composedParent(captured); node; node = composedParent(node)) {
+		ancestors.add(node);
+	}
+	const inside = (node: Node): boolean => {
+		for (let current: Node | null = node; current; current = composedParent(current)) {
+			if (current === captured) return true;
+			if (ancestors.has(current)) return false;
+		}
+		return false;
+	};
+	return (node) => {
+		if (ignore?.(node)) return true;
+		if (ancestors.has(node) || inside(node)) return false;
+		const parent = composedParent(node);
+		if (parent && ancestors.has(parent)) return false;
+		return !(node.closest('head') || holdsStyleSource(node));
+	};
+}
+
+/**
+ * Keep the cloned capture at the live element's layout width. Scoped by `html2canvasCaptureScope`,
+ * its ancestors' other children are empty shells, which could narrow a column it takes its width
+ * from. Only the width: a fixed height would change how percentage heights inside an auto-height
+ * element resolve. The offset width is the layout box, before any transform.
+ */
+export function pinCapturedSize(original: HTMLElement, clonedEl: HTMLElement): void {
+	const width = original.offsetWidth;
+	if (width <= 0) return;
+	const display = original.ownerDocument.defaultView?.getComputedStyle(original).display;
+	if (display === 'inline' || display === 'contents') return;
+	Object.assign(clonedEl.style, {
+		boxSizing: 'border-box',
+		width: `${width}px`,
+		minWidth: '0',
+		maxWidth: 'none',
+	});
 }

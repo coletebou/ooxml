@@ -1,5 +1,6 @@
 import type {
 	CollaborationLivePatcher,
+	InlineTextDraftSink,
 	ResolvedKeyboardCustomization,
 	SnapGuideInput,
 } from 'ooxml-ui/pptx';
@@ -50,13 +51,15 @@ export interface EditorControllerDeps {
 	 * Transform inline-editor text at commit time (File > Options > Proofing
 	 * AutoCorrect); identity when unset.
 	 */
-	transformCommittedText?(text: string): string;
+	transformCommittedText?(text: string, previous?: string): string;
 	/**
 	 * Collaboration live-preview channel. Inline text only reaches the slides
 	 * state on commit, so peers saw nothing while a peer typed; each keystroke is
 	 * published through this instead. Omit outside a collaborative viewer.
 	 */
 	getLivePatcher?(): CollaborationLivePatcher | undefined;
+	/** The autosave engine: typing that was never committed still counts as an edit. */
+	getAutosave?(): InlineTextDraftSink | undefined;
 	/** The slide the inline-edited element belongs to (live-preview lookup). */
 	getActiveSlide?(): PptxSlide | undefined;
 	/**

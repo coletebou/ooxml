@@ -1,0 +1,397 @@
+import type { PptxThemeColorScheme, PptxThemeFormatScheme } from 'ooxml-core/pptx';
+import { describe, expect, it, vi } from 'vitest';
+
+import { saveDeckWithPassword } from './deck-save-encryption';
+import {
+	crossedHistoryTheme,
+	historyTheme,
+	loadedThemeName,
+	queueThemeWrite,
+	restoreCrossedTheme,
+	settleThemeWrites,
+	themePartWrites,
+	withHistoryTheme,
+	withHistoryMasterThemes,
+	writeThemeParts,
+} from './theme-history';
+import type { ThemePartSchemes } from './theme-history';
+
+const OFFICE: PptxThemeColorScheme = {
+	dk1: '#000000',
+	lt1: '#FFFFFF',
+	dk2: '#44546A',
+	lt2: '#E7E6E6',
+	accent1: '#4472C4',
+	accent2: '#ED7D31',
+	accent3: '#A5A5A5',
+	accent4: '#FFC000',
+	accent5: '#5B9BD5',
+	accent6: '#70AD47',
+	hlink: '#0563C1',
+	folHlink: '#954F72',
+};
+const FACET: PptxThemeColorScheme = { ...OFFICE, accent1: '#90C226' };
+const CALIBRI = { majorFont: { latin: 'Calibri Light' }, minorFont: { latin: 'Calibri' } };
+const ARIAL = { majorFont: { latin: 'Arial' }, minorFont: { latin: 'Arial' } };
+
+/** A format scheme with one `phClr` fill, read while `phClr` resolved to `resolved`. */
+function formatScheme(name: string, resolved = '#4472C4'): PptxThemeFormatScheme {
+	return {
+		name,
+		fillStyles: [
+			{ kind: 'solid', color: resolved, rawNode: { 'a:schemeClr': { '@_val': 'phClr' } } },
+		],
+		lineStyles: [],
+		effectStyles: [],
+		backgroundFillStyles: [],
+	};
+}
+const OFFICE_EFFECTS = formatScheme('Office');
+const GLOSSY = formatScheme('Glossy');
+
+/**
+ * A handler that logs its writes, with the parts a scoped write names (`colors@part`); `parts` are
+ * the theme parts it reads (`getThemePartSchemes`).
+ */
+function writer(parts: Record<string, ThemePartSchemes> = {}) {
+	const writes: string[] = [];
+	const log = (write: string, themePaths?: readonly string[]) =>
+		writes.push(themePaths ? `${write}@${themePaths.join(',')}` : write);
+	return {
+		writes,
+		updateThemeColorScheme: vi.fn(async (_scheme: unknown, themePaths?: readonly string[]) => {
+			log('colors', themePaths);
+		}),
+		updateThemeFontScheme: vi.fn(async (_scheme: unknown, themePaths?: readonly string[]) => {
+			log('fonts', themePaths);
+		}),
+		updateThemeName: vi.fn(async (name: string, themePaths?: readonly string[]) => {
+			log(`name:${name}`, themePaths);
+		}),
+		setSlideMasterTheme: vi.fn(async (master: string, path: string) => {
+			writes.push(`${master}->${path}`);
+		}),
+		getThemePartSchemes: vi.fn(async (path: string) => parts[path]),
+		restoreThemeFormatScheme: vi.fn(
+			async (scheme: PptxThemeFormatScheme, themePaths?: readonly string[]) => {
+				log(`effects:${scheme.name}`, themePaths);
+				return scheme;
+			},
+		),
+	};
+}
+
+const later = (ms: number) =>
+	new Promise<void>((done) => {
+		setTimeout(done, ms);
+	});
+
+describe('history theme records', () => {
+	it('records the schemes and the name in one order, as a copy', () => {
+		const theme = { name: 'Facet', fontScheme: ARIAL, colorScheme: FACET, formatScheme: 'x' };
+		const recorded = historyTheme(theme);
+		expect(Object.keys(recorded ?? {})).toStrictEqual([
+			'colorScheme',
+			'fontScheme',
+			'formatScheme',
+			'name',
+		]);
+		expect(recorded?.colorScheme).not.toBe(FACET);
+		expect(historyTheme(undefined)).toBeUndefined();
+		expect(historyTheme({ name: '' })).toStrictEqual({});
+	});
+
+	it('tells a step that crosses a theme change from one that does not', () => {
+		const loaded = historyTheme({ colorScheme: OFFICE, fontScheme: CALIBRI });
+		const picked = historyTheme({ colorScheme: FACET, fontScheme: ARIAL, name: 'Facet' });
+		expect(
+			crossedHistoryTheme(loaded, historyTheme({ fontScheme: CALIBRI, colorScheme: OFFICE })),
+		).toBeUndefined();
+		expect(crossedHistoryTheme(picked, loaded)).toStrictEqual(loaded);
+		expect(crossedHistoryTheme(loaded, loaded)).toBeUndefined();
+		// A snapshot from before themes were recorded has nothing to restore.
+		expect(crossedHistoryTheme(picked, undefined)).toBeUndefined();
+	});
+
+	it('restores exactly the recorded parts and keeps the rest of the theme', () => {
+		const restored = withHistoryTheme(
+			{ name: 'Facet', fontScheme: ARIAL, colorScheme: FACET, formatScheme: 'kept' },
+			{ colorScheme: OFFICE, fontScheme: CALIBRI },
+		);
+		expect(restored).toStrictEqual({
+			colorScheme: OFFICE,
+			fontScheme: CALIBRI,
+			formatScheme: 'kept',
+		});
+	});
+
+	it('puts a crossed theme back and queues only the parts that differ', async () => {
+		const handler = writer();
+		const loaded = historyTheme({ colorScheme: OFFICE, fontScheme: CALIBRI });
+		const picked = historyTheme({ colorScheme: OFFICE, fontScheme: ARIAL, name: 'Arial' });
+		const restored = restoreCrossedTheme(
+			{ colorScheme: OFFICE, fontScheme: ARIAL, name: 'Arial', formatScheme: 'kept' },
+			picked,
+			loaded,
+			handler,
+			'Office Theme',
+		);
+		expect(restored).toStrictEqual({
+			colorScheme: OFFICE,
+			fontScheme: CALIBRI,
+			formatScheme: 'kept',
+		});
+		await settleThemeWrites(handler);
+		expect(handler.writes).toStrictEqual(['fonts', 'name:Office Theme']);
+		expect(restoreCrossedTheme({ name: 'x' }, loaded, loaded, handler)).toBeUndefined();
+		expect(handler.writes).toHaveLength(2);
+	});
+});
+
+describe('a step across an Effects pick', () => {
+	const loaded = historyTheme({ colorScheme: OFFICE, formatScheme: OFFICE_EFFECTS });
+	const picked = historyTheme({ colorScheme: OFFICE, formatScheme: GLOSSY });
+
+	it('crosses by its format scheme alone, and Undo and Redo write it back', async () => {
+		const handler = writer();
+		expect(crossedHistoryTheme(picked, loaded)).toStrictEqual(loaded);
+		const undone = restoreCrossedTheme(
+			{ colorScheme: OFFICE, formatScheme: GLOSSY, name: 'Office Theme' },
+			picked,
+			loaded,
+			handler,
+			'Office Theme',
+		);
+		expect(undone).toStrictEqual({ colorScheme: OFFICE, formatScheme: OFFICE_EFFECTS });
+		expect(undone?.formatScheme).not.toBe(OFFICE_EFFECTS);
+		await settleThemeWrites(handler);
+		expect(handler.writes).toStrictEqual(['effects:Office']);
+
+		restoreCrossedTheme(undone, loaded, picked, handler, 'Office Theme');
+		await settleThemeWrites(handler);
+		expect(handler.writes).toStrictEqual(['effects:Office', 'effects:Glossy']);
+	});
+
+	it('is the same scheme however its placeholder colours resolved when it was read', () => {
+		const reread = historyTheme({
+			colorScheme: OFFICE,
+			formatScheme: formatScheme('Office', '#156082'),
+		});
+		expect(crossedHistoryTheme(reread, loaded)).toBeUndefined();
+		expect(themePartWrites(reread, loaded)).toStrictEqual([]);
+		expect(themePartWrites(picked, loaded)).toStrictEqual([
+			{ part: 'formatScheme', formatScheme: OFFICE_EFFECTS },
+		]);
+	});
+});
+
+describe('themePartWrites', () => {
+	it('writes only the parts that differ: undoing a fonts pick leaves the colours alone', () => {
+		expect(
+			themePartWrites(
+				{ colorScheme: OFFICE, fontScheme: ARIAL },
+				{ colorScheme: OFFICE, fontScheme: CALIBRI },
+			),
+		).toStrictEqual([{ part: 'fontScheme', fontScheme: CALIBRI }]);
+	});
+
+	it('puts the loaded part name back when the target theme carries none', () => {
+		const writes = themePartWrites(
+			{ colorScheme: FACET, fontScheme: ARIAL, name: 'Facet' },
+			{ colorScheme: OFFICE, fontScheme: CALIBRI },
+			'Office Theme',
+		);
+		expect(writes.map((write) => write.part)).toStrictEqual(['colorScheme', 'fontScheme', 'name']);
+		expect(writes[2]).toStrictEqual({ part: 'name', name: 'Office Theme' });
+		expect(
+			themePartWrites({ colorScheme: OFFICE }, { colorScheme: OFFICE }, 'Office Theme'),
+		).toStrictEqual([]);
+	});
+
+	it('finds the primary theme part name, or the first one', () => {
+		const options = [
+			{ path: 'ppt/theme/theme2.xml', name: 'Other' },
+			{ path: 'ppt/theme/theme1.xml', name: 'Office Theme' },
+		];
+		const masters = [{ themePath: 'ppt/theme/theme1.xml' }, { themePath: 'ppt/theme/theme2.xml' }];
+		expect(loadedThemeName(options, masters)).toBe('Office Theme');
+		expect(loadedThemeName(options, [])).toBe('Other');
+		expect(loadedThemeName(options, undefined)).toBe('Other');
+		expect(loadedThemeName(undefined, masters)).toBeUndefined();
+	});
+});
+
+describe('the theme part write queue', () => {
+	it('writes the differing parts one after another, after every write queued before', async () => {
+		const handler = writer();
+		const first = queueThemeWrite(handler, async () => {
+			await later(20);
+			handler.writes.push('pick');
+		});
+		const restore = writeThemeParts(
+			handler,
+			{ colorScheme: FACET, fontScheme: ARIAL, name: 'Facet' },
+			{ colorScheme: OFFICE, fontScheme: CALIBRI },
+			'Office Theme',
+		);
+		await Promise.all([first, restore]);
+		expect(handler.writes).toStrictEqual(['pick', 'colors', 'fonts', 'name:Office Theme']);
+		await expect(writeThemeParts(null, {}, { colorScheme: OFFICE })).resolves.toBeUndefined();
+	});
+
+	it('settles once every write queued so far has landed, even a failed one', async () => {
+		const handler = writer();
+		await expect(settleThemeWrites(handler)).resolves.toBeUndefined();
+		await expect(settleThemeWrites(null)).resolves.toBeUndefined();
+		const failing = queueThemeWrite(handler, async () => {
+			await later(20);
+			throw new Error('write failed');
+		});
+		const outcome = failing.then(
+			() => 'landed',
+			(error: Error) => error.message,
+		);
+		void queueThemeWrite(handler, async () => {
+			handler.writes.push('after the failure');
+		});
+		await settleThemeWrites(handler);
+		expect(handler.writes).toStrictEqual(['after the failure']);
+		await expect(outcome).resolves.toBe('write failed');
+	});
+
+	it('hands back what the write resolves with', async () => {
+		await expect(queueThemeWrite(writer(), async () => 42)).resolves.toBe(42);
+	});
+
+	it('makes every save wait for the theme part writes queued before it', async () => {
+		const order: string[] = [];
+		const serializer = {
+			save: vi.fn(async () => {
+				order.push('save');
+				return new Uint8Array([1]);
+			}),
+			saveEncrypted: vi.fn(async () => new Uint8Array([2])),
+		};
+		void queueThemeWrite(serializer, async () => {
+			await later(30);
+			order.push('theme written');
+		});
+		await saveDeckWithPassword(serializer as never, [], undefined, null);
+		expect(order).toStrictEqual(['theme written', 'save']);
+	});
+});
+
+describe('a step across a theme applied by path', () => {
+	const T1 = 'ppt/theme/theme1.xml';
+	const T2 = 'ppt/theme/theme2.xml';
+	const masters = [
+		{ path: 'm1', themePath: T1, name: 'First' },
+		{ path: 'm2', themePath: T2 },
+	];
+	const switched = masters.map((master) => ({ ...master, themePath: T2 }));
+	const part = (path: string, colorScheme: PptxThemeColorScheme, name: string) => ({
+		path,
+		name,
+		colorScheme,
+		fontScheme: CALIBRI,
+	});
+
+	it("records each master's theme part in master order, and keeps it off the theme", () => {
+		const recorded = historyTheme({ colorScheme: OFFICE, fontScheme: CALIBRI }, masters);
+		expect(Object.keys(recorded)).toStrictEqual(['colorScheme', 'fontScheme', 'masterThemePaths']);
+		expect(recorded.masterThemePaths).toStrictEqual({ m1: T1, m2: T2 });
+		expect(Object.keys(recorded.masterThemePaths ?? {})).toStrictEqual(['m1', 'm2']);
+		expect(historyTheme(undefined, [{ path: 'm1' }])).toBeUndefined();
+		expect(withHistoryTheme({ name: 'Tide' }, recorded)).toStrictEqual({
+			colorScheme: OFFICE,
+			fontScheme: CALIBRI,
+		});
+		expect(
+			crossedHistoryTheme(
+				historyTheme({ colorScheme: OFFICE }, switched),
+				historyTheme({ colorScheme: OFFICE }, masters),
+			),
+		).toBeDefined();
+	});
+
+	it('carries the format scheme with a crossing', () => {
+		const tide = formatScheme('Tide');
+		const ember = formatScheme('Ember');
+		const before = historyTheme({ colorScheme: OFFICE, formatScheme: tide }, masters);
+		const after = historyTheme({ colorScheme: FACET, formatScheme: ember }, switched);
+		expect(before.formatScheme).toStrictEqual(tide);
+		const restored = restoreCrossedTheme(
+			{ colorScheme: FACET, formatScheme: ember },
+			after,
+			before,
+			null,
+		);
+		expect(restored).toStrictEqual({ colorScheme: OFFICE, formatScheme: tide });
+	});
+
+	it('writes the format scheme the part it goes back to no longer holds, into that part', async () => {
+		// An Effects pick after the switch was recorded wrote over the old part's format scheme too.
+		const handler = writer({
+			[T1]: { ...part(T1, OFFICE, 'Tide'), formatScheme: formatScheme('Glossy', '#156082') },
+		});
+		const before = historyTheme(
+			{ colorScheme: OFFICE, fontScheme: CALIBRI, formatScheme: formatScheme('Tide') },
+			masters,
+		);
+		const after = historyTheme(
+			{ colorScheme: FACET, fontScheme: CALIBRI, name: 'Ember', formatScheme: GLOSSY },
+			switched,
+		);
+		await writeThemeParts(handler, after, before, 'Ember');
+		expect(handler.writes).toStrictEqual([`m1->${T1}`, `effects:Tide@${T1}`]);
+	});
+
+	it('puts each recorded master back on its part, and keeps the array when none moved', () => {
+		const target = historyTheme({ colorScheme: OFFICE }, masters);
+		expect(withHistoryMasterThemes(switched, target)).toStrictEqual(masters);
+		expect(withHistoryMasterThemes(masters, target)).toBe(masters);
+		expect(withHistoryMasterThemes(switched, historyTheme({ colorScheme: OFFICE }))).toBe(switched);
+	});
+
+	it('Undo points the masters back and writes nothing into the parts', async () => {
+		const handler = writer({ [T1]: part(T1, OFFICE, 'Tide'), [T2]: part(T2, FACET, 'Ember') });
+		const before = historyTheme({ colorScheme: OFFICE, fontScheme: CALIBRI }, masters);
+		const after = historyTheme(
+			{ colorScheme: FACET, fontScheme: CALIBRI, name: 'Ember' },
+			switched,
+		);
+		const restored = restoreCrossedTheme(
+			{ colorScheme: FACET, fontScheme: CALIBRI, name: 'Ember', formatScheme: 'kept' },
+			after,
+			before,
+			handler,
+		);
+		expect(restored).toStrictEqual({
+			colorScheme: OFFICE,
+			fontScheme: CALIBRI,
+			formatScheme: 'kept',
+		});
+		await settleThemeWrites(handler);
+		expect(handler.writes).toStrictEqual([`m1->${T1}`]);
+
+		restoreCrossedTheme(restored, before, after, handler);
+		await settleThemeWrites(handler);
+		expect(handler.writes).toStrictEqual([`m1->${T1}`, `m1->${T2}`]);
+	});
+
+	it('writes what the part it goes back to no longer holds', async () => {
+		// The old part was edited after the switch was recorded: Undo writes the recorded colours.
+		const handler = writer({ [T1]: part(T1, FACET, 'Tide') });
+		const before = historyTheme(
+			{ colorScheme: OFFICE, fontScheme: CALIBRI, name: 'Renamed' },
+			masters,
+		);
+		const after = historyTheme(
+			{ colorScheme: FACET, fontScheme: CALIBRI, name: 'Ember' },
+			switched,
+		);
+		await writeThemeParts(handler, after, before, 'Ember');
+		// Into the deck's part only: the record does not describe the parts of the other masters.
+		expect(handler.writes).toStrictEqual([`m1->${T1}`, `colors@${T1}`, `name:Renamed@${T1}`]);
+	});
+});

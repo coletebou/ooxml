@@ -18,6 +18,8 @@ export interface OfficeStatusText {
 	live?: boolean | undefined;
 	/** Hide on phone widths. */
 	narrowHide?: boolean | undefined;
+	/** Visually hidden, still read by assistive technology (a live announcement). */
+	srOnly?: boolean | undefined;
 }
 
 /** A status-bar button (Notes, Comments, a view switch). `label` is its name and ScreenTip. */
@@ -157,7 +159,7 @@ export class OfficeUiStatusBar extends OfficeElement {
 							html`<span
 								class="item${spec.tone === 'saving' ? ' saving' : ''}${
 									spec.tone === 'error' ? ' error' : ''
-								}${spec.narrowHide ? ' narrow-hide' : ''}"
+								}${spec.narrowHide ? ' narrow-hide' : ''}${spec.srOnly ? ' sr' : ''}"
 								data-item=${spec.id}
 								title=${ifDefined(spec.title)}
 								aria-live=${ifDefined(spec.live ? 'polite' : undefined)}
@@ -176,7 +178,7 @@ export class OfficeUiStatusBar extends OfficeElement {
 					)}
 				</span>
 				<i class="sep tight" aria-hidden="true" ?hidden=${viewsHidden || togglesHidden}></i>
-				<div class="group views" ?hidden=${viewsHidden}>
+				<div class="group views" part="views" ?hidden=${viewsHidden}>
 					${repeat(
 						views,
 						(spec) => spec.id,
@@ -191,7 +193,7 @@ export class OfficeUiStatusBar extends OfficeElement {
 				></slot>
 				<slot name="end"></slot>
 				<i class="sep tight" aria-hidden="true" ?hidden=${zoomHidden}></i>
-				<div class="group zoom" ?hidden=${zoomHidden}>
+				<div class="group zoom" part="zoom" ?hidden=${zoomHidden}>
 					${this.zoomStep('zoomOut', zoom?.outLabel ?? '', zoom?.outIcon ?? 'minus')}
 					<button
 						type="button"

@@ -69,7 +69,7 @@ title bar, ribbon, backstage or dialog is mounted. See the
 
 This is an early editor, without Microsoft Excel parity or guaranteed lossless
 saving for unsupported features. Legacy XLS input saves as XLSX. Pivot tables,
-slicers and sparklines are not editable; macros never execute. Review core
+slicers and sparklines are supported for the cases the feature guide lists, but sparkline style galleries are not available; macros never execute. Review core
 diagnostics and the feature guide before relying on preservation.
 
 ## Documentation
@@ -77,6 +77,19 @@ diagnostics and the feature guide before relying on preservation.
 [Framework guide](https://christophervr.github.io/ooxml/xlsx/frameworks/react) |
 [Bindings](https://christophervr.github.io/ooxml/xlsx/bindings)
 
+## Privacy and network use
+
+The Excel packages make no network request when opening, rendering, editing or saving a document: linked pictures are not fetched, linked data is not refreshed, and fonts come from the device only, unless a reader turns on the Trust Center font download (off by default) or the host sets `googleFonts`. Hyperlinks open only when the reader follows them. Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 Apache-2.0.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#excel-xlsx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

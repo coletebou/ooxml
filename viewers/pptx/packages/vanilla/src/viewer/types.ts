@@ -1,6 +1,7 @@
 import type {
 	AccountAuthConfig,
 	AutosaveRecord,
+	CloudFileProvider,
 	DocumentStorage,
 	CanvasSize,
 	CollaborationConfig,
@@ -20,8 +21,11 @@ import type {
 	ViewerTheme,
 	ViewportFitOptions,
 	RibbonAddInTab,
+	RibbonDisplayMode,
 } from 'ooxml-ui/pptx';
+import type { GoogleFontsOption, ListConversionScope, PptxLoadLimits } from 'ooxml-ui/pptx';
 import type { PptxAiConfig } from 'ooxml-ui/pptx/ai';
+import type { PptxAiAssistant } from 'ooxml-ui/pptx/ai/host';
 import type { LocaleCatalogEntry } from 'ooxml-ui/pptx/i18n';
 import type { PptxCoreProperties, PptxHandler, PptxSaveFormat } from 'pptx-viewer-core';
 
@@ -66,10 +70,30 @@ export interface PptxViewerCallbacks {
 	onLoad?: (info: { slideCount: number; canvasSize: CanvasSize }) => void;
 	/** Fired when a load fails, and for each failed Save / Save As (message is best-effort). */
 	onError?: (message: string, error: unknown) => void;
+	/**
+	 * Reports a slide element omitted because its renderer threw, with
+	 * `{ elementId, elementType, slideId }`. Only that element is left out; the slide, its other
+	 * elements and the viewer stay. Defaults to `console.error(error, context)`, which is also
+	 * used when this callback throws. An unchanged failed element is not retried or reported
+	 * again on each repaint; a replacement element object (or a changed id) is tried again.
+	 */
+	onElementRenderError?: import('ooxml-ui/pptx').ElementRenderErrorHandler;
 	/** Fired when the active slide changes (zero-based index). */
 	onSlideChange?: (index: number) => void;
-	/** Fired when the effective zoom scale changes (1 = 100%). */
+	/**
+	 * Fired after a vector PDF export (File > Export > PDF or `exportPdf()`) that approximated
+	 * something: elements drawn as pictures, substituted fonts, simplified effects. The viewer also
+	 * shows one notice summarising it. Not fired when nothing was approximated.
+	 */
+	onPdfExportReport?: (result: import('ooxml-ui/pptx').VectorPdfExportResult) => void;
+	/** Fired when the editing zoom scale changes (1 = 100%); reports the editing zoom during a show too. */
 	onZoomChange?: (scale: number) => void;
+	/**
+	 * Fired when the user picks a Ribbon Display Options mode (the menu at the right end of the
+	 * tab row, Ctrl+F1 or a double click on a tab). Not fired for `setRibbonDisplay`. The viewer
+	 * keeps the choice for its own lifetime only; store it here to bring it back next time.
+	 */
+	onRibbonDisplayChange?: (mode: RibbonDisplayMode) => void;
 	/** Fired when presentation (fullscreen) mode is entered or exited. */
 	onPresentationChange?: (presenting: boolean) => void;
 	/** Fired after any document mutation (move, resize, edit, undo, ...). */
@@ -193,6 +217,50 @@ export interface PptxViewerOptions extends PptxViewerCallbacks, ViewportFitOptio
 	/** Zero-based slide to show after load (default 0). */
 	initialSlide?: number;
 	/**
+	 * Google Fonts fallback for deck fonts that are neither installed nor
+	 * embedded. Unset: File > Options > Trust Center > "Download fonts that
+	 * are not installed or embedded" decides (on by default: the viewer
+	 * loads them from `fonts.googleapis.com`). Any other value locks that
+	 * option: off for `false` or an invalid `baseUrl`, on for a mirror.
+	 * `false`: no request goes to Google (`fonts.googleapis.com` or
+	 * `fonts.gstatic.com`); text uses installed, embedded or fallback fonts.
+	 * `{ baseUrl }`: requests go to a self-hosted mirror of the Google Fonts
+	 * CSS2 API instead, so the user's browser never contacts Google. An
+	 * invalid `baseUrl` disables the fallback (with a console warning). Read
+	 * once, when the viewer is created.
+	 */
+	googleFonts?: GoogleFontsOption;
+	/**
+	 * How far Bullets / Numbering reach when the selection is a bare caret.
+	 * `'paragraph'` (the default, PowerPoint behaviour): only the paragraph
+	 * holding the caret changes. `'list'` (opt-in, Word / Google Docs
+	 * behaviour): switching a list paragraph between bullets and numbering
+	 * converts the whole adjacent list around the caret. Turning a list off,
+	 * listing a plain paragraph and range selections behave the same in both.
+	 * Read on every list command, so a change to the options object applies
+	 * from the next Bullets / Numbering press.
+	 */
+	listConversionScope?: ListConversionScope;
+	/**
+	 * Host switch for content a deck links from another server (http(s)
+	 * relationship targets): pictures, picture fills and bullets, video, audio
+	 * and poster frames. `false`: none of it is fetched. `true`: it is allowed.
+	 * Either value locks File > Options > Trust Center > "Allow external
+	 * content" to match; unset keeps the user's choice there. Google Fonts
+	 * requests are separate (see `googleFonts`).
+	 * Read once, when the viewer is created.
+	 */
+	allowExternalContent?: boolean;
+	/**
+	 * Bounds on the work loading a deck may do, for hosts that show untrusted
+	 * decks: `maxInputBytes`, `maxUncompressedBytes`, `maxEntries`, `maxSlides`
+	 * and `maxShapes` (see `PptxLoadLimits`). Unset keeps the core defaults
+	 * (500 MiB inflated, 65,536 ZIP entries, no other limit). A deck over a
+	 * limit shows the error overlay with the limit and the deck's value, and
+	 * `onError` receives the same message. Applies to every `load()`.
+	 */
+	limits?: PptxLoadLimits;
+	/**
 	 * Enable editing (default `false`): click to select, drag/resize/rotate,
 	 * inline text editing, keyboard shortcuts, undo/redo, and the toolbar
 	 * Save button. Toggle later via `setEditable`.
@@ -255,6 +323,13 @@ export interface PptxViewerOptions extends PptxViewerCallbacks, ViewportFitOptio
 	 * built-in tab, and a drop-down (`items`) is drawn as its items.
 	 */
 	ribbonAddIns?: readonly RibbonAddInTab[];
+	/**
+	 * PowerPoint's Ribbon Display Options at start (default `'always'`): `'always'` docks tabs
+	 * and commands, `'tabs'` shows the tab row and lays a tab's commands over the slide when it
+	 * is chosen, `'fullScreen'` hides the title bar and the ribbon behind a strip at the top.
+	 * The user changes it from the ribbon; `setRibbonDisplay` changes it from the host.
+	 */
+	ribbonDisplay?: RibbonDisplayMode;
 	/**
 	 * Custom element-renderer registry. Defaults to `createDefaultRegistry()`;
 	 * pass your own (or mutate the default via `getRegistry()`) to add or
@@ -383,6 +458,16 @@ export interface PptxViewerOptions extends PptxViewerCallbacks, ViewportFitOptio
 	 * when it provides them.
 	 */
 	storage?: DocumentStorage;
+	/**
+	 * Cloud places for File > Open (OneDrive through `createOneDriveFileProvider` from
+	 * `ooxml-core/embedding/onedrive`, or a provider of your own). When non-empty, the Open page
+	 * lists "This device" and one place per provider. A file opened from a place loads like a
+	 * normal open (read-only when the service does not allow editing, or when `editable` /
+	 * `readOnly` already forbid it); File > Save, Save As and recovery of that document go to the
+	 * file's own storage instead of `storage`, until another document is loaded (`loadFile`,
+	 * `loadUrl`, File > New, a device or recent open).
+	 */
+	fileProviders?: readonly CloudFileProvider[];
 	/** Original file path, used as the IndexedDB recovery key (defaults to fileName, or 'presentation.pptx' for an unnamed deck). */
 	filePath?: string;
 	/**
@@ -419,8 +504,14 @@ export interface PptxViewerOptions extends PptxViewerCallbacks, ViewportFitOptio
 	 * first opened, so a viewer without this option pays nothing. The host owns
 	 * the model connection (a backend `endpoint`, an in-browser `model`, or a
 	 * custom `transport`); see {@link PptxAiConfig}.
+	 *
+	 * Pass a plain `PptxAiConfig` (supported and not deprecated), or the opaque
+	 * handle `createAiAssistant(config)` returns (from `pptx-vanilla-viewer/ai`,
+	 * the opt-in entry that brings the chat panel). Both open the same panel.
+	 * Only a value from `createAiAssistant` is read as a handle; any other value
+	 * is a plain config, which the viewer does not validate.
 	 */
-	ai?: PptxAiConfig;
+	ai?: PptxAiConfig | PptxAiAssistant;
 }
 
 /** The viewer handle returned by `createPptxViewer`. */
@@ -445,7 +536,7 @@ export interface PptxViewerInstance extends PowerPointViewerAPI, ViewerCustomiza
 	 * again; pass `showCompatibilityToasts: false` to never show the stack.
 	 */
 	dismissAllCompatToasts(): void;
-	/** Effective zoom scale (1 = 100%), after fit resolution. */
+	/** Editing zoom scale (1 = 100%), after fit resolution, also during a show. */
 	getZoom(): number;
 	/** Set an explicit zoom scale, or `'fit'` for fit-to-viewport. */
 	setZoom(zoom: number): void;
@@ -456,6 +547,11 @@ export interface PptxViewerInstance extends PowerPointViewerAPI, ViewerCustomiza
 	setTheme(theme: ViewerTheme | undefined): void;
 	/** Switch the UI locale (rebuilds the chrome labels). */
 	setLocale(locale: string): void;
+	/**
+	 * Show or hide the toolbar at runtime (the `showToolbar` option). Rebuilds the
+	 * chrome only: the deck, unsaved edits and the undo history are kept.
+	 */
+	setShowToolbar(show: boolean): void;
 	/** Enter presentation mode (real Fullscreen API). */
 	enterPresentation(): Promise<void>;
 	/** Exit presentation mode. */
@@ -552,6 +648,13 @@ export interface PptxViewerInstance extends PowerPointViewerAPI, ViewerCustomiza
 	 * Removing the tab that is showing returns the ribbon to its default tab.
 	 */
 	setRibbonAddIns(tabs: readonly RibbonAddInTab[]): void;
+	/**
+	 * Set the Ribbon Display Options mode (`'always'`, `'tabs'` or `'fullScreen'`) from the host.
+	 * `onRibbonDisplayChange` is not called for it.
+	 */
+	setRibbonDisplay(mode: RibbonDisplayMode): void;
+	/** The current Ribbon Display Options mode. */
+	getRibbonDisplay(): RibbonDisplayMode;
 	/** Tear down DOM, listeners, Blob URLs, and the core handler. */
 	destroy(): void;
 }

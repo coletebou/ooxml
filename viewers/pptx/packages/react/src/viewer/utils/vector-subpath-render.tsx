@@ -1,6 +1,7 @@
 import {
 	buildSubpathPaints,
-	screenStrokeWidth,
+	dashStartPathData,
+	screenBorderWidth,
 	svgGradientFillRef,
 	svgLineCap,
 } from 'ooxml-ui/pptx';
@@ -76,7 +77,7 @@ function strokeContext(
 		strokePaint,
 		strokeWidth,
 		dashArray,
-		lineCap: svgLineCap(shapeStyle?.lineCap),
+		lineCap: svgLineCap(shapeStyle?.lineCap, dashArray !== undefined),
 		lineJoin,
 		miterLimit,
 		offsets: getCompoundLineOffsets(shapeStyle?.compoundLine, strokeWidth),
@@ -86,10 +87,12 @@ function strokeContext(
 
 /** Emit the compound (single or parallel) stroke `<path>` strands for one `d`. */
 function strokeStrands(d: string, keyBase: string, ctx: StrokeStyleContext): React.ReactNode[] {
+	// A dashed closed outline starts its pattern where PowerPoint does.
+	const strokeD = ctx.dashArray === undefined ? d : dashStartPathData(d);
 	return ctx.offsets.map((offset, idx) => (
 		<path
 			key={`${keyBase}-s${idx}`}
-			d={d}
+			d={strokeD}
 			fill='none'
 			stroke={ctx.strokePaint}
 			strokeWidth={Math.max(ctx.widths[idx] ?? ctx.strokeWidth, 1)}
@@ -100,7 +103,7 @@ function strokeStrands(d: string, keyBase: string, ctx: StrokeStyleContext): Rea
 			vectorEffect='non-scaling-stroke'
 			style={{
 				// Never under one device pixel on screen (shared `device-pixel-stroke`).
-				strokeWidth: screenStrokeWidth(Math.max(ctx.widths[idx] ?? ctx.strokeWidth, 1)),
+				strokeWidth: screenBorderWidth(Math.max(ctx.widths[idx] ?? ctx.strokeWidth, 1)),
 				transform: offset !== 0 ? `translate(0, ${offset}px)` : undefined,
 			}}
 		/>
@@ -200,8 +203,11 @@ export function renderCustomGeometryVector(
 
 	// Absolutely positioned: in normal flow this full-height svg pushed a
 	// freeform's text body down by the shape's own height, below the outline.
+	// `data-pptx-custom-geometry` lets a morph re-path these paths per frame
+	// (shared `customGeometryAnimations`), as it re-paths the outline overlay.
 	return (
 		<svg
+			data-pptx-custom-geometry=''
 			viewBox={`0 0 ${pathWidth} ${pathHeight}`}
 			className='absolute inset-0 w-full h-full pointer-events-none'
 			preserveAspectRatio='none'

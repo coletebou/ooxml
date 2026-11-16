@@ -8,6 +8,7 @@ import {
 	ANIMATION_KEYFRAMES_CSS,
 	applyHighlightClickStyle,
 	attachViewerHyperlinks,
+	confirmExternalHyperlinkDialog,
 	DEFAULT_VIEWER_OPTIONS,
 	endAudienceDisplay,
 	findHighlightClickTarget,
@@ -478,16 +479,16 @@ function onContextMenuSelect(id: string): void {
 			presenterMode.value = !presenterMode.value;
 			break;
 		case 'pointerArrow':
-			annotations.setPresentationTool('none');
+			annotations.selectPresentationTool('none');
 			break;
 		case 'pointerPen':
-			annotations.setPresentationTool('pen');
+			annotations.selectPresentationTool('pen');
 			break;
 		case 'pointerHighlighter':
-			annotations.setPresentationTool('highlighter');
+			annotations.selectPresentationTool('highlighter');
 			break;
 		case 'pointerLaser':
-			annotations.setPresentationTool('laser');
+			annotations.selectPresentationTool('laser');
 			break;
 		case 'eraseInk':
 			annotations.clearAnnotations();
@@ -537,7 +538,7 @@ const actionRunner = {
 		if (!shouldConfirmExternalHyperlink(options, url)) {
 			return true;
 		}
-		return window.confirm(`${t('pptx.options.trust.confirmHyperlinks')}\n\n${url}`);
+		return confirmExternalHyperlinkDialog(url, { t });
 	},
 	lastViewed: () => actionExtras?.lastViewed(),
 	customShow: (customShowId: string, returnAfter: boolean) =>
@@ -654,7 +655,7 @@ usePresentationKeyboard({
 	firstSlideIndex: () => showOrder.first(0),
 	lastSlideIndex: () => showOrder.last(props.slides.length - 1),
 	requestClose: close,
-	setPresentationTool: annotations.setPresentationTool,
+	setPresentationTool: annotations.selectPresentationTool,
 	clearAnnotations: annotations.clearAnnotations,
 	inkMarkupVisible,
 	subtitlesOn,
@@ -758,9 +759,13 @@ useTouchGestures({
 					@laser-leave="annotations.handleLaserLeave"
 					@erase="annotations.eraseAtPoint"
 				/>
-				<!-- Slide-transition animation (covers the frame until `done`). -->
+				<!-- Slide-transition animation (covers the frame until `done`). Keyed
+				     per transition: the overlay arms its completion timer on mount, so a
+				     reused instance let a fade's timer end the morph a timed slide
+				     started before it finished (issue #141, slides 6 to 7). -->
 				<PresentationTransitionOverlay
 					v-if="nav.transitionState.value"
+					:key="`${nav.transitionState.value.outgoing?.id ?? ''}>${nav.transitionState.value.incoming?.id ?? ''}`"
 					:outgoing-slide="nav.transitionState.value.outgoing"
 					:incoming-slide="nav.transitionState.value.incoming"
 					:canvas-size="canvasSize"
@@ -855,6 +860,7 @@ useTouchGestures({
 					:pen-color="annotations.penColor.value"
 					:highlighter-color="annotations.highlighterColor.value"
 					:has-annotations="annotations.hasAnyAnnotations.value"
+					:has-slide-annotations="annotations.annotationStrokes.value.length > 0"
 					:current-slide-index="nav.currentIndex.value"
 					:total-slides="slides.length"
 					:presentation-start-time="presentationStartTime"

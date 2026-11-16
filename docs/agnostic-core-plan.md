@@ -1,132 +1,1028 @@
 # Plan: making ooxml-core format-agnostic
 
-Status on 2026-10-22: steps 1 to 5 are largely done (`diagram`, `drawingml`, `chart` and the shared chart painter exist and docx, xlsx and visio consume them); step 6 (pptx off `XmlObject`) is only started for charts; section 6 was not pursued (see there). This file is an append-only log of what landed, newest detail last in each step; "Remains" lines are the open items. Counts below were taken from `origin/main` (`c3e0979`) with `find`/`grep`; they are approximate and describe coupling, not quality.
+Follow-on implementation on 2026-10-28: shared chart painting, custom geometry,
+font selection, picture semantics and cross-product UI services are tracked in
+[the further sharing delivery record](pptx-reuse-delivery-2026-10-28.md). The wave
+status and coupling measurements below describe their stated historical baselines.
 
-Goal: everything that is not specific to one Office format lives in a format-neutral area with a neutral public model, and `docx`, `pptx` (later `xlsx`) are thin adapters over it. Word can then use what only PowerPoint has today: SmartArt first, then charts, then DrawingML primitives (fills, lines, effects, text bodies, theme).
+Status on 2026-10-23, after Wave 6 (`2fedfaae7`): steps 1 to 5 are done for the parts listed below,
+and step 6 (pptx off `XmlObject`) is started for charts only; section 6 was not pursued. The shared
+areas `drawingml`, `diagram` and `chart` (with `chart/edit`, `chart/ex`, `chart/workbook` and
+`chart/render`) exist, and docx, xlsx, visio and pptx consume them. Chart and SmartArt editing, which
+was PowerPoint-only, now runs in Word and Excel (SmartArt) and in Word, Excel and Visio (charts)
+over the neutral models. The "Remains" lines are the open items. Counts below were taken from
+`origin/main` (`c3e0979`, 2026-10-08) with `find`/`grep`; they are approximate and describe coupling,
+not quality.
 
-## 1. Where the shared logic lives today (`src/core/pptx`)
+The step labels used in code comments and commit messages (chart steps C1 to C6, chart UI steps U1
+to U5, SmartArt steps S1 to S5) are defined in sections 3.5 to 3.7. Their order follows
+[structure-plan.md](structure-plan.md) section 5.3.
 
-`src/core/pptx/core` is 79,630 lines of SmartArt, chart and DrawingML code mixed with slide code in flat folders (`core/utils` ~1,700 files, `core/core/runtime`, `core/core/builders`, `core/types`). Only file names separate generic DrawingML from slide logic.
+Goal: everything that is not specific to one Office format lives in a format-neutral area with a
+neutral public model, and `docx` and `pptx` (and now `xlsx` and `visio` for charts and SmartArt) are
+thin adapters over it. Word can then use what only PowerPoint had: SmartArt, charts, then DrawingML
+primitives (fills, lines, effects, text bodies, theme).
+
+## 1. Where the shared logic lived (starting point, 2026-10-08)
+
+`src/core/pptx/core` held 79,630 lines of SmartArt, chart and DrawingML code mixed with slide code in
+flat folders (`core/utils` about 1,700 files, `core/core/runtime`, `core/core/builders`,
+`core/types`). Only file names separated generic DrawingML from slide logic.
 
 ### 1.1 The coupling, in four layers
 
-| Layer                               | What it is                                                                                                                                                                                                                                                                                                       | Why it is not portable as is                                                                                                                                                                                            |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| XML model                           | `XmlObject` (`types/common.ts`): `fast-xml-parser` trees, attributes as `@_name`, same-name siblings grouped into arrays, prefixes in keys (`a:solidFill`) looked up by local name through `xmlLookupService`.                                                                                                   | docx and `src/core/xml` use a namespace-aware DOM (`@xmldom/xmldom`). Every pptx parser reads `node['@_x']`. 87 of 162 `utils/chart-*` files and nearly every smartart file take `XmlObject`.                           |
-| Handler runtime (`this`)            | A mixin chain `PptxHandlerRuntime` (`core/core/runtime/*`): `parseSmartArtDrawingShapes`, `parseDrawingShape`, `parseSmartArtQuickStyle`, chart parsing all call `this.parseColor`, `this.resolveThemeFillRef`, `this.readXmlPartByRelationshipId(slidePath, relId)`, `this.compatibilityService.reportWarning`. | The base class owns the JSZip instance, the theme maps, the rels maps and the slide being loaded. Colour, gradient, shadow and theme resolution are methods of it, so a shape parser cannot run without a presentation. |
-| Types                               | `PptxSmartArtDrawingShape extends PptxCustomPathProperties`, `PptxSmartArtData` embeds `TextSegment`, `Pptx3DScene`, `PptxSmartArtChrome`; `PptxElement`/`PptxSlide` appear in `smartart-decompose-*` (SmartArt to slide elements) and the chart builders.                                                       | Public types are named and shaped for PowerPoint; the pure data (nodes, connections, colours, quick style) is tangled with slide editing fields.                                                                        |
-| Pure algorithms (no XML, no `this`) | `smartart-engine/` (layout algorithms, constraint solver, text fit, font metrics tables), `smartart-layout-interpreter-*`, `smartart-hierarchy-*`, `smartart-editing-*` (reflow, node ops) over typed `PptxSmartArt*` models; chart data utils; `color/`, `geometry/` (already moved).                           | These are the cleanest to move, but they import the pptx types barrel (`from '../types'`). Moving them needs the typed model to move first.                                                                             |
+| Layer                               | What it was                                                                                                                                                                                                                                                                                                          | Why it was not portable as is                                                                                                                                                                |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| XML model                           | `XmlObject` (`types/common.ts`): `fast-xml-parser` trees, attributes as `@_name`, same-name siblings grouped into arrays, prefixes in keys (`a:solidFill`) looked up by local name through `xmlLookupService`.                                                                                                       | docx and `src/core/xml` use a namespace-aware DOM (`@xmldom/xmldom`). Every pptx parser read `node['@_x']`. 87 of 162 `utils/chart-*` files and nearly every smartart file took `XmlObject`. |
+| Handler runtime (`this`)            | A mixin chain `PptxHandlerRuntime` (`core/core/runtime/*`): `parseSmartArtDrawingShapes`, `parseDrawingShape`, `parseSmartArtQuickStyle` and chart parsing called `this.parseColor`, `this.resolveThemeFillRef`, `this.readXmlPartByRelationshipId(slidePath, relId)` and `this.compatibilityService.reportWarning`. | The base class owned the JSZip instance, the theme maps, the rels maps and the slide being loaded, so a shape parser could not run without a presentation.                                   |
+| Types                               | `PptxSmartArtDrawingShape extends PptxCustomPathProperties`, `PptxSmartArtData` embeds `TextSegment`, `Pptx3DScene`, `PptxSmartArtChrome`; `PptxElement`/`PptxSlide` appear in `smartart-decompose-*` and the chart builders.                                                                                        | Public types were named and shaped for PowerPoint; the pure data (nodes, connections, colours, quick style) was tangled with slide editing fields.                                           |
+| Pure algorithms (no XML, no `this`) | `smartart-engine/` (layout algorithms, constraint solver, text fit, font metrics tables), `smartart-layout-interpreter-*`, `smartart-hierarchy-*`, `smartart-editing-*` (reflow, node ops) over typed `PptxSmartArt*` models; chart data utils; `color/` and `geometry/` (already moved).                            | Cleanest to move, but they imported the pptx types barrel (`from '../types'`), so the typed model had to move first.                                                                         |
+
+Coupling verdict: the **data shapes** (point, connection, relIds, custom layout, drawing geometry and
+text) are thin and reached `XmlObject` only through attribute reads. The **cached drawing shape
+parser** was wired to the runtime for colour, gradient and theme resolution. The **layout engine** was
+XML-free after its input was parsed, but its types came from the pptx barrel. The **writer and
+fabrication** code was object-tree specific.
 
 ### 1.2 SmartArt map
 
-- Part model and XML parsing: `core/builders/PptxSmartArtParser.ts` (data points, connections), `core/runtime/PptxHandlerRuntimeSmartArtParsing.ts` (connections with transition labels, quick style, cached drawing shapes, `parseDrawingShape`), `SmartArtXmlUtils`, `utils/smartart-data-model-attributes.ts`, `smartart-connector-labels.ts`, `diagram-relationship-ids.ts`, `core/runtime/smartart-drawing-part.ts` (resolves `dsp:drawing` through `dsp:dataModelExt` or the data part's rels), `smartart-colors-builder`, `smartart-style-label-refs`, `smartart-drawing-shape-{style,3d,font-ref}`, `smartart-text-paragraphs`, `smartart-text-style-resolution`.
-- Types: `types/smart-art*.ts` (`PptxSmartArtNode`, `PptxSmartArtConnection`, `PptxSmartArtDrawingShape`, layout definition, colour/quick-style definitions, constraint rules, chrome).
-- Layout engine and interpreters: `utils/smartart-engine/*` (~60 files, own ordered-XML layout-definition parser), `utils/smartart-layout-*`, `smartart-hierarchy-*`, `smartart-constraint-*`, `smartart-decompose*`.
-- Editing and writing (generation of parts from scratch, "fabrication"): `core/runtime/smartart-fabrication-*`, `smartart-xml-builders`, `PptxHandlerRuntimeSaveSmartArtFabrication`, `utils/smartart-editing*`.
-- PPTX-only glue: `PptxGraphicFrameParser` (finds `dgm:relIds` in a `p:graphicFrame`), `SmartArtElementProcessor` (converter), `smartart-decompose` (explode SmartArt into slide shapes), save pipeline.
-
-Coupling verdict: the **data shapes** (point, connection, relIds, custom layout, drawing geometry/text) are thin and only reach `XmlObject` through attribute reads. The **cached drawing shape parser** is wired to the runtime for colour/gradient/theme resolution. The **layout engine** is XML-free after its input is parsed, but its types come from the pptx barrel. The **writer/fabrication** code is object-tree specific.
+- Part model and XML parsing: `core/builders/PptxSmartArtParser.ts` (data points, connections),
+  `core/runtime/PptxHandlerRuntimeSmartArtParsing.ts` (connections with transition labels, quick style,
+  cached drawing shapes, `parseDrawingShape`), `SmartArtXmlUtils`,
+  `utils/smartart-data-model-attributes.ts`, `smartart-connector-labels.ts`,
+  `diagram-relationship-ids.ts`, `core/runtime/smartart-drawing-part.ts` (resolves `dsp:drawing`
+  through `dsp:dataModelExt` or the data part's rels), `smartart-colors-builder`,
+  `smartart-style-label-refs`, `smartart-drawing-shape-{style,3d,font-ref}`, `smartart-text-paragraphs`,
+  `smartart-text-style-resolution`.
+- Types: `types/smart-art*.ts` (`PptxSmartArtNode`, `PptxSmartArtConnection`,
+  `PptxSmartArtDrawingShape`, layout definition, colour and quick-style definitions, constraint rules,
+  chrome).
+- Layout engine and interpreters: `utils/smartart-engine/*` (about 60 files, own ordered-XML
+  layout-definition parser), `utils/smartart-layout-*`, `smartart-hierarchy-*`,
+  `smartart-constraint-*`, `smartart-decompose*`.
+- Editing and writing ("fabrication", generating parts from scratch):
+  `core/runtime/smartart-fabrication-*`, `smartart-xml-builders`,
+  `PptxHandlerRuntimeSaveSmartArtFabrication`, `utils/smartart-editing*`.
+- PPTX-only glue: `PptxGraphicFrameParser` (finds `dgm:relIds` in a `p:graphicFrame`),
+  `SmartArtElementProcessor` (converter), `smartart-decompose` (explodes SmartArt into slide shapes),
+  the save pipeline.
 
 ### 1.3 Charts map
 
-`types/chart*.ts` (~2,000 lines of model), `utils/chart-*` (162 files, ~87 import `XmlObject`; 10 are pure), `core/runtime/PptxHandlerRuntimeChart*` (parsing 1,105 lines, colour style, external data, user shapes), `builders/sdk/chart-operations.ts` (1,064), `chart-xlsx-parser` (embedded workbook), chartex (`chart-cx-*`), colour/style parts (`chart-color-style-writer`, `chart-style-definition`). Parsing starts from a `p:graphicFrame` on a slide; the part loader is `readXmlPartByRelationshipId(slidePath, relId)`. Word needs the same part (`c:chart r:id` inside `w:drawing`) and the same `c:chartSpace` model.
+`types/chart*.ts` (about 2,000 lines of model), `utils/chart-*` (162 files, about 87 importing
+`XmlObject`; 10 pure), `core/runtime/PptxHandlerRuntimeChart*` (parsing 1,105 lines, colour style,
+external data, user shapes), `builders/sdk/chart-operations.ts` (1,064 lines), `chart-xlsx-parser`
+(embedded workbook), ChartEx (`chart-cx-*`), colour and style parts (`chart-color-style-writer`,
+`chart-style-definition`). Parsing started from a `p:graphicFrame` on a slide; the part loader was
+`readXmlPartByRelationshipId(slidePath, relId)`. Word needs the same part (`c:chart r:id` inside
+`w:drawing`) and the same `c:chartSpace` model.
 
 ### 1.4 DrawingML primitives map
 
-Fills, lines, effects and text: `PptxShapeStyleExtractor`, `PptxGradientStyleCodec`, `PptxColorStyleCodec`, `PptxColorTransformCodec`, `PptxEffectDagExtractor`, `effect-dag-*`, `shape-style-line-helpers`, `drawing-fill-xml`, `body-properties-parser`, `paragraph-properties-parser`, `text-run-properties-parser`, `drawing-line-dash`, `gradient-angle`; theme in `PptxHandlerRuntimeTheme*` (loading, format scheme, ref resolution, `phClr` substitution) and `types/theme.ts`; custom geometry (`custom-geometry*`, left in pptx by the earlier `geometry` extraction). `docx` already has its own small theme model (`theme.ts`, `theme-color.ts`) and its text runs use WordprocessingML, so only the DrawingML text body (inside shapes, charts, diagrams) is shared.
+Fills, lines, effects and text: `PptxShapeStyleExtractor`, `PptxGradientStyleCodec`,
+`PptxColorStyleCodec`, `PptxColorTransformCodec`, `PptxEffectDagExtractor`, `effect-dag-*`,
+`shape-style-line-helpers`, `drawing-fill-xml`, `body-properties-parser`,
+`paragraph-properties-parser`, `text-run-properties-parser`, `drawing-line-dash`, `gradient-angle`;
+theme in `PptxHandlerRuntimeTheme*` (loading, format scheme, ref resolution, `phClr` substitution) and
+`types/theme.ts`; custom geometry (`custom-geometry*`, left in pptx by the earlier `geometry`
+extraction). `docx` had its own small theme model (`theme.ts`, `theme-color.ts`) and its text runs use
+WordprocessingML, so only the DrawingML text body (inside shapes, charts, diagrams) was shared.
 
 ## 2. Target areas
 
-Every area is a subpath of the single package, strict TypeScript, written against the shared `xml` DOM and `opc`. Neutral public types never mention `Pptx*`, `Docx*`, `XmlObject`, a slide or a document.
+Every area is a subpath of the single package, strict TypeScript, written against the shared `xml`
+DOM and `opc`. Neutral public types never mention `Pptx*`, `Docx*`, `XmlObject`, a slide or a document.
 
 | Area        | Contents                                                                                                                                                                                                                                                            | Depends on                          |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | `drawingml` | `DrawingColor` (srgb/scheme/sys/prst/hsl/scrgb + transform list) and its resolver, `Fill`, `Line`, `Effect` models, `TextBody`/paragraph/run models, xfrm, `ThemeLike` (colour scheme, font scheme, format scheme) and `phClr` resolution. DOM parsers and writers. | `xml`, `color`, `geometry`, `units` |
-| `diagram`   | The SmartArt part model: data model, layout definition header, colours, quick style, cached `dsp:drawing` shape tree; the relationship resolver; later the layout engine and fabrication.                                                                           | `drawingml`, `xml`, `opc`           |
-| `chart`     | `c:chartSpace` model, parse/serialize, `cx:` chartex, colour/style parts, embedded workbook reader, a renderer-neutral series/axis view-model.                                                                                                                      | `drawingml`, `xml`, `opc`           |
-| `theme`     | Possibly a sub-module of `drawingml` rather than its own area; `docx` and `pptx` both feed it.                                                                                                                                                                      | `drawingml`                         |
+| `diagram`   | The SmartArt part model: data model, layout definition header, colours, quick style, cached `dsp:drawing` shape tree; the relationship resolver; the layout engine, node text, edit operations and part writers.                                                    | `drawingml`, `xml`, `opc`           |
+| `chart`     | `c:chartSpace` model, parse/serialize, `cx:` ChartEx model, colour/style parts, embedded workbook reader and writer, edit operations, a renderer-neutral series/axis view-model and SVG painter.                                                                    | `drawingml`, `xml`, `opc`           |
+| `theme`     | A sub-module of `drawingml` rather than its own area; `docx`, `xlsx` and `pptx` feed it.                                                                                                                                                                            | `drawingml`                         |
 
-`diagram` ships first (this PR) with a **provisional** private colour/fill reader inside it (`diagram/drawing-color.ts` and `drawing-fill.ts`) because `drawingml` does not exist yet. These two files are written against the DOM and a `DrawingColor` type, with no diagram knowledge, precisely so they move to `drawingml` unchanged in step 3. (Done: they and the other provisional DrawingML modules now live in `drawingml`; see step 3.)
+`diagram` shipped first with a **provisional** private colour/fill reader (`diagram/drawing-color.ts`
+and `drawing-fill.ts`) because `drawingml` did not exist yet. Those files were written against the DOM
+and a `DrawingColor` type, with no diagram knowledge, so they moved to `drawingml` unchanged (step 3).
 
 ### 2.1 Adapters
 
-A neutral area exposes **parsers over DOM elements or part text plus small injected interfaces**; a format area supplies the host:
+A neutral area exposes **parsers over DOM elements or part text plus small injected interfaces**; a
+format area supplies the host:
 
-- `PartHost`: `readText(partName)`, `resolve(basePart, target)`, relationships by part. The pptx adapter implements it over its JSZip and `slideRelationships`; the docx adapter over the document package. This replaces `this.readXmlPartByRelationshipId(slidePath, relId)`.
-- `ColorResolver`: `(DrawingColor) => hex | undefined`. pptx binds its theme maps; docx binds `src/core/docx/theme.ts`.
+- `PartHost`: `readText(partName)`, `resolve(basePart, target)`, relationships by part. The pptx
+  adapter implements it over its JSZip and `slideRelationships`; the docx adapter over the document
+  package. This replaces `this.readXmlPartByRelationshipId(slidePath, relId)`.
+- `ColorResolver`: `(DrawingColor) => hex | undefined`. pptx binds its theme maps; docx binds
+  `src/core/docx/theme.ts`.
 - Diagnostics: parsers return `issues: {code, message}[]` instead of calling a compatibility service.
-- pptx adapter also converts between the neutral model and its legacy `Pptx*` types (aliases where shapes are identical, mappers where not) so the public pptx API does not change.
-- docx adapter owns the host markup (`w:drawing`/`wp:inline`/`wp:anchor`, extent, wrap, alt text) and calls the neutral area for the graphic part.
+- pptx adapter also converts between the neutral model and its legacy `Pptx*` types (aliases where
+  shapes are identical, mappers where not) so the public pptx API does not change.
+- docx adapter owns the host markup (`w:drawing`/`wp:inline`/`wp:anchor`, extent, wrap, alt text) and
+  calls the neutral area for the graphic part.
 
-For code that still takes `XmlObject`, a neutral parser may be driven through a **neutral attribute reader** (`(name) => string | undefined`) instead of a DOM element; pptx passes `(n) => node['@_'+n]`. That is how this slice shares the connection, custom-layout and relationship-id parsers without converting pptx to the DOM first. A full object-tree view of a DOM is deliberately not built: it would keep two XML models alive.
+For code that still takes `XmlObject`, a neutral parser may be driven through a **neutral attribute
+reader** (`(name) => string | undefined`) instead of a DOM element; pptx passes
+`(n) => node['@_'+n]`. That is how the connection, custom-layout and relationship-id parsers are shared
+without converting pptx to the DOM first. A full object-tree view of a DOM is deliberately not built: it
+would keep two XML models alive.
 
 ## 3. Migration order
 
-1. **`diagram` part model and cached drawing (done in this PR).** Neutral data model, connection/custom-layout/relIds parsers, relationship resolver, colours and quick-style summaries, cached drawing shape tree, loader. pptx re-imports the neutral parsers and types. Add docx `w:drawing` -> `DocxDiagram`.
-2. **`diagram` model types and layout engine.** Move `PptxSmartArtNode`/layout-definition/colour/quick-style types to neutral names with `Pptx*` aliases, then the XML-free code: `smartart-engine`, interpreters, hierarchy, constraint solver, editing reflow. The engine's own `layout-def-parse` (ordered XML) becomes a DOM parser. Needs `Pptx3D*` and `TextSegment` decoupled first (a `drawingml` text model).
-   - **Status (2026-10-08): model types, engine, `dgm:choose` walkers, constraint solver, interpreter model, hierarchy arranger and the remaining interpreters moved.** Survey of what step 2 covers (counts are non-test source files; "XML" means the module walks the pptx `XmlObject` tree):
+1. **`diagram` part model and cached drawing (done).** Neutral data model, connection, custom-layout
+   and relIds parsers, relationship resolver, colours and quick-style summaries, cached drawing shape
+   tree, loader. pptx re-imports the neutral parsers and types. docx maps `w:drawing` to `DocxDiagram`.
+2. **`diagram` model types and layout engine (moved; remains listed).** Survey of what step 2 covers
+   (counts are non-test source files; "XML" means the module walks the pptx `XmlObject` tree):
 
-     | Family                                                                       | Files               | Imports from pptx                                                                                                                                                                          | Coupling                                                                                                                                                                                                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-     | ---------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-     | `types/smart-art*.ts`                                                        | 8                   | `XmlObject` (`rawXml` slots), `TextStyle` (node runs), `Pptx3DScene`/`Pptx3DShape`/`Text3DStyle` (quick style), `TextSegment` and `PptxCustomPathProperties` (cached drawing shape)        | Node, layout definition, constraints, colour transform, quick style and layout variables are pure data with raw-XML, run-style and 3D slots; drawing shape, chrome and definition headers carry pptx models | **Moved** to `diagram/model` as `Diagram*` with type parameters for the slots; `PptxSmartArt*` are aliases (`pptx/core/types/smart-art-model.ts`), `PptxSmartArtData extends DiagramData`. Drawing shape, chrome and definition headers stay in pptx.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-     | `utils/smartart-engine/`                                                     | 54 (+7 deck tests)  | the types barrel (`PptxSmartArtData`, `PptxSmartArtNode`, `PptxSmartArtConnection`, `SmartArtStyle`), `geometry` (preset evaluator), `smartart-layout-item-font-size` (`resolveFontTable`) | Own ordered-XML layout-definition parser over the raw part text; no `XmlObject`, no `this`                                                                                                                  | **Moved** to `diagram/engine`, strict. The preset evaluator went to `geometry`, the glyph tables and kerning to `text/font-metrics`, the shared text-fit and layout-result modules to `diagram/layout`. Seven tests that load decks through `PptxHandler` stay in pptx.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-     | `smartart-constraint-*`                                                      | 8                   | types barrel, `clone-utils`, interpreter model                                                                                                                                             | Read `dgm:constr`/`dgm:rule` through the neutral attribute parsers; the solver used the interpreter model, whose `dgm:choose` walkers read the layout node's raw XML                                        | **Moved** to `diagram/layout` (solver, resolve, branch index, declared-by, sibling roles, ratio fallback, interpreter constraint helpers). The attribute parsing, validation and write values are neutral (`diagram/layout/smartart-constraint-rules.ts`); `smartart-constraint-rules` stays in pptx as the object-tree reader and writer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-     | `smartart-hierarchy-*`                                                       | 39                  | types barrel, constraint solver, interpreter model                                                                                                                                         | Pure arithmetic over typed nodes, but every family reaches the solver and interpreter model above; `smartart-hierarchy-tailed-transpose` itself walks `rawXml`                                              | **Moved** to `diagram/hierarchy` (the 39 modules and `arrangeHierarchy`), with its closure in `diagram/layout` (node forest `smartart-tree`, item font size/tier/role, hierarchy font fit, preset node, render and shape-preset helpers). The raw-`dgm:choose` readers and their callers take the `RawXmlView`; pptx keeps `arrangeHierarchy` as a bound facade and `smartart-helpers` for the slide-element factories.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-     | `smartart-layout-interpreter-*`, `smartart-layout-item-*`, `smartart-node-*` | 93 interpreter + 20 | types barrel, solver, `core/runtime/smartart-text-reconciliation` (through `smartart-node-text-projection`), `color`, `xml-access`                                                         | 5 interpreter files walk `XmlObject`; text projection reconciles paragraphs through the pptx runtime's text parsers                                                                                         | **Moved**, except the pptx-bound pieces. The `dgm:choose` walkers, `dgm:if` evaluation, axis navigation, composite detection, interpreter model and now every arranger and `interpretSmartArtLayout` itself live in `diagram/layout` (`smartart-layout-interpreter-*`, `smartart-layout-item-tx-anchor`, `smartart-node-role-colors`, `smartart-node-tree-axis`, the snake grid and the folded-descendant text); everything that reads raw `dgm:choose`/`dgm:forEach` XML takes a `RawXmlView`, and pptx binds its public entry points to its raw slots through `smartart-ordered-xml-adapter` (bound facades keep the old pptx module names and signatures). Stay in pptx: `smartart-node-text-projection` and `projectFoldedNodeText` (they project `TextSegment` runs through the pptx text parsers and need a neutral paragraph and run model, plan step 3), `smartart-node-style-apply` (writes `PptxElement`s), `smartart-node-style-role` and `smartart-node-pres-vars` (object-tree readers of the data model the neutral `data-model` parser already covers), `smartart-interpreter-drawing-bridge` (builds `PptxElement`s). |
-     | `smartart-decompose*`                                                        | 3                   | `PptxElement`, `TextSegment`                                                                                                                                                               | Explodes SmartArt into slide elements                                                                                                                                                                       | **pptx-only**, never moves.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-     | `smartart-editing*`                                                          | 8                   | types barrel, interpreters                                                                                                                                                                 | Reflow calls the interpreters                                                                                                                                                                               | **Stays** for now: it does not call the interpreters, but every reflow builds `PptxSmartArtDrawingShape`s and node operations edit `PptxSmartArtData` (and mint font GUIDs through pptx `font-deobfuscation`), so it follows the drawing shape model (step 4).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+   | Family                                                                       | Files               | Imports from pptx                                                                                                                                                                   | Coupling                                                                                                                                                                                                        | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+   | ---------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `types/smart-art*.ts`                                                        | 8                   | `XmlObject` (`rawXml` slots), `TextStyle` (node runs), `Pptx3DScene`/`Pptx3DShape`/`Text3DStyle` (quick style), `TextSegment` and `PptxCustomPathProperties` (cached drawing shape) | Node, layout definition, constraints, colour transform, quick style and layout variables are pure data with raw-XML, run-style and 3D slots; the drawing shape, chrome and definition headers carry pptx models | **Moved** to `diagram/model` as `Diagram*` with type parameters for the slots; `PptxSmartArt*` are aliases (`pptx/core/types/smart-art-model.ts`), `PptxSmartArtData extends DiagramData`. Drawing shape, chrome and definition headers stay in pptx.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+   | `utils/smartart-engine/`                                                     | 54 (+7 deck tests)  | the types barrel, `geometry` (preset evaluator), `smartart-layout-item-font-size` (`resolveFontTable`)                                                                              | Own ordered-XML layout-definition parser over the raw part text; no `XmlObject`, no `this`                                                                                                                      | **Moved** to `diagram/engine`, strict. The preset evaluator went to `geometry`, the glyph tables and kerning to `text/font-metrics`, the shared text-fit and layout-result modules to `diagram/layout`. Seven tests that load decks through `PptxHandler` stay in pptx.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+   | `smartart-constraint-*`                                                      | 8                   | types barrel, `clone-utils`, interpreter model                                                                                                                                      | Reads `dgm:constr`/`dgm:rule` through the neutral attribute parsers; the solver used the interpreter model, whose `dgm:choose` walkers read the layout node's raw XML                                           | **Moved** to `diagram/layout` (solver, resolve, branch index, declared-by, sibling roles, ratio fallback, interpreter constraint helpers). Attribute parsing, validation and write values are neutral (`diagram/layout/smartart-constraint-rules.ts`); `smartart-constraint-rules` stays in pptx as the object-tree reader and writer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+   | `smartart-hierarchy-*`                                                       | 39                  | types barrel, constraint solver, interpreter model                                                                                                                                  | Pure arithmetic over typed nodes, but every family reaches the solver and interpreter model; `smartart-hierarchy-tailed-transpose` walks `rawXml`                                                               | **Moved** to `diagram/hierarchy` (the 39 modules and `arrangeHierarchy`), with its closure in `diagram/layout` (node forest `smartart-tree`, item font size, tier and role, hierarchy font fit, preset node, render and shape-preset helpers). The raw `dgm:choose` readers take the `RawXmlView`; pptx keeps `arrangeHierarchy` as a bound facade and `smartart-helpers` for the slide-element factories.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+   | `smartart-layout-interpreter-*`, `smartart-layout-item-*`, `smartart-node-*` | 93 interpreter + 20 | types barrel, solver, `core/runtime/smartart-text-reconciliation`, `color`, `xml-access`                                                                                            | 5 interpreter files walk `XmlObject`; text projection reconciled paragraphs through the pptx runtime's text parsers                                                                                             | **Moved**, except the pptx-bound pieces. The `dgm:choose` walkers, `dgm:if` evaluation, axis navigation, composite detection, interpreter model and every arranger and `interpretSmartArtLayout` live in `diagram/layout`; everything that reads raw `dgm:choose`/`dgm:forEach` XML takes a `RawXmlView`, and pptx binds its entry points to its raw slots through `smartart-ordered-xml-adapter` (bound facades keep the old pptx module names and signatures). The node text projection, its reconciliation and the plain-text views moved to `diagram/text` (2026-10-23, see S2). Stay in pptx: `projectFoldedNodeText` (a thin pptx wrapper), `smartart-node-style-apply` (writes `PptxElement`s), `smartart-node-style-role` and `smartart-node-pres-vars` (object-tree readers of the data model the neutral `data-model` parser already covers), `smartart-interpreter-drawing-bridge` (builds `PptxElement`s). |
+   | `smartart-decompose*`                                                        | 3                   | `PptxElement`, `TextSegment`                                                                                                                                                        | Explodes SmartArt into slide elements                                                                                                                                                                           | **pptx-only**, never moves.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+   | `smartart-editing*`                                                          | 8                   | types barrel, interpreters                                                                                                                                                          | Reflow calls the interpreters                                                                                                                                                                                   | **Moved** to `diagram/edit` (2026-10-23), strict and generic over the neutral data model (see S3). The pptx modules are facades with the historical names.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
-     **Remains:** `smartart-node-text-projection` (and the folded-text projection that uses it) waits for a neutral paragraph and run model; `smartart-editing*` waits for a neutral drawing shape (step 4); `smartart-decompose*`, the drawing bridge and the node style writers never move. The hierarchy arranger is generic over the raw slot (`RawXmlView<R>`) while the other interpreters take `RawXmlView<unknown>`; unifying them is cosmetic. The engine's `layout-def-parse` still parses its own ordered XML rather than the shared `xml` DOM; the interpreter walkers share that ordered tree, so moving both to the DOM is one later step. Parity for the choose walkers is pinned by `pptx/core/utils/smartart-choose-walkers-corpus.test.ts` (every walker over the 353 distinct layout definitions of the committed decks and built-in layouts).
-3. **`drawingml` extraction.** Lift the provisional colour/fill code from `diagram`, add line/effect/text-body/theme-format models and their DOM parsers; pptx codecs (`PptxColorStyleCodec`, `PptxGradientStyleCodec`, `PptxEffectDagExtractor`) become object-tree shims that delegate or are replaced once their callers are ported. docx gets `w:drawing` shape fills and wps text boxes on top of it.
-   - **Status (2026-10-08): started.** `src/core/drawingml` exists (`ooxml-core/drawingml`). Moved from `diagram` with history: the colour reader and resolver, ordered colour transforms, fill and line readers, text-body reader, xfrm and geometry readers, shadow, colour and fill writers, gradient presets and geometry, rect path gradients and the DOM attribute helpers; the neutral types are `Drawing*` (`DrawingColor`, `DrawingFill`, `DrawingTextBody`...) and `diagram` keeps its `Diagram*` names as aliases. New: the theme model (`DrawingTheme`: colour scheme as `DrawingColor`, font scheme with script overrides), `parseTheme` over the DOM, `parseThemeColorMap` and `resolveSchemeColor` with the `clrMap` indirection. docx (`theme.ts`, `diagram-theme.ts`, `theme-color.ts` defaults) and xlsx (`read/theme.ts`, slot order in `write/theme.ts`) now read their themes through it; `chart` and xlsx chart code import the readers from `drawingml`. Wave 2: visio reads its `a:clrScheme` through `parseTheme` and resolves theme colours with `parseDrawingColor` + `resolveDrawingColor` (document order) behind a thin guard for its stricter limits (colour kinds, `a:` namespace, shade/tint/alpha only, `hueMod` ignored); its `vt:` extensions and `fmtScheme` selection stay in visio. `chart`, `xlsx`, `ooxml-ui` and the xlsx browser tests use the `Drawing*` type names; the `Diagram*` aliases remain in `diagram/types.ts` for the diagram area and external consumers.
-   - **Remains:** the `Line`/`Effect` models (`a:ln` beyond width/fill/dash/cap, `a:effectLst`, effect DAG), the theme format scheme (`a:fmtScheme`) and `phClr` substitution, a full paragraph/run text model; pptx (`PptxHandlerRuntimeTheme*`, `types/theme.ts`, the colour, gradient and effect codecs) stays on its object tree until step 6 or a parity-tested shim; the xlsx theme writer still patches the part itself (a neutral writer now exists as `drawingml/write-theme.ts`; whether xlsx should adopt it is open).
-4. **Drawing shape parsing off the runtime.** `parseDrawingShape` takes a `ColorResolver` and `drawingml` parsers instead of `this`; pptx's `parseSmartArtDrawingShapes` becomes a mapper over `diagram.parseDiagramDrawing`. Requires pptx fixtures (smartart-gallery, corpus) as a parity test.
-5. **`chart` model and parsers.** Move `types/chart*.ts` as neutral `Chart*` types (aliases in pptx), then DOM parsers for chartSpace; pptx object-tree chart code stays as a shim until step 6. docx adds `c:chart` in `w:drawing`, loading the chart part and its embedded workbook.
-   - **Status (2026-10-08): started.** `src/core/chart` has a neutral `c:chartSpace` model (`model.ts`, `model-series.ts`: title, auto-title-deleted, view3D, plot area with one or more chart groups for every classic family, series with their references and caches, `spPr` through `drawingml`, markers, data points, data labels, axes with scaling and number formats, legend, `plotVisOnly`, `dispBlanksAs`, `c:style`, `c:roundedCorners`, raw `extLst` strings) and `parseChartSpace` over the shared DOM, which reports every child it does not model as an issue instead of throwing (`parse-*.ts`). It is tested on real parts from chart-gallery, chart-data-fidelity, chart-top-axis, chart-filtered-series, chart-title-runs, chart-stacked-line-markers, three-d-charts and pie3d decks and the Excel and openpyxl xlsx fixtures. xlsx `read/chart.ts` now builds its `ChartObject` from the model (identical output on every chart part in the fixture corpus). docx attaches a `DocxChart` (part name, parsed model, title, embedded workbook part name) to `w:drawing` charts; the chart part, its relationships and the workbook are preserved unchanged (Word draws the chart since 2026-10-08, see `docx/chart-paint.ts`; only unsupported families such as bubble, stock, surface and chartex show a labelled placeholder).
-   - **Writer (2026-10-08, wave 3).** `writeChartSpace` (`write-*.ts`) serialises the model in the ECMA-376 element order: booleans `1`/`0`, numbers in a canonical decimal form without an exponent (`chartNumber`), cached point text as held, `extLst` and `c:printSettings` verbatim, namespace declarations once on the root. To reproduce Office's bytes the model now keeps the children of `c:spPr`, text bodies and `c:layout` as written (`sourceXml`, re-emitted while the modelled fields still read back from them; changed fills, lines and effects are patched into the kept `c:spPr`, changed text and layouts are written from the model), `c14:style`, `externalData/autoUpdate`, extra root declarations, gridline, chart-line, up/down bar and leader-line shapes, the multi-level cache point count and the line group's `smooth`. `drawingml` gained an `a:ln` writer. Round-trip tests (`write-space-fixtures.test.ts`): parse -> write -> parse keeps the model on every part the parser tests read and on the 278 parts embedded in the Excel acceptance fixtures; Office-written parts come back byte-identical except for the elements reported as not modelled (trendlines, walls and floors, surface band formats), literal CR LF inside `a:t` (normalised by the XML parser) and namespace declarations repeated below the root. Values Excel writes with 17 digits or an exponent outside a kept layout (axis bounds, units) come back in the canonical form. xlsx `write/chart.ts` builds the model for new charts (`chart-space.ts`) and writes it through `writeChartSpace`; the bytes are the old writer's minus repeated `xmlns:a` declarations.
-   - **Parity harness (2026-10-08).** `src/core/pptx/__tests__/integration/chart-neutral-parity.test.ts` loads every committed deck that holds a chart part (22 decks, 81 parts) through `PptxHandler`, runs `parseChartSpace` on each raw part, projects both models onto one comparison shape and asserts equality per part. The 74 classic parts compare equal (141 series, 108 axes): chart type per group, bar direction, grouping, gap width, overlap, gap depth, vary colours, first slice angle, hole size, scatter and radar style, 3-D shape, wireframe, series order, `c:idx`, names, value, x and bubble-size caches (blanks included), format codes, smooth, invert-if-negative, explosion, markers, data points, series, group and point data labels, categories and multi-level categories, axes (ids, cross axis, position, delete, crosses, cross-between, orientation, min, max, log base, units, gridlines, tick marks, tick label position, number format, title), chart title, legend position and overlay, `plotVisOnly`, `dispBlanksAs`, `autoTitleDeleted`, `c:style`, view3D, `date1904` and rounded corners. The pptx normalisations (trimmed text, the `Series` default name, placeholder values for an empty cache, the legend-overlay default, the first-run flat title, the grouping collapse to `clustered` plus `groupingStandard`, unknown marker symbols as `auto`) are applied explicitly on the neutral side of the projection; axes are compared by id because pptx groups its axis list by element name. Recorded expectations: the 7 ChartEx parts are reported, not modelled, by the neutral parser, and pptx takes categories from the embedded workbook when the part caches none (2 parts). Bugs the harness found, all fixed: the neutral parser did not read the line group's own `c:smooth`; pptx missed a `c:style` written only under `mc:Fallback` (35 parts), fixed after `getChartStylePalette` in `ooxml-ui/pptx` was corrected to Office's gallery columns (style 2 starts at accent 1); and pptx read a bare data-label switch (`<c:showVal/>`) as unset, although `CT_Boolean` defaults to true. The other pptx `CT_Boolean` readers that go through `getChildByLocalName` share that blind spot (fast-xml-parser turns a bare element into an empty string); no committed deck writes one.
-   - **Model gaps for the pptx alias.** What one model carries and the other does not, from the harness and the two type sets:
+   **Remains:** the pptx `TextStyle` styler (`smartart-node-text-projection`) and the object-tree
+   paragraph parser and builder (`smartart-text-paragraphs`) stay until pptx reads SmartArt text through
+   the neutral model; `smartart-decompose*`, the drawing bridge and the node style writers never move.
+   The hierarchy arranger is generic over the raw slot (`RawXmlView<R>`) while the other interpreters take
+   `RawXmlView<unknown>`; unifying them is cosmetic. The engine's `layout-def-parse` still parses its own
+   ordered XML rather than the shared `xml` DOM; the interpreter walkers share that ordered tree, so
+   moving both to the DOM is one later step. Parity for the choose walkers is pinned by
+   `pptx/core/utils/smartart-choose-walkers-corpus.test.ts` (every walker over the 353 distinct layout
+   definitions of the committed decks and built-in layouts).
 
-     | Area             | pptx model only (`PptxChart*`)                                                                                                                                                                                                                                                                                                                                                     | Neutral model only (`ChartSpace`)                                                                                                                                                                                                  |
-     | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-     | Part and package | resolved external data (target, auto-update), embedded workbook rows used as a cache fallback, colour style (`colorsN.xml`) and chart style (`styleN.xml`) parts, user-shape drawings, `clrMapOvr`, pivot source, print settings, protection                                                                                                                                       | `c:lang`, parse issues for everything not modelled, raw `extLst` of the part, chart, plot area, groups, series, axes, labels, markers and points                                                                                   |
-     | ChartEx (`cx:`)  | every layout: waterfall, funnel, treemap, sunburst, box and whisker, histogram and pareto, region map, with their options                                                                                                                                                                                                                                                          | none (reported as `CHART_ROOT_UNEXPECTED`)                                                                                                                                                                                         |
-     | Chart groups     | one chart-level set of group settings, read from the first group of a combo; ofPie split type, split position, custom split and second pie size; surface band formats; drop-line, high-low-line and up/down-bar styling                                                                                                                                                            | every group of a combo with its own settings, axis id list, `c:marker` and `c:smooth`; drop lines, high-low lines, up/down bars and series lines as presence flags only                                                            |
-     | Series           | the resolved line colour, width and dash of trendlines and error bars (their structure is neutral since 2026-10-15), picture fills (`c:pictureOptions`, implied blip fills) resolved to images, `c16:uniqueId`, filtered series and titles (c15), data-label ranges and field tables (c15), callout shapes, `xForSave`, resolved colour, line width and dash, gradient descriptors | `c:order`, formulas (`c:f`) and source kind (reference or literal) for names, categories, values, x, y and bubble sizes, `c:ptCount` and per-point format codes, per-series categories (pptx keeps one list from the first series) |
-     | Axes             | display-unit label styling, major and minor time units, resolved font family, size, bold and colour, gridline styling as resolved colours                                                                                                                                                                                                                                          | document order, title rich text, layout and overlay, `txPr` as a full text body                                                                                                                                                    |
-     | Chart chrome     | floor, wall and data-table styling as resolved colours, legend entry text styles and typefaces resolved through the theme (`+mn-lt`), title runs with resolved styles                                                                                                                                                                                                              | unresolved `DrawingColor` (scheme colours and transforms) and `DrawingFill`/`DrawingLine` for every `spPr`, effect lists as raw XML                                                                                                |
+3. **`drawingml` extraction (started; remains listed).** `src/core/drawingml` exists
+   (`ooxml-core/drawingml`). Moved from `diagram` with history: the colour reader and resolver, ordered
+   colour transforms, fill and line readers, text-body reader, xfrm and geometry readers, shadow, colour
+   and fill writers, gradient presets and geometry, rect path gradients and the DOM attribute helpers;
+   the neutral types are `Drawing*` (`DrawingColor`, `DrawingFill`, `DrawingTextBody`...) and `diagram`
+   keeps its `Diagram*` names as aliases. Also new: the theme model (`DrawingTheme`: colour scheme as
+   `DrawingColor`, font scheme with script overrides), `parseTheme` over the DOM, `parseThemeColorMap`
+   and `resolveSchemeColor` with the `clrMap` indirection. docx (`theme.ts`, `diagram-theme.ts`,
+   `theme-color.ts` defaults) and xlsx (`read/theme.ts`, slot order in `write/theme.ts`) read their
+   themes through it; `chart` and xlsx chart code import the readers from `drawingml`. visio reads its
+   `a:clrScheme` through `parseTheme` and resolves theme colours with `parseDrawingColor` and
+   `resolveDrawingColor` behind a thin guard for its stricter limits (colour kinds, `a:` namespace,
+   shade/tint/alpha only, `hueMod` ignored); its `vt:` extensions and `fmtScheme` selection stay in visio.
+   The text model (`drawingml/text-model.ts`, with its reader and writer, 2026-10-23) is pinned equal to
+   the pptx parsers by `pptx/__tests__/integration/smartart-text-neutral-parity.test.ts`.
 
-   - **pptx reads through the neutral parser (2026-10-08, wave 4).** pptx builds `PptxChartData` for every classic chart part from `parseChartSpace` through an adapter (`pptx/core/utils/chart-from-neutral*.ts`): chart type, the first group's settings, categories and multi-level categories, every series' name, `c:idx`, value, x and bubble-size caches with their blanks, number format, smoothing, invert-if-negative, explosion and 3-D shape, the structural fields of markers, data points, series and point data labels and the group labels, the axes (ids, position, deletion, scaling, gridlines, number format, title text, tick marks and labels, crossing, units, display units), the flat title, legend presence, position and overlay, `c:style`, `plotVisOnly`, `dispBlanksAs`, `autoTitleDeleted`, `showDLblsOverMax`, `dispNaAsBlank`, view3D, `date1904`, `roundedCorners`, and whether a data table, floor or walls exist. The neutral model gained floors and walls, data tables, display units and `readDisplayNaAsBlank` for this. What the neutral model does not carry is still read from the part's object tree by the existing readers, handed the matching subtree (each chart group is paired with its object-tree node by element and position, each series by position): resolved colours, line width and dash, gradients and fonts (series, points, markers, labels, axes, title runs, legend entries, chart and plot area, floor, walls, data table, drop lines, high-low lines, up/down bars), trendlines, error bars, picture fills, `c16:uniqueId`, c15 filtered series, titles, label ranges and `xForSave`, point-label text and layouts, ofPie and bubble options, surface band formats, date-axis major and minor time units, layouts, `clrMapOvr`, the external data, embedded workbook, colour-style, chart-style and user-shape parts, pivot source and formats, print settings and protection. ChartEx parts stay on the object tree entirely. The switch was proven by loading every committed deck (22 decks, 81 chart frames: 74 classic, 7 ChartEx) through the previous object-tree parser and the adapter and asserting the full `PptxChartData` deeply equal (`toStrictEqual`) for every frame; the previous parser was then deleted. Where the adapter reads differently it follows the schema and is pinned in `chart-from-neutral.test.ts`: a repeated chart-group element (two `c:lineChart` groups) keeps the series of both groups, which the object tree (same-named siblings grouped into one array) lost; bare `CT_Boolean` switches (`<c:smooth/>`, `<c:delete/>`) read as true; a `<c:marker/>` without `c:symbol` is the automatic marker. The DOM parser rejects parts that are not namespace-well-formed, which exposed two pptx writers that wrote `xmlns:c15`/`xmlns:c16` as elements (`chart-filtered-series-writer`, `chart-data-labels-range`, fixed); the pptx loader repairs parts those writers saved (declares the known Office prefixes, maps `c15:v` back to `c:v`, reports `CHART_PREFIX_REPAIRED`) and leaves any other malformed part unloaded.
-   - **Trendlines and error bars (2026-10-15).** The neutral model holds them (`chart/model-analysis.ts`: `ChartTrendline` with its `c:trendlineLbl`, `ChartErrorBars` with custom `c:plus`/`c:minus` sources; parsed by `parse-analysis.ts`, written in schema order by `write-analysis.ts`), so a part with trendlines round-trips byte for byte (`chart-gallery.pptx` chart2 left the not-modelled list) and an unreadable element is kept in place for positional pairing. The fitting and sizing moved out of the PowerPoint renderer into `chart/trendline-fit.ts` (`fitChartTrendline`: every kind, data-space samples, Office's equation text, R-squared, coefficients) and `chart/error-bar-amount.ts` (`chartErrorBarAmount`, sample variance); `ooxml-ui/pptx` maps their output to pixels (`chart-overlays-trendline-fit.ts`, `chart-error-bars.ts`, and the older public `chart-trendlines.ts` entry). pptx builds `PptxChartSeries.trendlines` and `.errBars` from the neutral model (`pptx/core/utils/chart-from-neutral-analysis.ts`); only the theme-resolved line colour, width, dash and the label's manual layout still come from the object tree, paired by position. `PptxChartTrendlineType`, `PptxChartErrBarDir`, `PptxChartErrBarType` and `PptxChartErrValType` alias the core types. The full `PptxChartData` of all 82 committed chart frames serialised identically before and after, and the `ooxml-ui` chart view-model parity hashes did not move. Read as the schema defines them (pinned in `chart-from-neutral-analysis.test.ts`): `c:name` is now read (the object-tree reader never found its text), a bare `<c:dispRSqr/>` is true and a bare `<c:trendlineLbl/>` is a label. The chart summary carries resolved trendlines and error bars (`ChartSummaryTrendline`, `ChartSummaryErrorBars`) and the shared painter draws them over bar, column, line and area charts (category positions 1..n) and scatter and bubble charts (their x values), with Office's default strokes, so Word and Excel charts show them. The data table and 3-D view were already read through the neutral model (`ChartDataTable`, `ChartView3D`, mapped by `chart-from-neutral.ts`); `PptxChartDataTable` and `PptxChartView3D` keep their own public field names (`showHorzBorder`, `rAngAx`, `hPercent`).
-   - **Remains:** pptx `types/chart.ts` is not aliased to the neutral model yet, and the pptx chart writers still edit the object tree; the style fields above wait for the `drawingml` colour, line and text models with theme resolution (step 3) before they can leave the object tree; chartex (`cx:chartSpace`) parts are reported, not modelled; pivot formats are reported as not modelled, so the writer drops them (a client that must keep them patches the source part, as xlsx `chart-patch.ts` still does for kept parts); the xlsx patch path (`chart-patch.ts`, `chart-colors.ts`) and the direct-formatting writers still edit the DOM; docx draws the cached chart (`docx/chart-paint.ts`) but does not read the embedded workbook's cells. Of the trendline and error-bar slice: the deprecated object-tree readers `parseSeriesTrendlines` and `parseSeriesErrBars` stay exported from `ooxml-core/pptx` until a major release removes them; the pptx trendline and error-bar writers (`chart-trendline-serializer.ts`, `chart-errbars-serializer.ts`) still edit the object tree; the shared painter draws no trendline label (equation and R-squared text), nothing over a combination chart's further groups or a stacked group, and no x error bars on category charts; xlsx keeps trendlines only while a chart part is patched, not when it regenerates a chart from its `ChartObject`; the PowerPoint renderer still builds its own view model from `PptxChartData` rather than from the chart summary.
-   - **Renderer unification (2026-10-17, started).** `docs/chart-renderer-gap-report.md` ranks what the PowerPoint renderer draws that core's painter does not (measured by ablation over the 82 committed chart parts). Slice 1, data labels: `chart/data-label-text.ts` (flag cascade and text, shared with the PowerPoint renderer), `render/summary-labels.ts`, `render/chart-view-labels.ts` and `render/chart-svg-labels.ts`. Word, Excel and Visio charts now draw value, category, series name, percentage and bubble-size labels at `c:dLblPos` on bar, column, line, scatter, bubble, radar, pie and doughnut charts; per-point deletion and custom text, label number formats and the chart-level text properties apply. Not drawn yet: label callout shapes and leader lines, manual label layout, "value from cells" text (`c15:datalabelsRange`), rich-text label runs, per-point fonts, labels on stock, waterfall, histogram and hierarchy charts, and the xlsx writer does not write `c:dLbls` when it regenerates a chart.
-   - **Slices 2 and 3 (2026-10-17): native axes and markers.** The PowerPoint range/tick and marker geometry implementations now live in strict `chart/axis-range*`, `axis-ticks.ts` and `marker-shape.ts`; PowerPoint delegates to these helpers. The shared painter retains native axis IDs, bounds, log/reversed scaling, number formats and major/minor gridline presence and styling. Word and PowerPoint's neutral SVG path consume these axes directly; Excel retains them in its chart model, also reaching Visio's embedded charts. Line, scatter and radar plots honor series and point marker symbols, sizes, visibility and paint. Palette edits update live marker paint as well as saved XML. Axis titles, display-unit captions, full tick-mark placement, date-axis spacing, series line/smoothing, advanced legend layout and remaining labels/ChartEx/3D work are still pending.
-6. **Port pptx area by area from `XmlObject` to the DOM** (charts and SmartArt first, slides, text and tables last), deleting `xml-reorder`/`ordered-xml-merge` as each area is ported, then drop `fast-xml-parser`. This is the dominant cost in the whole programme.
-   - **Status (2026-10-08): charts started.** Classic chart parts are read by the neutral parser and adapted (step 5, "pptx reads through the neutral parser"); the object tree is still parsed for the style fields, ChartEx and the chart writers, so `fast-xml-parser` stays for charts until the `drawingml` models resolve theme colours and fonts and the writers move to `writeChartSpace`.
-7. **Rendering view-models** (chart 2D/3D, SmartArt 3D) are UI/render code; the 2D chart painter is now core (`chart/render`), while 3D charts, the pptx DOM chart renderer and SmartArt 3D stay in `src/ui` (section 5); they consume only the neutral models.
+   Shared outlines now cover compound/alignment, joins, custom dashes and arrow ends; typed effect
+   lists, source-preserving pattern/picture fill codecs, theme format schemes and `phClr` style
+   resolution are implemented (2026-10-26). Chart and diagram consumers use them, with real
+   Word/Excel/PowerPoint producer fixtures and strict parser/writer/resolver tests.
+   **pptx colour codec and theme reader (2026-11-16).** The 26 colour transforms moved from
+   `pptx/core/color/color-transforms.ts` to `drawingml/color-transforms.ts`
+   (`applyDrawingColorTransformList`), and the preset and system colour tables to
+   `drawingml/preset-colors.ts`; `resolveDrawingColor` uses both, so gamma, `invGamma` and the RGB
+   channel transforms, every `ST_PresetColorVal` and a `sysClr` without `lastClr` now resolve in Word,
+   Excel, Visio, charts and SmartArt too. The pptx readers (`PptxColorTransformCodec.parseColorChoice`,
+   `parseDrawingColorChoice` and the public `applyDrawingColorTransforms`) are an object-tree adapter
+   (`pptx/core/color/color-transforms.ts`: `objectDrawingColor`, `resolveObjectColorChoice`) over the
+   shared resolver; their own base-colour and transform code was deleted. The theme part reader
+   (`parseThemePartXml`) reads names, the colour scheme and the font scheme (with per-script faces)
+   through `parseTheme`, mapped by `themeSchemesFromDrawingTheme` (`theme-part-model.ts`). Before the
+   switch the old and new paths were compared over every part of the committed decks (364 readable
+   decks, 15,928 parts, 180,499 colour holders through the codec, the default-scheme reader, a
+   placeholder colour and the transform entry point; 383 theme parts deeply equal): identical except
+   42 colours in `three-d-smartart.pptx` drawings that repeat `a:tint`, which the old codec skipped and
+   the shared resolver applies (first occurrence), as the DOM reader does. The permanent harness is
+   `pptx/__tests__/integration/drawingml-color-neutral-parity.test.ts` (object tree against DOM for
+   every colour element, 180,651 compared, and every theme part).
+   **Colour opacity (2026-11-16).** `extractColorOpacity` (the codec) and `parseDrawingColorOpacity`
+   (core and `src/ui/src/pptx/render/drawing-color.ts`) read the resolver's alpha
+   (`declaredDrawingColorAlpha` in `drawingml/color-transforms.ts`, through the object-tree adapter
+   `resolveObjectColorOpacity`); the UI's own colour-choice reader now delegates to the core one
+   (`parseDrawingColorChoice` with scheme overrides). Before the switch the old and new readers
+   agreed on all 180,499 colour holders of the corpus (15,102 declaring alpha); they differ only in
+   cases the corpus lacks (`a:alphaMod` above 100%, repeated alpha transforms, and in the UI reader a
+   negative `a:alphaOff` and a `sysClr` without `lastClr`), where the shared resolver is the one
+   followed. The colour harness also compares the declared alpha of every colour element.
+   **Gradient codec (2026-11-16).** `a:gradFill` is read once, by `readDrawingGradient`
+   (`drawingml/gradient-read.ts`) over a `DrawingNodeView` (`drawingml/node-view.ts`: the DOM view,
+   and the pptx object-tree view `OBJECT_DRAWING_VIEW` in `pptx/core/color/object-drawing-view.ts`).
+   `parseDrawingFill` and every `PptxGradientStyleCodec` reader (stops, opacity, type, angle, path,
+   focus and tile rectangles, flip, rotation, scaling, CSS, mean colour) derive from that read; the
+   codec keeps only its presentation rules (stops sorted with a missing `pos` at 0, positions and
+   focus clamped, the angle normalised with 90 as default) and resolves stop colours through the
+   runtime colour codec. Before the switch the old codec readers and the old DOM reader agreed with
+   the new ones on all 1,542 `a:gradFill` elements of the corpus. The permanent harness is
+   `pptx/__tests__/integration/drawingml-fill-effect-neutral-parity.test.ts` (both views over every
+   gradient, paired by path).
+   **Effect codecs and the effect DAG (2026-11-16).** The CT_EffectList reader is one function,
+   `readDrawingEffect` (`drawingml/effect-read.ts`, over the node view); `parseDrawingEffect` adds
+   the source XML. The pptx `a:effectLst` extractors (`PptxShapeEffectStyleExtractor`, the
+   reflection helper also used by text runs, the fill-overlay helper) read the typed effects and
+   map them onto ShapeStyle in `effect-style-from-model.ts`; colours still resolve through the
+   runtime codec on the effect's node. Before the switch the old and new extractors agreed on all
+   5,140 `a:effectLst` holders (8 readers each) and the old and new DOM readers on all 479 list
+   effects; the fill and effect harness now compares every list effect through both views. The
+   effect DAG has a neutral model (`drawingml/effect-dag-model.ts`: containers, list effects,
+   `alphaMod`, `blend`, `alphaModFix`, `alphaRepl`, colour and alpha operations, offsets,
+   transforms, references), a reader (`readDrawingEffectContainer`) and a renderer-facing
+   interpretation (`interpretDrawingEffectDag`: the effects and colour operations on the paint
+   path, the combined alpha, the first offset, transform and blend mode, and the approximations it
+   made). `PptxEffectDagExtractor` runs on it, so effects inside `a:cont` and `a:blend` now reach the
+   painters; the per-element top-level DAG helpers were removed (only the duotone colour pair
+   stays, resolved against the slide theme), and `a:hsl/@sat` is now read as an adjustment
+   (0 unchanged), as the schema default says. The corpus has no effect DAG, so the DAG is pinned by
+   unit tests only; what is approximated is listed in docs/parity-checklist.md. Text-run effects
+   other than reflection (`PptxHandlerRuntimeTextRunEffects`) and the theme effect styles still
+   read their own attributes.
 
-Each step ships independently; after each, `src/core/pptx` tests must pass unchanged (byte-identical output is the acceptance bar) and the area has its own tests plus real parts from `src/core/pptx/__tests__/fixtures`.
+   **pptx theme matrices, references, colour map and theme writer (2026-11-16).** The format scheme
+   reader (`PptxHandlerRuntimeThemeFormatScheme`) reads `a:fmtScheme` with `parseThemeFormatScheme`
+   (from the theme part's own DOM, so a mixed fill list keeps document order and an `a:blipFill`
+   entry keeps its index as a `picture` entry) and projects it onto the pptx view
+   (`theme-format-scheme-view.ts`); `PptxThemeFormatScheme` entries now carry their neutral half
+   (`fill`, `line`, `effects`) and `drawingFormatSchemeOf` gives the `ThemeFormatScheme` back. The
+   `fillRef`/`lnRef`/`effectRef` resolution (`PptxHandlerRuntimeThemeRefResolution`) takes its index
+   rules and `phClr` substitution from `resolveThemeFillStyle`, `resolveThemeLineStyle` and
+   `resolveThemeEffectStyle` (the reference colour, resolved, replaces `phClr`); the old re-parse of
+   the object tree with an injected `phclr` slot is gone except inside the gradient codec. The master
+   `p:clrMap` reader is `parseThemeColorMap` (values in their `ST_ColorSchemeIndex` spelling, so
+   `folHlink` is no longer lower-cased), the theme writer (`buildThemeXml`, a dirty theme) writes the
+   colour and font schemes with `drawingThemeXml` (which now drops the namespace declarations every
+   colour fragment repeated) and a part without a format scheme gets a schema-valid minimal one
+   (three entries per list; the old one had a single fill). Theme switching adopts the part through
+   the same reader. `types/theme.ts` takes its colour slots from `ThemeColorSlot`. The old reader,
+   resolution and writer are frozen in `pptx/__tests__/helpers/legacy-theme-format-scheme.ts` and
+   compared with the new ones by `pptx/__tests__/integration/drawingml-theme-format-scheme-parity.test.ts`
+   over every committed deck: 383 format schemes, 72,747 style references (slides, layouts, masters,
+   notes and SmartArt drawings), 366 master colour maps and every theme part written back agree,
+   except the one theme (`e2e/absolute-path-rels.pptx`, `theme11.xml`) whose fill and background
+   lists hold an `a:blipFill`, which the old reader dropped. On top of the shared gradient, effect
+   and alpha readers, the theme view takes colour opacity from the neutral colours' declared alpha
+   and reads `a:scene3d`/`a:sp3d` with the shared 3D readers; table style `fillRef`, `lnRef` and
+   `effectRef` read the theme entry through the node view and the gradient reader; and the theme
+   writer keeps every slot still at its authored value as written (the harness writes back 4,596
+   resolvable slots of the corpus, 571 of them `sysClr`, all as authored).
+
+   **pptx paragraph properties (2026-11-16).** `drawingml/text-paragraph-codec.ts` holds the rules
+   for the paragraph attributes, `a:lnSpc`/`a:spcBef`/`a:spcAft`, the bullet group except its colour
+   and picture (`a:buSz*`, `a:buFont*`, `a:buClrTx`, `a:buNone`, `a:buChar`, `a:buAutoNum`), tab
+   stops (now with the non-schema `leader` PowerPoint kept) and `CT_TextFont` slots, read through a
+   `DrawingTextElementView` (`text-element-view.ts`) and written as schema-ordered attribute
+   entries. The DOM reader and writer use it, and so does pptx through an object-tree adapter
+   (`pptx/core/utils/paragraph-properties-neutral.ts`): `paragraph-properties-parser`, `tab-stops`,
+   the bullet readers of `PptxHandlerRuntimeBulletParsing` and `PlaceholderStyles` (so `a:lstStyle`
+   and `p:txStyles` levels too), the `a:pPr` builder and bullet writer
+   (`PptxHandlerRuntimeSaveParagraphHelpers`), the spacing writers and the placeholder level-style
+   serializer convert the neutral values instead of reading attributes themselves. Before the
+   switch the old and new pptx readers and writers were compared over every `a:pPr`, `a:defPPr` and
+   `a:lvlNpPr` of the committed decks (54,742 elements): equal, except that a rebuilt `a:pPr` writes
+   its attributes in schema order (11,975 elements; 10,917 of them now in the source file's own
+   order). The permanent harness is `pptx/__tests__/integration/drawingml-paragraph-neutral-parity.test.ts`
+   (object tree against DOM for every element, 191,150 fields, and every element saved through the
+   pptx writers and read back).
+
+   **pptx run properties (2026-11-16).** `drawingml/text-run-codec.ts` holds the rules for the
+   `a:rPr`, `a:defRPr` and `a:endParaRPr` attributes, the font slots (`a:latin`, `a:ea`, `a:cs`,
+   `a:sym`), the run `a:rtl` and the underline follow-text markers, over the same element view; the
+   DOM reader and writer use it, and so does pptx through `pptx/core/utils/run-properties-neutral.ts`:
+   `extractTextRunStyle` (`PptxHandlerRuntimeTextRunStyleExtraction`), the SmartArt projection's
+   `text-run-properties-parser`, the level-style run defaults (`PlaceholderStyles`) and the writer
+   `createRunPropertiesFromTextStyle` (`PptxHandlerRuntimeSaveRunProperties`). Colours, fills, the
+   outline, effects, highlight and hyperlinks still go through their own codecs. Old and new were
+   compared over 80,319 run property elements and 35,226 level elements of the committed decks:
+   equal, except that a rebuilt `a:rPr` writes its attributes in schema order (2,311 elements; 1,566
+   of them now in the source file's own order). The permanent harness is
+   `pptx/__tests__/integration/drawingml-run-neutral-parity.test.ts` (80,232 elements, 150,587
+   fields, read and saved).
+
+   **pptx body properties (2026-11-16).** `drawingml/text-body-codec.ts` holds the `a:bodyPr`
+   attribute and autofit rules over the same element view; the DOM reader and writer use it, and
+   so does pptx through `pptx/core/utils/body-properties-neutral.ts`: `applyBodyProperties`
+   (`PptxHandlerRuntimeShapeBodyParsing`), `body-properties-parser`, the placeholder defaults
+   (`PptxHandlerRuntimePlaceholderDefaults`) and the body writer of `applyTextBodyContent`
+   (`PptxHandlerRuntimeSaveTextWriter`: anchor, direction, columns, overflow, wrap, insets, flags,
+   autofit). The unused duplicate `text-body-properties-parser` was deleted. Old and new were
+   compared over the committed decks' 26,999 `a:bodyPr` elements (read style and written node) and
+   21,186 shapes' placeholder defaults: equal; 427 bodies written from scratch list their attributes
+   in schema order, while a merge into an existing `a:bodyPr` keeps its order. The permanent harness
+   is `pptx/__tests__/integration/drawingml-body-neutral-parity.test.ts` (26,999 elements, 53,047
+   fields, read and saved).
+
+   **pptx run effects, fills, outlines, warp and the remaining text readers (2026-11-16).** A run's
+   `a:effectLst` members (outer, inner and preset shadow, glow, reflection, blur, soft edge) are read
+   by the shared effect reader (`findObjectEffect`, `PptxHandlerRuntimeTextRunEffects`), its
+   `a:gradFill` by `readDrawingGradient` (`extractTextFillVariants`), and its text outline and
+   underline line by the new shared `a:ln` field reader (`drawingml/line-read.ts`,
+   `readDrawingLineFields`, which `parseDrawingLine` also runs) over the object-tree view; colours
+   keep resolving through the runtime colour codec on each node (the shared resolver). The body
+   codec now types the text warp (`DrawingBodyProperties.textWarp`, `a:prstTxWarp` with its
+   `a:avLst` guides; a warp with anything else stays verbatim), which `applyBodyProperties` reads
+   and the save text writer writes through `objectTextWarp`; linked text boxes read their ids
+   through the codec's value readers; the table cell `a:tcPr` anchor, direction, `anchorCtr` and
+   overflow (the same types as on `a:bodyPr`) read through the body codec; and the SmartArt cached
+   drawing's text style (`extractDrawingShapeTextStyle`: spacing, run size, fonts, weight, slant,
+   body insets and anchor) reads through the paragraph, run and body codecs. Old and new were
+   compared over the committed decks (82,447 run property elements, 26,999 `a:bodyPr`, 23,291 text
+   bodies through the drawing style reader, 423 `a:tcPr`): equal. Body 3D (`text-body-scene3d`,
+   `text-body-sp3d`) already read through the shared 3D readers, and the bullet colour through the
+   shared colour resolver. `pptx/__tests__/integration/drawingml-line-neutral-parity.test.ts` pins
+   the line reader (7,811 `a:ln`/`a:uLn`, object tree against DOM); the effect and gradient reads
+   are pinned by `drawingml-fill-effect-neutral-parity.test.ts` and the warp by the body harness.
+
+   **Remains:** painting DAG sibling composition, masks, blends, transforms and references (see
+   docs/parity-checklist.md); theme gradient stops still come from the
+   gradient codec over the paired object node (`rawNode`), because their `originalColorXml`
+   round-trip data is object-tree XML, as does the background `bgRef` gradient; a picture theme
+   fill is not drawn; an edited theme slot is written as `srgbClr`. Of the pptx text code, the
+   writers of run effects, fills and outlines (`text-run-effect-xml-builder`, the fill choice of
+   `createRunPropertiesFromTextStyle`) still build their object nodes themselves (the shared
+   effect, fill and line writers work on the DOM); run pattern fills and the non-schema blip
+   effects some producers put on a run `a:effectLst` (`alphaModFix`, `hsl`, `clrChange`,
+   `duotone`) are read by pptx alone; picture bullets and run picture fills stay verbatim (the
+   neutral model also keeps `a:buBlip` verbatim); hyperlinks are read by pptx; and the SmartArt
+   text fabrication writer (`smartart-fabrication-text`) stays, pinned byte-identical to the
+   diagram writer; the xlsx theme writer
+   still patches the part itself (a neutral writer exists as `drawingml/write-theme.ts`; whether xlsx
+   should adopt it is open).
+
+4. **Drawing shape parsing off the runtime (done for the neutral reader; remains listed).**
+   `DiagramShapeView` (`diagram/drawing-view.ts`) is the resolved shape that renderers and edit operations
+   use, and `PptxSmartArtDrawingShape` extends it. `readDiagramDrawingShapes` and
+   `resolveDiagramDrawingShape` (`diagram/drawing-resolve.ts`) read a `dsp:drawing` through
+   `parseDiagramDrawing` (which keeps each shape's text body on the neutral rich text model and its shadow
+   colour) with a host `DiagramColorResolver`.
+   `pptx/__tests__/integration/smartart-drawing-shape-neutral-parity.test.ts` reads all 371 committed
+   drawing parts (3014 shapes) through both readers and requires every view field to agree; a colour that
+   repeats a transform (two `a:tint`) used to be counted as a divergence (the pptx object tree dropped
+   it); since the pptx codec resolves through the shared resolver (step 3, 2026-11-16) every field is
+   compared. The data part writer for a SmartArt created in memory moved to
+   `diagram/write/data.ts` (`writeFabricatedDiagramData`, byte-identical to the pptx fabrication under a
+   seeded id generator).
+
+   **Remains:** pptx's `parseSmartArtDrawingShapes` still parses its own object tree (switching it to a
+   mapper over the neutral reader means carrying its custom-geometry, 3D and text-segment slots across).
+   The cached drawing writer (`smartart-fabrication-drawing`, which emits pptx custom geometry, 3D and
+   text segments), the layout, colours and quick-style fabrication, and the merge of edits into existing
+   data parts (`smartart-xml-builders`, object trees in the pptx save pipeline) stay in pptx: a DOM port
+   of the merge path cannot match the object-tree serializer byte for byte without porting the save
+   pipeline (step 6).
+
+5. **`chart` model, parsers and writer (done for classic charts; remains listed).** Neutral `c:chartSpace`
+   model (`src/core/chart/model.ts`, `model-series.ts`, `model-analysis.ts`): title, auto-title-deleted,
+   view3D, plot area with one or more chart groups for every classic family, series with their references
+   and caches, `spPr` through `drawingml`, markers, data points, data labels, axes with scaling and number
+   formats, legend, `plotVisOnly`, `dispBlanksAs`, `c:style`, `c:roundedCorners`, raw `extLst` strings.
+   `parseChartSpace` (`parse-*.ts`) reads it over the shared DOM and reports every child it does not model
+   as an issue instead of throwing. It is tested on real parts from the chart-gallery, chart-data-fidelity,
+   chart-top-axis, chart-filtered-series, chart-title-runs, chart-stacked-line-markers, three-d-charts and
+   pie3d decks and the Excel and openpyxl xlsx fixtures. xlsx `read/chart.ts` builds its `ChartObject` from
+   the model (identical output on every chart part in the fixture corpus). docx attaches a `DocxChart`
+   (part name, parsed model, title, embedded workbook part name) to `w:drawing` charts; Word draws the
+   chart since 2026-10-08 (`docx/chart-paint.ts`); unsupported families (bubble, stock, surface, chartex)
+   were drawn as a labelled placeholder when this was written (see `docs/chart-renderer-gap-report.md`).
+
+   - **Writer (2026-10-08).** `writeChartSpace` (`write-*.ts`) serialises the model in the ECMA-376 element
+     order: booleans `1`/`0`, numbers in a canonical decimal form without an exponent (`chartNumber`),
+     cached point text as held, `extLst` and `c:printSettings` verbatim, namespace declarations once on the
+     root. To reproduce Office's bytes the model keeps the children of `c:spPr`, text bodies and `c:layout`
+     as written (`sourceXml`, re-emitted while the modelled fields still read back from them; changed fills,
+     lines and effects are patched into the kept `c:spPr`, changed text and layouts are written from the
+     model), `c14:style`, `externalData/autoUpdate`, extra root declarations, gridline, chart-line, up/down
+     bar and leader-line shapes, the multi-level cache point count and the line group's `smooth`. `drawingml`
+     gained an `a:ln` writer. Round-trip tests (`write-space-fixtures.test.ts`): parse, write and parse keeps
+     the model on every part the parser tests read and on the 278 parts embedded in the Excel acceptance
+     fixtures; Office-written parts come back byte-identical except for the elements reported as not modelled
+     (walls and floors, surface band formats at the time), literal CR LF inside `a:t` (normalised by the XML
+     parser) and namespace declarations repeated below the root. Values Excel writes with 17 digits or an
+     exponent outside a kept layout (axis bounds, units) come back in the canonical form.
+   - **Parity harness (2026-10-08).** `src/core/pptx/__tests__/integration/chart-neutral-parity.test.ts`
+     loads every committed deck that holds a chart part (22 decks, 81 parts) through `PptxHandler`, runs
+     `parseChartSpace` on each raw part, projects both models onto one comparison shape and asserts equality
+     per part. The 74 classic parts compare equal (141 series, 108 axes): chart type per group, bar direction,
+     grouping, gap width, overlap, gap depth, vary colours, first slice angle, hole size, scatter and radar
+     style, 3-D shape, wireframe, series order, `c:idx`, names, value, x and bubble-size caches (blanks
+     included), format codes, smooth, invert-if-negative, explosion, markers, data points, series, group and
+     point data labels, categories and multi-level categories, axes (ids, cross axis, position, delete,
+     crosses, cross-between, orientation, min, max, log base, units, gridlines, tick marks, tick label
+     position, number format, title), chart title, legend position and overlay, `plotVisOnly`,
+     `dispBlanksAs`, `autoTitleDeleted`, `c:style`, view3D, `date1904` and rounded corners. The pptx
+     normalisations (trimmed text, the `Series` default name, placeholder values for an empty cache, the
+     legend-overlay default, the first-run flat title, the grouping collapse to `clustered` plus
+     `groupingStandard`, unknown marker symbols as `auto`) are applied explicitly on the neutral side of the
+     projection; axes are compared by id because pptx groups its axis list by element name. Recorded
+     expectations: the 7 ChartEx parts are reported, not modelled, by the neutral parser, and pptx takes
+     categories from the embedded workbook when the part caches none (2 parts). Bugs the harness found, all
+     fixed: the neutral parser did not read the line group's own `c:smooth`; pptx missed a `c:style` written
+     only under `mc:Fallback` (35 parts), fixed after `getChartStylePalette` in `ooxml-ui/pptx` was corrected
+     to Office's gallery columns (style 2 starts at accent 1); and pptx read a bare data-label switch
+     (`<c:showVal/>`) as unset, although `CT_Boolean` defaults to true. The other pptx `CT_Boolean` readers
+     that go through `getChildByLocalName` share that blind spot (fast-xml-parser turns a bare element into an
+     empty string); no committed deck writes one.
+   - **Model gaps.** What one model carries and the other does not, from the harness and the two type sets:
+
+     | Area             | pptx model only (`PptxChart*`)                                                                                                                                                                                                                                                                                                                                                     | Neutral model only (`ChartSpace`)                                                                                                                                                                                                                                                                                                                                                                                     |
+     | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+     | Part and package | resolved external data (target, auto-update), embedded workbook rows used as a cache fallback, colour style (`colorsN.xml`) and chart style (`styleN.xml`) parts, user-shape drawings, `clrMapOvr`, pivot source, print settings, protection                                                                                                                                       | `c:lang`, parse issues for everything not modelled, raw `extLst` of the part, chart, plot area, groups, series, axes, labels, markers and points                                                                                                                                                                                                                                                                      |
+     | ChartEx (`cx:`)  | theme-resolved series, axis and label colours and fonts, `cx:valueColors` resolved to hex and `cx:valueColorPositions` read as `pos` children (the neutral model keeps both raw), the geography cache as an object tree                                                                                                                                                            | since 2026-10-23 (`ChartExSpace`, step C5): formulas (`cx:f`, `cx:nf`, `@dir`), level format codes and names, every point index, series `uniqueId`, `ownerIdx`, `formatIdx`, `hidden` and axis ids, data points, hidden labels and separators, plot surface, axis scaling, tick marks, chart title and legend alignment and overlay, external data, format overrides, print settings, `clrMapOvr` and extension lists |
+     | Chart groups     | one chart-level set of group settings, read from the first group of a combo; surface band formats; drop-line, high-low-line and up/down-bar styling                                                                                                                                                                                                                                | every group of a combo with its own settings, axis id list, `c:marker` and `c:smooth`; drop lines, high-low lines, up/down bars and series lines as presence flags only                                                                                                                                                                                                                                               |
+     | Series           | the resolved line colour, width and dash of trendlines and error bars (their structure is neutral since 2026-10-15), picture fills (`c:pictureOptions`, implied blip fills) resolved to images, `c16:uniqueId`, filtered series and titles (c15), data-label ranges and field tables (c15), callout shapes, `xForSave`, resolved colour, line width and dash, gradient descriptors | `c:order`, formulas (`c:f`) and source kind (reference or literal) for names, categories, values, x, y and bubble sizes, `c:ptCount` and per-point format codes, per-series categories (pptx keeps one list from the first series)                                                                                                                                                                                    |
+     | Axes             | display-unit label styling, resolved font family, size, bold and colour, gridline styling as resolved colours                                                                                                                                                                                                                                                                      | document order, title rich text, layout and overlay, `txPr` as a full text body                                                                                                                                                                                                                                                                                                                                       |
+     | Chart chrome     | floor, wall and data-table styling as resolved colours, legend entry text styles and typefaces resolved through the theme (`+mn-lt`), title runs with resolved styles                                                                                                                                                                                                              | unresolved `DrawingColor` (scheme colours and transforms) and `DrawingFill`/`DrawingLine` for every `spPr`, effect lists as raw XML                                                                                                                                                                                                                                                                                   |
+
+   - **pptx reads classic charts through the neutral parser (2026-10-08, wave 4).** pptx builds
+     `PptxChartData` for every classic chart part from `parseChartSpace` through an adapter
+     (`pptx/core/utils/chart-from-neutral*.ts`): chart type, the first group's settings, categories and
+     multi-level categories, every series' name, `c:idx`, value, x and bubble-size caches with their blanks,
+     number format, smoothing, invert-if-negative, explosion and 3-D shape, the structural fields of
+     markers, data points, series and point data labels and the group labels, the axes (ids, position,
+     deletion, scaling, gridlines, number format, title text, tick marks and labels, crossing, units, display
+     units), the flat title, legend presence, position and overlay, `c:style`, `plotVisOnly`, `dispBlanksAs`,
+     `autoTitleDeleted`, `showDLblsOverMax`, `dispNaAsBlank`, view3D, `date1904`, `roundedCorners`, and whether
+     a data table, floor or walls exist. The neutral model gained floors and walls, data tables, display units
+     and `readDisplayNaAsBlank` for this. What the neutral model does not carry is still read from the part's
+     object tree by the existing readers, handed the matching subtree (each chart group is paired with its
+     object-tree node by element and position, each series by position): resolved colours, line width and dash,
+     gradients and fonts (series, points, markers, labels, axes, title runs, legend entries, chart and plot
+     area, floor, walls, data table, drop lines, high-low lines, up/down bars), trendlines, error bars, picture
+     fills, `c16:uniqueId`, c15 filtered series, titles, label ranges and `xForSave`, point-label text and
+     layouts, ofPie and bubble options, surface band formats, date-axis major and minor time units, layouts,
+     `clrMapOvr`, the external data, embedded workbook, colour-style, chart-style and user-shape parts, pivot
+     source and formats, print settings and protection.
+
+     The switch was proven by loading every committed deck (22 decks, 81 chart frames: 74 classic, 7 ChartEx)
+     through the previous object-tree parser and the adapter and asserting the full `PptxChartData` deeply
+     equal (`toStrictEqual`) for every frame; the previous parser was then deleted. Where the adapter reads
+     differently it follows the schema and is pinned in `chart-from-neutral.test.ts`: a repeated chart-group
+     element (two `c:lineChart` groups) keeps the series of both groups, which the object tree (same-named
+     siblings grouped into one array) lost; bare `CT_Boolean` switches (`<c:smooth/>`, `<c:delete/>`) read as
+     true; a `<c:marker/>` without `c:symbol` is the automatic marker. The DOM parser rejects parts that are not
+     namespace-well-formed, which exposed two pptx writers that wrote `xmlns:c15`/`xmlns:c16` as elements
+     (`chart-filtered-series-writer`, `chart-data-labels-range`, fixed); the pptx loader repairs parts those
+     writers saved (declares the known Office prefixes, maps `c15:v` back to `c:v`, reports
+     `CHART_PREFIX_REPAIRED`) and leaves any other malformed part unloaded.
+
+   - **Trendlines and error bars (2026-10-15).** The neutral model holds them (`chart/model-analysis.ts`:
+     `ChartTrendline` with its `c:trendlineLbl`, `ChartErrorBars` with custom `c:plus`/`c:minus` sources;
+     parsed by `parse-analysis.ts`, written in schema order by `write-analysis.ts`), so a part with trendlines
+     round-trips byte for byte (`chart-gallery.pptx` chart2 left the not-modelled list) and an unreadable
+     element is kept in place for positional pairing. The fitting and sizing moved out of the PowerPoint
+     renderer into `chart/trendline-fit.ts` (`fitChartTrendline`: every kind, data-space samples, Office's
+     equation text, R-squared, coefficients) and `chart/error-bar-amount.ts` (`chartErrorBarAmount`, sample
+     variance); `ooxml-ui/pptx` maps their output to pixels (`chart-overlays-trendline-fit.ts`,
+     `chart-error-bars.ts`, and the older public `chart-trendlines.ts` entry). pptx builds
+     `PptxChartSeries.trendlines` and `.errBars` from the neutral model
+     (`pptx/core/utils/chart-from-neutral-analysis.ts`); only the theme-resolved line colour, width, dash and the
+     label's manual layout still come from the object tree, paired by position. `PptxChartTrendlineType`,
+     `PptxChartErrBarDir`, `PptxChartErrBarType` and `PptxChartErrValType` alias the core types. The full
+     `PptxChartData` of all 82 committed chart frames serialised identically before and after, and the
+     `ooxml-ui` chart view-model parity hashes did not move. Read as the schema defines them (pinned in
+     `chart-from-neutral-analysis.test.ts`): `c:name` is now read (the object-tree reader never found its text),
+     a bare `<c:dispRSqr/>` is true and a bare `<c:trendlineLbl/>` is a label. The chart summary carries resolved
+     trendlines and error bars (`ChartSummaryTrendline`, `ChartSummaryErrorBars`) and the shared painter draws
+     them over bar, column, line and area charts (category positions 1..n) and scatter and bubble charts (their
+     x values), with Office's default strokes, so Word and Excel charts show them. The data table and 3-D view
+     were already read through the neutral model (`ChartDataTable`, `ChartView3D`, mapped by
+     `chart-from-neutral.ts`); `PptxChartDataTable` and `PptxChartView3D` keep their own public field names
+     (`showHorzBorder`, `rAngAx`, `hPercent`).
+
+     **Remains (trendlines and error bars):** the deprecated object-tree readers `parseSeriesTrendlines` and
+     `parseSeriesErrBars` stay exported from `ooxml-core/pptx` until a major release removes them; the pptx
+     trendline and error-bar writers (`chart-trendline-serializer.ts`, `chart-errbars-serializer.ts`) still edit
+     the object tree; the shared painter draws no trendline label (equation and R-squared text), nothing over a
+     combination chart's further groups or a stacked group, and no x error bars on category charts; xlsx
+     regenerates a chart from its `ChartObject` (losing trendlines) only for a type switch to a family the
+     operations do not build; the PowerPoint renderer still builds its own view model from `PptxChartData`
+     rather than from the chart summary.
+
+   - **Renderer unification (2026-10-17, started).** `docs/chart-renderer-gap-report.md` ranks what the
+     PowerPoint renderer draws that core's painter does not (measured by ablation over the 82 committed chart
+     parts). Slice 1, data labels: `chart/data-label-text.ts` (flag cascade and text, shared with the PowerPoint
+     renderer), `render/summary-labels.ts`, `render/chart-view-labels.ts` and `render/chart-svg-labels.ts`. Word,
+     Excel and Visio charts now draw value, category, series name, percentage and bubble-size labels at
+     `c:dLblPos` on bar, column, line, scatter, bubble, radar, pie and doughnut charts; per-point deletion and
+     custom text, label number formats and the chart-level text properties apply. Not drawn yet: label callout
+     shapes and leader lines, manual label layout, "value from cells" text (`c15:datalabelsRange`), rich-text
+     label runs, per-point fonts, labels on stock, waterfall, histogram and hierarchy charts, and the xlsx writer
+     does not write `c:dLbls` when it regenerates a chart.
+     Slices 2 and 3 (2026-10-17), native axes and markers: the PowerPoint range, tick and marker geometry
+     implementations now live in strict `chart/axis-range*`, `axis-ticks.ts` and `marker-shape.ts`; PowerPoint
+     delegates to these helpers. The shared painter retains native axis IDs, bounds, log and reversed scaling,
+     number formats and major and minor gridline presence and styling. Word and PowerPoint's neutral SVG path
+     consume these axes directly; Excel retains them in its chart model, also reaching Visio's embedded charts.
+     Line, scatter and radar plots honour series and point marker symbols, sizes, visibility and paint. Palette
+     edits update live marker paint as well as saved XML. Axis titles, display-unit captions, full tick-mark
+     placement, date-axis spacing, series line and smoothing, advanced legend layout and remaining labels, ChartEx
+     and 3-D work are still pending.
+
+6. **Port pptx area by area from `XmlObject` to the DOM** (charts and SmartArt first, slides, text and tables
+   last), deleting `xml-reorder`/`ordered-xml-merge` as each area is ported, then drop `fast-xml-parser`. This is
+   the dominant cost in the whole programme.
+   - **Status: charts started.** Classic chart parts are read by the neutral parser and adapted (step 5).
+     Charts are saved through `writeChartSpace` and `writeChartExSpace` for the families in section 3.5 (C3, C5).
+     The object tree is still parsed for the style fields, ChartEx reading (`utils/chart-cx-parser.ts`), and the
+     writers that have not been claimed, so `fast-xml-parser` stays for charts until the `drawingml` models
+     resolve theme colours and fonts and the remaining writers move to the neutral writers.
+7. **Rendering view-models** (chart 2D and 3D, SmartArt 3D) are UI and render code. The 2D chart painter is core
+   (`chart/render`); the 3D charts, the pptx DOM chart renderer and SmartArt 3D stay in `src/ui` (section 5). They
+   consume only the neutral models.
+
+Each step ships independently. After each, the `src/core/pptx` tests must pass unchanged (byte-identical output
+is the acceptance bar), and the area has its own tests and real parts from `src/core/pptx/__tests__/fixtures`.
+
+### 3.5 Chart steps C1 to C6
+
+- **C1, neutral edit operations and typed intents over `ChartSpace` (done for the classic families).**
+  `src/core/chart/edit/` (exported from `ooxml-core/chart`) holds pure operations that return a new `ChartSpace`:
+  chart type and grouping switch (`setChartType`, `setChartGrouping`), series add, remove, reorder, rename, values,
+  categories and points, chart and axis titles, legend, data labels, axis visibility, title, bounds, units, log
+  scale, reverse, number format, ticks, crossing, display units and gridlines (with their outline), series, point
+  and element fill, line, colour, transparency and gradient, the built-in style id and palette recolouring. Each
+  module states whose semantics it follows: PowerPoint's `builders/sdk/chart-operations.ts` was the checklist and
+  decides addressing (flattened series index, first axis of a kind, a position shows a hidden legend, showing empty
+  labels turns the value on) and the type switch (keep what the new group element allows, add required children,
+  demote `clustered`, drop orphaned axes); Excel decides where PowerPoint is silent (new title and legend markup,
+  default axes, pie `varyColors`, 50% doughnut hole, full overlap for stacked bars, the 2.25 pt line a filled series
+  gets when it becomes a line series, colour edits keeping transparency). The model gained the pie-of-pie split
+  options and date-axis time units for it (`write-space-gaps.test.ts`; the fixture byte round trip is unchanged).
+  Intents (`chart/edit/intent.ts`) cover the Format pane fields, including target paint and group options. Proof:
+  `pptx/__tests__/integration/chart-neutral-edit-parity.test.ts` makes nine edits on the four bar and line charts of
+  `chart-gallery.pptx` both ways (neutral op plus `writeChartSpace`, and the PowerPoint op plus the pptx writers) and
+  compares the whole reloaded `PptxChartData`: identical except the listed line width and cap of a bar-to-line
+  switch. It found two type-switch differences, fixed in the neutral op (series colour moving to the line,
+  `crossBetween` kept). The data sheet maps onto the series operations (`chart/edit/data-sheet.ts`), and
+  `chart/edit/new-chart.ts` builds a new chart part through `setChartType`.
+  The per-series combination type (`setChartSeriesType`) joins a converted series to a neighbouring group of its type,
+  so a combination built series by series keeps one group per type and axis pair, as Office writes it.
+  **Remains:** no trendline or
+  error-bar setters, no marker or point-label edits, and no axis title font styling or user shapes; the type switch
+  does not build stock, surface or 3-D line charts and makes a combination chart one group; the neutral ops edit only
+  the chart part's caches, never an embedded workbook (`chart/workbook` writes that, see C6); the colour style part
+  (`colorsN.xml`) is not in `ChartSpace`, so `applyChartColorPalette` recolours series but the caller records the
+  palette id.
+- **C2, Excel as a client of C1 (done).** `ChartObject.chartSpace` carries the parsed model of a kept part (and of a
+  chart `addChart` builds, parsed from the part the summary writer produces), and every edit is a `chart/edit`
+  operation on it: `editChart` applies a `ChartEditIntent`, and `updateChart` keeps its `ChartPatch` API by turning
+  the difference between the summary the model showed and the patched summary into operations
+  (`xlsx/edit/chart-space-patch.ts`, `chart-space-series.ts`: type and grouping, Quick Layout, title, legend, bar
+  spacing, series membership, names, references, caches, primary, point and marker paint, effects, axes, element
+  fills). The summary the painter reads is derived from the edited model after each edit (`read/chart.ts`
+  `chartObjectFromSpace`, with direct formatting read back from the written part, as Word does); structure edits
+  rewrite the model's references (`shift-formulas.ts`), and a new chart's caches are refreshed into the model on save
+  (`chart-cache.ts`). On save an edited model is written with `writeChartSpace` in the source's declaration style,
+  and an unedited one keeps its part byte for byte (`write/drawing.ts` `editedChartPart`). `chart-patch.ts` and the
+  DOM half of `write/chart-colors.ts` are gone; only the colour style part (`colorsN.xml`, not in `ChartSpace`) and
+  the pivot, protection and colour-map children of `c:chartSpace` and `c:chart` (`chart/keep-unmodelled.ts`) are still
+  written beside the model. Excel's Format pane is the shared pane over `chartSpaceFormatSource`, with its intents sent
+  to `editChart`, so it gains the border, axis, gridline, data-label, legend-overlay and series options PowerPoint's
+  pane shows; Excel's own fill controls keep the chart area, plot area, title, legend and series Fill section.
+  Proof: `xlsx/write/chart-save-parity-*.test.ts` saves every classic chart part under `xlsx/__fixtures__` (109: the
+  three packaged workbooks and the native Excel parts of the JSON evidence files) after each of 26 edit kinds and
+  compares the saved model with the fingerprint of what the DOM path saved (`__fixtures__/chart-save-parity.json`).
+  Every non-regenerating kind matches (byte for byte where the DOM path was, else the same model) except where the
+  operations are deliberately better, each checked for what the edit asked: a type, grouping or series-count change
+  keeps the part instead of regenerating it (the DOM path turned a stock chart into columns), a hidden axis is written
+  as `c:delete` where the DOM path ignored axes without direct formatting, inserted rows move every group's and the
+  bubble sizes' references (the DOM path moved the first group's), and a point colour its marker already shows is not
+  written again as a fill. `src/core/scripts/xlsx-excel-acceptance.ps1` opens formatted and retyped copies of every chart fixture
+  in Excel without repair (`xlsx-acceptance-charts.ts`).
+  Advanced effects, shape 3D, text, pattern, secondary-axis, analysis, marker and axis-title controls
+  now use shared intents within U2's admission limits. Picture relationship allocation remains
+  host-owned. A kept part with content the model lacks below the top level (inside the
+  plot area, a series or an axis) or a value the parser could not read is not editable: the reader reports it as a
+  workbook warning, `updateChart` and `editChart` refuse to change it, the chart commands are disabled, and the part is
+  saved from its source bytes with only moved references patched in (`chart/keep-source.ts`,
+  `xlsx/edit/chart-space-blocked.test.ts`). The model keeps surface `c:bandFmts` and series and point `c:pictureOptions`
+  verbatim (`bandFormatsXml`, `pictureOptionsXml`), the only elements the parser still reported in the committed corpus,
+  so none of the 182 distinct classic chart parts of the xlsx fixtures, the Excel evidence files and the pptx and docx
+  decks is blocked (three were before: two surface charts and a picture-filled 3-D bar). An edited surface chart keeps
+  its band formats and opens in Excel without repair (acceptance script). A combination chart becomes one group on a
+  whole-chart type change (the operations' rule). Extended (`cx:`) chart editing is now admitted
+  through the separate neutral ChartEx operations and source policy described in C5.
+- **C3, pptx saves through the shared writer (admitted families implemented).**
+  `chart-neutral-save-plan.ts` plans sparse edits over the stored `ChartSpace`, and
+  `writeChartSpaceOverSource` preserves unchanged children and source bytes. Implemented families
+  include title text with rich-run preservation, legend and axis fonts/layout, data-label flags,
+  value-from-cells ranges and per-point labels, series/point fill and line formatting, gradients,
+  appearance/effects/text/3D properties, number/date/display units, series data and structure,
+  trendlines, error bars and markers. Formatting-only edits leave embedded workbook cells alone;
+  structural data edits allocate fresh workbook ranges. Existing coherent axis-pair reassignment
+  and vertical 2D category-axis combination edits preserve document-order selection indices.
+  Chrome, protection and stock helpers also use shared source-preserving operations.
+  Group subtype settings (3-D bar shape and gap depth, radar style, surface wireframe, pie-of-pie
+  split, plot gap and series lines, bubble options) go through `setChartGroupSubtype`
+  (`chart/edit/group-subtype.ts`, intent `groupSubtype`) under the chart types and removal rules the
+  object-tree writers use (`chart-neutral-save-subtype.ts`); `chart-subtype-migration.test.ts`
+  saves each edit both ways over the corpus and classifies every part difference.
+  Group `varyColors`, bar direction, scatter style and the `standard` grouping flag edited on
+  their own go through `setChartVaryColors`, `setChartBarDirection`, `setChartScatterStyle` and
+  `setChartGrouping` (`chart-neutral-save-group-flags.ts`, `chart-group-flags-migration.test.ts`);
+  the object-tree writers had dropped the first three.
+  The chart-wide gridline flag sets the first value axis's major gridlines
+  (`chart-neutral-save-gridlines.ts`); the object-tree writers had dropped it.
+  A series' own number format is written as its label number format
+  (`chart-neutral-save-series-format.ts`); the object-tree writers had dropped it.
+  Part settings outside the plot area (auto-update, colour map override, colour style part,
+  print settings, pivot formats, user shapes) go through `chart/edit/part-settings.ts`
+  (`chart-neutral-save-part-settings.ts`); print settings and pivot formats are still encoded by
+  PowerPoint's element codecs and placed as written.
+  Chart Filters hide, restore and drop series through `chart/edit/filtered-series.ts`
+  (`chart-neutral-save-filtered.ts`), in the form Excel 16 writes for `Series.IsFiltered`.
+  `setChartSeriesType` also turns series between horizontal bars and vertical families (secondary
+  axis pair), takes a series of an XY chart onto a category axis the scatter series share, and
+  rejoins a converted-back series to its group, as Excel 16 saves each.
+  One series of a vertical 2-D column, line or area chart can become XY (Scatter): the scatter
+  group shares the category and value axes it leaves, with x values from the categories, markers
+  in the series colour and smoothing off, as Excel 16 saves that edit (`setChartSeriesType`); the
+  SDK's promotion of a chart to `combo` is claimed the same way. 3-D and bubble series types stay
+  whole-chart switches, since Excel's object model turns the whole chart when one series takes
+  one. `chart-xy-combo-migration.test.ts` compares both save paths over the corpus.
+  Unclaimed or rejected edits retain an explicit compatibility path. Unsafe group splits (inside a
+  stack, unknown group extensions), unsupported picture relationship changes and an orientation
+  turn on a chart that already has secondary axes are not silently admitted.
+  The saved-part corpus compares canonical XML and reloaded models; it is implementation parity,
+  not a native rendering oracle. The 300-test classic corpus and five sequential native PowerPoint
+  edit/reopen/workbook checks pass. See [the delivery ledger](office-shared-parity-delivery.md) for evidence;
+  no claim is made that every object-tree serializer can already be deleted.
+  New classic charts (`addChart`, `createChartElement`, `ChartBuilder`, Insert Chart) are written the
+  same way (`chart-new-part.ts`): `newChartSpace` builds a minimal part with literal data, and the
+  planner turns the rest of the model into operations. A part it cannot write keeps the legacy
+  generator (`chart-xml-generator.ts`), and the save reports `CHART_WRITTEN_BY_LEGACY_GENERATOR`
+  with the fields it may drop; fields a new part cannot hold are reported as
+  `CHART_FIELDS_NOT_WRITTEN`. `chart-new-part-parity.test.ts` compares both writers over the 24
+  classic type variants; native opening of fresh SDK decks is not claimed.
+- **C4, `PptxChartData` as a compatibility adapter (shared projections implemented).** Classic
+  facts and supported formatting come from `ChartSpace` through `chart-from-neutral*.ts`; saved
+  parts refresh compatibility views with scoped host theme and relationship context. Remaining
+  source projections retain unsupported text/spatial details and unmodeled XML. The public model
+  remains a compatibility API rather than a neutral alias,
+  and the PowerPoint DOM chart painter remains separate from `chart/render`.
+- **C5, ChartEx model, writer, edits and consumers (implemented families, migration in progress).**
+  `chart/ex` reads/writes the neutral `ChartExSpace` model and carries unsupported source children
+  explicitly. Shared operations cover titles/legend/labels, values/categories/names, common fills
+  and outlines, series structure, layout/family options and safe local-workbook growth. Word and
+  Excel mount the shared ChartEx data sheet and family/axis/point-label controls, with history,
+  safe-source admission and save/reopen tests across all six bindings. External data and ambiguous
+  hierarchy mappings are refused. ChartEx common formatting uses its own capability source;
+  unsupported classic advanced controls are hidden or refused.
+  PowerPoint now projects neutral ChartEx facts through a host colour/font bridge, and shared
+  creation/save increments cover all eight families and admitted family switches, Pareto
+  (`toChartExPareto`: an owned `paretoLine` and a percentage axis) and region maps
+  (`newChartExGeography`, no provider cache) included. Word and Excel insert every family from
+  the shared picker (`newDocxChartEx`, `buildChartEx`/`addChartEx`); new parts carry the chart
+  style and colour style parts Office requires (`chart/ex/style-part.ts`), and fresh Word, Excel
+  and PowerPoint files with all eight families pass the native check in the delivery ledger.
+  Typed axis/style/point-label operations now serve PowerPoint as well as Word and Excel. The
+  style bridge reuses shared DrawingML edits while keeping ChartEx data and layout semantics native
+  to its model. ChartEx labels have no custom text or manual layout node in the schema and Excel 16's
+  object model refuses both, so those edits stay refused (see the delivery ledger, 2026-11-16).
+  Word and Excel's shared ChartEx controls also author axis titles, visibility, gridlines, number
+  formats and display units, series names, bins, funnel gaps and region map options
+  (`axisOptions`, `seriesName`, `regionMap` actions), with native re-save evidence.
+  PowerPoint's classic save also writes a series moved onto a new secondary pair as its own group
+  through `setChartSeriesSecondaryAxis` (C3; native check in the delivery ledger, 2026-11-16).
+  **Remains:** exact region map shapes without an Office-written geography cache, and
+  removal of the remaining compatibility paths only
+  after regression and native checks. The complete Office ChartEx authoring surface is not claimed.
+
+- **C6, Word and Visio chart editing (done for Word and for inserted charts in Visio).** `chart/workbook/` holds the
+  embedded-workbook writer moved from pptx (`chart-xlsx-writer`, its cell and validation helpers and the save policy of
+  `chart-external-workbook-save`), ported to the shared DOM; pptx forwards to it. Beside it: the standard data layout
+  (`layout.ts`), the writes a `ChartSpace` implies (`space-writes.ts`) and a new embedded workbook (`create.ts`).
+  `chart/edit/data-sheet.ts` maps the data sheet onto the series operations (formulas follow the table in the standard
+  layout) and `chart/edit/new-chart.ts` builds a new chart part. `new-part.ts` writes a new chart part with its
+  embedded workbook (`writeChartPartWithWorkbook`, used by Word's insert and by PowerPoint's `embedWorkbook`), and
+  `new-layout.ts` turns a part's literal data into sheet references. Word inserts, edits, formats, resizes and saves charts
+  (`docx/chart-edit.ts`, `docx/chart-save.ts`, `docx/ui/chart-commands.ts`); its Format pane is the shared pane (U2) and
+  its charts can be resized with the shared drawing handle. Desktop Word checks the results in the acceptance script. Visio
+  edits the data and format of an inserted chart object (`src/ui/src/visio/viewer-chart-editor.ts`) through the embedded
+  chart reader and writer of `ooxml-core/xlsx` (`embedded-chart-space.ts`), which apply the `chart/edit` operations.
+  **Current limits:** Word/Excel ChartEx editing is admitted as described in C5. Native chart style
+  and colour-part authoring remains incomplete; curated style presets do not replace it. Visio's
+  chart workflow edits eligible embedded Excel chart objects through the shared data sheet and
+  Format pane, regenerating the object's preview. Unsupported source parts are read-only. Arbitrary
+  OLE activation, external workbooks and native preview pixel fidelity are not established.
+
+### 3.6 Chart UI steps U1 to U5
+
+The labels U3 to U5 are assigned here; the remaining chart UI work was previously listed under the shared Format pane.
+
+- **U1, shared Format pane model and element (done).** `office-ui-chart-format-pane` (`src/ui/src/chart/format-pane*.ts`)
+  draws PowerPoint's Format pane from a neutral model over a `ChartFormatSource`. `chartSpaceFormatSource` reads a
+  `ChartSpace`, and each field is emitted as a typed `ChartEditIntent` (`chart/edit/intent.ts`, with the new target paint
+  and group options operations).
+- **U2, products mount the pane (implemented with capabilities and limits).** PowerPoint,
+  Excel, Word and embedded Visio charts use `office-ui-chart-format-pane`. Core owns the neutral
+  operations and resolved appearance conversion; products supply source/relationship/history
+  adapters. Shared controls cover effects, shape 3D, text, pattern fills, outline joins/ends,
+  markers, trendlines/error bars, axis titles and admitted secondary-axis moves. Excel keeps its
+  richer gradient editor in a slot and uses the shared pattern editor. Picture fill relationships
+  are allocated by `chart/picture-parts.ts` for every host's media folder; the shared painter draws
+  picture fills from `ChartSpace.pictureSources`, a pane picture waits under a pending id until its
+  host saves it, and Word, Excel and Visio offer Picture or texture fill. PowerPoint's pane edits
+  several trendlines and error bars with custom values through `withChartSeriesTrendline` and
+  `withChartSeriesErrorBars`.
+  Secondary authoring retains the first series as the primary render anchor; stacked groups give
+  up their first or last series and merge back on return, while a series inside a stack,
+  horizontal combinations and unknown-extension splits are refused. The pane shows a section per
+  trendline with Add trendline, and edits custom error sources as values or ranges
+  (`chart/edit/error-bar-source.ts`; Excel reads the workbook, other hosts only cached cells).
+  ChartEx exposes only its supported controls. Browser cases verify Word/Excel controls, history and
+  save/reopen across six bindings and the embedded Visio workflow; native Word/Excel checks cover
+  admitted ChartEx saves. Exact text, effects and 3D rendering still need broader native evidence.
+
+- **U3, shared chart data sheet (`office-ui-chart-data-sheet`, `src/ui/src/chart/data-sheet.ts`).** One element for the
+  PowerPoint bindings, Word and Visio. Excel edits its cells directly. The tokens for its lengths are the `--office-*` tokens.
+- **U4, one insert-chart picker (`office-ui-chart-picker`, `src/ui/src/dialog/chart-picker.ts`).** Used by PowerPoint's insert
+  dialog, Word, Excel and Visio.
+- **U5, shared chart design galleries (`src/ui/src/chart/design-galleries.ts`).** Chart Design galleries (colours, styles, quick
+  layouts) shared by the Word, Excel and PowerPoint ribbons.
+
+### 3.7 SmartArt steps S1 to S5
+
+- **S1, neutral DrawingML text model (done).** `drawingml/text-model.ts`, with `read-text-body.ts` and `write-text-body.ts`;
+  pinned equal to the pptx object-tree parsers by `pptx/__tests__/integration/smartart-text-neutral-parity.test.ts`.
+- **S2, node text projection into `diagram/text` (done).** `projectDiagramNodeText` is generic over a styler; pptx keeps
+  `smartart-node-text-projection` as its `TextStyle` styler over its own parsers, and `readDiagramNodeParagraphs` plus the
+  neutral styler serve Word and Excel. **Remains:** the pptx styler and object-tree paragraph parser stay until pptx reads
+  SmartArt text through the neutral model (step 2).
+- **S3, neutral drawing view and edit operations (done).** `diagram/drawing-view.ts` and `drawing-resolve.ts` (step 4), and
+  `diagram/edit` (node commands, tree order, outline levels, reflow, inserts). The insert picker and the SmartArt Design command
+  list are shared (`design-commands.ts`).
+- **S4, part writers (done for data parts).** `diagram/write`: `data.ts` (a SmartArt created in memory), `data-edit.ts`
+  (`writeEditedDiagramData`, an existing data part) and `inserted.ts` (an inserted diagram's data part). **Remains:**
+  PowerPoint's own source-cache regeneration and layout fabrication stay in pptx (step 4). Colour and quick-style fabrication
+  now live in `diagram/write/fabricated-styles.ts`, with the PowerPoint path as a compatibility facade. The neutral
+  source-backed formatter patches definition fields while preserving unknown XML. `writeGeneratedDiagramDrawing`
+  serializes generated drawings and returns presentation GUIDs a host can associate with its data model; PowerPoint's
+  ordinary 2D preset shape properties use the same serializer. Quick-style 3D is written per shape as Office's own
+  cache has it (the label's `scene3d` when it is not the default front view, its `sp3d`, and text 3D in `a:bodyPr`),
+  observed on PowerPoint 16's caches for all 14 built-in styles; a diagram's spatial camera stays in the quick-style
+  part, which Office's cache does not carry either. Any other 3D input is still refused rather than flattened.
+  Word and Excel drop stale cached drawing parts on edit and now attach a generated replacement when the ordered
+  interpreter and 2D painter admit the diagram. The shared writer adds presentation GUID associations; each host adds
+  the drawing relationship and content type. A private extension records the generated approximation and a SHA-256 of
+  its drawing bytes. Loaders label matching caches `generated-drawing`; a native rewrite invalidates that status.
+  Unsupported, partial and spatial/3D interpretations stay uncached and retain the explicit fallback.
+  The same writer is the round-trip writer for a cache Office laid out: after an edit, each regenerated shape for a
+  node and layout role Office presented binds to Office's own presentation point (`write/cache-presentation.ts`), as
+  Office's cache binds `dsp:sp/@modelId`, so the data part keeps Office's points and connections and only new nodes
+  get generated points. The placement is the layout engine's, not Office's: on the unedited diagrams of the 229
+  PowerPoint gallery fixtures and the Word fixture (`scripts/diagram/measure-source-cache-regeneration.ts`,
+  2026-11-16) the writer admits 52 of 230; 311 of their 414 regenerated shapes bind to an Office point, and the bound
+  shapes' worst frame deviation is within 1% of the diagram's larger side in 27 diagrams, 5% in 34 and 10% in 36
+  (the Word fixture, Basic Block List, exactly). The other 178 stay uncached as before.
+- **S5, Word and Excel SmartArt editing (done, with the shared UI).** Word edits and inserts SmartArt (`docx/diagram-edit.ts`,
+  `docx/diagram-save.ts`); Excel does the same through `xlsx/edit/smart-art.ts` and `xlsx/write/smart-art.ts`. Both use the
+  shared `office-ui-smartart-picker` (`src/ui/src/smartart/smartart-picker.ts`) and `office-ui-smartart-text-pane`
+  (`src/ui/src/smartart/`, with the `SmartArtTextPaneController` both editors wire up). PowerPoint's bindings use the same text
+  pane through the `pptx-ui-smartart-text-pane` alias (`src/ui/src/pptx/web-components/smartart-text-pane.ts`), which adds
+  PowerPoint's inspector tools (append, move, sub-item, remove, per-node style) and applies every request through
+  `render/smartart-text-pane-model.ts` and the pptx SmartArt facades.
+  Word and Excel now mount the same SmartArt Styles and Change Colors galleries as PowerPoint, over the shared catalogue:
+  three style intensities and five theme-accent colour schemes. `formatDocxDiagram` and `EditSession.formatSmartArt` update
+  source definitions, keep node overrides and unchanged rich text, invalidate stale drawings, and save the selected
+  definition ids. History retains the matching definitions, including after formatting an inserted diagram.
+  The galleries of every product (Word, Excel and PowerPoint) now list Office's full built-in catalogue: 38 colour and
+  14 quick-style definitions (`diagram/builtin/style-definitions.ts`, gallery metadata in `diagram/catalogue-native.ts`,
+  captured by `scripts/diagram/make-smartart-definitions.ps1` from PowerPoint 16 through COM). A pick
+  (`builtinSmartArtFormatChange`) replaces the definition part with Office's own XML and `uniqueId`, as Office does;
+  the model's five schemes and three intensities map onto the definitions they are named after. PowerPoint writes the
+  picked part on save and names it on the document point (`csTypeId`, `qsTypeId`); in the editor it recolours through
+  its existing colour patch and the nearest intensity, and applies the picked definition's 3D at once
+  (`render/ribbon-galleries/smartart-style-3d-preview.ts`: per-label bevel, extrusion, material and text 3D onto
+  the drawing shapes, the Scene styles' camera onto the diagram), so the lit scene shows a 3-D pick before reopening;
+  colours and effects stay at the nearest intensity until then, and extrusion and contour colours use the renderer's defaults.
+  Word and Excel name the gallery titles, sections and all 52 entries in every product locale
+  (`diagram/strings/gallery.ts`), expanded from PowerPoint's own `pptx.gallery.smartArt*` translations so the
+  three products agree; those translations are agent-authored and not verified against Office's localized names.
+  The shared SVG painter (`src/ui/src/smartart/smartart-3d.ts`) draws Word and Excel SmartArt 3D approximately: a bevel lit
+  by an SVG specular filter from the label's light rig, an extrusion as stacked darkened copies along the camera's depth,
+  and the Scene styles' spatial camera as a per-shape affine projection through the fitted scene camera that PowerPoint's
+  lit scene uses too (`diagram/scene-camera.ts`, moved from the pptx renderer). Loaders and the preview carry the quick style's
+  camera on the drawing (`DiagramDrawing.scene3d`), since Office keeps it out of the cache. It has no hidden-surface removal,
+  material model or contour and has not been compared against Office's pixels.
+  **Remains:** rich text authoring in Excel's text pane and 3D formatting controls beyond the gallery.
+
+  Acceptance on 2026-11-16: the extended `smartart-format-acceptance-build.ts` produced 41 Word and 41 Excel files
+  (the three model combinations, then each of the 38 colour definitions with the 14 quick styles in turn) and
+  `smartart-format-acceptance.ps1` reopened all 82 in Word 16 and Excel 16: node texts, colour and quick-style ids
+  matched, every node had native shapes, and Excel wrote no repair log. Rerun after the round-trip writer bound
+  regenerated shapes to Office's presentation points, with two `edit-*` cases per product added (a text edit and an
+  added node, then Polished or Bird's Eye Scene): all 86 files reopened in Word 16 and Excel 16 with the edited texts,
+  the expected ids, one native shape per node and no Excel repair log.
+
+  Acceptance on 2026-10-26: the shared formatting builder and
+  `src/core/scripts/docx/smartart-format-acceptance.ps1` produced and reopened six documents, three combinations each in desktop
+  Word 16 and Excel 16. Native node texts, colour ids and quick-style ids matched; Excel produced no repair log. These
+  checks also verify native semantic-node drawing associations. Both host loaders independently verify the generated
+  caches before native opening. These checks establish supported edit/save/reopen behavior, not pixel-identical effect or layout rendering. Unit tests cover
+  retained extension XML, theme references, direct node fills, rich text, undo/redo, and neutral generated cache round trips.
+
+Wave 6 did not change the Office evidence below; it is kept because the save decisions depend on it.
+
+#### 3.7.1 Word and an edited data part (evidence, 2026-10-23)
+
+Desktop Word 365 (16.0, `WINWORD.EXE` driven through COM) was given a SmartArt it had inserted itself (Basic Block List,
+nodes Alpha to Epsilon; `docx/__fixtures__/smartart-word.docx`) with the data part changed behind its back. Each variant was
+opened read-only, its `SmartArt.AllNodes` texts read, the text of the picture Word draws for it taken from
+`InlineShape.Range.EnhMetaFileBits` (the EMF records), and the file saved again so the drawing Word writes could be counted.
+Results:
+
+- data text changed, stale cached drawing kept: Word reports and draws the new text ("Beta EDITED") and saves a drawing with the new text;
+- a node added to the data, stale five-shape drawing kept: Word draws the sixth node and saves a six-shape drawing;
+- the same with the drawing part, its relationship, content type and `dsp:dataModelExt` removed; with only the `dsp:dataModelExt`
+  removed (drawing part left dangling); with every `pres` point and `presOf`/`presParOf` connection removed as well (with and without
+  the drawing): every variant opens without repair, Word draws all six nodes and saves a full presentation tree (12 `pres` points)
+  and a six-shape drawing;
+- the data unchanged but the cached drawing's text altered ("Gamma" to "Cacheonly"): Word draws "Gamma". Word never paints the
+  cached drawing; it always lays the diagram out from the data and layout parts;
+- stub definitions (a `colorsDef`/`styleDef` holding only a built-in `uniqueId`): Word keeps the stub and draws uncoloured shapes; a
+  stub `layoutDef` naming `layout/process1` made Word fall back to Basic Block List. Word does not substitute its built-in copy for a
+  known `uniqueId`, so a new diagram must carry complete definitions.
+
+Decision: an edited diagram drops its cached drawing (relationship, part, content type and the `dsp:dataModelExt` link) instead of
+regenerating it, and keeps the presentation points of the nodes that remain; Word recomputes the layout. A new diagram carries a
+built-in layout definition (`ooxml-core/diagram/builtin`) and Word's default `colors/accent1_2` and `quickstyle/simple1`
+definitions, with no `pres` points and no drawing. The probe is `src/core/scripts/docx/smartart-word-probe.ps1` (variants from
+`smartart-word-variants.mjs`; its output on 2026-10-23: `cache-only: nodes [Alpha, Beta, Gamma, Delta, Epsilon]; drawn [Alpha, Beta,
+Gamma]`, `stale-add: nodes [..., Zeta]; drawn [Alpha, Beta, Gamma, Zeta]; re-saved drawing 6 shapes`, `nodrawing-nopres: ...
+re-saved drawing 6 shapes`, `stale-text: drawn [Alpha, Beta, EDITED, Gamma]`). The acceptance check for the writer is
+`src/core/scripts/docx-word-acceptance.ps1` (with `docx-acceptance-build.ts`), which saves the fixtures untouched, after text, add,
+remove, move, promote and demote edits, and with four presets inserted, and checks in Word that each opens without repair, reports
+the expected node texts and draws every node's text. Last run 2026-10-23: all 6 documents passed.
+
+#### 3.7.2 Excel and an edited data part (evidence, 2026-10-23)
+
+Desktop Excel 365 (16.0, `EXCEL.EXE` driven through COM) was given its own SmartArt (Basic Block List, Plan, Build, Ship;
+`xlsx/__fixtures__/excel-smartart.xlsx`) with the data part or cached drawing changed behind its back, the variants of
+`src/core/scripts/docx/smartart-word-variants.mjs` ported to the workbook (`src/core/scripts/xlsx/smartart-excel-variants.mjs`). Each was
+opened read-only, its `SmartArt.AllNodes` texts read, the picture Excel draws taken from the clipboard as an EMF
+(`Shape.CopyPicture`) and searched for the probe words, and the workbook saved again. The probe is
+`src/core/scripts/xlsx/smartart-excel-probe.ps1`; its output on 2026-10-23:
+
+- `cache-only` (data unchanged, the cached drawing's "Ship" changed to "Cacheonly"): nodes [Plan, Build, Ship]; drawn [Plan, Build,
+  Ship]; re-saved drawing 3 shapes [Plan|Build|Ship]. Excel never paints the cached drawing.
+- `stale-text` (data text changed, stale drawing kept): nodes [Plan, Build EDITED, Ship]; drawn [Plan, Build, EDITED, Ship]; re-saved
+  [Plan|Build EDITED|Ship].
+- `stale-add`, `stale-nopres`, `dangling-ext`, `nodrawing-add` and `nodrawing-nopres` (a node added; with the stale drawing, without
+  the `dsp:dataModelExt` link, without the drawing part, relationship and content type, and without every presentation point): every
+  variant opens, Excel lists and draws all four nodes and saves a four-shape drawing [Plan|Build|Ship|Zeta].
+
+Decision: Excel behaves like Word, so an edited diagram drops its cached drawing (relationship and part) and the `dsp:dataModelExt`
+link, keeps the presentation points of the nodes that remain, and Excel recomputes the layout; a new diagram carries the built-in
+layout definition and Word's default colour and quick-style definitions, with no `pres` points and no drawing. The acceptance check is
+`src/core/scripts/xlsx/smartart-excel-acceptance.ps1` (with `smartart-acceptance-build.ts`): it saves the fixture untouched, after text,
+add, move and remove edits, after promote and demote, after Change Layout, and a new workbook with four presets inserted, and checks in
+Excel that each opens without repair, lists the expected `AllNodes` texts and layout and draws them. Last run 2026-10-23: all 6
+workbooks passed.
+
+### 3.8 Model gaps and parity harnesses in one place
+
+| Harness                           | What it proves                                                   | Where                                                     |
+| --------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------- |
+| Chart neutral parity (2026-10-08) | pptx object tree and neutral parser agree on 74 classic parts    | `pptx/__tests__/integration/chart-neutral-parity.test.ts` |
+| Chart neutral edit parity (C1)    | nine edits both ways on four charts agree                        | `chart-neutral-edit-parity.test.ts`                       |
+| Chart save parity (C3)            | 13 edits on 75 parts saved both ways                             | `chart-save-parity.test.ts`                               |
+| Chart ChartEx parity (C5)         | every committed chartex part agrees                              | `chart-ex-neutral-parity.test.ts`                         |
+| ChartEx save parity (C5)          | nine edits on 15 chartex parts                                   | `chart-ex-save-parity.test.ts`                            |
+| Excel chart save parity (C2)      | 26 edit kinds on 109 classic parts                               | `xlsx/write/chart-save-parity-*.test.ts`                  |
+| SmartArt text parity (S1)         | every text body of the committed fixtures                        | `smartart-text-neutral-parity.test.ts`                    |
+| SmartArt drawing parity (S3)      | 371 drawing parts, 3014 shapes                                   | `smartart-drawing-shape-neutral-parity.test.ts`           |
+| Choose walkers corpus (step 2)    | every walker over 353 layout definitions                         | `smartart-choose-walkers-corpus.test.ts`                  |
+| DrawingML colour and theme (3)    | 180,651 colour elements and 383 theme parts agree                | `drawingml-color-neutral-parity.test.ts`                  |
+| DrawingML theme matrices (3)      | 383 format schemes, 72,747 style refs, 366 clrMaps, theme writes | `drawingml-theme-format-scheme-parity.test.ts`            |
+
+### 3.9 pptx strictness and the XML object model (inventory, 2026-11-16)
+
+Strict since 2026-11-16: the whole pptx model and almost everything around it. The strict project
+includes `pptx/core` (core/core, builders, utils, services, ppt, geometry, color, types, openxml and
+the handler modules), `pptx/converter`, `pptx/cli`, `pptx/editor/ai`, `pptx/editor/loader`,
+`pptx/ui`, `pptx/node`, `pptx/signature-node`, `pptx/smartart-layouts`, `pptx/test-support`,
+`pptx/index.ts` and the two `pptx/merge-*.ts` files. `tsconfig.json` maps `ooxml-core/pptx` to
+`pptx/index.ts`, as `tsconfig.pptx.json` does, so the editor modules resolve the model by its
+package name. Still relaxed: `pptx/editor/render`, `pptx/automation` and the `pptx/__tests__`
+integration suite, plus 197 test files elsewhere that `tsconfig.json` lists by name until their
+remaining strict errors are fixed (they were never type-checked by the relaxed project either).
+
+The way there was from the leaves inward. `pptx/core/core/types.ts` stopped being a hub once two
+runtime classes' result types moved to the import-free `handler-result-types.ts`; geometry needed
+`ensureArrayValue` from its leaf module instead of the `utils` barrel; and the runtime class chain
+had to be clean before anything importing `pptx/index.ts` could move.
+
+Measured by compiling every `src/core/pptx/**/*.ts` file under the strict base project (TypeScript
+7.0.2): 7,883 errors at the start, 3,149 now, counted where they are reported. Everything
+`pptx/index.ts` reaches compiles clean (it held 1,392 source errors).
+
+| Directory            | Source errors | Test errors | Status                                   |
+| -------------------- | ------------: | ----------: | ---------------------------------------- |
+| `pptx/editor/render` |            70 |         581 | relaxed                                  |
+| `pptx/automation`    |            15 |         254 | relaxed                                  |
+| `pptx/__tests__`     |             0 |       1,287 | relaxed (integration suite and helpers)  |
+| `pptx/core/core`     |             0 |         471 | strict; failing tests excluded by name   |
+| `pptx/core/utils`    |             0 |         300 | strict; failing tests excluded by name   |
+| `pptx/core/builders` |             0 |         152 | strict; failing tests excluded by name   |
+| `pptx/converter`     |             0 |          10 | strict; failing tests excluded by name   |
+| `pptx/core/ppt`      |             0 |           9 | strict; writer round-trip tests excluded |
+
+The remaining source errors are the same kinds the model had: possibly-`undefined` reads in the
+editor's collaboration and remap code, and automation tool parameters that zod parses with
+`| undefined` on optional fields. Most remaining test errors are object-tree chains such as
+`xml['p:sld']['p:cSld']` (TS7053) and fixtures typed narrower than the code they feed.
+
+How the code was narrowed, so later work follows the same rules: optional fields the code clears
+on purpose admit `undefined` (type-only); objects built for ole2's writer model or the text model
+set only the fields that are present; reads the surrounding code keeps in range use geometry's
+`at()`, which throws where the old code would have dereferenced `undefined`; required regex
+captures fall back to `''` and bitwise byte reads to `0`, the values `undefined` produced;
+`Number.isFinite` guards use the `isFiniteNumber` type guard (`units/finite.ts`); and tests use
+`pptx/test-support/access.ts` (`at`, `must`, and `xmlFixture` for deliberately malformed trees).
+
+What blocks moving the object trees onto the shared `xml` area:
+
+- **The model stores trees.** `XmlObject` (`pptx/core/types/common.ts`) appears in about 600
+  source files and 164 times in `pptx/core/types` alone, as preservation fields (`rawXml`,
+  `extLstXml`, `colorChoiceXml`, ...). The `pptx-viewer-json` serializer writes the model as it
+  is (`converter/json/json-serializer.ts`), so replacing those fields with DOM nodes changes a
+  persisted shape and needs a versioned migration, not a type swap.
+- **Two parsing contracts.** `xml` is DOM (`parseXml` returns a `Document`); pptx code relies on
+  fast-xml-parser's `@_` attribute keys, the single-object-or-array child duality and bare-string
+  collapsed text. 108 source files import fast-xml-parser and 16 build parsers with their own
+  options, so the behaviour differs per call site. Section 4 already rules out an object-tree view
+  over the DOM; each call site moves to neutral readers behind a parity test, as charts and SmartArt
+  did.
+- **Writers depend on tree order.** The save pipeline rebuilds parts with `XMLBuilder` and restores
+  schema order afterwards (`merge-child-order.ts`, `core/utils/xml-reorder.ts`); a DOM writer keeps
+  document order, so each writer needs a round-trip test before it switches.
+- **Strictness and the tree type are the same work.** Most of the `noUncheckedIndexedAccess` errors
+  above are accesses into the `XmlObject | XmlObject[] | string | undefined` union; a call site that
+  moves to the neutral DOM readers loses those errors with it, so tightening a directory and moving
+  its parsing onto `xml` are best done together.
 
 ## 4. Risks
 
-- **Two XML models for a long time.** Mitigation: neutral attribute readers and `PartHost` instead of a bridge; do not build an object-tree view over the DOM.
-- **Behavioural drift in the pptx adapter.** Mitigation: the pptx suite is the oracle (16 minutes); add parity tests that parse the same part with both parsers on the committed decks before switching a pptx call site.
-- **Colour fidelity.** pptx resolution includes `phClr`, effect colour transforms and a quick-style/colour-list interplay; the provisional `diagram` resolver covers `srgb`, `scheme`, `sys`, `prst`, `scrgb`, `hsl` and the common transforms (`alpha`, `lumMod`, `lumOff`, `tint`, `shade`, `satMod`) and reports the rest as unresolved rather than guessing.
-- **Layout engine size.** ~60 engine files and ~150 interpreter files share the types barrel; moving them piecemeal creates circular imports. Move types first, then engine, then interpreters, in one PR each.
-- **Word has no regeneration path.** The cached `dsp:drawing` is optional (Word may omit it, and files from other producers do). Until the layout engine is neutral, a Word SmartArt without a cached drawing can only be preserved and shown as a placeholder, which the model reports honestly.
-- **Strictness gap.** `pptx` compiles with relaxed flags; code moved into a neutral area must compile strict (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`). Budget for bounds-checked access as in the `geometry` move.
-- **Bundles.** The pptx bundle inlines shared areas; check bundle size and that `diagram` stays tree-shakeable.
+- **Two XML models for a long time.** Mitigation: neutral attribute readers and `PartHost` instead of a bridge; do not build an
+  object-tree view over the DOM.
+- **Behavioural drift in the pptx adapter.** Mitigation: the pptx suite is the oracle (16 minutes); add parity tests that parse the
+  same part with both parsers on the committed decks before switching a pptx call site.
+- **Colour fidelity.** pptx resolution includes `phClr`, effect colour transforms and a quick-style and colour-list interplay. The
+  `diagram` resolver covers `srgb`, `scheme`, `sys`, `prst`, `scrgb`, `hsl` and the common transforms (`alpha`, `lumMod`, `lumOff`,
+  `tint`, `shade`, `satMod`) and reports the rest as unresolved rather than guessing.
+- **Layout engine size.** About 60 engine files and about 150 interpreter files share the types barrel; moving them piecemeal created
+  circular imports. Types moved first, then the engine, then the interpreters, one PR each.
+- **SmartArt regeneration has explicit limits.** Word and Excel use the shared neutral layout
+  interpreter for uncached and edited diagrams, with an approximate fallback for unsupported or
+  partial layouts. Admitted 2D results gain generated source caches; complex text, folding and
+  spatial 3D decline cache generation. Native Office can regenerate its own cache, but that does
+  not establish that the viewer's geometry, typography or effects match Office (section 3.7).
+- **Strictness gap.** `pptx` compiles with relaxed flags; code moved into a neutral area must compile strict (`exactOptionalPropertyTypes`,
+  `noUncheckedIndexedAccess`). Budget for bounds-checked access as in the `geometry` move.
+- **Bundles.** The pptx bundle inlines shared areas; check bundle size and that `diagram` and `chart` stay tree-shakeable.
 
 ## 5. What stays format-specific
 
-- `pptx`: slides, masters, layouts, notes, animation, transitions, presentation properties, the fluent builder SDK, converters, CLI, signatures, `a:tbl`, `p:graphicFrame` handling, SmartArt-to-slide-element decomposition, the save pipeline that writes the diagram parts into a presentation.
-- `docx`: WordprocessingML (`w:p`, `w:r`, `w:tbl`, numbering, styles, revisions), the anchor/inline/wrap host markup, the OPC wiring that adds a diagram's parts to a package.
-- Rendering code (three.js scenes, HTML painters, the pptx chart view-models) is UI and stays in `src/ui`; the neutral SVG chart painter is the exception and lives in `chart/render`.
+- `pptx`: slides, masters, layouts, notes, animation, transitions, presentation properties, the fluent builder SDK, converters, CLI,
+  signatures, `a:tbl`, `p:graphicFrame` handling, SmartArt-to-slide-element decomposition, and the save pipeline that writes the diagram
+  parts into a presentation.
+- `docx`: WordprocessingML (`w:p`, `w:r`, `w:tbl`, numbering, styles, revisions), the anchor, inline and wrap host markup, and the OPC
+  wiring that adds a diagram's or a chart's parts to a package.
+- `xlsx`: sheets, cells, formulas, the drawing anchor (`xdr:graphicFrame`) and the workbook's own chart and SmartArt hosts.
+- Rendering code (three.js scenes, HTML painters, the pptx chart view-models) is UI and stays in `src/ui`; the neutral SVG chart painter is
+  the exception and lives in `chart/render`.
 
 ## 6. Shared UI: a second package (not pursued as written)
 
-This section proposed a `packages/*` layout (`packages/ooxml-core`, `packages/ooxml-ui`, `packages/office-collab`), `v<version>` tags and a `pptx-ui-*` to `office-ui-*` migration across separate viewer repositories. None of it shipped in that form and it should not be followed. The repository is a Bun workspace with the library in `src/core`, the DOM-only `ooxml-ui` in `src/ui`, tags `ooxml-core@<version>` and `ooxml-ui@<version>`, collaboration as the `collab` area, and the viewers under `viewers/`. See `AGENTS.md` and `src/ui/README.md` for the current layout and [ooxml-ui-plan.md](ooxml-ui-plan.md) for the UI package's history.
+This section proposed a `packages/*` layout (`packages/ooxml-core`, `packages/ooxml-ui`, `packages/office-collab`), `v<version>` tags and a
+`pptx-ui-*` to `office-ui-*` migration across separate viewer repositories. None of it shipped in that form and it should not be followed.
+The repository is a Bun workspace with the library in `src/core`, the DOM-only `ooxml-ui` in `src/ui`, tags `ooxml-core@<version>` and
+`ooxml-ui@<version>`, collaboration as the `collab` area, and the viewers under `viewers/`. See `AGENTS.md` and `src/ui/README.md` for the
+current layout and [ooxml-ui-plan.md](ooxml-ui-plan.md) for the UI package's history.
 
-## 7. First slice delivered (this PR)
+## 7. First slice delivered (history)
 
-See `PROVENANCE.md` ("diagram area"): `src/core/diagram` and `src/core/docx/diagram*.ts`. Not moved yet, on purpose: layout engine, interpreters, fabrication, the typed layout-definition tree, 3D, and everything in steps 2-6 above.
+See `PROVENANCE.md` ("diagram area"): `src/core/diagram` and `src/core/docx/diagram*.ts`. Everything in steps 2 to 6 above has since moved
+or is listed under its "Remains" entry.
+
+### Classic chart read adapter follow-up (2026-10-26)
+
+PowerPoint series solid fills, fill and outline gradients, line widths, preset dashes and no-fill
+switches now project from neutral DrawingML fields. Chart/plot/title/legend/axis/gridline/series format-pane fills, outlines and ordinary outer-shadow/glow/soft-edge effects also project from the neutral models; spatial and text-specific source details retain their compatibility adapters. Trendline and error-bar lines, trendline label
+layout values, marker and point shape overrides, floor/wall formatting, up/down bars, and drop/high-low lines use the same neutral projection. Theme aliases resolve through
+the deck's existing color-map context; authored tokens remain in `ChartSpace` for saving.
+
+`refreshClassicChartFromPart` rebuilds compatibility data from a saved classic part with the current
+theme and host relationship context. It refreshes chart groups, axis topology and series identities,
+instead of layering a new topology over stale resolved snapshots. Reordered axes retain styling by
+axis identity and the retained snapshot is not mutated by the projection.
+
+Remaining source-tree compatibility reads include resolved label/axis text styles,
+complex text effects and spatial properties, picture details/relationships, extension payloads, filtered
+series, external style/workbook/user-shape parts and unsupported layouts. This checkpoint does not
+claim that every classic chart read is DOM-only. The 81-frame chart projection corpus and focused
+adapter regressions remain the gate for deleting each compatibility reader.
+
+### Native picture and map reuse follow-up (2026-10-29)
+
+The [remaining-capabilities delivery](pptx-reuse-delivery-2026-10-29.md) adds neutral cached
+region maps, Visio embedded ChartEx admission/editing, rich ordered picture rendering and tiled
+fills, and picture-role-preserving SmartArt reflow/save. These capabilities are mounted by their
+product consumers rather than left as unused extractions. Native Office comparisons and source
+round-trip/browser regressions document their admitted scope; the general regeneration and
+unsupported-feature boundaries above still apply.

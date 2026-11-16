@@ -165,6 +165,14 @@ export function copySnapshotScene(model: VisioDocument): VisioDocument {
 			...(source.glow ? { glow: fields(source.glow, ['color', 'opacity', 'size']) } : {}),
 			...(source.softEdges === undefined ? {} : { softEdges: source.softEdges }),
 			...(source.rounding === undefined ? {} : { rounding: source.rounding }),
+			...(source.bevel
+				? { bevel: fields(source.bevel, ['type', 'width', 'height', 'lighting', 'material']) }
+				: {}),
+			...(source.extrusion ? { extrusion: fields(source.extrusion, ['depth', 'color']) } : {}),
+			...(source.contour ? { contour: fields(source.contour, ['size', 'color']) } : {}),
+			...(source.rotation3d
+				? { rotation3d: fields(source.rotation3d, ['x', 'y', 'z', 'perspective', 'keepTextFlat']) }
+				: {}),
 			...(source.reflection
 				? { reflection: fields(source.reflection, ['opacity', 'size', 'distance', 'blur']) }
 				: {}),
@@ -329,6 +337,11 @@ export function copySnapshotScene(model: VisioDocument): VisioDocument {
 								list(colors, 'theme colours', 64, (color) => color),
 							),
 						},
+					}
+				: {}),
+			...(page.themeSchemes
+				? {
+						themeSchemes: fields(page.themeSchemes, ['colors', 'fonts', 'effects', 'connectors']),
 					}
 				: {}),
 			shapes: shapes(page.shapes),

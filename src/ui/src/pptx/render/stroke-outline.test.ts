@@ -228,6 +228,28 @@ describe('buildStrokeOutline stroke-only ("open") presets', () => {
 		expect(outline!.paint).toBeUndefined();
 	});
 
+	// PowerPoint (COM export) draws an arc's curve only: the ECMA-376 definition adds an unstroked
+	// wedge FILL path, whose radial edges are part of the merged clip outline but never stroked.
+	it('strokes an arc along its curve only, never the wedge radii', () => {
+		const outline = buildStrokeOutline(
+			line({
+				shapeType: 'arc',
+				width: 200,
+				height: 120,
+				shapeAdjustments: { adj1: 16200000, adj2: 0 },
+			} as Partial<PptxElement>),
+		);
+		expect(outline!.d).toContain('A ');
+		expect(outline!.d).not.toContain('L ');
+	});
+
+	it('strokes a bracket as its curve only, not the closed chord of its fill path', () => {
+		const outline = buildStrokeOutline(
+			line({ shapeType: 'leftBracket', width: 40, height: 200 } as Partial<PptxElement>),
+		);
+		expect(outline!.d).not.toContain('Z');
+	});
+
 	it('strokes the whole elbow of an open connector preset', () => {
 		const outline = buildStrokeOutline(
 			line({ shapeType: 'bentConnector3', width: 200, height: 120 }),
@@ -236,11 +258,18 @@ describe('buildStrokeOutline stroke-only ("open") presets', () => {
 	});
 
 	it('leaves closed presets to the CSS border only when the line is explicitly inset', () => {
-		for (const shapeType of ['rect', 'ellipse', 'roundRect', 'triangle']) {
+		for (const shapeType of ['rect', 'ellipse', 'roundRect']) {
 			const inset = line({ shapeType, width: 200, height: 120 }, { lineAlignment: 'in' });
 			expect(buildStrokeOutline(inset)).toBeUndefined();
 			expect(suppressesCssBorder(inset)).toBeFalsy();
 		}
+	});
+
+	it('paints an inset line along a clipped outline, which a box border cannot follow', () => {
+		// Under the triangle's clip a CSS border survived only on its base.
+		const inset = line({ shapeType: 'triangle', width: 200, height: 120 }, { lineAlignment: 'in' });
+		expect(buildStrokeOutline(inset)).toBeDefined();
+		expect(suppressesCssBorder(inset)).toBeTruthy();
 	});
 
 	it('centres a closed preset at the default (omitted) alignment instead', () => {
@@ -269,11 +298,47 @@ describe('buildStrokeOutline stroke-only ("open") presets', () => {
 
 	it('paints one strand for a single line and several for a compound one', () => {
 		expect(buildStrokeOutline(line())!.strands).toStrictEqual([
-			{ strokeWidth: 2, cssStrokeWidth: 'max(2px, var(--pptx-device-px, 0px))', offset: 0 },
+			{
+				strokeWidth: 2,
+				cssStrokeWidth:
+					'max(max(var(--pptx-device-px, 0px), 0.001px), round(2px, max(var(--pptx-device-px, 0px), 0.001px)))',
+				offset: 0,
+				// A horizontal, unrotated line is snapped to the device grid.
+				cssTransform: expect.stringContaining('translate(0px, calc(round('),
+			},
 		]);
-		const compound = buildStrokeOutline(line({}, { strokeWidth: 4, compoundLine: 'dbl' }))!;
+		const compound = buildStrokeOutline(line({}, { strokeWidth: 6, compoundLine: 'dbl' }))!;
 		expect(compound.strands).toHaveLength(2);
-		expect(compound.strands[0].offset).not.toBe(compound.strands[1].offset);
+		// Each strand is traced along the line as its own path, a third of the
+		// width off its centre on either side (see `stroke-compound-strands`).
+		expect(compound.strands.map((strand) => strand.offset)).toStrictEqual([0, 0]);
+		expect(compound.strands[0].d).not.toBe(compound.strands[1].d);
+	});
+
+	it('traces a closed shape compound line along every side, outer strand first', () => {
+		// PowerPoint 16: a rectangle's 12 pt thickThin line paints its thick strand
+		// outside and its thin one inside on all four sides.
+		const box = {
+			id: 'r',
+			type: 'shape',
+			shapeType: 'rect',
+			x: 0,
+			y: 0,
+			width: 100,
+			height: 50,
+			shapeStyle: {
+				fillColor: '#C07020',
+				strokeColor: '#FFFFFF',
+				strokeWidth: 10,
+				compoundLine: 'thickThin',
+				lineJoin: 'miter',
+			},
+		} as unknown as PptxElement;
+		const strands = buildStrokeOutline(box)!.strands;
+		expect(strands.map((strand) => [strand.strokeWidth, strand.d])).toStrictEqual([
+			[6, 'M -2 -2 L 102 -2 L 102 52 L -2 52 Z'],
+			[2, 'M 4 4 L 96 4 L 96 46 L 4 46 Z'],
+		]);
 	});
 
 	it('takes the overlay viewBox from the PAINTED (authored) box, matching the wrapper', () => {
@@ -353,5 +418,57 @@ describe('buildStrokeOutline pattern outlines', () => {
 			shape({ ...gradientStroke, strokePatternPreset: 'dkDnDiag' }),
 		);
 		expect(outline!.paint!.kind).toBe('linear');
+	});
+});
+
+describe('buildStrokeOutline device-grid snap', () => {
+	const flat: ShapeStyle = { strokeColor: '#000000', strokeWidth: 1.3333 };
+
+	it('shifts the outline of a plain rectangle, every edge on its own', () => {
+		const strands = buildStrokeOutline(shape(flat, { x: 454, y: 387 }))!.strands;
+		expect(strands).toHaveLength(1);
+		expect(strands[0]!.cssTransform).toMatch(
+			/^translate\(calc\(round\(454px,.*calc\(round\(387px,/u,
+		);
+		// The right and bottom edges round on their own: the width of the
+		// element (200 by 100 here) is scaled to land them on their device pixels.
+		const transform = strands[0]!.cssTransform ?? '';
+		expect(transform).toMatch(/scale\(calc\(\(\d+px \+ calc\(round\(\d+(\.\d+)?px,/u);
+		expect(transform).toContain(`round(${454 + 200}px,`);
+		expect(transform).toContain(`round(${387 + 100}px,`);
+	});
+
+	it('leaves rounded, rotated and gradient outlines alone', () => {
+		expect(
+			buildStrokeOutline(shape(flat, { shapeType: 'roundRect' }))?.strands[0]?.cssTransform,
+		).toBeUndefined();
+		expect(
+			buildStrokeOutline(shape(flat, { rotation: 20 }))?.strands[0]?.cssTransform,
+		).toBeUndefined();
+		expect(buildStrokeOutline(shape(gradientStroke))!.strands[0]!.cssTransform).toBeUndefined();
+	});
+});
+
+describe('buildStrokeOutline edge bleed', () => {
+	const line: ShapeStyle = { strokeColor: '#102030', strokeWidth: 4 };
+	const triangle = (style: ShapeStyle) => shape(style, { shapeType: 'triangle' });
+
+	it('adds a hairline on the outer edge of a clipped preset (the clip would cut it)', () => {
+		expect(buildStrokeOutline(triangle(line))!.strands).toHaveLength(2);
+	});
+
+	it('adds none to a silhouette shape, whose filter would shadow the thicker line', () => {
+		// The container keeps no clip there, so there is nothing to cover, and the
+		// hairline made a hollow triangle's shadow 25 % darker than PowerPoint's.
+		const silhouette = triangle({
+			...line,
+			shadowColor: '#000000',
+			shadowOpacity: 0.7,
+			shadowBlur: 14,
+			shadowDistance: 12,
+			shadowAngle: 45,
+			outerShadowXml: {},
+		});
+		expect(buildStrokeOutline(silhouette)!.strands).toHaveLength(1);
 	});
 });

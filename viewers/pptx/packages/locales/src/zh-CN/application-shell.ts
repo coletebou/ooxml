@@ -12,6 +12,11 @@ export const translations = {
 	'pptx.statusBar.zoomOut': '缩小',
 	'pptx.statusBar.zoomToFit': '适应窗口',
 	'pptx.autosave.saving': '正在保存…',
+	'pptx.autosave.progress.uploading': '正在保存… {percent}%',
+	'pptx.autosave.progress.checking': '正在检查更改…',
+	'pptx.autosave.progress.downloading': '正在获取最新版本… {percent}%',
+	'pptx.autosave.progress.downloadingUnknown': '正在获取最新版本…',
+	'pptx.autosave.progress.merging': '正在合并编辑…',
 	'pptx.autosave.saved': '已保存 {{time}}',
 	'pptx.autosave.error': '自动保存错误',
 	'pptx.autosave.disabled': '自动保存不可用',
@@ -106,8 +111,19 @@ export const translations = {
 	'pptx.toolbar.save': '保存',
 	'pptx.settings.done': '完成',
 	'pptx.viewer.loading': '正在加载演示文稿...',
+	'pptx.viewer.loadingFonts': '正在下载字体（{{loaded}}/{{total}}）...',
 	'pptx.viewer.encrypted': '该演示文稿受密码保护，无法打开。',
 	'pptx.viewer.loadError': '无法加载演示文稿。',
+	'pptx.viewer.loadLimit.maxInputBytes':
+		'此文件大小为 {{actual}}，超过此查看器允许的 {{maximum}}。',
+	'pptx.viewer.loadLimit.maxUncompressedBytes':
+		'此演示文稿解压后至少为 {{actual}}，超过此查看器允许的 {{maximum}}。',
+	'pptx.viewer.loadLimit.maxEntries':
+		'此演示文稿包含 {{actual}} 个部件，超过此查看器允许的 {{maximum}} 个。',
+	'pptx.viewer.loadLimit.maxSlides':
+		'此演示文稿有 {{actual}} 张幻灯片，超过此查看器允许的 {{maximum}} 张。',
+	'pptx.viewer.loadLimit.maxShapes':
+		'此演示文稿至少有 {{actual}} 个形状，超过此查看器允许的 {{maximum}} 个。',
 	'pptx.viewer.slide': '幻灯片',
 	'pptx.viewer.background': '背景',
 	'pptx.viewer.speakerNotesPlaceholder': '单击添加演讲者备注',
@@ -117,6 +133,12 @@ export const translations = {
 	'pptx.common.close': '关闭',
 	'pptx.common.save': '保存',
 	'pptx.common.ok': '确定',
+	'pptx.dialog.confirmTitle': '确认',
+	'pptx.dialog.inputTitle': '输入名称',
+	'pptx.dialog.noticeTitle': '无法完成操作',
+	'pptx.dialog.hyperlinkTitle': '要打开外部超链接吗？',
+	'pptx.dialog.hyperlinkMessage': '此链接将离开演示文稿：',
+	'pptx.dialog.hyperlinkOpen': '打开',
 	'pptx.toolbar.findAndReplace': '查找并替换',
 	'pptx.mode.closeMasterViewTooltip': '关闭母版视图',
 	'pptx.mode.masterView': '母版视图',
@@ -175,6 +197,10 @@ export const translations = {
 		'无法保存一张幻灯片切换声音并被跳过。',
 	'pptx.compatibility.diagramRelationshipIdsIncomplete':
 		'此 SmartArt 图表缺少一些内部引用，因此它可能无法完全按照创作的方式显示。',
+	'pptx.compatibility.embeddedFontRestricted':
+		'嵌入字体的许可不允许使用该字体，因此显示替代字体。其字体数据保留在文件中。',
+	'pptx.compatibility.embeddedFontNotEmbeddable':
+		'未嵌入某个字体，因为其许可不允许将其嵌入到可编辑的演示文稿中。',
 	'pptx.compatibility.exportBackendUnavailable': '当前环境中无法导出为此格式。',
 	'pptx.readOnly.bannerTitle': '只读',
 	'pptx.readOnly.editAnyway': '无论如何编辑',

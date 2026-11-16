@@ -41,13 +41,13 @@ getter 方法（`canUndo()`、`getZoom()`、`getSelectedElementIds()` 等）返�
 
 ## 缩放 {#zoom}
 
-| 方法        | 签名                      | 说明                                       |
-| ----------- | ------------------------- | ------------------------------------------ |
-| `getZoom`   | `() => number`            | 实际缩放比例，1 表示 100%。                |
-| `setZoom`   | `(level: number) => void` | 设置明确的缩放比例，自动限制在有效范围内。 |
-| `zoomIn`    | `() => void`              | 放大一级。                                 |
-| `zoomOut`   | `() => void`              | 缩小一级。                                 |
-| `zoomReset` | `() => void`              | 重置为 100%。                              |
+| 方法        | 签名                      | 说明                                         |
+| ----------- | ------------------------- | -------------------------------------------- |
+| `getZoom`   | `() => number`            | 实际缩放比例，1 表示 100%。                  |
+| `setZoom`   | `(level: number) => void` | 设置明确的缩放比例，限制在 0.1 至 5.0 之间。 |
+| `zoomIn`    | `() => void`              | 放大一级。                                   |
+| `zoomOut`   | `() => void`              | 缩小一级。                                   |
+| `zoomReset` | `() => void`              | 重置为 100%。                                |
 
 ## 模式与放映 {#mode-and-presentation}
 
@@ -73,6 +73,44 @@ viewer?.setMode('present'); // start presenting; Esc exits
 | `moveSlide`        | `(fromIndex: number, toIndex: number) => void` | 将幻灯片移动到新位置。                             |
 | `toggleHideSlides` | `(indexes: number[]) => void`                  | 切换指定幻灯片的隐藏标记。                         |
 | `isDirty`          | `() => boolean`                                | 文档是否存在未保存修改。                           |
+
+### 宿主持久化保存
+
+宿主自行序列化并异步存储演示文稿时，请使用修订号，使上传过程中产生的修改保持为未保存状态。
+不会重新加载文档，撤销历史也会保留。
+
+| 方法              | 签名                                                       | 说明                                               |
+| ----------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| `getSaveRevision` | `() => number`                                             | 文档当前的修订号，每次修改后都会变化。             |
+| `getSaveSnapshot` | `() => Promise<{ revision: number; content: Uint8Array }>` | 为宿主序列化文档。文档保持未保存，不触发保存事件。 |
+| `acknowledgeSave` | `(revision: number) => PptxSaveAcknowledgement`            | 通知查看器宿主已持久化 `revision`。                |
+
+结果类型：
+
+```ts
+interface PptxSaveSnapshot {
+	readonly revision: number;
+	readonly content: Uint8Array;
+}
+
+type PptxSaveAcknowledgement =
+	| { readonly status: 'clean'; readonly revision: number }
+	| { readonly status: 'pending'; readonly revision: number; readonly currentRevision: number }
+	| { readonly status: 'stale'; readonly revision: number; readonly savedRevision: number }
+	| { readonly status: 'unknown'; readonly revision: number };
+```
+
+`acknowledgeSave` 返回以下之一：
+
+- `{ status: 'clean' }`：`revision` 仍是当前修订号。文档变为已保存，触发 `onDirtyChange(false)`，
+  并丢弃崩溃恢复副本（除非选项 > 保存 中选择保留上次自动恢复版本）。
+- `{ status: 'pending', currentRevision }`：已接受该修订号，但之后又有修改。文档保持未保存，
+  可能包含这些修改的恢复副本也会保留。
+- `{ status: 'stale' }`：早于已确认的修订号，忽略。
+- `{ status: 'unknown' }`：并非该查看器发出的修订号，忽略。
+
+保存失败时不要调用确认，文档会保持未保存。撤销到已保存内容同样算一次修改，因此在下次保存前文档仍为未保存。
+与 Svelte 和原生版的 `getContent()` 不同，`getSaveSnapshot()` 不会清除未保存标记。
 
 ## 访问与操作元素 {#element-access-and-manipulation}
 
@@ -127,16 +165,16 @@ const image = await createImageElementFromFile(file, canvasSize, signal);
 
 设置 `editable` 时启用，参见[快速上手 > 编辑](/zh/svelte/getting-started#editing)。
 
-| 方法             | 签名                                                           | 说明                                                           |
-| ---------------- | -------------------------------------------------------------- | -------------------------------------------------------------- |
-| `undo`           | `() => void`                                                   | 撤销上一次提交的编辑。                                         |
-| `redo`           | `() => void`                                                   | 重做上一次撤销的编辑。                                         |
-| `canUndo`        | `() => boolean`                                                | 是否存在可撤销步骤，返回快照，不具备响应性。                   |
-| `canRedo`        | `() => boolean`                                                | 是否存在可重做步骤。                                           |
-| `deleteSelected` | `() => void`                                                   | 删除选中元素，未选中时不执行操作。                             |
-| `save`           | `(format?: PptxSaveFormat) => Promise<Uint8Array>`             | 将编辑后的幻灯片序列化为字节（`'pptx' \| 'ppsx' \| 'pptm'`）。 |
-| `downloadAs`     | `(format: PptxSaveFormat, fileName?: string) => Promise<void>` | 保存并以指定格式触发浏览器下载。                               |
-| `downloadPptx`   | `(fileName?: string) => Promise<void>`                         | 保存并以默认名称下载 `.pptx`。                                 |
+| 方法             | 签名                                                           | 说明                                                                    |
+| ---------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `undo`           | `() => void`                                                   | 撤销上一次提交的编辑。                                                  |
+| `redo`           | `() => void`                                                   | 重做上一次撤销的编辑。                                                  |
+| `canUndo`        | `() => boolean`                                                | 是否存在可撤销步骤，返回快照，不具备响应性。                            |
+| `canRedo`        | `() => boolean`                                                | 是否存在可重做步骤。                                                    |
+| `deleteSelected` | `() => void`                                                   | 删除选中元素，未选中时不执行操作。                                      |
+| `save`           | `(format?: PptxSaveFormat) => Promise<Uint8Array>`             | 将编辑后的幻灯片序列化为字节（`'pptx' \| 'ppsx' \| 'pptm' \| 'ppt'`）。 |
+| `downloadAs`     | `(format: PptxSaveFormat, fileName?: string) => Promise<void>` | 保存并以指定格式触发浏览器下载。                                        |
+| `downloadPptx`   | `(fileName?: string) => Promise<void>`                         | 保存并以默认名称下载 `.pptx`。                                          |
 
 启用编辑时可使用以下键盘快捷键：`Ctrl` / `Cmd+Z` 撤销，`Ctrl` / `Cmd+Shift+Z` 重做，`Delete` / `Backspace` 删除，`Ctrl` / `Cmd+D` 复制，方向键微移（配合 `Shift` 使用更大步长），`Escape` 取消选择。
 
@@ -214,6 +252,68 @@ const current = viewer?.getCustomization();
 
 `pptx-svelte-viewer/viewer` 入口还导出查看器内部不依赖框架的状态辅助接口：`ViewerState`、`PresentationLoader`、`clampSlideIndex`、`fitScale`、`resolveNavigationKey`、`zoomInPercent`、`zoomOutPercent`，供宿主基于相同基础能力构建自定义界面。这些接口比组件 API 更底层，常规嵌入场景无需使用。
 
+### 幻灯片缩略图栏 {#slide-thumbnail-rail}
+
+`SlidesPane` 是 `PowerPointViewer` 在画布旁显示的幻灯片缩略图栏，供基于 `createViewerState` 和 `SlideCanvas` 构建的自定义外壳使用（见[协作](/zh/svelte/collaboration#custom-host-chrome)）。它列出所有幻灯片（演示文稿包含节时按节分组）并突出显示当前幻灯片；点击缩略图会将画布切换到该幻灯片，不会把演示文稿标记为已修改。启用 `canEdit` 后，它还可以添加、复制、删除、隐藏、重新排序和分组幻灯片（按住 Ctrl 或 Shift 点击可多选），使用与完整编辑器相同的操作、撤销历史和协作同步。`createSlidesPaneProps(state)` 根据查看器状态构建其属性，这些属性是实时 getter，请原样展开传入。
+
+```svelte
+<script lang="ts">
+	import {
+		createSlidesPaneProps,
+		createViewerState,
+		SlideCanvas,
+		SlidesPane,
+	} from 'pptx-svelte-viewer/viewer';
+
+	const state = createViewerState(viewerOptions);
+	const paneProps = createSlidesPaneProps(state, {
+		onopenlayoutgallery: ({ slideIndex, x, y }) => openMyLayoutGallery(slideIndex, x, y),
+	});
+</script>
+
+<div style="display: flex; height: 600px">
+	<SlidesPane {...paneProps} />
+	<SlideCanvas
+		slide={state.activeSlide}
+		canvasSize={state.loader.canvasSize}
+		mediaDataUrls={state.loader.mediaDataUrls}
+		scale={state.scale}
+	/>
+</div>
+```
+
+这些属性是扁平的，因此宿主也可以用自己的状态驱动缩略图栏：`slides`（已合并版式和母版元素，与画布的绘制方式一致）、`activeSlideIndex`、`canvasSize`、`mediaDataUrls`、`sections`、`canEdit`、`onselectslide` / `onmoveslide` / `onaddslide` / `onaddslideafter` / `onduplicateslides` / `ondeleteslides` / `onhideslides` 及节相关回调，以及用 `ooxml-ui/pptx` 中的 `buildSlidesPaneFieldContext` 和 `buildSlidesPaneTableStyleContext` 构建的 `fieldContext` 和 `tableStyleContext`，使缩略图像画布一样替换字段（包括编号不从 1 开始的演示文稿中的幻灯片编号）和表格颜色。幻灯片右键菜单中的“版式”项会将该幻灯片设为当前幻灯片，并调用可选的 `onopenlayoutgallery({ slideIndex, x, y })`，因为这些构建模块不渲染版式库。缩略图栏自身没有折叠控件：要隐藏它，请按条件渲染。`SlidesPane` 也从包根入口导出，需要 `pptx-svelte-viewer/styles.css`。
+
+### 单张幻灯片缩略图 {#single-slide-thumbnail}
+
+`SlideThumbnail`（与其 `SlideThumbnailProps` 类型一起，从包根入口和 `pptx-svelte-viewer/viewer` 导出）按 `SlidesPane` 的方式绘制一张幻灯片，供维护自己缩略图条的宿主使用。它根据幻灯片模型渲染，因此会跟随未保存的编辑；它是静态的：没有选择、编辑、指针处理、焦点停靠或元素 id。设置了切换效果（“剪切”除外）的幻灯片会在右上角以小标记显示切换名称，各绑定的缩略图一致（Svelte 的 `SlidesPane` 不绘制该标记）。其属性为 `slide`、`templateElements`（绘制在幻灯片自身元素之下的版式和母版元素；默认为空）、`canvasSize` 和 `previewWidth`（像素；默认为缩略图栏的缩略图宽度；高度按演示文稿的宽高比计算），以及与 `SlidesPane` 共用的属性：`mediaDataUrls`、`fieldContext` 和 `tableStyleContext`。请用同一个 `createSlidesPaneProps` 结果驱动它。这些 `slides` 已合并版式和母版元素，因此对它们请将 `templateElements` 留空。
+
+```svelte
+<script lang="ts">
+	import { createSlidesPaneProps, createViewerState, SlideThumbnail } from 'pptx-svelte-viewer/viewer';
+
+	const state = createViewerState(viewerOptions);
+	const paneProps = createSlidesPaneProps(state);
+</script>
+
+<ul class="my-strip">
+	{#each paneProps.slides as slide (slide.id)}
+		<li style="width: 120px">
+			<SlideThumbnail
+				{slide}
+				canvasSize={paneProps.canvasSize}
+				previewWidth={120}
+				mediaDataUrls={paneProps.mediaDataUrls}
+				fieldContext={paneProps.fieldContext}
+				tableStyleContext={paneProps.tableStyleContext}
+			/>
+		</li>
+	{/each}
+</ul>
+```
+
+缩略图填满其容器的宽度，高度为 `previewWidth` 按演示文稿宽高比计算的值，因此请为容器设置该宽度。它同样需要 `pptx-svelte-viewer/styles.css`。
+
 ### `pptx-svelte-viewer/internals`：幻灯片过渡辅助函数 {#pptx-svelte-viewer-internals-slide-transition-helpers}
 
 所有绑定共用的框架无关逻辑位于 `ooxml-ui/pptx`；私有的 `pptx-viewer-shared` 包只是它的兼容外观。宿主如果搭建了自己的放映界面（自定义舞台，而非完整的 `PowerPointViewer`），仍然需要用到过渡解析器/关键帧和叠加层组件，因此它们改从 `pptx-svelte-viewer/internals` 子路径重新导出：
@@ -247,14 +347,14 @@ import {
 } from 'pptx-svelte-viewer';
 ```
 
-| 导出项                         | 类型                                                                  | 说明                                                                                                           |
-| ------------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `PPTX_OPEN_ACCEPT`             | `string`                                                              | 可直接用于 `<input type="file" accept>`：`.pptx,.ppsx,.pptm,.potx,.ppt,.json`。                                |
-| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | 未拼接的同一扩展名列表，供拖放区域自行判断。                                                                   |
-| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | 根据选择或拖入的文件名进行快速预筛选，只检查扩展名，最终格式由加载器检测。                                     |
-| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | 判断是否属于 PowerPoint 97-2003 二进制格式（`.ppt`、`.pps`、`.pot`），这些格式可读取，不属于此保存接口的输出。 |
-| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | 去除目录和可加载扩展名，得到文件主名，例如 `decks/report.ppt` 变为 `report`。                                  |
-| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | 生成保存副本时提供的文件名，例如 `report.ppt` 变为 `report.pptx`。                                             |
-| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm'`                                          | 此保存路径可生成的格式，不包含二进制 `.ppt`，输出始终为 OpenXML。                                              |
+| 导出项                         | 类型                                                                  | 说明                                                                                                               |
+| ------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `PPTX_OPEN_ACCEPT`             | `string`                                                              | 可直接用于 `<input type="file" accept>`：`.pptx,.ppsx,.pptm,.potx,.ppt,.json`。                                    |
+| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | 未拼接的同一扩展名列表，供拖放区域自行判断。                                                                       |
+| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | 根据选择或拖入的文件名进行快速预筛选，只检查扩展名，最终格式由加载器检测。                                         |
+| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | 判断是否属于 PowerPoint 97-2003 二进制格式（`.ppt`、`.pps`、`.pot`）。`.ppt` 可以保存；`.pps` 和 `.pot` 仅可读取。 |
+| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | 去除目录和可加载扩展名，得到文件主名，例如 `decks/report.ppt` 变为 `report`。                                      |
+| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | 生成保存副本时提供的文件名，例如 `report.ppt` 变为 `report.pptx`。                                                 |
+| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm' \| 'ppt'`                                 | 此保存路径可生成的格式，包括二进制 97-2003 `.ppt`。                                                                |
 
-“另存为”时应使用 `savedPresentationFileName`。此路径输出的是 OpenXML 包，如果保留旧版源扩展名，会得到扩展名为 `.ppt`、内容却是 ZIP 的文件，PowerPoint 会拒绝打开。
+“另存为”时应使用 `savedPresentationFileName`。除非选择 97-2003 `.ppt`，输出都是 OpenXML 包；因此如果保留旧版源扩展名，会得到扩展名为 `.ppt`、内容却是 ZIP 的文件，PowerPoint 会拒绝打开。

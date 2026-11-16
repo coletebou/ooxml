@@ -30,8 +30,11 @@ export function selectTextPlaceholder(
 	input: PptxElement,
 	type: string,
 	options: SdkPlaceholderOptions,
-	slots: Array<{ phInfo: { type?: string; idx?: string }; shapeXml: XmlObject }>,
-): { type: string; idx?: string } {
+	slots: Array<{
+		phInfo: { type?: string | undefined; idx?: string | undefined };
+		shapeXml: XmlObject;
+	}>,
+): { type: string; idx?: string | undefined } {
 	if (!TEXT_PLACEHOLDER_TYPES.has(type.toLowerCase())) {
 		throw new Error(`Unsupported text placeholder type: ${type}`);
 	}
@@ -104,7 +107,7 @@ function withoutFallbackLanguages(paragraphs: XmlObject[]): XmlObject[] {
 
 /** A real slide placeholder with no authored frame or text-format defaults. */
 export function placeholderShape(
-	identity: { type: string; idx?: string },
+	identity: { type: string; idx?: string | undefined },
 	paragraphs: XmlObject[],
 ): XmlObject {
 	paragraphs = withoutFallbackLanguages(paragraphs);

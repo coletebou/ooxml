@@ -1,5 +1,9 @@
 import type {
 	CanvasSize,
+	CompatibilityWarningToast,
+	MountedPdfSlide,
+	PdfExportSettings,
+	VectorPdfExportResult,
 	RasterizeElementResult,
 	RasterizeElementTilesResult,
 } from 'ooxml-ui/pptx';
@@ -11,9 +15,11 @@ import {
 	rasterResultToPngBlob,
 	rasterResultToPngDataUrl,
 	resolveExportBaseName,
+	runPdfExport,
 } from 'ooxml-ui/pptx';
 import type { PptxData, PptxSlide } from 'pptx-viewer-core';
 
+import type { Translator } from '../../i18n/translator';
 import type { ExportGifOptions } from './export-gif';
 import { exportSlidesToGifBlob } from './export-gif';
 import type { OpenPrintWindow, PrintOptions } from './export-print';
@@ -38,6 +44,17 @@ export interface ExportPdfOptions {
 	onProgress?: ExportProgress;
 	/** Abort the export early; the loop checks this between slides. */
 	signal?: AbortSignal;
+	/** Include hidden slides (vector export; default from Options > Advanced > Save as PDF). */
+	includeHiddenSlides?: boolean;
+	/** 1-based slide range (vector export). */
+	from?: number;
+	to?: number;
+	/** Explicit 0-based slides (the current slide); overrides `from`/`to` (vector export). */
+	slideIndexes?: readonly number[];
+	/** `pictures` writes one image per slide (the compatibility export); default from the options. */
+	mode?: PdfExportSettings['mode'];
+	/** Told what the vector PDF approximated (effects drawn as pictures, substituted fonts). */
+	onReport?: (result: VectorPdfExportResult) => void;
 }
 
 export interface ExportControllerDeps {
@@ -83,6 +100,18 @@ export interface ExportControllerDeps {
 	getIncludeHiddenSlides?(): boolean;
 	/** Options > Advanced > "High quality" raster scale for the print fallback path. */
 	getPrintHighQuality?(): boolean;
+	/** Live translator, for the print window title. English when omitted. */
+	getTranslator?(): Translator;
+	/** Mount a slide on the capture stage, for the vector PDF export. */
+	mountSlide?: (index: number) => Promise<MountedPdfSlide>;
+	/** Options > Advanced > Save as PDF. Defaults to vector pages without hidden slides. */
+	getPdfExportSettings?(): PdfExportSettings | undefined;
+	/** Options > Advanced image resolution multiplier, for effects drawn as pictures. */
+	getImageResolutionScale?(): number;
+	/** Show the PDF approximation notice in the viewer's toast stack. */
+	notify?(toast: CompatibilityWarningToast): void;
+	/** The host's `onpdfexportreport`, told what every vector PDF approximated. */
+	onPdfExportReport?(result: VectorPdfExportResult): void;
 }
 
 /**
@@ -186,6 +215,47 @@ export class ExportController {
 		}
 		// eslint-disable-next-line one-var -- separated from `total` above by a guard clause
 		const { onProgress, signal } = options;
+		const defaults = this.#deps.getPdfExportSettings?.() ?? {
+			mode: 'vector',
+			includeHiddenSlides: false,
+		};
+		const mountSlide = this.#deps.mountSlide;
+		const mode = mountSlide ? (options.mode ?? defaults.mode) : 'pictures';
+		if (mode === 'vector' && mountSlide) {
+			this.exporting = true;
+			try {
+				const baseName = resolveExportBaseName(this.#deps.fileName);
+				await runPdfExport({
+					settings: {
+						mode,
+						includeHiddenSlides: options.includeHiddenSlides ?? defaults.includeHiddenSlides,
+					},
+					vector: {
+						document,
+						slides: this.#deps.getSlides(),
+						canvasSize: this.#deps.getCanvasSize(),
+						mountSlide,
+						rasterScale: 2 * (this.#deps.getImageResolutionScale?.() ?? 1),
+						title: baseName,
+						...(options.from !== undefined ? { from: options.from } : {}),
+						...(options.to !== undefined ? { to: options.to } : {}),
+						...(options.slideIndexes ? { slideIndexes: options.slideIndexes } : {}),
+						...(signal ? { signal } : {}),
+						...(onProgress ? { onProgress } : {}),
+					},
+					pictures: () => Promise.resolve(),
+					save: (blob) => downloadBlob(blob, `${baseName}.pdf`),
+					onApproximated: (result) => {
+						options.onReport?.(result);
+						this.#deps.onPdfExportReport?.(result);
+					},
+					...(this.#deps.notify ? { notify: (toast) => this.#deps.notify?.(toast) } : {}),
+				});
+			} finally {
+				this.exporting = false;
+			}
+			return;
+		}
 		this.exporting = true;
 		try {
 			const { jsPDF } = await import('jspdf'),
@@ -287,6 +357,7 @@ export class ExportController {
 					getIncludeHiddenSlides: this.#deps.getIncludeHiddenSlides,
 					getPrintHighQuality: this.#deps.getPrintHighQuality,
 					getHandoutMaster: () => this.#deps.getDeckData?.()?.handoutMaster,
+					getTranslator: this.#deps.getTranslator,
 				},
 				options,
 			);

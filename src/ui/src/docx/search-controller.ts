@@ -1,12 +1,30 @@
-import { closeHistory } from 'prosemirror-history';
-import { Fragment, type Mark, type Node as ProseMirrorNode } from 'prosemirror-model';
-import { TextSelection } from 'prosemirror-state';
+import { NodeSelection, TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { expectDefined, insertedTextMarks } from 'ooxml-core/docx/ui';
+import { expectDefined, FindPatternError, type FindOptions } from 'ooxml-core/docx/ui';
+import { findDocumentMatches } from './search-document';
+import {
+	findUnitMatches,
+	mainUnits,
+	searchUnits,
+	type SearchUnit,
+	type StoryMatch,
+} from './search-stories';
+import { applyReplacements, type SearchStoryHost } from './search-story-replace';
+
+export type { SearchStoryHost } from './search-story-replace';
 
 export interface SearchMatch {
 	from: number;
 	to: number;
+}
+
+/** The story a match is in: what the Find dialog names beside its count. */
+export interface SearchStoryInfo {
+	readonly kind: 'main' | 'footnote' | 'endnote' | 'textBoxes' | 'header' | 'footer';
+	/** Headers and footers: `default`, `first` or `even`. */
+	readonly slot?: 'default' | 'first' | 'even';
+	/** Headers and footers: the zero-based section that owns the part. */
+	readonly sectionIndex?: number;
 }
 
 export interface SearchStatus {
@@ -14,157 +32,118 @@ export interface SearchStatus {
 	count: number;
 	active: number;
 	readOnly: boolean;
+	/** The query is a wildcard pattern Word would reject; nothing matches it. */
+	invalid: boolean;
+	/** The story of the active match, when there is one. */
+	story?: SearchStoryInfo;
 }
 
-type Segment = { text: string; from: number };
+/** The Find options of the dialog: Match case, whole words, wildcards and the rest of More >>. */
+export type SearchOptions = FindOptions;
 
-function escapedLiteral(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A match Find selected outside an editor caret (a text box, a story it could not open). */
+interface Placed {
+	readonly key: string;
+	readonly from: number;
+	readonly to: number;
+	/** The body selection right after placing it; any other selection means the user moved on. */
+	readonly body: SearchMatch;
 }
 
-function graphemeBoundaries(value: string): Set<number> {
-	const boundaries = new Set<number>([0, value.length]);
-	if (typeof Intl.Segmenter === 'function') {
-		const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-		for (const part of segmenter.segment(value)) boundaries.add(part.index);
-		return boundaries;
-	}
-	for (let index = 0; index < value.length;) {
-		const point = value.codePointAt(index)!;
-		index += point > 0xffff ? 2 : 1;
-		while (index < value.length && /\p{Mark}/u.test(value.charAt(index))) index++;
-		boundaries.add(index);
-	}
-	return boundaries;
-}
-
-function paragraphSegments(node: ProseMirrorNode, pos: number): Segment[] {
-	const segments: Segment[] = [];
-	let value = '';
-	let from = -1;
-	const flush = () => {
-		if (value) segments.push({ text: value, from });
-		value = '';
-		from = -1;
-	};
-	node.forEach((child, offset) => {
-		if (!child.isText) {
-			flush();
-			return;
-		}
-		if (!child.text) return;
-		if (from < 0) from = pos + 1 + offset;
-		value += child.text;
-	});
-	flush();
-	return segments;
-}
-
-// A soft hyphen (`w:softHyphen`) shows only where a line breaks at it, so Find skips it.
-const SOFT_HYPHEN = '\u00AD';
-
-/** `text` without its soft hyphens, and the offset in `text` of each character that is left. */
-function withoutSoftHyphens(text: string): { text: string; offsets: number[] } {
-	let kept = '';
-	const offsets: number[] = [];
-	for (let index = 0; index < text.length; index++) {
-		if (text[index] === SOFT_HYPHEN) continue;
-		kept += text[index];
-		offsets.push(index);
-	}
-	return { text: kept, offsets };
-}
-
-function collectMatches(
-	doc: ProseMirrorNode,
-	query: string,
-	caseSensitive: boolean,
-): SearchMatch[] {
-	const literal = query.replaceAll(SOFT_HYPHEN, '');
-	if (!literal) return [];
-	const expression = new RegExp(escapedLiteral(literal), caseSensitive ? 'gu' : 'giu');
-	const matches: SearchMatch[] = [];
-	doc.descendants((node, pos) => {
-		if (node.type.name !== 'paragraph') return;
-		for (const segment of paragraphSegments(node, pos)) {
-			const boundaries = graphemeBoundaries(segment.text);
-			const { text, offsets } = withoutSoftHyphens(segment.text);
-			expression.lastIndex = 0;
-			for (const match of text.matchAll(expression)) {
-				// The match in the segment, with the soft hyphens inside it but none at its ends.
-				const start = offsets[match.index]!;
-				const end = offsets[match.index + match[0].length - 1]! + 1;
-				if (boundaries.has(start) && boundaries.has(end))
-					matches.push({ from: segment.from + start, to: segment.from + end });
-			}
-		}
-		return false;
-	});
-	return matches;
-}
-
-function marksAt(doc: ProseMirrorNode, pos: number): readonly Mark[] {
-	const $pos = doc.resolve(pos);
-	if ($pos.nodeAfter?.isText) return $pos.nodeAfter.marks;
-	if ($pos.nodeBefore?.isText) return $pos.nodeBefore.marks;
-	return $pos.marks();
-}
-
+/**
+ * Find and Replace over the body and, given a story host, the other stories in Word's order (see
+ * `findStories`): Find Next runs off the end of one story into the next and wraps to the body.
+ */
 export class SearchController {
 	private query = '';
-	private caseSensitive = false;
-	private matches: SearchMatch[] = [];
+	private options: SearchOptions = {};
+	private units: SearchUnit[] = [];
+	private matches: StoryMatch[] = [];
 	private activeIndex = -1;
+	private invalid = false;
+	private placed: Placed | undefined;
 
-	constructor(private readonly getView: () => EditorView | undefined) {}
+	constructor(
+		private readonly getView: () => EditorView | undefined,
+		private readonly stories?: SearchStoryHost,
+	) {}
 
 	get status(): SearchStatus {
+		const story = this.matches[this.activeIndex]?.unit.story;
 		return {
 			query: this.query,
 			count: this.matches.length,
 			active: this.activeIndex < 0 ? 0 : this.activeIndex + 1,
 			readOnly: !this.getView()?.editable,
+			invalid: this.invalid,
+			...(story && {
+				story:
+					story.kind === 'header' || story.kind === 'footer'
+						? { kind: story.kind, slot: story.slot, sectionIndex: story.sectionIndex }
+						: { kind: story.kind },
+			}),
 		};
 	}
 
-	search(query: string, caseSensitive = this.caseSensitive): SearchStatus {
+	search(query: string, options: SearchOptions = this.options): SearchStatus {
 		this.query = query;
-		this.caseSensitive = caseSensitive;
-		this.matches = this.currentMatches();
-		this.activeIndex = this.indexAtSelection();
-		return this.status;
+		this.options = options;
+		return this.refresh();
 	}
 
 	refresh(): SearchStatus {
-		this.matches = this.currentMatches();
+		const view = this.getView();
+		this.matches = [];
+		this.units = [];
+		this.invalid = false;
+		if (view && this.query) {
+			const open = this.stories?.openStory();
+			const units = (this.units = this.stories
+				? searchUnits(
+						view.state.doc,
+						this.stories.model(),
+						open && { key: open.key, doc: open.view.state.doc },
+					)
+				: mainUnits(view.state.doc));
+			try {
+				this.matches = findUnitMatches(units, this.query, this.options);
+			} catch (error) {
+				if (!(error instanceof FindPatternError)) throw error;
+				this.invalid = true;
+			}
+		}
 		this.activeIndex = this.indexAtSelection();
 		return this.status;
 	}
 
 	findNext(): SearchMatch | null {
-		const view = this.getView();
 		this.refresh();
-		if (!view || !this.matches.length) return null;
+		if (!this.getView() || !this.matches.length) return null;
 		let next = this.activeIndex + 1;
 		if (this.activeIndex < 0) {
-			const cursor = view.state.selection.from;
-			next = this.matches.findIndex((match) => match.from >= cursor);
+			const cursor = this.cursor();
+			next = this.matches.findIndex(
+				(match) =>
+					match.order > cursor.order || (match.order === cursor.order && match.from >= cursor.pos),
+			);
 			if (next < 0) next = 0;
 		}
 		return this.select(next % this.matches.length);
 	}
 
 	findPrevious(): SearchMatch | null {
-		const view = this.getView();
 		this.refresh();
-		if (!view || !this.matches.length) return null;
+		if (!this.getView() || !this.matches.length) return null;
 		let previous = this.activeIndex - 1;
 		if (this.activeIndex < 0) {
-			const cursor = view.state.selection.from;
+			const cursor = this.cursor();
 			previous = -1;
 			for (let index = this.matches.length - 1; index >= 0; index--) {
-				const match = this.matches[index];
-				if (match && match.from < cursor) {
+				const match = this.matches[index]!;
+				if (
+					match.order < cursor.order ||
+					(match.order === cursor.order && match.from < cursor.pos)
+				) {
 					previous = index;
 					break;
 				}
@@ -181,8 +160,7 @@ export class SearchController {
 		if (this.activeIndex < 0 && !this.findNext()) return false;
 		const match = this.matches[this.activeIndex];
 		if (!match) return false;
-		this.replace(view, [match], replacement);
-		return true;
+		return this.replace(view, [match], replacement) > 0;
 	}
 
 	replaceAll(replacement: string): number {
@@ -190,77 +168,95 @@ export class SearchController {
 		if (!view?.editable || !this.query) return 0;
 		this.refresh();
 		if (!this.matches.length) return 0;
-		const targets = [...this.matches];
-		this.replace(view, targets, replacement);
-		return targets.length;
+		if (this.matches.some((match) => match.unit.key !== 'main')) this.stories?.closeStory();
+		return this.replace(view, [...this.matches], replacement);
 	}
 
-	private currentMatches(): SearchMatch[] {
-		const view = this.getView();
-		return view ? collectMatches(view.state.doc, this.query, this.caseSensitive) : [];
+	/** The open story's selection, a placed match, or the body caret, as a search-order position. */
+	private cursor(): { order: number; pos: number } {
+		const orderOf = (key: string) => this.units.findIndex((unit) => unit.key === key);
+		const open = this.stories?.openStory();
+		if (open && orderOf(open.key) >= 0)
+			return { order: orderOf(open.key), pos: open.view.state.selection.from };
+		const placed = this.currentPlaced();
+		if (placed && orderOf(placed.key) >= 0) return { order: orderOf(placed.key), pos: placed.from };
+		return { order: 0, pos: this.getView()?.state.selection.from ?? 0 };
+	}
+
+	private currentPlaced(): Placed | undefined {
+		const selection = this.getView()?.state.selection;
+		const placed = this.placed;
+		if (!selection || !placed || this.stories?.openStory()) return undefined;
+		return selection.from === placed.body.from && selection.to === placed.body.to
+			? placed
+			: undefined;
 	}
 
 	private indexAtSelection(): number {
+		const same = (key: string, range: SearchMatch) => (match: StoryMatch) =>
+			match.unit.key === key && match.from === range.from && match.to === range.to;
+		const open = this.stories?.openStory();
+		if (open) return this.matches.findIndex(same(open.key, open.view.state.selection));
+		const placed = this.currentPlaced();
+		if (placed) return this.matches.findIndex(same(placed.key, placed));
 		const selection = this.getView()?.state.selection;
-		if (!selection) return -1;
-		return this.matches.findIndex(
-			(match) => match.from === selection.from && match.to === selection.to,
-		);
+		return selection ? this.matches.findIndex(same('main', selection)) : -1;
 	}
 
 	private select(index: number): SearchMatch {
 		const view = this.getView()!;
 		const match = expectDefined(this.matches[index], 'search match');
-		this.activeIndex = index;
-		view.dispatch(
-			view.state.tr
-				.setSelection(TextSelection.create(view.state.doc, match.from, match.to))
-				.scrollIntoView(),
-		);
+		const { unit } = match;
+		const place = (body: SearchMatch) => {
+			this.placed = { key: unit.key, from: match.from, to: match.to, body };
+		};
+		this.placed = undefined;
+		// Selecting re-enters `refresh` through the editor's change handlers, so the placed match is
+		// recorded before the dispatch and the active index is settled again afterwards.
+		if (unit.key === 'main' || unit.textBoxPos !== undefined) {
+			this.stories?.closeStory();
+			const { doc } = view.state;
+			let selection: TextSelection | NodeSelection;
+			if (unit.textBoxPos === undefined)
+				selection = TextSelection.create(doc, match.from, match.to);
+			else {
+				selection = NodeSelection.create(doc, unit.textBoxPos);
+				place({ from: selection.from, to: selection.to });
+			}
+			view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
+		} else {
+			this.stories?.showStory(unit.story, match.from, match.to);
+			const { from, to } = view.state.selection;
+			if (this.stories?.openStory()?.key !== unit.key) place({ from, to });
+		}
+		const settled = this.indexAtSelection();
+		this.activeIndex = settled < 0 ? index : settled;
 		return match;
 	}
 
-	private replace(view: EditorView, matches: SearchMatch[], replacement: string): void {
-		const { state } = view;
-		let transaction = state.tr;
-		for (const match of [...matches].sort((left, right) => right.from - left.from)) {
-			const marks = marksAt(state.doc, match.from);
-			const content = replacementFragment(state.schema, replacement, marks);
-			transaction = transaction.replaceWith(match.from, match.to, content);
+	/** Replaces the matches, one undoable step per story; the count replaced, 0 if invalid. */
+	private replace(view: EditorView, matches: StoryMatch[], replacement: string): number {
+		try {
+			const count = applyReplacements(view, this.stories, matches, {
+				replacement,
+				wildcards: Boolean(this.options.wildcards),
+			});
+			this.placed = undefined;
+			this.refresh();
+			return count;
+		} catch (error) {
+			if (!(error instanceof FindPatternError)) throw error;
+			this.invalid = true;
+			return 0;
 		}
-		const last = matches[0];
-		if (!last) return;
-		const cursor =
-			last.from +
-			replacementFragment(state.schema, replacement, marksAt(state.doc, last.from)).size;
-		transaction = transaction.setSelection(TextSelection.create(transaction.doc, cursor));
-		view.dispatch(closeHistory(transaction.scrollIntoView()));
-		this.refresh();
 	}
 }
 
-function replacementFragment(
-	schema: EditorView['state']['schema'],
-	replacement: string,
-	marks: readonly Mark[],
-): Fragment {
-	if (!replacement) return Fragment.empty;
-	const lines = replacement.split(/\r\n|\r|\n/);
-	const content: ProseMirrorNode[] = [];
-	lines.forEach((line, index) => {
-		if (line) content.push(schema.text(line, insertedTextMarks(marks, line)));
-		if (index < lines.length - 1)
-			content.push(
-				expectDefined(schema.nodes.hardBreak, 'hardBreak node type').create(null, null, marks),
-			);
-	});
-	return Fragment.fromArray(content);
-}
-
+/** Every match of a query in the document, as ranges (Find without its replacement details). */
 export function findTextMatches(
-	doc: ProseMirrorNode,
+	doc: Parameters<typeof findDocumentMatches>[0],
 	query: string,
-	caseSensitive = false,
+	options: SearchOptions = {},
 ): SearchMatch[] {
-	return collectMatches(doc, query, caseSensitive);
+	return findDocumentMatches(doc, query, options).map(({ from, to }) => ({ from, to }));
 }

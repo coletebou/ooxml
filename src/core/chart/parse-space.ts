@@ -3,6 +3,7 @@
 import { NS, buildXml, children, first, parseXml, relAttr, type XmlElement } from '../xml/index';
 import type { ChartLegend, ChartSpace, ChartSpaceParseResult, ChartView3D } from './model';
 import { parseSurface } from './parse-chrome';
+import { parseChartProtection } from './protection';
 import { parsePlotArea } from './parse-plot';
 import { parseTitle } from './parse-text';
 import { CHART_ROOT_BINDINGS } from './xml-fragment';
@@ -99,6 +100,7 @@ function namespaceDeclarations(root: XmlElement): { prefix: string; uri: string 
 const CHART = new Set([
 	'title',
 	'autoTitleDeleted',
+	'pivotFmts',
 	'view3D',
 	'floor',
 	'sideWall',
@@ -111,11 +113,13 @@ const CHART = new Set([
 	'extLst',
 ]);
 const SPACE = new Set([
+	'protection',
 	'date1904',
 	'lang',
 	'roundedCorners',
 	'AlternateContent',
 	'style',
+	'clrMapOvr',
 	'chart',
 	'spPr',
 	'txPr',
@@ -136,7 +140,7 @@ export function parseChartSpace(source: string | XmlElement): ChartSpaceParseRes
 	if (root.localName !== 'chartSpace' || (root.namespaceURI && root.namespaceURI !== NS.c)) {
 		context.issues.push({
 			code: 'CHART_ROOT_UNEXPECTED',
-			message: `The part root is {${root.namespaceURI ?? ''}}${root.localName}, not c:chartSpace (chartex parts are not modelled).`,
+			message: `The part root is {${root.namespaceURI ?? ''}}${root.localName}, not c:chartSpace (chartex parts are read by parseChartExSpace).`,
 		});
 		return { chartSpace: { plotArea: { groups: [], axes: [] } }, issues: context.issues };
 	}
@@ -149,16 +153,21 @@ export function parseChartSpace(source: string | XmlElement): ChartSpaceParseRes
 	const legend = cChild(chart, 'legend');
 	const view3D = cChild(chart, 'view3D');
 	const printSettings = cChild(root, 'printSettings');
+	const colorMap = cChild(root, 'clrMapOvr');
+	const pivotFormats = cChild(chart, 'pivotFmts');
 	const chartSpace = assignDefined<ChartSpace>(
 		{ plotArea: parsePlotArea(context, cChild(chart, 'plotArea')) },
 		{
 			date1904: cBool(context, root, 'date1904'),
+			protection: parseChartProtection(context, cChild(root, 'protection')),
 			language: cVal(root, 'lang'),
 			roundedCorners: cBool(context, root, 'roundedCorners'),
+			colorMapOverrideXml: colorMap ? buildXml(colorMap) : undefined,
 			style: chartStyle(context, root),
 			c14Style: c14Style(root),
 			title: title ? parseTitle(context, title) : undefined,
 			autoTitleDeleted: cBool(context, chart, 'autoTitleDeleted'),
+			pivotFormatsXml: pivotFormats ? buildXml(pivotFormats) : undefined,
 			view3D: view3D ? parseView3D(context, view3D) : undefined,
 			floor: parseSurface(context, cChild(chart, 'floor')),
 			sideWall: parseSurface(context, cChild(chart, 'sideWall')),

@@ -1,4 +1,5 @@
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
+export { mergeDocxSnapshots } from './merge-snapshots';
 export * from './model';
 export * from './highlight';
 export { LIGATURE_VALUES, isLigatures, type Ligatures } from './ligatures';
@@ -11,6 +12,7 @@ export {
 export * from './underline';
 export { parseRunStyleCatalog } from './character-styles';
 export { parseTableStyleCatalog } from './table-styles';
+export { resolveTableCellMargins } from './table-margins';
 export { resolveTableStyleFormatting } from './resolve-table';
 export { resolveRunFormatting, type RunFormattingContext } from './run-formatting';
 export { parseTheme, parseColorSchemeMapping } from './theme';
@@ -31,8 +33,36 @@ export {
 	type DocxDiagramRendering,
 } from './diagram';
 export { diagramsIn } from './diagram-document';
-export { CHART_GRAPHIC_URI, CHART_NOTICE, chartsIn, type DocxChart } from './chart';
+export {
+	changeDocxDiagramLayout,
+	formatDocxDiagram,
+	createDocxDiagram,
+	editDocxDiagram,
+	insertedDiagramPartNames,
+	withDiagramNodes,
+	type DocxDiagramCreation,
+	type DocxDiagramEdit,
+	type DocxDiagramEditResult,
+} from './diagram-edit';
+export { treeOrderDiagramNodes } from './diagram-nodes';
+export {
+	CHART_GRAPHIC_URI,
+	CHART_NOTICE,
+	chartsIn,
+	documentDrawingBlocks,
+	type DocxChart,
+} from './chart';
 export { docxChartPaint, themeCatalogColorScheme, type DocxChartPaint } from './chart-paint';
+export {
+	applyDocxChartDataSheetEdits,
+	docxChartDataSheet,
+	editDocxChart,
+	isDocxChartEditable,
+	isNewDocxChart,
+	newChartImage,
+	newDocxChart,
+	NEW_CHART_SIZE_PX,
+} from './chart-edit';
 export { diagramColorTheme, resolveDiagramColor } from './diagram-theme';
 export { saveDocx } from './save';
 export {
@@ -43,6 +73,21 @@ export {
 } from './validate-model';
 export * from './numbering-model';
 export { parseNumberingCatalog, resolveNumberingLevel } from './numbering-parse';
+export { pictureBulletSizePt } from './numbering-picture';
+export {
+	DRAWING_WRAPS,
+	drawingWrapOf,
+	placementForWrap,
+	setDrawingWrap,
+	type DrawingWrap,
+	type FloatOrigin,
+} from './drawing-wrap';
+export {
+	isValidPictureCrop,
+	pictureCropOf,
+	setPictureCrop,
+	uncroppedPictureSize,
+} from './picture-crop-edit';
 export {
 	computeListLabels,
 	displayListLabel,
@@ -54,10 +99,21 @@ export { setListStartOverride } from './numbering-start-edit';
 export {
 	ensureListDefinition,
 	createListDefinition,
+	createPictureBulletList,
 	linkStylesToList,
 	type ListKind,
 } from './numbering-editing';
 export { formatNoteNumber, numberNotesInOrder } from './notes';
+export { PICTURE_WATERMARK_SCALES, pictureWatermarkSizePt } from './picture-watermark';
+export {
+	convertNoteRun,
+	convertNotes,
+	planNoteConversion,
+	retargetNoteReference,
+	type NoteConversion,
+	type NoteConversionPlan,
+	type NoteSelection,
+} from './note-convert';
 export * from './review-formatting-display';
 export * from './review-document-formatting';
 export {
@@ -69,6 +125,17 @@ export {
 	rejectRevision,
 	type RevisionEntry,
 } from './revision-commands';
+export {
+	compareDocuments,
+	UNCOMPARED_DOCUMENT_PARTS,
+	revisionSpans,
+	type CompareDocumentsOptions,
+	type CompareDocumentsResult,
+	type CompareGranularity,
+	type CompareSummary,
+	type RevisionSpan,
+	type UncomparedDocumentPart,
+} from './compare/index';
 export { DEFAULT_TABLE_BORDERS } from './table-defaults';
 export { fieldName } from './field-runs';
 export { isFieldLocked } from './field-lock';
@@ -79,8 +146,16 @@ export {
 	type StyleRefSource,
 	type StyleReference,
 } from './style-ref';
-export { fieldResultRun, withFieldCodeFormatting } from './style-ref-fields';
+export { fieldResultRun, withFieldCodeFormatting } from './field-result-spans';
 export { bodyStyleRefResult, refreshStyleRefFields } from './style-ref-fields';
+export {
+	COMPUTED_FIELD_NAMES,
+	computedFields,
+	refreshComputedFields,
+	type ComputedFieldResult,
+	type ComputedFields,
+} from './computed-fields';
+export { docPropertyResult, fieldProperties } from './doc-property-field';
 export {
 	listFormFields,
 	type FormFieldChoice,
@@ -107,7 +182,22 @@ export {
 	tocCaptionLabel,
 } from './table-of-figures';
 export * from './document-stats';
+export {
+	INSPECTION_CATEGORIES,
+	inspectDocument,
+	type CategoryInspection,
+	type InspectionCategory,
+	type InspectionFinding,
+	type InspectionFindingKind,
+} from './inspect-document';
+export { removeDocumentInformation } from './remove-document-information';
+export type { PackageInformation } from './package-information';
 export * from './column-settings';
+export {
+	createProtectionPassword,
+	enforceProtection,
+	verifyProtectionPassword,
+} from './protection';
 export * from './line-spacing';
 export * from './section-layout';
 export * from './attr-units';
@@ -128,3 +218,6 @@ export { parseContentControl } from './content-control';
 export * from './shape-model';
 export * from './shape-palette';
 export { shapeSvg, shapeAppearance, shapeColorCss, shapeTextColor } from './shape-svg';
+
+export * from './chart-ex-edit';
+export * from './clipboard/index';

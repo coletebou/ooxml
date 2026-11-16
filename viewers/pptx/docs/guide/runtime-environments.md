@@ -23,6 +23,54 @@ These are not gaps to be closed: they follow directly from running inside a brow
 
 A browser has no font catalogue of its own to draw on the way the desktop app does, so `pptx-viewer` resolves each deck font in three steps: use it as-is when the reader's machine has it installed, otherwise fetch its verified metric-compatible clone from Google Fonts before layout (Calibri -> Carlito, Cambria -> Caladea, Arial -> Arimo, Times New Roman -> Tinos, Courier New -> Cousine, Georgia -> Gelasio, so line breaks and text extents still match PowerPoint), and only when neither exists fall back through PANOSE classification to a same-class generic font, which can shift metrics.
 
+While a deck loads, the viewer waits briefly (150 ms) for the Google Fonts faces its slides draw, so cached faces never appear in a stand-in first. A first download on a slow network does not hold the deck back: after 150 ms, or at once when the request fails (offline, blocked), the deck is shown with metric-compatible substitutes, the status bar reads "Downloading fonts (1 of 2)" while the download runs, and a late face is laid out again when it arrives. Installed and embedded fonts need no wait.
+
+The Home font dropdown in all five bindings also lists supported Google Fonts weights,
+for example `DM Sans Light`, `DM Sans Medium` and `DM Sans SemiBold`. Regular keeps the
+plain family name; choosing a weight preserves that name on save. The bundled metadata
+does not invent faces for unknown, embedded or custom fonts. Hosts can opt into the same
+`{ family, weight }` variants with `buildFontCatalog({ includeWeightVariants: true })` from
+`ooxml-ui/pptx/render/font-catalog`, without importing the editor. The default catalogue
+output is unchanged. See the [font-picker API table](https://github.com/ChristopherVR/ooxml/blob/main/docs/font-loading.md#font-picker-weights).
+
+### Fonts and privacy {#fonts-and-privacy}
+
+Fetching a clone from Google Fonts means the reader's browser contacts `fonts.googleapis.com` and `fonts.gstatic.com`, which reveals the reader's IP address to Google. By default the reader decides with the File > Options > Trust Center option "Download fonts that are not installed or embedded (Google Fonts)", which is on. Turning it off applies at once to the open deck (the viewer removes its webfont stylesheet) and to every later load, and the choice is saved with the other options. A host can decide instead with the `googleFonts` option, available on every binding:
+
+- unset (the default): the Trust Center option decides; when it is on, clones are loaded from Google Fonts as described above;
+- `googleFonts: false`: no request goes to Google; text uses installed fonts, fonts embedded in the deck, or the PANOSE fallback, so line breaks can differ from PowerPoint. The Trust Center option is shown off and read-only;
+- `googleFonts: { baseUrl: 'https://fonts.example.com/css2' }`: the same CSS2 request goes to a self-hosted mirror instead, and the Trust Center option is shown on and read-only. The mirror must answer the Google Fonts CSS2 query format (`?family=...&display=swap`) with compatible `@font-face` CSS, and its font files should be self-hosted too so no request reaches Google. A `baseUrl` that is not an absolute `http(s)` URL turns the fallback off (the option is then shown off and read-only) and logs a warning.
+
+The option also governs the WordArt glyph-outline fetch and the webfonts inlined into slide image exports, since both reuse the stylesheet URL the viewer resolved. Both read the CSS and font files with `fetch()`, so a mirror must send CORS headers (`Access-Control-Allow-Origin`) for them to work, as Google's own servers do.
+
+How the viewer picks a face for each run, and how it waits for downloads, is described in [font loading](https://github.com/ChristopherVR/ooxml/blob/main/docs/font-loading.md). Every request the packages can make is listed in [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
+### External content and privacy {#external-content-and-privacy}
+
+A deck can link pictures (including picture fills and picture bullets), videos, audio and poster frames to other servers (`TargetMode="External"` relationships) instead of embedding them. Opening such a deck makes the reader's browser fetch them, which tells whoever runs that server the reader's IP address and that the deck was opened. By default the Trust Center option "Allow external content" decides, and it is on. A host can decide instead with the `allowExternalContent` option, available on every binding:
+
+- unset (the default): the Trust Center option decides;
+- `allowExternalContent: false`: no linked content is fetched, so slides show embedded content only, and the Trust Center option is shown off and read-only;
+- `allowExternalContent: true`: linked content is fetched, and the option is shown on and read-only.
+
+The value applies to every deck the viewer opens, including decks opened for Compare and slides reused from another file; a change applies from the next load. Hyperlinks are not affected: they open only when the reader follows them. Fonts are separate: deck fonts that are neither installed nor embedded load from Google Fonts unless the Trust Center option "Download fonts that are not installed or embedded" or the `googleFonts` option turns that off (see [Fonts and privacy](#fonts-and-privacy)).
+
+In a collaboration session, slides arrive from peers already parsed, and the switch is not applied to them again: a peer whose viewer allows external content can share a slide that references a linked URL. Use the same `allowExternalContent` value for every participant when this matters.
+
+### Load limits {#load-limits}
+
+A host that opens decks it does not trust (uploads from the public, attachments) can bound the work one deck may cause with the `limits` option, available on every binding and passed straight to `PptxHandler.load`:
+
+| Field                  | Default  | Bounds                                                                                         |
+| ---------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `maxInputBytes`        | no limit | The file as given to the viewer, checked before it is opened.                                  |
+| `maxUncompressedBytes` | 500 MiB  | The archive once inflated, checked from the declared sizes and again while each part is read.  |
+| `maxEntries`           | 65,536   | The parts (ZIP entries) in the archive; 65,536 is also the highest value accepted.             |
+| `maxSlides`            | no limit | The slides listed in `ppt/presentation.xml`, checked before any slide is parsed.               |
+| `maxShapes`            | no limit | The elements authored on the slides (group members included), counted as each slide is parsed. |
+
+Unset, or a field left out, keeps the default, so a viewer without `limits` behaves as before. A deck over a limit stops loading at that check and the viewer shows its load-error screen with a localized message that names the limit and the deck's value, for example "This presentation has 120 slides, more than the 100 this viewer accepts." A value that is not a positive finite number is rejected as an error rather than ignored. The limits apply to the deck the viewer opens (the `content` / `source` deck and File > Open), not to a file the user picks for Compare or Reuse Slides; a change applies from the next load. Without the viewer, pass the same object as `handler.load(buffer, { limits })` (see [Load options](../core/loading.md#load-options)).
+
 ### Run program actions (`ppaction://program`)
 
 PowerPoint's "Run program" action setting is parsed and round-tripped losslessly (the authored program path/command survives load and save unchanged), and the Action Settings dialog lets you view and edit it like any other action while editing. What a browser cannot do is what PowerPoint itself does when the action fires during a show: launch a local executable. No web platform API exists for that, by design (a page that could launch arbitrary local programs would be a critical security hole).

@@ -148,7 +148,6 @@ export const translations = {
 	'pptx.hyperlinkDialog.apply': 'Anwenden',
 	'pptx.linkTooltip.followLink': 'Strg+Klicken, um dem Link zu folgen',
 	'pptx.linkTooltip.presentationMode': 'Aktiv im Präsentationsmodus',
-	'pptx.properties.title': 'Dokumenteigenschaften',
 	'pptx.properties.titleLabel': 'Titel',
 	'pptx.properties.author': 'Autor',
 	'pptx.properties.subject': 'Thema',
@@ -193,8 +192,6 @@ export const translations = {
 	'pptx.review.translate': 'Übersetzen',
 	'pptx.review.translateTooltip': 'Ausgewählten Text übersetzen',
 	'pptx.shortcuts.action.cancelTextEdit': 'Inline-Textbearbeitung abbrechen / Menüs schließen',
-	'pptx.shortcuts.action.clearSelection':
-		'Auswahl aufheben / Menüs schließen / Bearbeitung abbrechen',
 	'pptx.shortcuts.action.commitTextEdit': 'Inline-Textbearbeitung bestätigen',
 	'pptx.shortcuts.action.copyElement': 'Ausgewähltes Element kopieren',
 	'pptx.shortcuts.action.cutElement': 'Ausgewähltes Element ausschneiden',
@@ -205,7 +202,6 @@ export const translations = {
 	'pptx.shortcuts.action.nudgeElementLarge': 'Ausgewähltes Element weit verschieben',
 	'pptx.shortcuts.action.pasteElement': 'Element einfügen',
 	'pptx.shortcuts.action.prevSlide': 'Vorherige Folie (ohne Auswahl)',
-	'pptx.shortcuts.action.redoAlternate': 'Wiederholen (alternativ)',
 	'pptx.shortcuts.action.selectAll': 'Alle Elemente auswählen',
 	'pptx.shortcuts.action.zoomCanvas': 'Arbeitsbereich zoomen',
 	'pptx.shortcuts.close': 'Schließen',
@@ -260,6 +256,7 @@ export const translations = {
 	'pptx.hyperlink.actionOleVerb': 'Objektaktion',
 	'pptx.hyperlink.actionRunProgram': 'Programm ausführen',
 	'pptx.colorPicker.recentColors': 'Zuletzt verwendete Farben',
+	'pptx.colorPicker.recentColor': 'Zuletzt verwendete Farbe {{hex}}',
 	'pptx.colorPicker.customColors': 'Benutzerdefinierte Farben',
 	'pptx.comments.mentionPlaceholder': 'Tippe @, um jemanden zu erwähnen',
 	'pptx.comments.mentionSuggestions': 'Personen',
@@ -320,6 +317,10 @@ export const translations = {
 		'Ein Folienübergangston konnte nicht gespeichert werden und wurde übersprungen.',
 	'pptx.compatibility.diagramRelationshipIdsIncomplete':
 		'Diesem SmartArt-Diagramm fehlen einige interne Verweise, sodass es möglicherweise nicht genau wie ursprünglich erstellt angezeigt wird.',
+	'pptx.compatibility.embeddedFontRestricted':
+		'Die Lizenz einer eingebetteten Schriftart erlaubt ihre Verwendung nicht, daher wird eine Ersatzschrift angezeigt. Ihre Schriftdaten bleiben in der Datei.',
+	'pptx.compatibility.embeddedFontNotEmbeddable':
+		'Eine Schriftart wurde nicht eingebettet, weil ihre Lizenz das Einbetten in eine bearbeitbare Präsentation nicht erlaubt.',
 	'pptx.compatibility.exportBackendUnavailable':
 		'Der Export in dieses Format ist in der aktuellen Umgebung nicht verfügbar.',
 } as const;

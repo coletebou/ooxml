@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { componentSource } from './component-source.test-support';
 import {
+	armSlideEntryAutoAdvance,
 	attachShowVisibilityPause,
 	clampIndex,
 	endShowMediaCleanup,
@@ -14,6 +15,7 @@ import {
 	nextVisibleIndex,
 	prevVisibleIndex,
 	resolveSlideAutoAdvanceMs,
+	resolveSlideEntryAutoAdvanceMs,
 	shouldBlockClickAdvance,
 } from './presentation-overlay-helpers';
 
@@ -102,6 +104,92 @@ describe('resolveSlideAutoAdvanceMs', () => {
 
 	it('schedules nothing once the end-of-show screen is up', () => {
 		expect(resolveSlideAutoAdvanceMs(timed(2500), true, true)).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// resolveSlideEntryAutoAdvanceMs
+// ---------------------------------------------------------------------------
+
+// Regression (issue #141): PowerPoint counts `After` from the END of a slide's
+// own transition. Armed on entry with the bare authored time, a slide set to
+// advance after 0 s moved on at once and the next transition replaced its
+// 700 ms fade, which then appeared in a single frame.
+describe('resolveSlideEntryAutoAdvanceMs', () => {
+	const timed = (advanceAfterMs: number, durationMs?: number): PptxSlide =>
+		slide({ transition: { type: 'fade', advanceAfterMs, durationMs } });
+
+	it('waits out the entry transition before a 0 s timer fires', () => {
+		expect(resolveSlideEntryAutoAdvanceMs(timed(0, 700), true, false)).toBe(700);
+	});
+
+	it('adds the transition to the authored time', () => {
+		expect(resolveSlideEntryAutoAdvanceMs(timed(2500, 700), true, false)).toBe(3200);
+	});
+
+	it('schedules nothing where the authored timer is off', () => {
+		expect(resolveSlideEntryAutoAdvanceMs(slide(), true, false)).toBeUndefined();
+		expect(resolveSlideEntryAutoAdvanceMs(timed(0, 700), false, false)).toBeUndefined();
+		expect(resolveSlideEntryAutoAdvanceMs(timed(0, 700), true, true)).toBeUndefined();
+	});
+});
+
+// The overlay's slide-change effect calls `armSlideEntryAutoAdvance` with its
+// navigator and the current slide, timings and end-of-show signals. A fake
+// navigator that schedules like the real one shows when the show moves on.
+describe('armSlideEntryAutoAdvance', () => {
+	function fakeNavigator() {
+		const advanced: number[] = [];
+		const armed: (number | undefined)[] = [];
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		return {
+			advanced,
+			armed,
+			armAutoAdvance(delayMs: number | undefined): void {
+				armed.push(delayMs);
+				clearTimeout(timer);
+				timer =
+					delayMs === undefined ? undefined : setTimeout(() => advanced.push(Date.now()), delayMs);
+			},
+		};
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ now: 0 });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const timed = (advanceAfterMs: number, durationMs: number): PptxSlide =>
+		slide({ transition: { type: 'fade', advanceAfterMs, durationMs } });
+
+	it('holds a 0 s slide for its whole entry transition', () => {
+		const navigator = fakeNavigator();
+		armSlideEntryAutoAdvance(navigator, timed(0, 700), true, false);
+		vi.advanceTimersByTime(699);
+		expect(navigator.advanced).toStrictEqual([]);
+		vi.advanceTimersByTime(1);
+		expect(navigator.advanced).toStrictEqual([700]);
+	});
+
+	it('advances after the transition plus the authored time', () => {
+		const navigator = fakeNavigator();
+		armSlideEntryAutoAdvance(navigator, timed(2500, 700), true, false);
+		vi.advanceTimersByTime(3199);
+		expect(navigator.advanced).toStrictEqual([]);
+		vi.advanceTimersByTime(1);
+		expect(navigator.advanced).toStrictEqual([3200]);
+	});
+
+	it('cancels the timer where the show is manual or over', () => {
+		const navigator = fakeNavigator();
+		armSlideEntryAutoAdvance(navigator, timed(0, 700), false, false);
+		armSlideEntryAutoAdvance(navigator, timed(0, 700), true, true);
+		vi.advanceTimersByTime(5000);
+		expect(navigator.armed).toStrictEqual([undefined, undefined]);
+		expect(navigator.advanced).toStrictEqual([]);
 	});
 });
 

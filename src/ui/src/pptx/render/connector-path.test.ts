@@ -7,9 +7,11 @@ import {
 	buildDashArray,
 	buildWrapperStyle,
 	connectorHitStrokeWidth,
+	connectorSnapTransform,
 	connectorWrapperTransform,
 	markerPath,
 } from './connector-path';
+import { connectorStrandScreenWidth } from './connector-style';
 
 describe('buildDashArray', () => {
 	it('returns undefined for solid / missing dashes', () => {
@@ -19,28 +21,30 @@ describe('buildDashArray', () => {
 
 	it('produces a distinct pattern per preset (not a single 3w/w approximation)', () => {
 		// Aligned with the shape/border `getSvgStrokeDasharray` output.
-		expect(buildDashArray('dot', 2)).toBe('2 4');
-		expect(buildDashArray('sysDot', 2)).toBe('2 4');
-		expect(buildDashArray('dash', 2)).toBe('8 4');
-		expect(buildDashArray('lgDash', 4)).toBe('28 10');
+		// Lengths measured from PowerPoint's own exports (see dash-pattern.ts).
+		expect(buildDashArray('dot', 2)).toBe('2 6');
+		expect(buildDashArray('sysDot', 2)).toBe('2 2');
+		expect(buildDashArray('dash', 2)).toBe('8 6');
+		expect(buildDashArray('sysDash', 2)).toBe('6 2');
+		expect(buildDashArray('lgDash', 4)).toBe('32 12');
 	});
 
 	it('emits multi-part patterns for dash-dot families', () => {
-		expect(buildDashArray('dashDot', 2)).toBe('8 4 2 4');
-		expect(buildDashArray('lgDashDotDot', 2)).toBe('14 5 2 4 2 4');
+		expect(buildDashArray('dashDot', 2)).toBe('8 6 2 6');
+		expect(buildDashArray('lgDashDotDot', 2)).toBe('16 6 2 6 2 6');
 	});
 
 	it('honours custDash segments (percent-of-width, 1000ths of a percent)', () => {
 		const segments = [
-			{ dash: 400, space: 300 },
-			{ dash: 100, space: 300 },
+			{ dash: 400000, space: 300000 },
+			{ dash: 100000, space: 300000 },
 		];
 		// custDash implies the custom family even without a prstDash token.
-		expect(buildDashArray(undefined, 2, segments)).toBe('0.8 0.6 0.2 0.6');
+		expect(buildDashArray(undefined, 2, segments)).toBe('8 6 2 6');
 	});
 
 	it('clamps sub-1px stroke widths to 1 before scaling', () => {
-		expect(buildDashArray('dot', 0)).toBe('1 2');
+		expect(buildDashArray('dot', 0)).toBe('1 3');
 	});
 });
 
@@ -267,5 +271,50 @@ describe('buildWrapperStyle', () => {
 		const style = buildWrapperStyle(el, 2);
 		expect(style).toContain('transform:rotate(45deg)');
 		expect(style).not.toContain('scale');
+	});
+});
+
+describe('connectorSnapTransform', () => {
+	const line = (over: Partial<PptxElement> = {}): PptxElement =>
+		({
+			type: 'connector',
+			id: 'c',
+			x: 27,
+			y: 27,
+			width: 373,
+			height: 0,
+			shapeType: 'straightConnector1',
+			shapeStyle: { strokeColor: '#000', strokeWidth: 1.3333 },
+			...over,
+		}) as PptxElement;
+
+	it('snaps a horizontal line in y and a vertical line in x', () => {
+		expect(buildConnectorGeometry(line(), 0).snapTransform).toMatch(/^translate\(0px, calc\(/u);
+		const vertical = buildConnectorGeometry(line({ width: 0, height: 200 }), 0);
+		expect(vertical.snapTransform).toMatch(/^translate\(calc\(.*\), 0px\)$/u);
+	});
+
+	it('ends a horizontal line at its real y, not at the 1px-floored SVG box', () => {
+		const geo = buildConnectorGeometry(line(), 0);
+		expect([geo.y1, geo.y2]).toEqual([0, 0]);
+	});
+
+	it('leaves diagonal, rotated, compound and bent lines unsnapped', () => {
+		expect(buildConnectorGeometry(line({ height: 80 }), 0).snapTransform).toBeUndefined();
+		expect(buildConnectorGeometry(line({ rotation: 30 }), 0).snapTransform).toBeUndefined();
+		expect(
+			buildConnectorGeometry(
+				line({ shapeStyle: { strokeColor: '#000', strokeWidth: 6, compoundLine: 'dbl' } }),
+				0,
+			).snapTransform,
+		).toBeUndefined();
+		expect(connectorSnapTransform(line(), false, 1, 1.3333)).toBeUndefined();
+	});
+
+	it('snaps a single strand but leaves compound strand widths unrounded', () => {
+		expect(connectorStrandScreenWidth([1.3333], 0.3333, 0)).toContain('round(0.3333px,');
+		expect(connectorStrandScreenWidth([1.3333], 0.3333, 0)).toContain('clamp(');
+		const compound = connectorStrandScreenWidth([2, 2, 2], 6, 1);
+		expect(compound).toBe('max(2px, var(--pptx-device-px, 0px))');
 	});
 });

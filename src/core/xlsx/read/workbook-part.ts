@@ -4,10 +4,32 @@ import {
 	parseCustomProperties,
 } from '../../opc/properties/index';
 import { parseXml, relAttr } from '../../xml/index';
-import type { DefinedName, ModernPasswordHash, SheetState, WorkbookProperties } from '../model';
+import type {
+	CustomWorkbookView,
+	DefinedName,
+	ModernPasswordHash,
+	SheetState,
+	WorkbookProperties,
+} from '../model';
+import { readCustomWorkbookViews } from './custom-views';
 import { stripFuturePrefixes } from './formula-text';
 import { readModernHash } from './password-hash';
 import { att, boolAttr, numAttr, xChildren, xFirst, xText } from './xml-util';
+
+/** Defined name attributes the model keeps without interpreting them. */
+export const NAME_EXTRA_ATTRIBUTES = [
+	'function',
+	'vbProcedure',
+	'xlm',
+	'customMenu',
+	'description',
+	'help',
+	'statusBar',
+	'shortcutKey',
+	'functionGroupId',
+	'publishToServer',
+	'workbookParameter',
+] as const;
 
 export interface SheetEntry {
 	name: string;
@@ -29,6 +51,8 @@ export interface WorkbookPart {
 	workbookModernHash?: ModernPasswordHash;
 	/** `oleSize ref`. */
 	oleSize?: string;
+	/** `customWorkbookViews`, when the part has them. */
+	customViews?: CustomWorkbookView[];
 	/** `calcPr calcMode`: `manual` (and `autoNoTable`, read as automatic). */
 	calcMode?: 'auto' | 'manual';
 	/** `calcPr iterate` with its count (default 100) and maximum change (default 0.001). */
@@ -58,6 +82,12 @@ export function parseWorkbookPart(xml: string): WorkbookPart {
 		if (boolAttr(node, 'hidden')) name.hidden = true;
 		const comment = att(node, 'comment');
 		if (comment) name.comment = comment;
+		const extra: Record<string, string> = {};
+		for (const key of NAME_EXTRA_ATTRIBUTES) {
+			const value = att(node, key);
+			if (value !== undefined) extra[key] = value;
+		}
+		if (Object.keys(extra).length) name.extra = extra;
 		if (name.name) definedNames.push(name);
 	}
 	const view = xFirst(xFirst(root, 'bookViews'), 'workbookView');
@@ -73,7 +103,9 @@ export function parseWorkbookPart(xml: string): WorkbookPart {
 			}
 		: undefined;
 	const oleSize = att(xFirst(root, 'oleSize'), 'ref');
+	const customViews = xFirst(root, 'customWorkbookViews');
 	return {
+		...(customViews ? { customViews: readCustomWorkbookViews(customViews) } : {}),
 		...(oleSize ? { oleSize } : {}),
 		...(iterate ? { iterate } : {}),
 		...(password ? { workbookPasswordHash: password } : {}),

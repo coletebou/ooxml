@@ -1,7 +1,7 @@
 import type { PptxElement, TextSegment } from 'ooxml-core/pptx';
 import { describe, expect, it } from 'vitest';
 
-import { buildParagraphs } from './text-paragraphs';
+import { buildParagraphs, resolveBlockFont } from './text-paragraphs';
 import { segmentStyleToCss } from './text-run-style';
 
 function textEl(segments: TextSegment[], extra: Record<string, unknown> = {}): PptxElement {
@@ -276,11 +276,9 @@ describe('buildParagraphs', () => {
 		expect(paras[0].runs.map((run) => run.style.lineHeight)).toStrictEqual([0, 0]);
 	});
 
-	it('folds the first paragraph own before-spacing into spaceAfterPx when spcFirstLastPara is explicitly true', () => {
+	it('keeps the first paragraph own before-spacing above it when spcFirstLastPara is explicitly true', () => {
 		// A single paragraph is both first and last, so both its own before and
-		// after apply once the flag opts back in - but PowerPoint never renders
-		// a paragraph's own spcBef as space above it (see paragraph-spacing.ts),
-		// so both fold into ONE trailing margin (12 + 6 = 18), not spaceBeforePx.
+		// after apply once the flag opts back in, each on its own side.
 		const paras = buildParagraphs(
 			textEl(
 				[
@@ -293,7 +291,7 @@ describe('buildParagraphs', () => {
 				{ textStyle: { spaceFirstLastParagraph: true } },
 			),
 		);
-		expect(paras[0]).toMatchObject({ spaceBeforePx: undefined, spaceAfterPx: 18 });
+		expect(paras[0]).toMatchObject({ spaceBeforePx: 12, spaceAfterPx: 6 });
 	});
 
 	it('leaves spacing undefined when a paragraph has no pPr overrides', () => {
@@ -585,6 +583,8 @@ describe('algn="dist" last-line distribution', () => {
 		const dist = buildParagraphs(textEl([{ text: 'Dist one line', style: { align: 'dist' } }]));
 		expect(dist[0].paragraphStyle?.textAlign).toBe('justify');
 		expect(dist[0].paragraphStyle?.textAlignLast).toBe('justify');
+		// PowerPoint spreads letters, not words, on every line of `dist`.
+		expect(dist[0].paragraphStyle?.textJustify).toBe('inter-character');
 
 		// Core normalises `a:pPr/@algn="just"` to `align: 'justify'` at parse
 		// time (see `ALIGN_MAP` in `paragraph-properties-parser.ts`); a bare
@@ -592,6 +592,7 @@ describe('algn="dist" last-line distribution', () => {
 		const just = buildParagraphs(textEl([{ text: 'Justified text', style: { align: 'justify' } }]));
 		expect(just[0].paragraphStyle?.textAlign).toBe('justify');
 		expect(just[0].paragraphStyle?.textAlignLast).toBeUndefined();
+		expect(just[0].paragraphStyle?.textJustify).toBeUndefined();
 	});
 });
 
@@ -678,5 +679,20 @@ describe('inline equation font size', () => {
 			}),
 		);
 		expect(paras[0].runs[0].style.fontSize).toBe('40px');
+	});
+});
+
+describe('resolveBlockFont', () => {
+	it('substitutes a fixed-pitch face by its panose class, as the block does', () => {
+		// OCR A Extended (panose proportion 9) is declared on the block with the
+		// monospace chain; the strut was measured on `"OCR A Extended", sans-serif`
+		// instead and the line sat 9px high at 72pt.
+		const font = resolveBlockFont(
+			{ fontFamily: 'OCR A Extended', latinFontPanose: '02000509000000000000', fontSize: 72 },
+			1,
+		);
+		expect(font.fontFamily).toContain('"Courier New"');
+		expect(font.fontFamily).not.toContain('sans-serif');
+		expect(font.fontSizePx).toBe(72);
 	});
 });

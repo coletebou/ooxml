@@ -180,6 +180,21 @@ export const TOOLS_STRINGS: Translations = {
 	Scatter: ['Nuage de points', 'Punkt (X Y)', 'Dispersión', '散点图'],
 	Doughnut: ['Anneau', 'Ring', 'Anillo', '圆环图'],
 	Radar: ['Radar', 'Netz', 'Radial', '雷达图'],
+	Waterfall: ['Cascade', 'Wasserfall', 'Cascada', '瀑布图'],
+	Histogram: ['Histogramme', 'Histogramm', 'Histograma', '直方图'],
+	Pareto: ['Pareto', 'Pareto', 'Pareto', '排列图'],
+	'Box and Whisker': ['Zone et valeur', 'Kastengrafik', 'Cajas y bigotes', '箱形图'],
+	Treemap: ['Compartimentage', 'Treemap', 'Rectángulos', '树状图'],
+	Sunburst: ['Rayons de soleil', 'Sunburst', 'Proyección solar', '旭日图'],
+	Funnel: ['Entonnoir', 'Trichter', 'Embudo', '漏斗图'],
+	Map: ['Carte', 'Karte', 'Mapa', '地图'],
+	'Map outlines here are approximate. Office draws a new map only after it adds map data through its online service.':
+		[
+			'Les contours de la carte sont approximatifs ici. Office ne dessine une nouvelle carte qu’après y avoir ajouté des données cartographiques via son service en ligne.',
+			'Die Kartenumrisse sind hier angenähert. Office zeichnet eine neue Karte erst, nachdem es über seinen Onlinedienst Kartendaten hinzugefügt hat.',
+			'Aquí los contornos del mapa son aproximados. Office dibuja un mapa nuevo solo después de añadirle datos de mapa mediante su servicio en línea.',
+			'此处的地图轮廓为近似值。Office 仅在通过其联机服务添加地图数据后才会绘制新地图。',
+		],
 	// Paste Special
 	'Paste Special': ['Collage spécial', 'Inhalte einfügen', 'Pegado especial', '选择性粘贴'],
 	Paste: ['Coller', 'Einfügen', 'Pegar', '粘贴'],
@@ -505,11 +520,31 @@ export const TOOLS_STRINGS: Translations = {
 	'(none)': ['(aucun)', '(ohne)', '(ninguno)', '(无)'],
 	'Destination:': ['Destination :', 'Ziel:', 'Destino:', '目标区域:'],
 	'Data preview': ['Aperçu de données', 'Datenvorschau', 'Vista previa de los datos', '数据预览'],
-	'Only delimited text is supported; fixed width splitting is not available yet.': [
-		'Seul le texte délimité est pris en charge ; le fractionnement à largeur fixe n’est pas encore disponible.',
-		'Nur Text mit Trennzeichen wird unterstützt; feste Breite ist noch nicht verfügbar.',
-		'Solo se admite texto delimitado; la división de ancho fijo aún no está disponible.',
-		'仅支持分隔符号文本；尚不支持固定宽度分列。',
+	'Original data type': [
+		'Type de données d’origine',
+		'Ursprünglicher Datentyp',
+		'Tipo de datos original',
+		'原始数据类型',
+	],
+	Delimited: ['Délimité', 'Getrennt', 'Delimitados', '分隔符号'],
+	'Fixed width': ['Largeur fixe', 'Feste Breite', 'Ancho fijo', '固定宽度'],
+	'Break positions:': [
+		'Positions de rupture :',
+		'Trennstellen:',
+		'Posiciones de corte:',
+		'分列位置:',
+	],
+	'Each number ends a column after that character, for example 5, 12.': [
+		'Chaque nombre termine une colonne après ce caractère, par exemple 5, 12.',
+		'Jede Zahl beendet eine Spalte nach diesem Zeichen, z. B. 5, 12.',
+		'Cada número termina una columna después de ese carácter, por ejemplo 5, 12.',
+		'每个数字表示在该字符后结束一列，例如 5, 12。',
+	],
+	'Enter break positions as whole numbers from 1, separated by commas.': [
+		'Saisissez les positions de rupture sous forme de nombres entiers à partir de 1, séparés par des virgules.',
+		'Trennstellen als ganze Zahlen ab 1 eingeben, durch Kommas getrennt.',
+		'Escriba las posiciones de corte como números enteros desde 1, separados por comas.',
+		'请输入从 1 开始的整数分列位置，用逗号分隔。',
 	],
 	// Symbol
 	Symbol: ['Symbole', 'Symbol', 'Símbolo', '符号'],

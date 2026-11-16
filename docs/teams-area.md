@@ -7,11 +7,12 @@ devices, `RTCPeerConnection` and `WebSocket` are all injectable.
 
 The UI is split the same way as every other product:
 
-| Layer                | Where                                                                                          | Owns                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Logic                | `src/core/teams/` (this area)                                                                  | model, chat CRDT, signaling, calls, server config, client store        |
-| Visual primitives    | `src/ui/src/teams/` (`ooxml-ui/teams`)                                                         | `office-ui-avatar`, `-app-rail`, `-channel-list`, `-chat-list`, ...    |
-| App, bindings, demos | `viewers/teams` in this repository (the standalone `teams-viewer` repository only points here) | `<teams-app>`, React/Vue/Solid/Svelte/Angular/vanilla bindings, server |
+| Layer                  | Where                                                                                          | Owns                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Logic                  | `src/core/teams/` (this area)                                                                  | model, chat CRDT, signaling, calls, server config, client store             |
+| Visual primitives      | `src/ui/src/teams/` (`ooxml-ui/teams`)                                                         | `office-ui-avatar`, `-app-rail`, `-channel-list`, `-chat-list`, ...         |
+| App and binding wiring | `src/ui/src/teams/app/` (`ooxml-ui/teams`), on the `ooxml-ui/bindings` kit                     | `<teams-app>`, `bindTeams`, `pickTeamsProps`, `TEAMS_CONTRACT`              |
+| Bindings, demos        | `viewers/teams` in this repository (the standalone `teams-viewer` repository only points here) | React/Vue/Solid/Svelte/Angular/vanilla lifecycle adapters, reference server |
 
 ## The client: one state, plain actions
 
@@ -90,7 +91,7 @@ core only decides and emits; showing a toast, a browser `Notification` or a soun
 ## Shared assistant chats
 
 `createSharedChat({ roomId, user, config })` joins one assistant conversation that lives in its own
-room (`sharedChatRoomId()` makes an unguessable `aiaichat-<32 hex>` id), over the same sync transport
+room (`sharedChatRoomId()` makes an unguessable `aichat-<32 hex>` id), over the same sync transport
 the workspace uses (`createSyncTransport`). `store.put` adds or replaces a message by id (unchanged
 rows are not written again), `store.truncateFrom` removes a message and everything after it, and
 `store.messages()` re-validates every row: role, length caps, author name and a JSON-only `data`
@@ -128,7 +129,7 @@ throws):
    sockets of the room, and sends `{ "type": "bye", "from": <id> }` to them when a socket closes. A
    socket speaks for one peer id (the first `from` it uses). It does not need to understand the
    messages (`signaling.ts` defines them).
-3. **Files** (optional): `POST|GET <origin>/files/<workspace>/<name>`, with the token in an
+3. **Files** (optional): `POST|GET|DELETE <origin>/files/<scope>/<name>` and `GET <origin>/files/<scope>` (a scope is the workspace id, or a private chat's room name whose files only that chat's members reach; the client sends `X-Teams-Session`, or `X-Teams-User` without accounts), with the token in an
    `Authorization: Bearer` header. To open a file in a browser tab the client calls
    `POST <origin>/files/link/<workspace>/<name>` (same header) and gets `{ url }` back: a link
    signed for that one file, valid for a few minutes (`?sig=...&exp=...`), so the token never
@@ -136,8 +137,8 @@ throws):
 
 Private chats add one rule to the sync contract: a room named `chat-<16 hex>-<chat id>` admits a socket only when its `?user=<id>` is in the room's `teams:chat-members` map (a Yjs map of user id to `true`). A room that has no members yet is created by its first socket, which passes `?members=<id>,<id>` and must be one of them; a 1:1 room (`dm-<hash>`) must list exactly the two people the id was derived from. The server closes the sockets of people removed from the map. Identity is a claim unless the server has accounts (see Authentication below).
 
-Both sockets receive `?token=<token>` when a token is configured (a browser cannot set headers on
-a WebSocket); enforce it, and an origin allowlist, on the server. Validate room names (`^[\w-]{1,128}$`) and cap message sizes.
+Both sockets send the token in the `Sec-WebSocket-Protocol` header (`openteams.token.<token>`) when
+one is configured, with `?token=<token>` as the fallback for values the header cannot carry; enforce it, and an origin allowlist, on the server. Validate room names (`^[\w-]{1,128}$`) and cap message sizes.
 
 ### Authentication
 
@@ -145,7 +146,7 @@ Optional, and off by default. A server with accounts exposes `POST <origin>/auth
 `{ user, credential }`, the workspace token in `Authorization` when one is set) and answers
 `{ session, user, expiresAt }`: a signed, expiring token that binds one user id.
 `requestTeamsSession(config, { userId, credential })` calls it; pass the result as
-`config.sessionToken` and both sockets send `?session=<token>`. The server then takes the user id
+`config.sessionToken` and both sockets send it in `Sec-WebSocket-Protocol` (`openteams.session.<token>`), or as `?session=<token>` when the header cannot carry it. The server then takes the user id
 from the session and ignores the claimed `?user=`, so holding the shared token no longer lets a
 client join another person's chats. With accounts the server refuses sockets that have no valid
 session (401).
@@ -200,12 +201,162 @@ a change on `<teams-app>` reaches everything it rendered.
   chat messages, channel and meeting titles, and the system lines the core writes into a chat
   ("Ada joined the chat") stay in the language they were written in.
 
+## Compatibility policy
+
+Three things must stay compatible between releases of the app and the server: the **schema** of the
+stored workspace document, the **protocol** (room names, connection parameters, message framing)
+and the **server contract**. Each has a number or a pinned test.
+
+### Schema version (`schema.ts`)
+
+- The workspace document carries an integer `schemaVersion` in the `teams:meta` map
+  (`SCHEMA_VERSION`, 1 today). A fresh workspace is stamped after its first sync (so an empty local
+  document is never stamped before the server's state arrives); a document with data and no stamp is
+  version 0 and is migrated when it opens, from a stored snapshot or after the first sync.
+- Migrations are an append-only ordered list (`MIGRATIONS`), one per version, applied in a single
+  transaction (origin `teams:migration`) and idempotent: they only fill what is missing. Several
+  clients may migrate at once; they write the same values and Yjs converges. 0 to 1 gives channel
+  and message rows the fields v1 treats as always present (`topic`, `kind`, `archived`,
+  `createdAt`, `deleted`, `ts`). A message without `mentions` is valid in v1 and is not rewritten.
+  The legacy presence `availability` field lives in awareness, not in the document, so it stays a
+  wire fallback (`statusFromWire`), not a migration. Readers keep tolerating missing fields even
+  after migration, because peers are untrusted.
+- A client that sees a **newer** stamp (or one it cannot read) does not write.
+  `TeamsState.schema` becomes `{ state: 'unsupported-schema', found, supported }`, the client emits
+  a notice, no seed, roster entry, migration or local snapshot is written, and the transport drops
+  sync step 2 and update messages (`readOnlyTransport`) while still asking for state and showing
+  presence. Local edits a UI still lets the person make are not sent; the UI should disable editing
+  from `state.schema`. Private chat documents are not stamped separately: they follow the
+  workspace.
+- **When a change needs a bump:** a field that old readers would misread or drop (a new meaning for
+  an existing key, a renamed key or map, a changed value shape, a removed field a reader relies
+  on), or a rule that makes previously valid rows invalid. **No bump:** adding an optional field or
+  a new map that old clients ignore, adding a UI string, tightening validation of new writes only.
+- **How a migration ships:** add `{ version: N + 1, name, up }` and raise `SCHEMA_VERSION` in the
+  same commit, with a test that migrates a document written by the previous release, and say so in
+  the commit. A release that raises the version is a deliberate event: older clients become
+  read-only on migrated workspaces, so announce it. Never edit or reorder a shipped migration;
+  there is no downgrade.
+
+### Protocol version and room names (`protocol.ts`)
+
+- `PROTOCOL_VERSION` (1) rides as the `proto` query parameter on every sync and signaling
+  connection. The reference server completes the handshake and then closes a client whose value is
+  not its own with code 1008 and the reason `unsupported protocol version N: this server speaks 1`
+  (an HTTP refusal would not show the client a reason). A missing `proto` (a client older than this
+  parameter) is still accepted, with a log line. `protocolOfUrl` reads it back.
+- Credentials: the client sends the workspace token and the signed session in the
+  `Sec-WebSocket-Protocol` header (`openteams, openteams.session.<s>`, `connectionAuth` in
+  `server-config.ts`), not in the URL. The header only allows token characters, so a credential with
+  others (a hand-made token) makes the client fall back to the query string for all of them.
+- Room names are pinned by tests: a workspace room is the workspace id (1 to 128 of `[\w-]`); a chat
+  room is `chat-<16 hex of the workspace id>-<chat id>`; a 1:1 chat id is `dm-<16 hex of the sorted
+  pair>`; a call room is `call-<workspace>-<channel>`; all are cut to 128. The hash (`shortHash`) is
+  duplicated in the reference server's `chat-access.mjs`; a test keeps them equal. Changing any of
+  this orphans stored rooms and needs a protocol bump.
+- The protocol version changes only when an old client or server could misread the other: room
+  naming, required query parameters, or message framing. Additive parameters and new optional
+  document fields do not change it.
+
+### Version skew
+
+- **New client, old server:** works if the server ignores `proto` and reads credentials from the
+  subprotocol header (the reference server does both); an older server that only reads
+  `?session=` answers 401. A new client on an old document
+  migrates it for everyone.
+- **Old client, new document:** read-only (`unsupported-schema`), never corrupting.
+- **Old client, new server:** the reference server accepts a missing `proto` (and query-string
+  credentials) until it deliberately drops those clients, and will say so in its changelog.
+- Deploy the app and the server from the same release when you can.
+
+### Server-side authorship (`validate-update.ts`)
+
+Author checks in the client are not enforcement. `validateTeamsUpdate(doc, update, actor)` lets a
+server check a Yjs update before applying it: it applies the update to a scratch copy and compares
+every touched message row and reaction with the room document, which it never changes. For a
+non-moderator actor (the user id of the **signed session**, never a claimed one):
+
+- a new row in a `teams:messages:<channel>` map must have `authorId` equal to the actor;
+- an existing row may be edited, soft-deleted or removed only by its author, and `authorId` cannot
+  change; replacing a row counts as editing it;
+- a `teams:reactions` key `message|emoji|user` may be added or removed only with `user` equal to
+  the actor;
+- a moderator may additionally set `deleted` to true on any row (and change nothing else), remove a
+  row, and remove a reaction, but never write in somebody else's name;
+- a row in `teams:channels` or `teams:tabs` must name the actor as `createdBy` when created, and only
+  its creator or a moderator may then rename, archive, replace or remove it (the creator cannot
+  change `createdBy`). Archiving is a change like any other. The one exception: the creator of a
+  channel row may replace another person's row of the same name and kind, because clients seed
+  fixed-id channels (`general`, the `Chat` of a direct chat) concurrently;
+- a pin row in `teams:pins:<channel>` must name the actor in `by`; in a private chat (a room whose
+  `teams:chat-members` map has entries) only members may pin or unpin. Any member may unpin, as in
+  Teams, and a moderator may unpin without being a member;
+- a meeting row follows the channel rule with `organizerId` as the owner (create as yourself; only
+  the organiser or a moderator edits or cancels it);
+- a `teams:roster` row may be written or removed only under the actor's own id (a moderator may
+  also remove one);
+- in `teams:chat-members` a member may be added only by an existing member (the first writer of an
+  empty map must list themselves), and removed only by themselves; a moderator may do both freely.
+  The client therefore lets only moderators remove other people from a chat;
+- message text and reactions per message are capped, see the limits below.
+
+**Client behaviour.** `POST /auth/session` answers `role`; `TeamsSession.role` and
+`TeamsState.moderator` carry it, and `<teams-app>` offers Hide on others' messages, rename and
+archive on others' channels, tab options and removing chat members only to moderators; plain members
+see those actions only on what they created. A `1008` close is surfaced as a notice and the
+WebSocket transport backs off and gives up after three consecutive `update rejected` closes.
+
+`validateTeamsSyncMessage(doc, message, actor)` does the same for a raw y-websocket message (sync
+step 2 and update are checked, everything else passes). The reference server
+(`viewers/teams/server`) calls it in the `ws.on('message')` handler of `handleSync` before
+`readSyncMessage`, for every sync room (workspace and private chats), with the room's document and
+the user of the **signed session**; on `{ ok: false }` it logs the violation codes, closes the socket
+with 1008 (`update rejected: <codes>`) and does not apply the message. It applies only to sockets
+that carry a verified identity (a session, from `users` or the `authenticate` hook); without
+accounts the user is a claim and nothing is enforced. `enforceAuthorship: false` (or
+`TEAMS_ENFORCE_AUTHORSHIP=0`) turns it off. The moderator flag comes from the session (a `users`
+entry `{ "credential": "...", "role": "moderator" }`, or `role: 'moderator'` returned by
+`authenticate`).
+
+**Packaging.** `openteams-server` is a standalone `.mjs` package. Rather than add `ooxml-core` (a
+large package with its own dependency tree, whose `dist` must be built before the server's tests
+can run) to a small server, `viewers/teams/scripts/bundle-validator.mjs` bundles
+`validate-update.ts` and `protocol.ts` with esbuild into the committed
+`server/validator.generated.mjs` (about 12 KB, `yjs`, `lib0` and `y-protocols` external, which the
+server already depends on). A script test fails when the committed file is stale, so a change to the
+validator must be followed by `bun run bundle:validator` in `viewers/teams`; the commit then touches
+`server/` and releases `openteams-server`.
+
+What it does not cover, honestly:
+
+- **Identity is only as good as the actor you pass.** Without accounts the actor is a claim.
+- **Yjs client ids are not checked.** Content is validated, not which client id wrote a struct; a
+  hostile client can still insert structs under another client's id and disturb that client's later
+  updates.
+- Everything outside messages, reactions, channels, tabs, pins, meetings, the roster and the chat
+  member map: the chat directory (who talks to whom) is unvalidated, and so is the meeting
+  attendee list beyond the organiser rule (there are no RSVP rows). A channel or tab row is
+  attributed only through its `createdBy` field, a meeting through `organizerId`; whether the pinned message exists, or the tab content is sensible, is not checked. In a
+  workspace room "member" means any authenticated user (there is no workspace member list).
+- Message text is capped (`maxMessageChars`, default 32768) and so are the reactions per message
+  (`maxReactionsPerMessage`, default 200); attachments, mentions and other fields are not
+  inspected, and who may post in which channel is not checked.
+- **Updates that depend on missing state** (Yjs would hold them pending and apply them later
+  unchecked) are refused as `incomplete-update`. A client that relays another person's unsynced rows
+  has its whole update refused: Yjs updates cannot be filtered struct by struct.
+- Concurrent writes of the same tab discussion root (`tab:...`) are allowed as the writer, because
+  clients create it with a deterministic id; so any member can overwrite a tab's boilerplate root.
+- Cost: each check copies the room state, so it is O(document size) per update. Cache or rate-limit
+  on busy rooms.
+
 ## Honest limits
 
 - **No end-to-end encryption.** Chat travels as Yjs updates through your server, which can read
   them. Media is DTLS-SRTP between peers (or to your TURN relay, which cannot decrypt it).
 - **Authorization is the server's job.** The `role` and author checks here are client-side; a
-  hostile client can write anything the server accepts. Treat the server as the trust boundary.
+  hostile client can write anything the server accepts. The reference server enforces message,
+  channel, tab and pin ownership for signed-in users (see "Server-side authorship"); the rest of the
+  document is unchecked. Treat the server as the trust boundary.
 - **Mesh calls scale to a handful of people**, not a webinar.
 - A sync server that never compacts will grow with history; the reference server stores one
   snapshot per room.

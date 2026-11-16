@@ -1,0 +1,327 @@
+// Package-independent preview of an uncached diagram. Keep the original definitions intact:
+// the per-point engine reads their ordered constraints and conditional layout statements.
+import { parseXml } from '../xml/index';
+import { resolveDrawingColor } from '../drawingml/drawing-color';
+import { resolveThemeFillStyle, type ThemeFormatScheme } from '../drawingml/format-scheme';
+import { descendants, first, NS } from './dom';
+import { parseDiagramDataModel } from './data-model';
+import { parseDiagramColors, parseDiagramQuickStyle } from './definitions';
+import { runEngineLayout } from './engine';
+import { applyCustomLayoutOverrides } from './layout/smartart-layout-interpreter-custom';
+import { diagramDrawingFromViews } from './drawing-from-views';
+import { diagramPreviewText } from './layout-text';
+import { approximateDiagramDrawingFromNodes, type ApproximateDiagramInput } from './approximate';
+import type { DiagramData, DiagramNode, DiagramPresLayoutVars } from './model';
+import type { DiagramHostNode } from './edit/node-edit';
+import type { DiagramDrawing, DiagramIssue } from './types';
+import type { DiagramPictureSource } from './picture-layout';
+import { applyDiagramPictureSources } from './picture-layout';
+import { applyDiagramRoleColors } from './layout-role-style';
+import { diagramQuickStyle3d } from './scene-3d';
+
+/** Original part text, JSON-safe so hosts can retain it through undo and collaboration. */
+export interface DiagramLayoutSource {
+	/** Per-content-node image identities survive dropping stale presentation geometry. */
+	pictures?: DiagramPictureSource[];
+	pictureParts?: Record<string, string>;
+	layoutXml?: string;
+	dataXml?: string;
+	colorsXml?: string;
+	quickStyleXml?: string;
+}
+
+export interface DiagramPreviewInput extends ApproximateDiagramInput {
+	formatScheme?: ThemeFormatScheme | undefined;
+	nodes: readonly DiagramHostNode[];
+	source?: DiagramLayoutSource | undefined;
+	scheme?: Readonly<Record<string, string>> | undefined;
+	minorFont?: string | undefined;
+}
+
+export interface DiagramPreview {
+	drawing?: DiagramDrawing;
+	mode: 'interpreted' | 'approximate' | 'placeholder';
+	issues: DiagramIssue[];
+}
+
+/** Adapt current host nodes, keeping source metadata but never restoring stale text or order. */
+export function diagramLayoutData(input: DiagramPreviewInput): DiagramData {
+	const original = input.source?.dataXml ? parseDiagramDataModel(input.source.dataXml) : undefined;
+	const nodes: DiagramNode[] = input.nodes.map((node) => {
+		const point = original?.nodes.find((entry) => entry.modelId === node.id);
+		const presentation = original?.points.find(
+			(entry) => entry.type === 'pres' && entry.presAssocId === node.id,
+		);
+		const customLayout = point?.customLayout ?? presentation?.customLayout;
+		const styleRole = point?.presStyleLabel ?? presentation?.presStyleLabel;
+		const fillColor =
+			point?.fill?.kind === 'solid'
+				? resolveDrawingColor(point.fill.color, { scheme: (name) => input.scheme?.[name] })?.hex
+				: undefined;
+		const strokeColor =
+			point?.line?.fill?.kind === 'solid'
+				? resolveDrawingColor(point.line.fill.color, { scheme: (name) => input.scheme?.[name] })
+						?.hex
+				: undefined;
+		return {
+			id: node.id,
+			text: node.text,
+			...(node.parentId ? { parentId: node.parentId } : {}),
+			...(node.nodeType ? { nodeType: node.nodeType } : {}),
+			...(node.paragraphs ? { textParagraphs: node.paragraphs } : {}),
+			...(customLayout ? { customLayout } : {}),
+			...(styleRole ? { styleRole } : {}),
+			...(fillColor || strokeColor
+				? {
+						style: { ...(fillColor ? { fillColor } : {}), ...(strokeColor ? { strokeColor } : {}) },
+					}
+				: {}),
+		};
+	});
+	// Source connections retain transition labels, while current host order and parents win.
+	const connections = nodes.map((node, index) => {
+		const connection = original?.connections.find(
+			(entry) => entry.destId === node.id && (!entry.type || entry.type === 'parOf'),
+		);
+		return {
+			...connection,
+			modelId: connection?.modelId ?? `preview-${node.id}`,
+			type: 'parOf',
+			sourceId: node.parentId ?? '__doc__',
+			destId: node.id,
+			srcOrd: index,
+		};
+	});
+	const data: DiagramData = { nodes, connections };
+	if (input.minorFont) data.themeMinorFont = input.minorFont;
+	if (input.family) data.resolvedLayoutType = input.family;
+	if (input.source?.layoutXml)
+		data.layoutDefinition = { rootNode: {}, rawXmlText: input.source.layoutXml };
+	if (input.source?.dataXml) {
+		const root = parseXml(input.source.dataXml).documentElement;
+		const vars = descendants(root, 'presLayoutVars')[0];
+		const direction = first(vars, 'dir', NS.dgm)?.getAttribute('val');
+		const values: DiagramPresLayoutVars = {};
+		if (direction === 'norm' || direction === 'rev') values.direction = direction;
+		const branch = first(vars, 'hierBranch', NS.dgm)?.getAttribute('val');
+		if (
+			branch === 'std' ||
+			branch === 'init' ||
+			branch === 'l' ||
+			branch === 'r' ||
+			branch === 'hang'
+		)
+			values.hierarchyBranch = branch;
+		for (const [tag, key] of [
+			['chMax', 'childMax'],
+			['chPref', 'childPreferred'],
+		] as const) {
+			const raw = first(vars, tag, NS.dgm)?.getAttribute('val');
+			if (raw && Number.isFinite(Number(raw))) values[key] = Number(raw);
+		}
+		for (const [tag, key] of [
+			['orgChart', 'orgChart'],
+			['bulletEnabled', 'bulletEnabled'],
+		] as const) {
+			const raw = first(vars, tag, NS.dgm)?.getAttribute('val');
+			if (raw) values[key] = raw === '1' || raw === 'true';
+		}
+		for (const [tag, key] of [
+			['animLvl', 'animationLevel'],
+			['animOne', 'animateOne'],
+			['resizeHandles', 'resizeHandles'],
+		] as const) {
+			const raw = first(vars, tag, NS.dgm)?.getAttribute('val');
+			if (raw) values[key] = raw;
+		}
+		data.presLayoutVars = values;
+	}
+	if (input.source?.colorsXml) {
+		const colors = parseDiagramColors(input.source.colorsXml);
+		const roleColors: NonNullable<NonNullable<DiagramData['colorTransform']>['roleColors']> = {};
+		for (const label of colors.labels) {
+			const fill = label.fill.colors.flatMap((color) => {
+				const resolved = resolveDrawingColor(color, { scheme: (name) => input.scheme?.[name] });
+				return resolved ? [resolved.hex] : [];
+			});
+			if (fill.length) roleColors[label.name] = { fill, line: [] };
+		}
+		data.colorTransform = { roleColors, fillColors: [], lineColors: [] };
+	}
+	return data;
+}
+
+/** Try the shared ordered-layout engine, then an explicitly reported family approximation. */
+export function previewDiagramLayout(input: DiagramPreviewInput): DiagramPreview {
+	const issues: DiagramIssue[] = [];
+	try {
+		const data = diagramLayoutData(input);
+		const palette = ['accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6'].map(
+			(name) => input.scheme?.[name] ?? '#4472c4',
+		);
+		const box = { width: input.extentEmu.width / 9525, height: input.extentEmu.height / 9525 };
+		const styleId = input.source?.quickStyleXml
+			? parseDiagramQuickStyle(input.source.quickStyleXml).uniqueId
+			: '';
+		const intensity = styleId.endsWith('/intense')
+			? 'intense'
+			: styleId.endsWith('/moderate')
+				? 'moderate'
+				: 'flat';
+		const computed = runEngineLayout(data, box, data.nodes, palette, intensity);
+		if (computed) {
+			const result = applyCustomLayoutOverrides(computed, data.nodes, box);
+			const declaresConnectors =
+				input.source?.layoutXml &&
+				descendants(parseXml(input.source.layoutXml).documentElement, 'alg').some(
+					(algorithm) => algorithm.getAttribute('type') === 'conn',
+				);
+			if (
+				declaresConnectors &&
+				data.nodes.some((node) => node.parentId) &&
+				!result.nodes.some((node) => /connector|^line(?:Inv)?$/i.test(node.presetOverride ?? ''))
+			)
+				issues.push({
+					code: 'DIAGRAM_CONNECTORS_PARTIAL',
+					message:
+						"This interpreted preview does not reconstruct the layout's bent or unsupported hierarchy connectors.",
+				});
+			const vars = data.presLayoutVars;
+			if (
+				vars &&
+				(vars.orgChart ||
+					vars.bulletEnabled ||
+					(vars.childMax ?? -1) > 0 ||
+					(vars.childPreferred ?? -1) > 0 ||
+					(vars.hierarchyBranch && !['std', 'init'].includes(vars.hierarchyBranch)))
+			)
+				issues.push({
+					code: 'DIAGRAM_LAYOUT_VARIABLES_PARTIAL',
+					message:
+						'The original presentation layout variables are retained; this engine applies only the supported subset.',
+				});
+			const views = result.nodes.flatMap((node) => {
+				if (node.kind !== 'rect') return [];
+				return [
+					{
+						id: node.key,
+						x: node.x,
+						y: node.y,
+						width: node.width,
+						height: node.height,
+						shapeType: node.presetOverride ?? 'rect',
+						fillNone: node.fill === 'none',
+						fillColor: node.fill,
+						strokeColor: node.stroke,
+						strokeWidth: node.strokeWidth,
+						text:
+							node.literalText ??
+							[
+								node.text,
+								...(node.foldedNodeIds ?? []).map(
+									(id) => input.nodes.find((item) => item.id === id)?.text ?? '',
+								),
+							]
+								.filter(Boolean)
+								.join('\n'),
+						fontSize: node.fontSize,
+						fillOpacity: node.opacity,
+						...(node.rotation ? { rotation: node.rotation } : {}),
+						...(node.shapeAdjustments ? { shapeAdjustments: node.shapeAdjustments } : {}),
+					},
+				];
+			});
+			const drawing = diagramDrawingFromViews(views);
+			drawing.extentEmu = { ...input.extentEmu };
+			const scene = input.source?.quickStyleXml
+				? diagramQuickStyle3d(input.source.quickStyleXml).scene
+				: undefined;
+			if (scene) drawing.scene3d = scene;
+			const colors = input.source?.colorsXml
+				? parseDiagramColors(input.source.colorsXml)
+				: undefined;
+			const quickStyle = input.source?.quickStyleXml
+				? parseDiagramQuickStyle(input.source.quickStyleXml)
+				: undefined;
+			const originalModel = input.source?.dataXml
+				? parseDiagramDataModel(input.source.dataXml)
+				: undefined;
+			result.nodes.forEach((node, index) => {
+				const shape = drawing.shapes[index];
+				if (!shape || node.kind !== 'rect' || node.literalText !== undefined) return;
+				const label = quickStyle?.labels.find((entry) => entry.name === node.styleLabel);
+				if (label) {
+					shape.style = label;
+					shape.has3d = label.requires3d ?? label.hasShape3d;
+					if (shape.has3d)
+						shape.shape3d = {
+							...(label.scene3dXml ? { scene3dXml: label.scene3dXml } : {}),
+							...(label.shape3dXml ? { shape3dXml: label.shape3dXml } : {}),
+							...(label.text3dXml ? { text3dXml: label.text3dXml } : {}),
+						};
+				}
+				const contextNodeId = node.nodeId ?? node.contextNodeId;
+				if (contextNodeId) shape.sourceNodeId = contextNodeId;
+				if (node.layoutRole) shape.sourceLayoutRole = node.layoutRole;
+				if (node.styleLabel) shape.sourceStyleLabel = node.styleLabel;
+				if (node.foldedNodeIds?.length) shape.foldedNodeIds = node.foldedNodeIds;
+				const sourceNode = data.nodes.find((entry) => entry.id === node.nodeId);
+				if (
+					input.formatScheme &&
+					label?.fill?.index &&
+					!sourceNode?.style?.fillColor &&
+					shape.fill?.kind === 'solid'
+				) {
+					const fill = resolveThemeFillStyle(
+						input.formatScheme,
+						label.fill.index,
+						shape.fill.color,
+					);
+					if (fill) shape.fill = fill;
+				}
+				const direct = originalModel?.nodes.find((entry) => entry.modelId === node.nodeId);
+				const sourceIds = [node.nodeId, ...(node.foldedNodeIds ?? [])];
+				const textNodes = sourceIds.flatMap((id) => {
+					const source = input.nodes.find((entry) => entry.id === id);
+					return source ? [source] : [];
+				});
+				if (textNodes.length) shape.text = diagramPreviewText(textNodes, node.fontSize);
+				if (shape.text) {
+					if (node.textVerticalAnchor) shape.text.anchor = node.textVerticalAnchor;
+					for (const paragraph of shape.text.paragraphs)
+						if (!paragraph.align && node.textAlign) paragraph.align = node.textAlign;
+				}
+				applyDiagramRoleColors(
+					shape,
+					colors?.labels.find((label) => label.name === node.styleLabel),
+					Math.max(
+						0,
+						input.nodes.findIndex((entry) => entry.id === contextNodeId),
+					),
+					input.minorFont,
+				);
+				if (direct?.fill && direct.fill.kind !== 'picture') shape.fill = direct.fill;
+				if (direct?.line) shape.line = { ...shape.line, ...direct.line };
+			});
+			applyDiagramPictureSources(
+				drawing,
+				result.nodes,
+				input.source,
+				issues,
+				new Set(input.nodes.map((node) => node.id)),
+			);
+			return { drawing, mode: 'interpreted', issues };
+		}
+	} catch (error) {
+		issues.push({
+			code: 'DIAGRAM_LAYOUT_FAILED',
+			message: error instanceof Error ? error.message : String(error),
+		});
+	}
+	issues.push({
+		code: 'DIAGRAM_LAYOUT_APPROXIMATE',
+		message: 'The layout definition could not be interpreted; a family approximation is used.',
+	});
+	const drawing = approximateDiagramDrawingFromNodes(input);
+	return { ...(drawing ? { drawing } : {}), mode: drawing ? 'approximate' : 'placeholder', issues };
+}

@@ -1,7 +1,10 @@
 import { installOfficeUiTheme } from '../../theme';
 import { withOfficeThemeCss } from '../theme/office-css';
+import { definePptxFormatSection } from './format-section';
 import { definePptxSlideClipboard } from './slide-clipboard';
 export { slideClipboardLabels } from './slide-clipboard';
+export { ribbonTab, ribbonTabButtons } from './ribbon-tabs';
+export type { PptxUiRibbonTabsElement } from './ribbon-tabs';
 export type { PptxUiSlideClipboardElement } from './slide-clipboard';
 import { HOST_STYLES } from './host-styles';
 import { definePptxMobileBar } from './mobile-bar';
@@ -13,19 +16,34 @@ import {
 	definePptxCompatToasts,
 	definePptxContextMenu,
 	definePptxDialogFooter,
+	definePptxExportProgress,
 	definePptxPasteOptions,
 	definePptxRadio,
 	definePptxReadOnlyBanner,
 	definePptxRibbonCommand,
 	definePptxRibbonGroup,
 	definePptxRibbonToggle,
+	definePptxOpenPlaces,
+	definePptxConnectedServices,
 	definePptxSearchField,
 	definePptxColorGrid,
 	definePptxSelect,
 	definePptxSwitch,
 } from './office-aliases';
+import { definePptxChartDataSheet } from './chart-data-sheet';
+export { smartArtTextPaneLabels } from './smartart-text-pane';
+export type {
+	PptxUiSmartArtTextPaneElement,
+	SmartArtTextPaneChange,
+	SmartArtTextPaneChangeEvent,
+	SmartArtTextPaneViewState,
+} from './smartart-text-pane';
+import { definePptxSmartArtTextPane } from './smartart-text-pane';
 import { OFFICE_TOKEN_BRIDGE } from './office-token-bridge';
 import { definePptxOptionsDialog } from './options-dialog';
+import { definePptxInsertChartDialog } from './insert-chart-dialog';
+import { definePptxPdfExportDialog } from './pdf-export-dialog';
+import { definePptxInsertSmartArtDialog } from './insert-smartart-dialog';
 import { definePptxPresentToolbar } from './present-toolbar';
 import { definePptxPresenterConsole } from './presenter-console';
 import { assertWebControlContract, markWebControlContract } from './registration-contract';
@@ -57,12 +75,31 @@ import { definePptxRibbonView } from './ribbon-view';
 import { definePptxSlideShowOptions } from './slide-show-options';
 import { definePptxStatusBar } from './status-bar';
 import { definePptxRibbonActions } from './ribbon-actions';
+import { definePptxRibbonTabs } from './ribbon-tabs';
 import { definePptxSubtitleSettings } from './subtitle-settings';
 import { definePptxThemeEditor } from './theme-editor';
 import { definePptxChartFormatPane } from './chart-format-pane';
 import { definePptxTitleBar } from './title-bar';
 
 export type { PptxUiThemeEditorElement, ThemeEditorApplyEvent } from './theme-editor';
+export type {
+	InsertChartDialogDetail,
+	InsertChartDialogInsertEvent,
+	PptxUiInsertChartDialogElement,
+} from './insert-chart-dialog';
+export type {
+	PdfExportDialogConfirmEvent,
+	PdfExportDialogDetail,
+	PdfExportDialogTranslate,
+	PptxUiPdfExportDialogElement,
+} from './pdf-export-dialog';
+export { choosePdfExportSelection } from './pdf-export-options';
+export type { PdfExportOptionsInput } from './pdf-export-options';
+export type {
+	InsertSmartArtDialogDetail,
+	InsertSmartArtDialogInsertEvent,
+	PptxUiInsertSmartArtDialogElement,
+} from './insert-smartart-dialog';
 export type {
 	ChartFormatChangeEvent,
 	ChartFormatPaneTranslate,
@@ -71,6 +108,13 @@ export type {
 } from './chart-format-pane';
 export type { CompatToastsRequestEvent, PptxUiCompatToastsElement } from './office-alias-types';
 export type { PptxUiColorGridElement } from './office-aliases';
+export { chartDataSheetLabels } from './chart-data-sheet';
+export type {
+	ChartDataSheetChange,
+	ChartDataSheetChangeEvent,
+	ChartDataSheetViewState,
+	PptxUiChartDataSheetElement,
+} from './chart-data-sheet';
 export type { DialogFooterRequestEvent, PptxUiDialogFooterElement } from './office-alias-types';
 export type { MobileBarRequestEvent, PptxUiMobileBarElement } from './mobile-bar';
 export type { MobileInsertRequestEvent, PptxUiMobileInsertElement } from './mobile-insert';
@@ -82,11 +126,12 @@ export type {
 	PresenterConsoleRequestEvent,
 } from './presenter-console';
 export type { PptxUiReadOnlyBannerElement, ReadOnlyBannerRequestEvent } from './office-alias-types';
+export type { PptxUiExportProgressElement } from './office-alias-types';
 
 export { attachRibbonOverflow, reflowRibbon } from './ribbon-overflow';
 export type { RibbonRowOptions } from './ribbon-overflow';
-export { HOME_LAUNCHER_GROUPS, homeLaunchers } from './ribbon-launchers';
-export type { RibbonLauncher, RibbonLaunchers } from './ribbon-launchers';
+export { HOME_LAUNCHER_GROUPS, HOME_LAUNCHER_SECTIONS, homeLaunchers } from './ribbon-launchers';
+export type { HomeLauncherGroup, RibbonLauncher, RibbonLaunchers } from './ribbon-launchers';
 
 export type { RibbonCommandRequestEvent } from './office-alias-types';
 export type {
@@ -150,7 +195,11 @@ export type {
 
 const controls = [
 	['pptx-ui-search', definePptxSearchField],
+	['pptx-ui-open-places', definePptxOpenPlaces],
+	['pptx-ui-connected-services', definePptxConnectedServices],
 	['pptx-ui-color-grid', definePptxColorGrid],
+	['pptx-ui-chart-data-sheet', definePptxChartDataSheet],
+	['pptx-ui-smartart-text-pane', definePptxSmartArtTextPane],
 	['pptx-ui-checkbox', definePptxCheckbox],
 	['pptx-ui-radio', definePptxRadio],
 	['pptx-ui-switch', definePptxSwitch],
@@ -165,6 +214,7 @@ const controls = [
 	['pptx-ui-present-toolbar', definePptxPresentToolbar],
 	['pptx-ui-presenter-console', definePptxPresenterConsole],
 	['pptx-ui-read-only-banner', definePptxReadOnlyBanner],
+	['pptx-ui-export-progress', definePptxExportProgress],
 	['pptx-ui-ribbon-command', definePptxRibbonCommand],
 	['pptx-ui-ribbon-animations', definePptxRibbonAnimations],
 	['pptx-ui-ribbon-draw', definePptxRibbonDraw],
@@ -193,14 +243,19 @@ const controls = [
 	['pptx-ui-ribbon-toggle', definePptxRibbonToggle],
 	['pptx-ui-status-bar', definePptxStatusBar],
 	['pptx-ui-ribbon-actions', definePptxRibbonActions],
+	['pptx-ui-ribbon-tabs', definePptxRibbonTabs],
 	['pptx-ui-notes-toolbar', definePptxNotesToolbar],
 	['pptx-ui-context-menu', definePptxContextMenu],
 	['pptx-ui-subtitle-settings', definePptxSubtitleSettings],
 	['pptx-ui-theme-editor', definePptxThemeEditor],
 	['pptx-ui-chart-format-pane', definePptxChartFormatPane],
+	['pptx-ui-format-section', definePptxFormatSection],
 	['pptx-ui-title-bar', definePptxTitleBar],
 	['pptx-ui-slide-clipboard', definePptxSlideClipboard],
 	['pptx-ui-options-dialog', definePptxOptionsDialog],
+	['pptx-ui-insert-chart-dialog', definePptxInsertChartDialog],
+	['pptx-ui-pdf-export-dialog', definePptxPdfExportDialog],
+	['pptx-ui-insert-smartart-dialog', definePptxInsertSmartArtDialog],
 ] as const;
 
 /** Idempotent browser-only registration. Safe to call from every viewer binding. */

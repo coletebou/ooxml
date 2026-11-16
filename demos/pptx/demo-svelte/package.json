@@ -9,27 +9,28 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
-		"@ai-sdk/openai-compatible": "^3.0.70",
-		"@ai-sdk/svelte": "^5.0.142",
-		"@lucide/svelte": "^1.57.0",
-		"ai": "^7.0.142",
-		"emf-converter": "4.21.0",
-		"fast-xml-parser": "^5.11.2",
+		"@ai-sdk/openai-compatible": "^3.0.92",
+		"@ai-sdk/svelte": "^5.0.172",
+		"@lucide/svelte": "^1.72.0",
+		"ai": "^7.0.172",
+		"emf-converter": "4.28.1",
+		"fast-xml-parser": "^5.12.0",
 		"jszip": "^3.10.2",
+		"ooxml-demo-onedrive": "workspace:*",
 		"pptx-svelte-viewer": "workspace:*",
 		"pptx-viewer-core": "workspace:*",
 		"pptx-viewer-locales": "workspace:*",
-		"svelte": "^5.57.2",
+		"svelte": "^5.57.3",
 		"y-webrtc": "^10.3.0",
 		"y-websocket": "^3.1.0",
 		"yjs": "^13.6.33"
 	},
 	"devDependencies": {
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
-		"@tailwindcss/vite": "^4.3.3",
-		"@types/node": "^26.6.5",
-		"tailwindcss": "^4.3.3",
+		"@tailwindcss/vite": "^4.3.4",
+		"@types/node": "^26.6.6",
+		"tailwindcss": "^4.3.4",
 		"typescript": "6.0.3",
-		"vite": "^8.3.4"
+		"vite": "^8.3.8"
 	}
 }

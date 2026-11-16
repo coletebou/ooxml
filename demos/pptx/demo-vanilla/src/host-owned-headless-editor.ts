@@ -6,6 +6,7 @@ import {
 	createInitialViewerState,
 	createStore,
 	describeCollaborationShellState,
+	disposePptxRenderStage,
 	getViewerCss,
 	loadPresentation,
 	renderSlideStage,
@@ -15,8 +16,11 @@ import type { LoadedPresentation, PptxElement } from 'pptx-vanilla-viewer';
 
 import type { createHostOwnedDemo } from '../../shared/host-owned-collaboration';
 import type { HostOwnedShellHandle } from '../../shared/host-owned-shell-controls';
+import { hostThumbnailStripRequested } from '../../shared/host-thumbnail-strip';
 import { t } from './demo-i18n';
 import { createHostOwnedInlineEditor } from './host-owned-inline-editor';
+import { mountHostSlideStrip } from './host-owned-slide-strip';
+import { mountHostOwnedSlidesPane } from './host-owned-slides-pane';
 
 /** Custom chrome with native rendering/inline editing and host-owned selection/drag. */
 export function mountHostOwnedHeadlessEditor(
@@ -30,7 +34,8 @@ export function mountHostOwnedHeadlessEditor(
 	const shellRoot = document.createElement('section');
 	shellRoot.className = 'pptxv';
 	shellRoot.dataset.hostCustomShell = '';
-	shellRoot.style.cssText = 'height:100%;overflow:auto;background:#e2e8f0;padding:24px';
+	shellRoot.style.cssText =
+		'height:100%;display:flex;flex-direction:column;box-sizing:border-box;background:#e2e8f0;padding:24px';
 	// Same localised readout and label as the other four custom-shell demos;
 	// the e2e readiness wait (`waitForHostEditing`) reads it before editing.
 	const status = document.createElement('output');
@@ -42,7 +47,13 @@ export function mountHostOwnedHeadlessEditor(
 	const editorRoot = document.createElement('div');
 	editorRoot.style.cssText = 'position:absolute;inset:0;pointer-events:none';
 	viewport.append(stageRoot, editorRoot);
-	shellRoot.append(status, viewport);
+	// The slide rail sits beside the canvas, both inside the custom shell.
+	const body = document.createElement('div');
+	body.style.cssText = 'display:flex;flex:1;min-height:0;gap:16px';
+	const canvasArea = document.createElement('div');
+	canvasArea.style.cssText = 'flex:1;min-width:0;overflow:auto';
+	canvasArea.append(viewport);
+	shellRoot.append(status, body);
 	root.replaceChildren(style, shellRoot);
 	let loaded: LoadedPresentation | undefined;
 	let scale = 1;
@@ -69,6 +80,12 @@ export function mountHostOwnedHeadlessEditor(
 		getScale: () => scale,
 		onChange: () => render(),
 	});
+	const railOptions = { store, getLoaded: () => loaded, commitInline: () => inline.commit() };
+	// `?hostStrip=1`: the host's own strip of thumbnails instead of the slides pane.
+	const slidesPane = hostThumbnailStripRequested()
+		? mountHostSlideStrip(body, railOptions)
+		: mountHostOwnedSlidesPane(body, railOptions);
+	body.append(canvasArea);
 	const patchElement = (element: PptxElement, patch: Partial<PptxElement>): void => {
 		const state = store.get();
 		store.set({
@@ -96,6 +113,8 @@ export function mountHostOwnedHeadlessEditor(
 		}
 		viewport.style.width = `${state.canvasSize.width * scale}px`;
 		viewport.style.height = `${state.canvasSize.height * scale}px`;
+		// Retire the previous stage's chart subscriptions before replacing it.
+		disposePptxRenderStage(stageRoot);
 		stageRoot.replaceChildren(
 			renderSlideStage({
 				document,
@@ -218,6 +237,7 @@ export function mountHostOwnedHeadlessEditor(
 			inline.cancel();
 			destroyed = true;
 			unsubscribe();
+			slidesPane.destroy();
 			collaboration.destroy();
 			document.removeEventListener('pointermove', onPointerMove);
 			document.removeEventListener('pointerup', onPointerUp);
@@ -225,6 +245,7 @@ export function mountHostOwnedHeadlessEditor(
 			if (loaded) {
 				revokeBlobUrls(loaded.blobUrls);
 			}
+			disposePptxRenderStage(stageRoot);
 			root.replaceChildren();
 		},
 	};

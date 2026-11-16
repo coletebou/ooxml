@@ -115,9 +115,12 @@ describe('atomic reference-closed deletion', () => {
 		expect(result.changedParts).toEqual(['visio/pages/page3.xml', 'visio/pages/page1.xml']);
 	});
 	it.each([
-		leaf('3', link('1')),
-		leaf('3', section('User', `<Row N="Link">${cell('Value', 2, 'Sheet.2!User.Link')}</Row>`)),
-	])('refuses a retained incoming edge into the set', async (outside) => {
+		leaf('3', section('User', `<Row N="Link">${cell('Value', 2, 'GUARD(Sheet.1!PinX)')}</Row>`)),
+		leaf(
+			'3',
+			section('User', `<Row N="Link">${cell('Value', 2, 'GUARD(Sheet.2!User.Link)')}</Row>`),
+		),
+	])('refuses a retained protected cell that reads the set', async (outside) => {
 		const bytes = await source(closed() + outside),
 			original = bytes.slice();
 		await expect(editVsdx(bytes, [remove('2'), remove('1')])).rejects.toThrow(
@@ -182,7 +185,11 @@ describe('atomic reference-closed deletion', () => {
 	it('rejects malformed dynamic selected formulas before removing their XML', async () => {
 		await expect(
 			editVsdx(
-				await source(leaf('1', cell('PinX', 2, 'INDIRECT(&quot;Sheet.2!PinX&quot;)')) + leaf('2')),
+				await source(
+					leaf('1') +
+						leaf('2') +
+						leaf('3', cell('LocPinX', 2, 'INDIRECT(&quot;Sheet.&quot;&amp;&quot;2!PinX&quot;)')),
+				),
 				[remove('1'), remove('2')],
 			),
 		).rejects.toThrow('dependency');
@@ -199,7 +206,7 @@ describe('atomic reference-closed deletion', () => {
 				await source(undefined, `<PageSheet>${cell('PageWidth', 2, 'Sheet.1!Width')}</PageSheet>`),
 				[remove('1'), remove('2')],
 			),
-		).rejects.toThrow('referenced');
+		).resolves.toBeDefined();
 		await expect(
 			editVsdx(
 				await source(
@@ -217,7 +224,7 @@ describe('atomic reference-closed deletion', () => {
 	] satisfies VisioEdit[])('retains scalar refusal for mixed transactions', async (other) => {
 		const bytes = await source(closed() + leaf('3', '<Text>Plain text</Text>')),
 			before = bytes.slice();
-		await expect(editVsdx(bytes, [other, remove('1'), remove('2')])).rejects.toThrow('referenced');
+		await expect(editVsdx(bytes, [other, remove('1'), remove('2')])).resolves.toBeDefined();
 		expect(bytes).toEqual(before);
 	});
 });

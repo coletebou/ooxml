@@ -78,10 +78,16 @@ export interface SlideCanvasProps {
 		cell: Omit<TableCellEditorState, 'elementId'> | null,
 		elementId: string,
 	) => void;
-	onCommitCellEdit?: (elementId: string, rowIndex: number, colIndex: number, text: string) => void;
+	onCommitCellEdit?: (
+		elementId: string,
+		rowIndex: number,
+		colIndex: number,
+		text: string,
+		end?: import('ooxml-ui/pptx').TableCellEditEnd,
+	) => void;
 	onResizeTableColumns?: (elementId: string, newWidths: number[]) => void;
 	onResizeTableRow?: (elementId: string, rowIndex: number, newHeight: number) => void;
-	findResults?: Array<{
+	findResults?: ReadonlyArray<{
 		slideIndex: number;
 		elementId: string;
 		segmentIndex: number;

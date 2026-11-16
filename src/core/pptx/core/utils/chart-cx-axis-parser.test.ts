@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { XmlObject } from '../types';
 import { parseCxAxes, resolveCxTitleText } from './chart-cx-axis-parser';
+import { at } from '../../test-support/access';
 
 /** Minimal XmlLookupLike stub using plain object traversal (mirrors chart-cx-parser.test.ts). */
 const xmlLookup = {
@@ -112,10 +113,10 @@ describe('parseCxAxes (C2-G7)', () => {
 		};
 		const axes = parseCxAxes(plotArea, xmlLookup)!;
 		expect(axes).toHaveLength(2);
-		expect(axes[0].axisType).toBe('catAx');
-		expect(axes[1].axisType).toBe('valAx');
+		expect(at(axes, 0).axisType).toBe('catAx');
+		expect(at(axes, 1).axisType).toBe('valAx');
 		// cx:tickLabels present -> labels are shown, no forced 'none'.
-		expect(axes[1].tickLblPos).toBeUndefined();
+		expect(at(axes, 1).tickLblPos).toBeUndefined();
 	});
 
 	it('marks an axis hidden via @hidden and resolves fontFamily/fontColor from cx:txPr', () => {
@@ -253,5 +254,27 @@ describe('resolveCxTitleText', () => {
 	it('falls back to the linked-cell cached text (cx:tx/cx:txData/cx:v) with no rich text', () => {
 		const title: XmlObject = { 'cx:tx': { 'cx:txData': { 'cx:v': 'Sheet1!$A$1 cache' } } };
 		expect(resolveCxTitleText(title, xmlLookup)).toBe('Sheet1!$A$1 cache');
+	});
+});
+
+describe('parseCxAxes bare elements and unit names (chartex parity harness)', () => {
+	it('reads a bare cx:tickLabels and cx:catScaling (empty strings in the object tree)', () => {
+		const plotArea: XmlObject = {
+			'cx:plotAreaRegion': {},
+			'cx:axis': { '@_id': '0', 'cx:catScaling': '', 'cx:tickLabels': '' },
+		};
+		const [axis] = parseCxAxes(plotArea, xmlLookup)!;
+		expect(axis.axisType).toBe('catAx');
+		expect(axis.tickLblPos).toBeUndefined();
+	});
+
+	it('maps the ST_AxisUnit names of cx:units/@unit onto their divisors', () => {
+		const plotArea: XmlObject = {
+			'cx:plotAreaRegion': {},
+			'cx:axis': { '@_id': '1', 'cx:valScaling': '', 'cx:units': { '@_unit': 'millions' } },
+		};
+		const [axis] = parseCxAxes(plotArea, xmlLookup)!;
+		expect(axis.displayUnits).toBe('custom');
+		expect(axis.displayUnitsValue).toBe(1_000_000);
 	});
 });

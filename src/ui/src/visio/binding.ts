@@ -1,3 +1,4 @@
+import type { CloudOpenedFile } from 'ooxml-core/embedding';
 import type { VisioEdit, CreateVsdxOptions } from 'ooxml-core/visio';
 import type {
 	ViewerOptions,
@@ -10,7 +11,7 @@ import { registerVisioViewer, type VisioViewerElement } from './viewer-element';
 import type { ViewerController } from './controller';
 import type { SvgExportOptions, SvgExportResult } from './export-svg';
 import type { CurrentPagePrintSnapshotOptions, PrintSnapshot } from './print-snapshot';
-import type { VsdxExportResult } from 'ooxml-core/visio/ui';
+import type { VsdxExportResult, VisioTemplateId } from 'ooxml-core/visio/ui';
 
 export interface MountedViewer {
 	readonly element: VisioViewerElement;
@@ -18,6 +19,9 @@ export interface MountedViewer {
 	update(options: ViewerOptions): void;
 	load(source: VsdxSource): Promise<void>;
 	createBlankDrawing(options?: CreateVsdxOptions): Promise<void>;
+	createFromTemplate(template: VisioTemplateId): Promise<void>;
+	/** Opens a file from a `CloudFileProvider`, as File > Open > OneDrive does (storage, read-only). */
+	openCloudFile(file: CloudOpenedFile): Promise<void>;
 	applyEdits(edits: readonly VisioEdit[]): Promise<void>;
 	selectShapes(shapes: readonly VisioShapeSelection[]): void;
 	selectAll(): void;
@@ -83,6 +87,8 @@ export function mountViewer(container: HTMLElement, initial: ViewerOptions = {})
 				element.collaboration = options.collaboration;
 			else if (key === 'storage' && options.storage !== undefined)
 				element.storage = options.storage;
+			else if (key === 'fileProviders' && options.fileProviders !== undefined)
+				element.fileProviders = options.fileProviders;
 			else if (key === 'customization' && options.customization !== undefined)
 				element.customization = options.customization;
 		}
@@ -100,6 +106,14 @@ export function mountViewer(container: HTMLElement, initial: ViewerOptions = {})
 		async createBlankDrawing(options) {
 			assertAlive();
 			await element.createBlankDrawing(options);
+		},
+		async openCloudFile(file) {
+			assertAlive();
+			await element.openCloudFile(file);
+		},
+		async createFromTemplate(template) {
+			assertAlive();
+			await element.createFromTemplate(template);
 		},
 		async applyEdits(edits) {
 			assertAlive();

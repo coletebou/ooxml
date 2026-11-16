@@ -34,7 +34,7 @@ export interface RibbonGalleryGroupPlacement {
 }
 
 /** Galleries the format inspector shows as panels (`mode="panel"`) instead of the ribbon. */
-export const INSPECTOR_GALLERIES: readonly RibbonGalleryId[] = ['textWarp'];
+export const INSPECTOR_GALLERIES: readonly RibbonGalleryId[] = ['textWarp', 'quickStyles'];
 
 /** The groups each contextual tab renders, in order. */
 export const CONTEXTUAL_TAB_GROUPS: Record<
@@ -296,6 +296,16 @@ export const CONTEXTUAL_TAB_GROUPS: Record<
 				{
 					gallery: 'smartArtAddShape',
 					control: 'smartArtDesign.createGraphic.addShape',
+					mode: 'dropdown',
+				},
+				{
+					gallery: 'smartArtAddShapeBefore',
+					control: 'smartArtDesign.createGraphic.addShapeBefore',
+					mode: 'dropdown',
+				},
+				{
+					gallery: 'smartArtAddShapeAbove',
+					control: 'smartArtDesign.createGraphic.addShapeAbove',
 					mode: 'dropdown',
 				},
 				{

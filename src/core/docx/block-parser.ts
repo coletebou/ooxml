@@ -11,13 +11,14 @@ import { parseTable as parseTableWithFidelity } from './parse-table';
 import { parseDrawing, type DrawingContext } from './drawing';
 import { resolveHyperlink, parseSimpleHyperlinkField } from './hyperlink';
 import { paragraphBookmarkNames } from './bookmarks';
+import { readParagraphPermissionMarkers, resolvePermissions } from './permissions';
 import { createFieldTracker, storyFieldResults, type FieldResultMetadata } from './field-runs';
 import { parseEquation } from './equation';
 import { parseInlineControl, flatBlocks } from './parse-content-control';
 import { parseFieldFlags } from './field-flags';
 import { parseFormField } from './form-fields';
 import { isAnnotationWrapper } from './inline-markers';
-import { runPositionalTab, runSymbol, specialCharacterText } from './special-characters';
+import { runContentText, runPositionalTab, runSymbol } from './special-characters';
 import {
 	collectParagraphRuns,
 	type OpenMoves,
@@ -95,7 +96,8 @@ function parseRun(node: XmlElement, revision?: Revision): TextRun {
 	let noteSeparator: TextRun['noteSeparator'];
 	let fieldChar: TextRun['fieldChar'];
 	const fieldCode =
-		content.length > 0 && content.every((child) => named(child, 'instrText'))
+		content.length > 0 &&
+		content.every((child) => named(child, 'instrText') || named(child, 'delInstrText'))
 			? content.map((child) => textContent(child)).join('')
 			: undefined;
 	const only = content.length === 1 ? content[0] : undefined;
@@ -121,14 +123,7 @@ function parseRun(node: XmlElement, revision?: Revision): TextRun {
 	const text =
 		breakKind || noteReference || noteMark || fieldChar || fieldCode !== undefined
 			? ''
-			: content
-					.map((child) => {
-						if (named(child, 't') || named(child, 'delText')) return textContent(child);
-						if (named(child, 'tab')) return '\t';
-						if (named(child, 'br') || named(child, 'cr')) return '\n';
-						return specialCharacterText(child) ?? '';
-					})
-					.join('');
+			: content.map((child) => runContentText(child) ?? '').join('');
 	const run: TextRun = { text, ...parseDirectRunProperties(props) };
 	const symbol = runSymbol(content);
 	if (symbol) run.symbol = symbol;
@@ -269,6 +264,7 @@ function parseParagraph(node: XmlElement, id: string, fields?: FieldResultMetada
 	if (props) paragraph.sourceParagraphPropertiesXml = buildXml(props);
 	const bookmarks = paragraphBookmarkNames(node);
 	if (bookmarks.length) paragraph.bookmarks = bookmarks;
+	readParagraphPermissionMarkers(node, paragraph);
 	const markRevision = paragraphMarkRevision(props);
 	if (markRevision) paragraph.markRevision = markRevision;
 	const formatRevision = paragraphFormatRevision(props);
@@ -319,6 +315,7 @@ function parseContainer(container: XmlElement, idPrefix: string): Block[] {
 		if (control) block.contentControl = control;
 		blocks.push(block);
 	}
+	resolvePermissions(blocks);
 	return blocks;
 }
 

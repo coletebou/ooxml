@@ -1,6 +1,13 @@
 // The editor context every UI module (grid, formula bar, sheet tabs, commands, dialogs) receives.
 // Shapes are fixed by the UI contract; the shell (component.ts) is the only implementation.
-import type { CellAddress, CellRange, EditSession, RemoteRange, Workbook } from '../index';
+import type {
+	CellAddress,
+	CellRange,
+	EditSession,
+	RemoteRange,
+	SplitPane,
+	Workbook,
+} from '../index';
 import type { CommandRegistry } from './commands';
 import type { DialogRegistry } from './dialogs';
 
@@ -38,6 +45,13 @@ export interface GridController {
 	measureText(text: string, font: string): number;
 	zoom(): number;
 	setZoom(percent: number): void;
+	/** The split View > Split makes with `active` selected, and the first cell of its scrolling pane. */
+	splitAt?(active: CellAddress): { split: SplitPane; topLeft: CellAddress } | undefined;
+	/**
+	 * Measures text again (overflow, shrink to fit, mixed-run baselines) and repaints, keeping the
+	 * selection, scroll and an edit in progress: called when font faces arrive.
+	 */
+	remeasure?(): void;
 }
 
 export interface EditorContext {
@@ -64,6 +78,8 @@ export interface EditorContext {
 	/** Dispatches a public CustomEvent on the host; returns `!defaultPrevented`. */
 	emit(type: string, detail: unknown): boolean;
 	authorName(): string;
+	/** Whether Replace and Replace All check data validation (`validateReplace`; default false). */
+	validateReplace?(): boolean;
 	locale(): string;
 	/**
 	 * The undo history Ctrl+Z, the ribbon and the Quick Access Toolbar drive: the edit session's

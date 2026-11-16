@@ -3,7 +3,9 @@
 // then text/html (a table), then text/plain. Keyboard copy/paste use the native clipboard events
 // of the grid's focus sink, which need no permission; menu commands use the async Clipboard API.
 import {
+	CUT_MULTIPLE,
 	parseHtmlTable,
+	pasteAreas,
 	type CellRange,
 	type ClipboardPayload,
 	type PasteRequest,
@@ -51,16 +53,26 @@ export function createGridClipboard(host: ClipboardHost): GridClipboard {
 		const session = ctx.session();
 		const range = lastRange();
 		if (!session || !range) return undefined;
-		if (ctx.selection.get().ranges.length > 1) {
-			ctx.toast(ctx.t("This action won't work on multiple selections."), 'warning');
+		const ranges = ctx.selection.get().ranges;
+		const sheet = ctx.activeSheet();
+		let payload: ClipboardPayload;
+		try {
+			// Several areas copy when they share rows or columns (Excel's rule); they cannot be cut.
+			if (ranges.length > 1 && cut) throw new RangeError(CUT_MULTIPLE);
+			payload =
+				ranges.length > 1
+					? session.copyAreas(sheet, ranges)
+					: cut && !ctx.readOnly()
+						? session.cut(sheet, range)
+						: session.copy(sheet, range);
+		} catch (error) {
+			ctx.toast(ctx.t(error instanceof Error ? error.message : String(error)), 'warning');
 			return undefined;
 		}
-		const sheet = ctx.activeSheet();
-		const payload = cut && !ctx.readOnly() ? session.cut(sheet, range) : session.copy(sheet, range);
 		internal = payload;
 		internalSheet = sheet;
 		marquee = true;
-		host.setMarquee(range, sheet);
+		host.setMarquee(ranges.length > 1 ? (ranges[0] ?? range) : range, sheet);
 		return payload;
 	};
 
@@ -76,13 +88,13 @@ export function createGridClipboard(host: ClipboardHost): GridClipboard {
 		const session = ctx.session();
 		const at = lastRange();
 		if (!session || !at || ctx.readOnly()) return false;
-		if (ctx.selection.get().ranges.length > 1) {
-			ctx.toast(ctx.t("This action won't work on multiple selections."), 'warning');
-			return false;
-		}
+		const areas = ctx.selection.get().ranges;
 		try {
 			const wasCut = typeof payload !== 'string' && payload.cut;
-			const range = session.paste(ctx.activeSheet(), at, payload, mode);
+			const range =
+				areas.length > 1
+					? pasteAreas(session, ctx.activeSheet(), areas, payload, mode)
+					: session.paste(ctx.activeSheet(), at, payload, mode);
 			host.selectRange(range);
 			if (typeof payload !== 'string' && wasCut) {
 				internal = { ...payload, cut: false };

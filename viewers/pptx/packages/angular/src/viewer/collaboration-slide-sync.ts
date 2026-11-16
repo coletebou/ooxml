@@ -22,8 +22,6 @@ import {
 } from 'ooxml-ui/pptx';
 import type { PptxSlide } from 'pptx-viewer-core';
 
-import type { ProviderLike } from './collaboration-providers';
-
 /** Live-session references the engine writes into, set on connect. */
 export interface SlideSyncBinding {
 	ydoc: YDocLike;
@@ -46,17 +44,21 @@ export class SlideSyncEngine {
 	readonly gate: SyncGate = this.#reportingGate();
 	/** True while the first-write gate is open (the first exchange with the room finished). */
 	readonly synced = signal(false);
+	/** Called whenever the first-write gate opens or resets. */
+	onGateChange: (() => void) | null = null;
 
 	#reportingGate(): SyncGate {
 		const base = createSyncGate(() => {
 			this.synced.set(true);
 			this.#flushPending();
+			this.onGateChange?.();
 		});
 		return {
 			...base,
 			reset: () => {
 				base.reset();
 				this.synced.set(false);
+				this.onGateChange?.();
 			},
 		};
 	}
@@ -117,29 +119,6 @@ export class SlideSyncEngine {
 			this.#applyingRemote = false;
 		}
 		this.#binding?.scheduleWriteBack();
-	}
-
-	/**
-	 * Open the first-write gate on the provider's initial-sync confirmation.
-	 * y-websocket emits 'sync' with a boolean; y-webrtc emits 'synced' with an
-	 * object carrying a `synced` flag (and only once a peer syncs, hence the
-	 * grace timer). Listen to both; opening is idempotent.
-	 */
-	wireSynced(provider: ProviderLike): void {
-		const handle = (payload: unknown): void => {
-			const flag = payload as boolean | { synced?: boolean } | undefined;
-			const isSynced = typeof flag === 'boolean' ? flag : flag?.synced !== false;
-			if (isSynced) {
-				this.gate.open();
-			}
-		};
-		provider.on('sync', handle);
-		provider.on('synced', handle);
-		if (provider.synced === true) {
-			this.gate.open();
-		} else {
-			this.gate.arm();
-		}
 	}
 
 	/**

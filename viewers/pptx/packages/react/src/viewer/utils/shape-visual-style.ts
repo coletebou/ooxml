@@ -7,7 +7,7 @@ import {
 	isWedgeCalloutPresetShape,
 	isStrokeOnlyPresetElement,
 	resolveShapeGeometry,
-	screenStrokeWidth,
+	screenBorderWidth,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, ShapeStyle } from 'pptx-viewer-core';
 import { hasShapeProperties } from 'pptx-viewer-core';
@@ -42,7 +42,7 @@ import { apply3dEffects } from './shape-visual-3d';
  * (Presets keep their container fill because a `clipPath` constrains it to the
  * shape outline.)
  */
-function rendersCustomVectorPath(element: PptxElement): boolean {
+export function rendersCustomVectorPath(element: PptxElement): boolean {
 	return (
 		(element.type === 'shape' || element.type === 'image' || element.type === 'picture') &&
 		Boolean(element.pathData) &&
@@ -53,7 +53,7 @@ function rendersCustomVectorPath(element: PptxElement): boolean {
 	);
 }
 
-function rendersWedgeCalloutVector(element: PptxElement): boolean {
+export function rendersWedgeCalloutVector(element: PptxElement): boolean {
 	return element.type === 'shape' && isWedgeCalloutPresetShape(element.shapeType);
 }
 
@@ -248,7 +248,7 @@ export function getShapeVisualStyle(
 				...base,
 				backgroundColor: 'transparent',
 				borderWidth: 0,
-				borderTopWidth: screenStrokeWidth(geometry.strokeWidth),
+				borderTopWidth: screenBorderWidth(geometry.strokeWidth),
 				borderTopColor: stroke.borderColor,
 				borderTopStyle: (stroke.borderStyle ?? 'solid') as React.CSSProperties['borderTopStyle'],
 			};

@@ -1,5 +1,12 @@
-import type { ThemeEditorEdit } from 'ooxml-ui/pptx';
-import { buildThemeColorMap, reResolveElementColors, reResolveSlideColors } from 'pptx-viewer-core';
+import { queueThemeWrite } from 'ooxml-ui/pptx';
+import type { HistoryTheme, ThemeEditorEdit } from 'ooxml-ui/pptx';
+import {
+	buildThemeColorMap,
+	reResolveElementColors,
+	reResolveElementFonts,
+	reResolveSlideColors,
+	reResolveSlideFonts,
+} from 'pptx-viewer-core';
 import type {
 	PptxElement,
 	PptxSlide,
@@ -15,18 +22,21 @@ import type {
  */
 import type { RefObject } from 'react';
 
+import { applyThemePartInPlace } from './theme-by-path-apply';
 import { applyThemeEditorEdit } from './theme-editor-apply';
+import { restoreHistoryTheme } from './theme-history-restore';
 import type { EditorHistoryResult } from './useEditorHistory';
 
 export interface UseThemeHandlersInput {
 	handlerRef: RefObject<PptxHandler | null>;
-	serializeSlides: () => Promise<Uint8Array | null>;
-	setContent: React.Dispatch<React.SetStateAction<ArrayBuffer | Uint8Array | null>>;
-	onContentChange: ((data: Uint8Array) => void) | undefined;
 	setTheme: React.Dispatch<React.SetStateAction<Record<string, unknown> | null>>;
 	setSlideMasters: React.Dispatch<React.SetStateAction<Array<Record<string, unknown>>>>;
 	slideMasters: Array<Record<string, unknown>>;
+	/** The deck's theme parts as loaded; an undo back to the loaded theme restores its name. */
+	themeOptions?: PptxThemeOption[];
 	history: EditorHistoryResult;
+	/** The live slides, which a theme applied by path re-themes in place. */
+	slides: PptxSlide[];
 	/** Current live slides, re-coloured in place on a scheme-colour change. */
 	setSlides: React.Dispatch<React.SetStateAction<PptxSlide[]>>;
 	/**
@@ -58,13 +68,15 @@ export interface ThemeHandlersResult {
 		fontScheme: PptxThemeFontScheme,
 		themeName?: string,
 	) => Promise<void>;
+	/** Undo or redo crossed a theme change: put that theme back (see `useEditorHistory`). */
+	handleRestoreHistoryTheme: (theme: HistoryTheme) => Promise<void>;
 	handleSetTemplateBackground: (path: string, backgroundColor: string | undefined) => void;
 	handleGetTemplateBackgroundColor: (path: string) => string | undefined;
 	/** Return theme parts discovered in the loaded PPTX archive. */
 	handleGetAvailableThemes: () => Promise<PptxThemeOption[]>;
 	/**
-	 * Switch the presentation to an existing theme by its archive path,
-	 * update all slide masters, and refresh the serialised content.
+	 * Switch every slide master to an existing theme part by its archive path, in place, as one
+	 * undo step.
 	 */
 	handleSwitchTheme: (themePath: string) => Promise<void>;
 }
@@ -72,9 +84,6 @@ export interface ThemeHandlersResult {
 export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersResult {
 	const {
 		handlerRef,
-		serializeSlides,
-		setContent,
-		onContentChange,
 		setTheme,
 		setSlideMasters,
 		slideMasters,
@@ -86,31 +95,9 @@ export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersRes
 		bumpHistory,
 	} = input;
 
-	const refreshContentAfterThemeChange = async () => {
-		const updated = await serializeSlides();
-		if (!updated) {
-			return;
-		}
-		setContent(updated);
-		if (onContentChange) {
-			onContentChange(updated);
-		}
-		history.markDirty();
-	};
-
-	const handleApplyTheme = async (themePath: string, applyToAllMasters: boolean) => {
-		const handler = handlerRef.current;
-		if (!handler) {
-			return;
-		}
-		await handler.setPresentationTheme(themePath, applyToAllMasters);
-		setSlideMasters((prev) =>
-			prev.map((master, index) =>
-				applyToAllMasters || index === 0 ? { ...master, themePath } : master,
-			),
-		);
-		await refreshContentAfterThemeChange();
-	};
+	// Presentation properties > Theme: in place, as one undo step (never by reloading the deck).
+	const handleApplyTheme = (themePath: string, applyToAllMasters: boolean) =>
+		applyThemePartInPlace(input, themePath, applyToAllMasters);
 
 	const handleUpdateThemeColorScheme = async (colorScheme: PptxThemeColorScheme) => {
 		const handler = handlerRef.current;
@@ -119,7 +106,7 @@ export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersRes
 		}
 		// Update the theme in the underlying archive + colour map so a later save
 		// (and any future parse) carries the new scheme.
-		await handler.updateThemeColorScheme(colorScheme);
+		await queueThemeWrite(handler, () => handler.updateThemeColorScheme(colorScheme));
 		// Re-colour the live slides IN PLACE rather than serialising the whole
 		// deck and feeding it back through the load pipeline. The old round-trip
 		// (`serialize -> setContent -> full re-parse`) is a heavy main-thread
@@ -149,9 +136,22 @@ export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersRes
 		if (!handler) {
 			return;
 		}
-		await handler.updateThemeFontScheme(fontScheme);
+		await queueThemeWrite(handler, () => handler.updateThemeFontScheme(fontScheme));
+		// Re-resolve the live slides in place, as the colour scheme does: a full
+		// reload would jump back to the first slide and drop the undo history.
+		const previousFonts = theme?.fontScheme;
+		bumpHistory();
+		setSlides((prev) => reResolveSlideFonts(prev, previousFonts, fontScheme));
+		setTemplateElementsBySlideId((prev) =>
+			Object.fromEntries(
+				Object.entries(prev).map(([slideId, elements]) => [
+					slideId,
+					reResolveElementFonts(elements, previousFonts, fontScheme),
+				]),
+			),
+		);
 		setTheme((prev) => (prev ? { ...prev, fontScheme } : { fontScheme }));
-		await refreshContentAfterThemeChange();
+		history.markDirty();
 	};
 
 	const handleUpdateThemeName = async (name: string) => {
@@ -159,41 +159,27 @@ export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersRes
 		if (!handler) {
 			return;
 		}
-		await handler.updateThemeName(name);
+		await queueThemeWrite(handler, () => handler.updateThemeName(name));
 		setTheme((prev) => (prev ? { ...prev, name } : { name }));
 		history.markDirty();
 	};
 
+	// Every master on the first master's theme part.
 	const handleApplyThemeToPresentation = async () => {
-		const handler = handlerRef.current;
-		if (!handler) {
-			return;
-		}
 		const primaryThemePath = (slideMasters[0] as { themePath?: string } | undefined)?.themePath;
 		if (primaryThemePath) {
-			await handler.setPresentationTheme(primaryThemePath, true);
+			await applyThemePartInPlace(input, primaryThemePath, true);
 		}
-		await refreshContentAfterThemeChange();
 	};
 
-	const handleApplyThemeData = async (
+	// Design > Themes and the theme gallery: re-themed in place (one undo step,
+	// the active slide and selection kept), never by reloading the deck.
+	const handleApplyThemeData = (
 		colorScheme: PptxThemeColorScheme,
 		fontScheme: PptxThemeFontScheme,
 		themeName?: string,
-	) => {
-		const handler = handlerRef.current;
-		if (!handler) {
-			return;
-		}
-		await handler.applyTheme(colorScheme, fontScheme, themeName);
-		setTheme((prev) => ({
-			...prev,
-			colorScheme,
-			fontScheme,
-			...(themeName && { name: themeName }),
-		}));
-		await refreshContentAfterThemeChange();
-	};
+	) =>
+		applyThemeEditorEdit(input, { colorScheme, fontScheme, name: themeName ?? theme?.name ?? '' });
 
 	const handleSetTemplateBackground = (path: string, backgroundColor: string | undefined) => {
 		const handler = handlerRef.current;
@@ -223,18 +209,11 @@ export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersRes
 		return handler.getAvailableThemes();
 	};
 
-	const handleSwitchTheme = async (themePath: string): Promise<void> => {
-		const handler = handlerRef.current;
-		if (!handler) {
-			return;
-		}
-		// Update all slide master relationships to point to the new theme
-		await handler.setPresentationTheme(themePath, true);
-		setSlideMasters((prev) => prev.map((master) => ({ ...master, themePath })));
-		await refreshContentAfterThemeChange();
-	};
+	const handleSwitchTheme = (themePath: string): Promise<void> =>
+		applyThemePartInPlace(input, themePath, true);
 
 	const handleApplyThemeEdit = (edit: ThemeEditorEdit) => applyThemeEditorEdit(input, edit);
+	const handleRestoreHistoryTheme = (target: HistoryTheme) => restoreHistoryTheme(input, target);
 
 	return {
 		handleApplyThemeEdit,
@@ -244,6 +223,7 @@ export function useThemeHandlers(input: UseThemeHandlersInput): ThemeHandlersRes
 		handleUpdateThemeName,
 		handleApplyThemeToPresentation,
 		handleApplyThemeData,
+		handleRestoreHistoryTheme,
 		handleSetTemplateBackground,
 		handleGetTemplateBackgroundColor,
 		handleGetAvailableThemes,

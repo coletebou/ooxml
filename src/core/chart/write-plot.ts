@@ -3,7 +3,7 @@
 // only what the type allows): ofPieType, scatterStyle, radarStyle, wireframe, barDir, grouping,
 // varyColors, ser, dLbls, gapWidth, overlap, dropLines, hiLowLines, upDownBars, marker, smooth,
 // gapDepth, shape, firstSliceAng, holeSize, bubble3D, bubbleScale, showNegBubbles, sizeRepresents,
-// serLines, axId, extLst. Groups come before axes, as Office writes them.
+// splitType, splitPos, custSplit, secondPieSize, serLines, bandFmts, axId, extLst. Groups come before axes, as Office writes them.
 import type { ChartPlotArea, ChartPlotGroup } from './model';
 import type { ChartLines, ChartShapeProperties } from './model-series';
 import { CHART_GROUP_ELEMENTS } from './parse-plot';
@@ -72,7 +72,14 @@ export function groupXml(context: ChartWriteContext, group: ChartPlotGroup): str
 			valXml('bubbleScale', group.bubbleScale) +
 			valXml('showNegBubbles', group.showNegativeBubbles) +
 			valXml('sizeRepresents', group.sizeRepresents) +
+			valXml('splitType', group.splitType) +
+			valXml('splitPos', group.splitPosition) +
+			(group.customSplit
+				? elementXml('custSplit', group.customSplit.map((i) => valXml('secondPiePt', i)).join(''))
+				: '') +
+			valXml('secondPieSize', group.secondPieSize) +
 			linesXml(context, 'serLines', group.seriesLines, group.seriesLinesSpPr) +
+			raw(context, group.bandFormatsXml) +
 			group.axisIds.map((id) => valXml('axId', id)).join('') +
 			raw(context, group.extLst),
 	);

@@ -118,11 +118,8 @@ export const translationsDe: Partial<Record<TranslationKey, string>> = {
 	'pptx.shortcuts.action.zoomCanvas': 'Arbeitsbereich zoomen',
 	'pptx.shortcuts.action.commitTextEdit': 'Inline-Textbearbeitung bestatigen',
 	'pptx.shortcuts.action.cancelTextEdit': 'Inline-Textbearbeitung abbrechen / Menus schliessen',
-	'pptx.shortcuts.action.clearSelection':
-		'Auswahl aufheben / Menus schliessen / Bearbeitung abbrechen',
 	'pptx.shortcuts.action.nextSlide': 'Nachste Folie (ohne Auswahl)',
 	'pptx.shortcuts.action.prevSlide': 'Vorherige Folie (ohne Auswahl)',
-	'pptx.shortcuts.action.redoAlternate': 'Wiederholen (alternativ)',
 	'pptx.shortcuts.action.selectAll': 'Alle Elemente auswahlen',
 	'pptx.shortcuts.group.editing': 'Bearbeitung',
 	'pptx.shortcuts.group.navigation': 'Navigation',
@@ -202,9 +199,7 @@ export const translationsDe: Partial<Record<TranslationKey, string>> = {
 	// Comments
 	'pptx.comments.addComment': 'Kommentar hinzufugen',
 	'pptx.comments.noComments': 'Keine Kommentare',
-	'pptx.comments.author': 'Autor',
 	'pptx.comments.resolved': 'Erledigt',
-	'pptx.comments.clickToSelect': 'Klicken, um Element auszuwahlen',
 	'pptx.comments.deletedElement': 'Element geloscht',
 	'pptx.comments.save': 'Speichern',
 	'pptx.comments.cancel': 'Abbrechen',
@@ -214,7 +209,6 @@ export const translationsDe: Partial<Record<TranslationKey, string>> = {
 	'pptx.comments.unresolve': 'Wieder offnen',
 	'pptx.comments.delete': 'Loschen',
 	'pptx.comments.commentingOn': 'Kommentar zu:',
-	'pptx.comments.commentOnElement': '{{element}} kommentieren...',
 	'pptx.comments.addCommentPlaceholder': 'Kommentar hinzufugen...',
 
 	// Header & Footer

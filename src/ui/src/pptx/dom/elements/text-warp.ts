@@ -3,11 +3,12 @@ import { getSubstituteFontFamily, hasTextProperties } from 'ooxml-core/pptx';
 import type { EnvelopeSegmentInput, WarpParagraph } from '../../index';
 import {
 	buildGlyphEnvelopeBlock,
-	buildWarpPath,
 	DEFAULT_FONT_FAMILY,
 	fontWeightAttribute,
 	getWarpCssTransform,
 	resolveFontItalic,
+	resolveWarpRunPaint,
+	warpParagraphLayouts,
 	groupIntoParagraphs,
 	hasGlyphEnvelope,
 	shouldUseSvgWarp,
@@ -27,7 +28,7 @@ export function renderWarpedText(
 	}
 	const style = element.textStyle;
 	const preset = style?.textWarpPreset;
-	if (!preset || preset === 'textNoShape' || preset === 'textPlain') {
+	if (!preset || preset === 'textNoShape') {
 		return null;
 	}
 	const paragraphs = groupIntoParagraphs(element);
@@ -130,24 +131,21 @@ function renderGlyphWarp(
 		style.textWarpAdj,
 		style.textWarpAdj2,
 		getGlyphOutline,
+		style,
 	);
 	paragraphs.forEach((paragraph, lineIndex) => {
 		const segments = paragraph.segments;
 		const glyphs = perLine[lineIndex] ?? [];
 		glyphs.forEach((g, glyphIndex) => {
-			const s = segments[g.segmentIndex]?.style ?? {};
-			const fill = s.color ?? style.color ?? '#000000';
-			const renderedFamily = s.fontFamily || style.fontFamily;
+			const paint = resolveWarpRunPaint(segments[g.segmentIndex], style);
+			const fill = paint.fill;
 			const textAttrs = {
 				fill,
-				'font-family': renderedFamily
-					? getSubstituteFontFamily(renderedFamily)
-					: DEFAULT_FONT_FAMILY,
-				'font-size': s.fontSize ?? style.fontSize ?? 18,
-				'font-weight': fontWeightAttribute(renderedFamily, s.bold ?? style.bold),
-				'font-style': resolveFontItalic(renderedFamily, s.italic ?? style.italic)
-					? 'italic'
-					: undefined,
+				'font-family': paint.fontFamily,
+				'font-size': paint.fontSizePx,
+				'font-weight': paint.fontWeight,
+				'font-style': paint.fontStyle,
+				'text-decoration': paint.textDecoration,
 			};
 			if (g.outlinePath) {
 				// The glyph's real outline, already warped point-by-point (see
@@ -224,20 +222,21 @@ function renderPathWarp(
 	svg.setAttribute('class', 'pptxv-wordart');
 	svg.setAttribute('style', 'position:absolute;inset:0;width:100%;height:100%;overflow:visible');
 	const defs = createSvgEl(context.document, 'defs');
+	const layouts = warpParagraphLayouts(
+		preset,
+		element.width,
+		element.height,
+		paragraphs,
+		style.textWarpAdj,
+		style.textWarpAdj2,
+		style,
+	);
 	paragraphs.forEach((paragraph, index) => {
 		const id = `${element.id.replace(/[^a-zA-Z0-9_-]/gu, '_')}-warp-${index}`;
 		defs.appendChild(
 			createSvgEl(context.document, 'path', {
 				id,
-				d: buildWarpPath(
-					preset,
-					element.width,
-					element.height,
-					index,
-					paragraphs.length,
-					style.textWarpAdj,
-					style.textWarpAdj2,
-				),
+				d: layouts[index]?.d,
 			}),
 		);
 		const text = createSvgEl(context.document, 'text', {
@@ -254,7 +253,21 @@ function renderPathWarp(
 			startOffset: '50%',
 			'text-anchor': 'middle',
 		});
-		textPath.textContent = paragraph.segments.map((segment) => segment.text).join('');
+		// Each run keeps its own paint, the shared descriptor every binding maps.
+		const fit = layouts[index]?.fitScale ?? 1;
+		for (const segment of paragraph.segments) {
+			const paint = resolveWarpRunPaint(segment, style);
+			const tspan = createSvgEl(context.document, 'tspan', {
+				fill: paint.fill,
+				'font-family': paint.fontFamily,
+				'font-size': paint.fontSizePx * fit,
+				'font-weight': paint.fontWeight ?? 'normal',
+				'font-style': paint.fontStyle ?? 'normal',
+				'text-decoration': paint.textDecoration,
+			});
+			tspan.textContent = segment.text;
+			textPath.appendChild(tspan);
+		}
 		text.appendChild(textPath);
 		svg.appendChild(text);
 	});

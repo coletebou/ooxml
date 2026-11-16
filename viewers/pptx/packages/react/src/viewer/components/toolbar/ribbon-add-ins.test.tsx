@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { ribbonTab, ribbonTabButtons } from 'ooxml-ui/pptx';
 import type { RibbonAddInTab } from 'ooxml-ui/pptx';
 import React, { act, useCallback, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -8,7 +9,9 @@ import type { ToolbarSection } from '../../types';
 import { RibbonAddInsContext, RibbonAddInSection, useRibbonAddInTabs } from './ribbon-add-ins';
 import { RibbonTabBar } from './RibbonTabBar';
 
-vi.mock(import('react-i18next'), () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock(import('../../i18n/use-translation'), () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
+}));
 
 const reports = (run: () => void, label = 'Reports'): RibbonAddInTab => ({
 	id: 'reports',
@@ -27,7 +30,6 @@ function Harness({ onFallback }: { onFallback: () => void }): React.ReactElement
 	return (
 		<div>
 			<RibbonTabBar
-				isTabVisible={() => true}
 				activeSection={addIns.active ? null : section}
 				contextualTabs={[]}
 				activeContextual={null}
@@ -66,12 +68,11 @@ describe('host ribbon tabs', () => {
 					</RibbonAddInsContext.Provider>,
 				),
 			);
-		const tab = () => container.querySelector<HTMLButtonElement>('[data-ribbon-add-in-tab]');
-		const selected = () =>
-			container.querySelector('[role="tab"][aria-selected="true"]')!.textContent;
+		const tab = () => ribbonTab(container, '[data-ribbon-add-in-tab]');
+		const selected = () => ribbonTab(container, '[role="tab"][aria-selected="true"]')!.textContent;
 		try {
 			render([reports(first), { ...reports(first), id: 'home', label: 'Fake' }]);
-			const tabs = [...container.querySelectorAll('[role="tab"]')];
+			const tabs = [...ribbonTabButtons(container)];
 			expect(tabs.at(-1)).toBe(tab());
 			expect(tabs.map((item) => item.textContent)).not.toContain('Fake');
 			expect(tab()!.textContent).toBe('Reports');

@@ -66,6 +66,8 @@ export const GRID_CSS = `
 	border-right:1px solid var(--xve-header-line, var(--office-border, #d4d4d4));border-bottom:1px solid var(--xve-header-line, var(--office-border, #d4d4d4));cursor:default}
 .xg-corner::after{content:"";position:absolute;right:3px;bottom:3px;border-left:9px solid transparent;border-bottom:9px solid #b4b4b4}
 .xg-freeze-h,.xg-freeze-v{position:absolute;background:var(--xve-freeze-line, var(--office-border, #9b9b9b));z-index:6;pointer-events:none}
+.xg-freeze-h.xg-split-bar,.xg-freeze-v.xg-split-bar{pointer-events:auto;background:var(--xve-split-bar, var(--office-border, #b4b4b4));touch-action:none}
+.xg-freeze-h.xg-split-bar{cursor:row-resize}.xg-freeze-v.xg-split-bar{cursor:col-resize}
 .xg-col-resize{cursor:col-resize!important}.xg-row-resize{cursor:row-resize!important}
 .xg-resize-guide{position:absolute;z-index:8;border:0 dashed #666;pointer-events:none}
 .xg-editor-host{position:absolute;z-index:7;box-sizing:border-box;opacity:0;overflow:hidden;pointer-events:none;background:#fff;color:#000;line-height:1.25}
@@ -85,6 +87,30 @@ export const GRID_CSS = `
 .xg-dd{position:absolute;z-index:6;width:17px;height:17px;box-sizing:border-box;border:1px solid #c8c8c8;background:#f3f3f3;
 	display:flex;align-items:center;justify-content:center;cursor:default;pointer-events:auto}
 .xg-dd::before{content:"";border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #444}
+.xg-fb{position:absolute;z-index:6;box-sizing:border-box;padding:0;border:1px solid #c8c8c8;background:#f3f3f3;display:flex;align-items:center;justify-content:center;cursor:default;pointer-events:auto}
+.xg-fb::before{content:"";border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #444}
+.xg-fb-active{background:#dcebe1;border-color:var(--xve-selection-border, var(--office-accent, #217346))}
+.xg-fb-active::before{border:0;width:8px;height:8px;background:var(--xve-selection-border, var(--office-accent, #217346));clip-path:polygon(0 0,100% 0,62% 50%,62% 100%,38% 85%,38% 50%)}
+.xg-fmenu{padding:4px 0;font-size:13px;max-height:calc(100% - 8px)}
+.xg-fm-row{position:relative}
+.xg-fm-sep{border-top:1px solid var(--xve-border, var(--office-border, #d8d8d8));margin-top:3px;padding-top:3px}
+.xg-fm-item{display:block;width:100%;text-align:left;padding:4px 14px;border:0;background:transparent;color:inherit;font:inherit;cursor:default}
+.xg-fm-item:hover:not(:disabled),.xg-fm-item:focus-visible{background:var(--xve-accent, var(--office-selected, #e1efe6));outline:none}
+.xg-fm-item:disabled{opacity:.45}
+.xg-fm-parent::after{content:"";position:absolute;right:10px;top:50%;margin-top:-4px;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid currentColor}
+.xg-fm-sub{position:absolute;left:100%;top:-4px;min-width:200px;padding:4px 0;max-height:360px;overflow:auto}
+.xg-fm-sub[hidden]{display:none}
+.xg-fm-head{padding:4px 14px;font-weight:600}
+.xg-fm-swatches{display:flex;flex-wrap:wrap;gap:3px;padding:2px 14px 6px;max-width:220px}
+.xg-fm-swatch{width:18px;height:18px;border:1px solid #888;padding:0}
+.xg-fm-values{padding:4px 10px 6px;border-top:1px solid var(--xve-border, var(--office-border, #d8d8d8));margin-top:3px}
+.xg-fm-search{box-sizing:border-box;width:100%;margin:4px 0;padding:3px 6px;font:inherit;border:1px solid var(--xve-border, var(--office-border, #c8c8c8));background:transparent;color:inherit}
+.xg-fm-list{list-style:none;margin:2px 0;padding:0 0 0 4px;max-height:180px;overflow:auto;border:1px solid var(--xve-border, var(--office-border, #d8d8d8))}
+.xg-fm-check{display:flex;align-items:center;gap:6px;padding:2px 4px;white-space:nowrap}
+.xg-fm-empty{padding:4px;opacity:.7}
+.xg-fm-buttons{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+.xg-fm-buttons button{min-width:64px;padding:3px 10px;border:1px solid var(--xve-border, var(--office-border, #c8c8c8));border-radius:3px;background:var(--xve-secondary, var(--office-surface, #f3f3f3));color:inherit;font:inherit}
+.xg-fm-buttons .xg-fm-ok{background:var(--xve-selection-border, var(--office-accent, #217346));color:#fff;border-color:transparent}
 .xg-popup{position:absolute;z-index:20;background:var(--xve-popover, var(--office-popover, #fff));color:var(--xve-popover-foreground, var(--office-popover-foreground, #222));
 	border:1px solid var(--xve-border, var(--office-border, #c8c8c8));box-shadow:0 4px 12px rgba(0,0,0,.18);font-size:13px;border-radius:4px}
 .xg-list{max-height:220px;overflow:auto;min-width:120px;padding:2px 0;margin:0;list-style:none}
@@ -106,9 +132,16 @@ export const GRID_CSS = `
 .xg-obj.xg-obj-sel{outline:1px solid #8a8a8a;outline-offset:0}
 .xg-obj .xg-grip{position:absolute;width:8px;height:8px;background:#fff;border:1px solid #555;box-sizing:border-box;border-radius:50%}
 @media(pointer:coarse){.xg-grip::before{content:'';position:absolute;inset:-${(MIN_TOUCH_TARGET_PX - 8) / 2}px;touch-action:none}}
+.xg-obj.xg-shape svg{overflow:visible}
+.xg-obj.xg-formcontrol{overflow:visible}
+.xg-formcontrol svg [data-control-part]{pointer-events:auto;cursor:pointer}
+.xg-formcontrol[data-control-type=button] svg{pointer-events:auto}
+.xg-fc-pop{position:absolute;left:0;z-index:5;max-height:160px;overflow:auto;background:#fff;border:1px solid #7a7a7a;box-sizing:border-box;font:12px 'Segoe UI',Arial,sans-serif}
+.xg-fc-item{padding:2px 4px;cursor:pointer;white-space:nowrap}
+.xg-fc-item:hover,.xg-fc-on{background:#0078d7;color:#fff}
 .xg-obj-unsupported{background:repeating-linear-gradient(45deg,#f6f6f6,#f6f6f6 6px,#ececec 6px,#ececec 12px);border:1px dashed #aaa;
 	font-size:11px;color:#555;display:flex;align-items:center;justify-content:center;text-align:center}
-.xg-obj.xg-smartart{overflow:hidden}
+.xg-obj.xg-smartart{overflow:visible}
 .xg-obj.xg-smartart office-ui-smartart{display:block;pointer-events:none}
 .xg-smartart-placeholder{background:#fafafa;border:1px dashed #aaa;font-size:11px;color:#333;padding:4px;overflow:auto}
 .xg-smartart-nodes{margin:0;padding-left:16px}

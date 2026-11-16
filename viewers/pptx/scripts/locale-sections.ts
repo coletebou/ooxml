@@ -141,6 +141,7 @@ const SECTION_DEFINITIONS = [
 		prefixes: [
 			'arrange',
 			'inspector',
+			'formatPane',
 			'shape',
 			'action',
 			'align',
@@ -224,9 +225,12 @@ const SECTION_DEFINITIONS = [
 	},
 	{ name: 'ai-assistant', prefixes: ['ai'] },
 	{ name: 'backstage', prefixes: ['backstage'] },
+	{ name: 'cloud-files', prefixes: ['cloudFiles'] },
+	{ name: 'pdf-export', prefixes: ['pdfExport'] },
+	{ name: 'dialogs', prefixes: ['dialog'] },
 	{ name: 'viewer-options', prefixes: ['options'] },
 	{ name: 'slide-templates', prefixes: ['slideTemplates'] },
-	{ name: 'ribbon', prefixes: ['ribbon', 'home', 'insert'] },
+	{ name: 'ribbon', prefixes: ['ribbon', 'home', 'insert', 'insertChart'] },
 	{ name: 'ribbon-galleries', prefixes: ['gallery'] },
 	{ name: 'shape-gallery', prefixes: ['shapes'] },
 ] as const;

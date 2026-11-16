@@ -2,8 +2,11 @@ import {
 	applyImagePathPatches,
 	applyMasterViewCrudAction,
 	collectImagePaths,
+	forgetStepsUsingRemovedParts,
 	masterViewCrudActions,
 	masterViewCrudFailureKey,
+	alertNoticeDialog,
+	promptNameDialog,
 } from 'ooxml-ui/pptx';
 import type { MasterViewCrudActionId, MasterViewTarget } from 'ooxml-ui/pptx';
 /**
@@ -44,10 +47,13 @@ export interface MasterViewCrudActionsDeps {
 	/** Live getter, not a snapshot: a `setLocale` switch must reach the next call. */
 	getTranslator(): Translator;
 	store: Store<ViewerState>;
-	ops: Pick<EditorOps, 'pushHistory' | 'commitChange'>;
+	ops: Pick<EditorOps, 'pushHistory' | 'commitChange' | 'history'>;
 	getHandler(): PptxHandler | null;
-	/** Adopt the fresh handler `applyMasterViewCrudAction` returns on success. */
-	setHandler(handler: PptxHandler): void;
+	/**
+	 * Adopt the fresh handler `applyMasterViewCrudAction` returns on success; `keepPrevious` leaves
+	 * the one it replaces undisposed.
+	 */
+	setHandler(handler: PptxHandler, keepPrevious?: boolean): void;
 }
 
 /**
@@ -163,9 +169,10 @@ export function createMasterViewCrudActions(
 
 			let name: string | undefined;
 			if (id === 'renameLayout' || id === 'renameMaster') {
-				const entered = doc.defaultView?.prompt(
+				const entered = await promptNameDialog(
 					t('pptx.masterView.renamePrompt'),
 					currentName(state.slideMasters, target),
+					{ t, host: doc },
 				);
 				if (!entered) {
 					return;
@@ -175,12 +182,14 @@ export function createMasterViewCrudActions(
 
 			const result = await applyMasterViewCrudAction(handler, data, id, target, { name });
 			if (!result.ok) {
-				doc.defaultView?.alert(t(masterViewCrudFailureKey(id, result.reason)));
+				await alertNoticeDialog(t(masterViewCrudFailureKey(id, result.reason)), { t, host: doc });
 				return;
 			}
 
 			ops.pushHistory();
-			deps.setHandler(result.handler);
+			// Keep the previous handler alive: the slides on screen and the undo stack still show its
+			// pictures, and disposing it revokes their Blob URLs.
+			deps.setHandler(result.handler, true);
 			const slideMasters = await resolveSlideMasterImages(
 				result.handler,
 				result.data.slideMasters ?? [],
@@ -194,6 +203,8 @@ export function createMasterViewCrudActions(
 				selectedElementId: null,
 				selectedElementIds: [],
 			});
+			// A step restores the masters too, so a delete leaves no undo step here.
+			forgetStepsUsingRemovedParts((reaches) => ops.history.forget(reaches), data, result.data);
 			ops.commitChange();
 		},
 	};

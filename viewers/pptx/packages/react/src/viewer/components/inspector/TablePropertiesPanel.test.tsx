@@ -16,7 +16,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderTableElement } from '../../utils/table-render';
 import { TablePropertiesPanel } from './TablePropertiesPanel';
 
-vi.mock(import('react-i18next'), () => ({
+/** In-app dialogs load on demand; a busy CI runner needs more than waitFor's 1 s default. */
+const DIALOG_WAIT = { timeout: 5000 };
+
+vi.mock(import('../../i18n/use-translation'), () => ({
 	useTranslation: () => ({
 		t: (key: string, vars?: Record<string, unknown>) =>
 			vars ? `${key}:${Object.values(vars).join(',')}` : key,
@@ -121,6 +124,20 @@ function render(
 }
 
 describe('tablePropertiesPanel', () => {
+	it('draws the shared table options and merges a toggle into the table data', () => {
+		const onUpdate = vi.fn();
+		render(table(), onUpdate);
+		expect(host.querySelector('[data-testid="table-bandRowCycle"]')).toBeNull();
+		const total = host.querySelector<HTMLInputElement>('[data-testid="table-lastRow"]')!;
+		act(() => {
+			total.checked = true;
+			total.dispatchEvent(new Event('change', { bubbles: true }));
+		});
+		expect(onUpdate).toHaveBeenLastCalledWith({
+			tableData: expect.objectContaining({ lastRow: true }),
+		});
+	});
+
 	it.each([
 		{
 			command: 'mergeRight',
@@ -206,9 +223,12 @@ describe('tablePropertiesPanel', () => {
 		const original = structuredClone(element);
 		const onUpdate = vi.fn();
 		render(element, onUpdate, { rowIndex: 0, columnIndex: 0 });
-		const bold = host.querySelector<HTMLButtonElement>('button.font-bold');
+		const bold = host.querySelector<HTMLInputElement>('[data-testid="table-cell-bold"]');
 		expect(bold).not.toBeNull();
-		act(() => bold!.click());
+		act(() => {
+			bold!.checked = true;
+			bold!.dispatchEvent(new Event('change', { bubbles: true }));
+		});
 		expect(onUpdate).toHaveBeenCalledOnce();
 		expect(onUpdate.mock.calls[0][0]).not.toHaveProperty('rawXml');
 		expect(onUpdate.mock.calls[0][0].tableData.rows[0].cells[0].style.bold).toBeTruthy();
@@ -318,8 +338,7 @@ describe('tablePropertiesPanel', () => {
 		expect(splitData.rows[0].cells[1].textRuns).toBeUndefined();
 	});
 
-	it('enables "Edit style..." with no tableStyleId, and assigns a created style to the table', () => {
-		window.prompt = () => 'Brand New Style';
+	it('enables "Edit style..." with no tableStyleId, and assigns a created style to the table', async () => {
 		const onUpdate = vi.fn();
 		const onTableStyleMapChange = vi.fn();
 		const el = table();
@@ -346,6 +365,15 @@ describe('tablePropertiesPanel', () => {
 		) as HTMLButtonElement;
 		expect(createButton).toBeTruthy();
 		act(() => createButton.click());
+		const dialog = await vi.waitFor(() => {
+			const found = document.querySelector('office-ui-message-dialog');
+			if (!found) throw new Error('no dialog yet');
+			return found;
+		}, DIALOG_WAIT);
+		(dialog.shadowRoot!.querySelector('input') as HTMLInputElement).value = 'Brand New Style';
+		await act(async () => {
+			(dialog.shadowRoot!.querySelector('button.confirm') as HTMLButtonElement).click();
+		});
 
 		expect(onTableStyleMapChange).toHaveBeenCalledOnce();
 		const nextMap = onTableStyleMapChange.mock.calls[0][0] as ParsedTableStyleMap;

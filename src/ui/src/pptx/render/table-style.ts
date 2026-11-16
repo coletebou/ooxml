@@ -37,6 +37,7 @@ import { fontWeightAttribute, resolveFontItalic, resolveFontWeight } from './fon
 import { cellPaddingCss } from './table-cell-padding';
 import type { CellBorderPosition } from './table-style-borders';
 import { resolveCellBorderCss, resolveStyleDiagonalBorders } from './table-style-borders';
+import { spanTableBackground } from './table-style-bg-span';
 import { getBuiltinTableStyle } from './table-style-builtins';
 import { resolveTableStyleCell3D } from './table-style-cell3d';
 import {
@@ -47,6 +48,7 @@ import {
 } from './table-style-fill';
 import { cellImageFillCss } from './table-style-image';
 import { styleDeclaresFills } from './table-style-scheme';
+import { tableStyleShadowCss } from './table-style-shadow';
 import { resolveTableStyleThemeRefs } from './table-style-theme-refs';
 import { isKoreanLanguage } from './text-east-asian-breaks';
 import { authoredLetterSpacingPx } from './text-run-spacing';
@@ -324,6 +326,22 @@ export function tableContainerCss(tableData: PptxTableData | undefined): TableCe
 		...(tableData?.rtl ? { direction: 'rtl' } : {}),
 		...(tableData?.defaultCellFontSize ? { fontSize: `${tableData.defaultCellFontSize}pt` } : {}),
 	};
+}
+
+/**
+ * The style a table's frame (the element that clips the `<table>`) takes from
+ * its table style: the drop shadow "Themed Style 1/2" reference through
+ * `a:tblBg/a:effectRef`, drawn on the table's outline. It belongs on the
+ * frame, not the `<table>`, because the frame clips its content and would cut
+ * the shadow off. Empty for a style without an effect, so a binding can
+ * spread it unconditionally.
+ */
+export function tableFrameCss(
+	tableData: PptxTableData | undefined,
+	styleCtx?: TableStyleContext,
+): TableCellCss {
+	const boxShadow = tableData ? tableStyleShadowCss(styleEntryFor(tableData, styleCtx)) : undefined;
+	return boxShadow ? { boxShadow } : {};
 }
 
 /**
@@ -693,12 +711,16 @@ export function getTableCellBandStyle(
 		return painted;
 	};
 
+	let tableBackgroundCss: string | undefined;
 	// ── Table STYLE's own background (`a:tblBg`), the lowest-priority
 	// background layer of all: even `a:tblPr`'s own fill and the style's
 	// wholeTbl fill can sit above it. ──
 	if (styleEntry?.tableBackground?.fill) {
 		if (paintFill(styleEntry.tableBackground.fill)) {
 			applied = true;
+			if (typeof style.background === 'string') {
+				tableBackgroundCss = style.background;
+			}
 		}
 	}
 
@@ -826,7 +848,9 @@ export function getTableCellBandStyle(
 		const headerPainted = authoredFills
 			? Boolean(styleEntry?.firstRowFill && !styleEntry.firstRowFill.noFill)
 			: !styleEntry?.firstRowFill?.noFill;
-		if (headerPainted) {
+		// An authored style names its own header text colour (or leaves the
+		// whole-table colour): Medium Style 4's header stays dark on its pale fill.
+		if (headerPainted && !authoredFills) {
 			style.color = '#ffffff';
 		}
 		applyStyleText(styleEntry?.firstRowText, colorScheme, style, fontScheme);
@@ -868,5 +892,6 @@ export function getTableCellBandStyle(
 		applied = true;
 	}
 
+	spanTableBackground(style, tableBackgroundCss, tableData, rowIndex, cellIndex);
 	return applied ? style : undefined;
 }

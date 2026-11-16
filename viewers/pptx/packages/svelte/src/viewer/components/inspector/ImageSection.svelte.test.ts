@@ -101,6 +101,30 @@ describe('imageSection', () => {
 		expect(current.imageEffects).toBeUndefined();
 	});
 
+	it('draws the artistic effect gallery over the picture and applies the picked effect', () => {
+		const el = imageEl({
+			imageData: 'data:image/png;base64,AA',
+			imageEffects: { artisticEffect: 'blur' },
+		});
+		const editor = makeEditor(el);
+		const { target } = mountSection(editor, el);
+		const blur = target.querySelector<HTMLButtonElement>(
+			'[data-testid="picture-artistic"] [data-value="blur"]',
+		)!;
+		expect(blur.getAttribute('aria-pressed')).toBe('true');
+		expect(blur.querySelector('img')?.style.filter).toBe('blur(4px)');
+		target
+			.querySelector<HTMLButtonElement>(
+				'[data-testid="picture-artistic"] [data-value="grayscale"]',
+			)!
+			.click();
+		flushSync();
+		expect(
+			(currentEl(editor) as { imageEffects?: { artisticEffect?: string } }).imageEffects
+				?.artisticEffect,
+		).toBe('grayscale');
+	});
+
 	it('sets brightness, contrast, and saturation via the sliders', () => {
 		const editor = makeEditor(imageEl());
 		const { target, setProps } = mountSection(editor, currentEl(editor));
@@ -138,16 +162,16 @@ describe('imageSection', () => {
 	it('sets the four crop insets, clamped to 0-90%', () => {
 		const editor = makeEditor(imageEl());
 		const { target } = mountSection(editor, currentEl(editor));
-		const [left, top, right, bottom] = Array.from(
-			target.querySelectorAll<HTMLInputElement>('input[type="number"]'),
+		const [left, top, right, bottom] = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom'].map(
+			(edge) => target.querySelector<HTMLInputElement>(`[data-testid="picture-${edge}"]`),
 		);
 		if (!left || !top || !right || !bottom) {
 			throw new Error('crop inputs not found');
 		}
 		left.value = '10';
-		left.dispatchEvent(new Event('change', { bubbles: true }));
+		left.dispatchEvent(new Event('input', { bubbles: true }));
 		right.value = '200';
-		right.dispatchEvent(new Event('change', { bubbles: true }));
+		right.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 
 		const el = currentEl(editor) as ImageShape;
@@ -161,7 +185,7 @@ describe('imageSection', () => {
 		const editor = makeEditor(imageEl({ locks: { noCrop: true } }));
 		const { target } = mountSection(editor, currentEl(editor));
 		const cropInputs = Array.from(
-			target.querySelectorAll<HTMLInputElement>('input[type="number"]'),
+			target.querySelectorAll<HTMLInputElement>('[data-testid^="picture-crop"]'),
 		);
 		expect(cropInputs).toHaveLength(4);
 		for (const input of cropInputs) {
@@ -169,8 +193,40 @@ describe('imageSection', () => {
 		}
 		const [left] = cropInputs;
 		left!.value = '10';
-		left!.dispatchEvent(new Event('change', { bubbles: true }));
+		left!.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		expect((currentEl(editor) as ImageShape).cropLeft).toBeUndefined();
+	});
+
+	it('draws the shared colour effects and switches a colour wash on', () => {
+		const editor = makeEditor(imageEl());
+		const { target } = mountSection(editor, currentEl(editor));
+		const wash = target.querySelector<HTMLInputElement>(
+			'[data-testid="picture-colorWash-toggle"]',
+		)!;
+		wash.checked = true;
+		wash.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		expect(
+			(currentEl(editor) as { imageEffects?: { colorWash?: unknown } }).imageEffects?.colorWash,
+		).toStrictEqual({ color: '#0066cc', opacity: 40 });
+		expect(target.querySelector('[data-testid="picture-colorChange-toggle"]')).not.toBeNull();
+	});
+
+	it('draws the shared picture adjustments: inverted transparency and grayscale', () => {
+		const editor = makeEditor(imageEl({ imageEffects: { alphaModFix: 70 } }));
+		const { target } = mountSection(editor, currentEl(editor));
+		const transparency = target.querySelector<HTMLInputElement>(
+			'[data-testid="picture-transparency"]',
+		)!;
+		expect(transparency.value).toBe('30');
+		const grayscale = target.querySelector<HTMLInputElement>('[data-testid="picture-grayscale"]')!;
+		grayscale.checked = true;
+		grayscale.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		expect((currentEl(editor) as ImageShape).imageEffects).toStrictEqual({
+			alphaModFix: 70,
+			grayscale: true,
+		});
 	});
 });

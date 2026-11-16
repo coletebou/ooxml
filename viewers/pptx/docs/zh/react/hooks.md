@@ -43,11 +43,40 @@ description: 了解 PowerPointViewer 的 hooks 架构、/viewer 提供的稳定�
 
 ## 公共 hooks {#public-hooks}
 
-以下 hooks 从 `pptx-react-viewer/viewer` 导出，可按需使用并支持 tree-shaking。`useViewerBuildingBlocks` 也从包根入口导出，同时导出的还有独立的 `Toolbar` 和 `SlideCanvas` 组件。
+以下 hooks 从 `pptx-react-viewer/viewer` 导出，可按需使用并支持 tree-shaking。`useViewerBuildingBlocks` 也从包根入口导出，同时导出的还有独立的 `Toolbar`、`SlideCanvas` 和 `SlidesPane` 组件。
 
 ```tsx
 import { useThemeSwitching, useCollaborativeState } from 'pptx-react-viewer/viewer';
 ```
+
+### 元素渲染错误 {#element-render-errors}
+
+React 画布、缩略图和静态预览/切换渲染器会在每个元素处隔离客户端渲染和生命周期错误。失败的元素不输出内容，相邻元素和编辑器界面仍保持挂载；文档中的元素不会因此被删除或修改。缺少 3D 依赖或场景仍在加载时保留海报回退；3D 场景渲染错误则与其他元素错误一样上报并省略。
+
+可向 `useViewerBuildingBlocks` 传入可选的 `onElementRenderError`，同时接收返回的 `canvasProps` 和 `slidesPaneProps` 中发生的错误：
+
+```tsx
+import { SlideCanvas, SlidesPane, useViewerBuildingBlocks } from 'pptx-react-viewer';
+import type { ElementRenderErrorHandler } from 'pptx-react-viewer';
+
+const reportElementError: ElementRenderErrorHandler = (error, context) => {
+	console.error('Element could not be rendered', error, context);
+};
+
+function Editor({ content }) {
+	const blocks = useViewerBuildingBlocks({ content, onElementRenderError: reportElementError });
+	return (
+		<>
+			<SlidesPane {...blocks.slidesPaneProps} />
+			<SlideCanvas {...blocks.canvasProps} />
+		</>
+	);
+}
+```
+
+导出的 `ElementRenderErrorContext` 包含 `elementId`、`elementType`，以及提供所属幻灯片时的可选 `slideId`。没有回调时调用 `console.error(error, context)`；回调抛出错误时也回退到该日志，不会让查看器崩溃。React 开发版本还可能自行输出捕获的错误。同一元素出现在多个界面中时，每个失败的已挂载实例都可能各自上报。
+
+独立的 `SlideCanvas`、`SlidesPane`、`SlideThumbnail`、`ScaledSlidePreview`、`SlideTemplatePreview`、`PresentationStage`、`ReadingViewStage` 和 `PresentationTransitionOverlay` 也接受 `onElementRenderError`。`PowerPointViewer` 也接受该属性，作用于它渲染的所有界面（组件自身传入的回调优先）。替换失败元素的对象（即使 id 不变）会重试渲染；改变 id 会重新挂载边界。相同失败对象的重复渲染不会重试，仅原地修改对象不能清除失败状态。边界不捕获事件处理器、任意异步/定时器或服务端渲染错误。Vue、Svelte、Angular 和原生 JavaScript 的查看器与构建块接受同样的 `onElementRenderError`，负载和重试规则相同。
 
 ### 自定义编辑器的协作 {#custom-editor-collaboration}
 
@@ -71,6 +100,62 @@ function Editor({ content, collaboration }) {
 
 仅在配置了协作时才会增加源加载和错误检查。未配置协作时，该 hook 保持原有的宿主授权行为，包括用 `content: null` 表示空白文档。活动的协作会话同样遵循宿主的编辑权限和就绪状态；仅有已连接的传输层并不授予编辑权限。宿主需要为返回的状态类型命名时，可从包根入口使用 `CollaborationContextValue`。
 
+### 幻灯片缩略图栏 {#slide-thumbnail-rail}
+
+`slidesPaneProps` 驱动 `SlidesPane`，即 `PowerPointViewer` 在画布旁显示的幻灯片缩略图栏。它列出所有幻灯片（演示文稿包含节时按节分组）并突出显示当前幻灯片；点击缩略图会将画布切换到该幻灯片，不会把演示文稿标记为已修改。启用 `canEdit` 后，它还可以添加、复制、删除、隐藏、重新排序和分组幻灯片，使用与完整编辑器相同的操作、撤销历史和协作同步。
+
+```tsx
+import { SlideCanvas, SlidesPane, Toolbar, useViewerBuildingBlocks } from 'pptx-react-viewer';
+
+function Editor({ content }) {
+	const blocks = useViewerBuildingBlocks({ content, canEdit: true });
+	return (
+		<>
+			<Toolbar {...blocks.toolbarProps} />
+			<div style={{ display: 'flex', height: 600 }}>
+				<SlidesPane {...blocks.slidesPaneProps} />
+				<div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+					<SlideCanvas {...blocks.canvasProps} />
+				</div>
+			</div>
+		</>
+	);
+}
+```
+
+缩略图栏的展开状态就是工具栏的侧边栏开关：折叠任一处都会隐藏缩略图栏。幻灯片右键菜单中的“版式”项会将该幻灯片设为当前幻灯片，并调用可选的 `onOpenLayoutGallery({ slideIndex, x, y })`，因为这些构建块不渲染版式库。`SlidesPane` 需要完整的 `styles.css`，而不是 `canvas.css`。
+
+### 单张幻灯片缩略图 {#single-slide-thumbnail}
+
+`SlideThumbnail`（及其 `SlideThumbnailProps` 类型）从包根入口导出，按 `SlidesPane` 的方式绘制单张幻灯片，适用于保留自有缩略图条的宿主。它基于幻灯片模型渲染，因此会反映尚未保存的编辑；它是静态的：没有选择、编辑、指针处理或元素 id。设置了切换效果（“剪切”除外）的幻灯片会在右上角以小标记显示切换名称，各绑定的缩略图一致。属性包括 `slide`、`templateElements`（该幻灯片的版式和母版元素，绘制在其自身元素下方）、`canvasSize`、`previewWidth`（像素；高度随演示文稿的宽高比变化）、`fieldContext` 和 `tableStyleContext`。从 `slidesPaneProps` 取值：
+
+```tsx
+import { SlideThumbnail, useViewerBuildingBlocks } from 'pptx-react-viewer';
+
+function MyStrip({ blocks }: { blocks: ReturnType<typeof useViewerBuildingBlocks> }) {
+	const { slides, templateElementsBySlideId, canvasSize, fieldContext, tableStyleContext } =
+		blocks.slidesPaneProps;
+	return (
+		<ul className='my-strip'>
+			{slides.map((slide) => (
+				<li key={slide.id} style={{ width: 120 }}>
+					<SlideThumbnail
+						slide={slide}
+						templateElements={templateElementsBySlideId[slide.id] ?? []}
+						canvasSize={canvasSize}
+						previewWidth={120}
+						fieldContext={fieldContext}
+						tableStyleContext={tableStyleContext}
+					/>
+				</li>
+			))}
+		</ul>
+	);
+}
+```
+
+未设置 `previewWidth` 时，缩略图采用缩略图栏的宽度和边框。它在收到不同的 `slide` 对象时重绘，通过查看器进行的每次编辑都会产生新的对象；自行编辑幻灯片的宿主应替换幻灯片对象，而不是原地修改它。
+
 ### 打开指定幻灯片 {#opening-on-a-slide}
 
 `useViewerBuildingBlocks` 接受与 `PowerPointViewer` 相同的 `initialSlide` 选项：每次加载后显示的幻灯片，索引从 0 开始，自动限制在有效范围内。它在首次显示已加载演示文稿的那次渲染中生效，因此自定义界面不会先显示第 1 张幻灯片，也无需在加载后调用 `goTo()` 或在跳转完成前隐藏画布。
@@ -80,6 +165,41 @@ const blocks = useViewerBuildingBlocks({ content, initialSlide: 4 });
 ```
 
 之后修改 `initialSlide` 只对下一次加载生效，不会移动已打开的演示文稿；要切换当前幻灯片，请使用句柄的 `goTo(index)`。
+
+### 通过自有控件完成选择器、对话框和版式工作流 {#picker-dialog-and-layout-workflows}
+
+构建块不会挂载文件输入框、对话框或窗格。`blocks.actions` 让自定义界面可以通过宿主渲染的控件完成这些工作流。每个操作都运行查看器自身的插入、查找替换和版式代码，因此选择、历史记录（撤销）和 `onDirtyChange` 的行为与 `PowerPointViewer` 一致。每个操作都返回 `{ ok: true }` 或 `{ ok: false, code }`，并在以下情况下被拒绝：`'read-only'`（只读、不在编辑模式或无编辑权限）、`'protected'`（建议只读或受保护视图）、`'not-ready'`（正在加载或加载失败）。错误码不是英文文本，请在宿主界面中以自己的语言呈现反馈。
+
+```tsx
+const blocks = useViewerBuildingBlocks({
+	content,
+	canEdit: true,
+	// 工具栏控件或画布手势需要由你提供的界面时调用。
+	onRequest: (request) => openMyDialog(request.kind),
+	fileLimits: { imageBytes: 10_000_000 }, // 默认值：图片 25 MiB，音频/视频 100 MiB
+});
+const { actions } = blocks;
+```
+
+- **请求。** 工具栏的图片、视频、链接、SmartArt、图表和公式控件，以及在画布上双击公式，都会产生一个 `BuildingBlockRequest`（`{ kind: 'image' | 'media' | 'hyperlink' | 'smartArt' | 'chart' | 'passwordProtection' | 'documentProperties' | 'fontEmbedding' | 'digitalSignatures' }` 或 `{ kind: 'equation', existingOmml }`）。它会传给 `onRequest`，并保留在 `actions.pending` 中，直到对应操作成功或你调用 `actions.cancel()`。操作不可用时不会产生请求。
+- **图片和媒体。** `actions.insertImage(file)` 和 `actions.insertMedia(file)` 接收你自己的选择器返回的 `File`。它们会校验类型、是否为空和大小（`'unsupported-type'`、`'empty-file'`、`'file-too-large'`、`'decode-failed'`），把元素居中插入幻灯片并选中。如果在图片解码或视频尺寸探测期间演示文稿、当前幻灯片或其位置发生了变化，两者都会返回 `'stale-target'` 且不添加任何内容，因此元素不会落到错误的幻灯片上。
+- **超链接。** `actions.hyperlink.current` 是所选元素当前链接的编辑器值（或 `null`），`slideCount` 用于限定幻灯片目标选择器，`apply(data)` 设置链接（脚本类协议返回 `'unsafe-url'`，空目标返回 `'invalid-target'`），`remove()` 清除链接。
+- **图表。** “插入图表”控件会产生 `{ kind: 'chart' }`。用 `actions.chart.insert(kind, options?)` 完成：`kind` 是“插入图表”中的类型（`'column'`、`'bar'`、`'line'`、`'pie'` 等），`options` 支持 `title`、`grouping`、`hasLegend` 和 `data`（`{ categories, series: [{ name, values }] }`，每个类别一个值）。不提供 `data` 时使用默认示例数据；数据不匹配时返回 `'invalid-data'`。
+- **SmartArt 和公式。** `actions.smartArt.insert(layout, items)`；`actions.equation.insert(omml)`、针对所选元素的 `update(omml)`，以及其 OMML 的 `current`。
+- **查找/替换。** `actions.findReplace` 提供 `query`、`replacement`、`options`（`matchCase`、`includeNotes`、`includeChartTitles`、`includeChartData`）、`matches`、`currentIndex`、`currentMatch`、`setQuery`、`setReplacement`、`setOptions`、`find`、`next`、`previous`、`replaceCurrent()` 和 `replaceAll()`（没有可替换内容时返回 `'no-match'`），以及用于查找栏的 `open` 和 `setOpen`（Ctrl+F 和 Ctrl+H 可切换）。只读查看器中仍可搜索，但不能替换。`next` 和 `previous` 会显示匹配项所在的幻灯片并选中其元素。
+- **版式。** `toolbarProps` 现已接通“开始”>“版式”和“重置”。`actions.layout` 提供 `current`、`currentPath`、`available`（当前幻灯片所属母版的版式）、`apply(path)`（路径不在列表中时返回 `'unknown-layout'`）和 `reset()`（幻灯片未记录版式时返回 `'no-layout'`）。
+- **文件对话框。** “文件”>“信息”中的保护、属性、字体和签名会产生 `{ kind: 'passwordProtection' | 'documentProperties' | 'fontEmbedding' | 'digitalSignatures' }` 请求。查看器处于只读或受保护视图时也会产生该请求，以便你显示当前状态；`availability[id]` 表示是否允许应用，每个操作在运行时还会再次检查。更改会将文档标记为已修改，并随文档一起保存。
+  - `actions.passwordProtection`：`state` 为 `{ openPassword, modifyPassword, readOnlyRecommended, markedFinal, supported }`，不包含密码或哈希。`setOpenPassword(password, confirmation)`（`'password-required'`、`'password-mismatch'`、`'password-too-short'`）使下一次保存加密；`clearOpenPassword()`；`setMarkedFinal(boolean)` 写入或移除 `_MarkAsFinal`。`setModifyPassword()` 始终返回 `'unsupported'`：查看器只保留文档原有的修改密码和建议只读，无法写入它们。
+  - `actions.documentProperties`：`current` 为 `{ core, custom, app }`（副本）。`apply({ core?, app?, custom?: { set?, remove? } })` 按名称修改摘要字段（title、subject、creator、keywords、description、category）、公司和经理以及自定义属性。格式错误的补丁（名称为空、类型未知、值无法按类型解析）返回 `'invalid-data'` 且不做任何更改。
+  - `actions.fontEmbedding`：`state` 为 `{ embedFonts, embeddedFamilies, usedFamilies, canEmbed, unavailableReasonKey? }`；`setEmbedFonts(enabled)` 决定保存时保留还是移除文档已嵌入的字体。对未嵌入任何字体的文档启用时返回 `'unsupported'`：浏览器无法读取已安装字体的字节，因此查看器无法新增字体。
+  - `actions.digitalSignatures`：`state` 为 `{ signed, count, removedOnSave, supported }`。`list()` 读取已加载包中的签名（签名者、颁发者、有效期、`expired`，以及每个签名所覆盖部件的 `integrity`：`'digestsMatch' | 'invalid' | 'unverified'`）。这只是完整性检查：不评估签名值、证书链和吊销状态，因此不会将任何签名报告为受信任。`remove()` 将文档标记为已修改，使保存的文件不含签名（保存时总会丢弃签名；没有签名时返回 `'no-signatures'`）。`sign()` 始终返回 `'unsupported'`：查看器无法创建签名。
+- **放映对话框。** “幻灯片放映”>“设置幻灯片放映”、“自定义幻灯片放映”、“联机演示”以及快捷键帮助（`?` 或 Ctrl+/）同样由宿主负责。前两者分别产生 `{ kind: 'setUpSlideShow' }` 和 `{ kind: 'customShows' }`；快捷键帮助每次打开或关闭都会产生 `{ kind: 'shortcuts', open }`（打开期间保留在 `actions.pending` 中）。
+  - `actions.setUpSlideShow.current` 是已解析默认值的设置（`showType`、`loop`、`playNarration`、`playAnimation`、`subtitles`、`advanceMode`、`slidesMode`、`rangeFrom`、`rangeTo`、`customShowId`、`penColor`、`kioskRestartTime`、`showScrollbar`、`slideCount`、`customShows`）。`apply(patch)` 以演示文稿存储的字段名接收变更，并沿用内置对话框的规则（自助式放映会循环，范围默认为整个演示文稿）。无法保存的变更返回 `'invalid-range'`、`'unknown-show'` 或 `'invalid-data'`。显示器和激光笔颜色不在演示文稿模型中，因此不提供。
+  - `actions.customShows` 提供 `shows`、`slides`、`activeId`，以及 `create(name, slideRIds?)`、`rename(id, name)`、`setSlides(id, slideRIds)`、`copy(id, name?)`、`remove(id)`（会清除指向该放映的跳转）和 `start(id)`（选中该放映并从其第一张幻灯片开始放映）。每次编辑立即保存。错误码：`'unknown-show'`、`'unknown-slide'`、`'invalid-name'`、`'no-slide'`。
+  - `actions.shortcuts` 提供 `open`、`setOpen`、`toggle` 和 `catalogue`（以数据形式给出的快捷键表，含 `id`、`descriptionKey`、已翻译的 `description`、`keys`、`alternatives`、`group` 与 `groupLabel`）。
+  - **不支持联机演示。** 它需要构建块并不运行的协作服务，因此 `availability.broadcast` 为 `{ available: false, reason: 'unsupported', needsHostUi: true }`，`actions.broadcast` 为 `{ supported: false, reason: 'unsupported', requires: 'collaboration-service' }`，工具栏的该控件不会产生请求。拥有自己服务的宿主可传入 `collaboration`（角色为 `owner`）并自行放映；`onOpenBroadcastDialog` 仍在 `unmountedDialogActions` 中。
+  - 编辑需要与其他流程相同的编辑权限（`'read-only'`、`'protected'`、`'not-ready'`，执行时会再次检查），并像内置对话框一样标记为已修改并更新历史记录。读取设置、放映列表和快捷键表始终可用。
+- **哪些操作可以运行。** `actions.availability[id]` 为 `{ available, reason?, needsHostUi }`，涵盖 `insertImage`、`insertMedia`、`hyperlink`、`removeHyperlink`、`insertSmartArt`、`insertChart`、`insertEquation`、`editEquation`、`replace`、`applyLayout`、`resetLayout`，文件对话框 `passwordProtection`、`documentProperties`、`fontEmbedding` 和 `digitalSignatures`，以及放映对话框 `setUpSlideShow`、`customShows`、`broadcast` 和 `shortcuts`。`needsHostUi` 为 true 表示该控件只会产生请求。`actions.unmountedDialogActions` 列出仍会为此处无人渲染的对话框设置状态的 `toolbarProps` 处理函数（`onOpenBroadcastDialog`）；请用 `hiddenActions` 隐藏它，或显示你自己的界面。
 
 ### `useThemeSwitching` {#usethemeswitching}
 

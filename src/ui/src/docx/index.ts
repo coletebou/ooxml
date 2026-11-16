@@ -6,6 +6,7 @@ export type {
 	WordToolbarProps,
 } from './building-blocks';
 export type { WordNavigationProps, WordStatusProps } from './building-blocks-status';
+export type { ReadAloudIssue, ReadAloudStart } from './building-blocks-read-aloud';
 export type {
 	FindReplaceRequest,
 	HyperlinkRequest,
@@ -58,6 +59,7 @@ export {
 	type RibbonAddInGroup,
 	type RibbonAddInTab,
 } from '../ribbon/add-in-tabs';
+export type { ReadAloudOptions } from './read-aloud-session';
 export type {
 	WordBackstagePage,
 	WordCustomization,

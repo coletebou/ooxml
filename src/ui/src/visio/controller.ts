@@ -4,12 +4,16 @@ import {
 	type ViewerEditState,
 	type SourceSnapshot,
 	type VsdxExportResult,
+	snapshotVisioGeometryExpectation,
+	assertVisioGeometryExpectation,
+	type VisioGeometryExpectation,
 } from 'ooxml-core/visio/ui';
 import { createWorkerEditor, snapshotEdits, type CancellableEditor } from './worker-editor';
 import {
 	MAX_INPUT_BYTES,
 	visioCalloutCommand,
 	visioContainerCommand,
+	visioContainerUpkeep,
 	visioWithContainerMembers,
 } from 'ooxml-core/visio/ui';
 import type { VisioCalloutStyle, VisioContainerStyle } from 'ooxml-core/visio';
@@ -54,7 +58,11 @@ import {
 	visibleSelection,
 	type LayerVisibilityOverride,
 } from './viewer-layers';
-import { assertViewableDocument } from 'ooxml-core/visio/ui';
+import {
+	assertViewableDocument,
+	createTemplateVsdx,
+	type VisioTemplateId,
+} from 'ooxml-core/visio/ui';
 import type { CancellableParser } from './worker-parser';
 import type { DiagramTool } from './diagram-tool';
 import type { ViewerEvents, VisioShapeSelection } from 'ooxml-core/visio/ui';
@@ -80,6 +88,7 @@ import {
 	type VisioTextOccurrence,
 	type VisioTextReplacePlan,
 } from 'ooxml-core/visio/ui';
+import type { TextEditCommitter, TextEditOutcome } from './text-edit-outcome';
 
 export interface ViewerState {
 	/** Host permission, independent of source-format editing support. */
@@ -163,6 +172,7 @@ export class ViewerController {
 	#revision = 0;
 	#documentGeneration = 0;
 	#sourceGeneration = 0;
+	#textCommitter: TextEditCommitter | undefined;
 	#searchIndex: DocumentTextIndex | null = null;
 	#history: DocumentHistory | null = null;
 	#undoLevels: number | undefined;
@@ -190,6 +200,8 @@ export class ViewerController {
 	#visible = documentVisibility(null);
 	#clipboard: ViewerClipboardCapture;
 	#clipboardQueued = false;
+	#beforeShow: ((document: VisioDocument) => Promise<unknown> | undefined) | undefined;
+	#beforeParse: ((bytes: Uint8Array) => void) | undefined;
 	constructor(
 		private readonly parser: Parser = loadVisio,
 		private readonly listenerError: (error: unknown) => void = (error) => {
@@ -210,6 +222,10 @@ export class ViewerController {
 	}
 	get state(): ViewerState {
 		return this.#state;
+	}
+	/** True once `destroy()` ran; most members then throw. */
+	get destroyed(): boolean {
+		return this.#destroyed;
 	}
 	/** Accepted document replacements, including the same object, invalidate captured artifacts. */
 	get documentGeneration(): number {
@@ -256,6 +272,12 @@ export class ViewerController {
 		this.#capabilityReadOnly = locked;
 		this.#applyEditPermission();
 	}
+	/** Set while a drawing opened from a cloud place is read-only (the service or host policy). */
+	setFileReadOnly(locked: boolean): void {
+		this.#fileReadOnly = locked;
+		this.#applyEditPermission();
+	}
+	#fileReadOnly = false;
 	#hostCanEdit = true;
 	#hostReadOnly = false;
 	#roleReadOnly = false;
@@ -263,7 +285,11 @@ export class ViewerController {
 	#applyEditPermission(): void {
 		this.#assertAlive();
 		const value =
-			this.#hostCanEdit && !this.#hostReadOnly && !this.#roleReadOnly && !this.#capabilityReadOnly;
+			this.#hostCanEdit &&
+			!this.#hostReadOnly &&
+			!this.#roleReadOnly &&
+			!this.#capabilityReadOnly &&
+			!this.#fileReadOnly;
 		if (value === this.#state.canEdit) return;
 		if (!value) {
 			this.cancelEdit();
@@ -282,6 +308,24 @@ export class ViewerController {
 		this.#assertAlive();
 		this.#events.add(listener);
 		return () => this.#events.delete(listener);
+	}
+	/**
+	 * Run `hook` between parsing a drawing and showing it, while `loading` is still true (the
+	 * viewer waits there, bounded, for the webfonts the drawing draws). A hook that returns
+	 * nothing adds no wait; one that rejects is ignored. A newer load or `cancelLoad` wins.
+	 */
+	setBeforeShow(
+		hook: ((document: VisioDocument) => Promise<unknown> | undefined) | undefined,
+	): void {
+		this.#beforeShow = hook;
+	}
+	/**
+	 * Run `hook` with a file's bytes just before they are parsed (the viewer starts the drawing's
+	 * webfonts there, so they download during the parse). It must not keep the bytes; one that
+	 * throws is ignored.
+	 */
+	setBeforeParse(hook: ((bytes: Uint8Array) => void) | undefined): void {
+		this.#beforeParse = hook;
 	}
 	setDocument(document: VisioDocument | null): void {
 		this.#assertAlive();
@@ -491,6 +535,10 @@ export class ViewerController {
 	async createBlankDrawing(options?: CreateVsdxOptions): Promise<void> {
 		return this.loadSource(() => createVsdx(options));
 	}
+	/** A starter drawing from File > New shares the blank drawing's load path. */
+	async createFromTemplate(template: VisioTemplateId): Promise<void> {
+		return this.loadSource(() => createTemplateVsdx(template));
+	}
 	/** Reading bytes shares the same request epoch and error state as parsing them. */
 	async loadSource(
 		read: () => Uint8Array | ArrayBuffer | Promise<Uint8Array | ArrayBuffer>,
@@ -511,6 +559,12 @@ export class ViewerController {
 				throw new Error('This viewer accepts files up to 32 MiB.');
 			const owned =
 				bytes instanceof Uint8Array ? Uint8Array.from(bytes) : new Uint8Array(bytes.slice(0));
+			try {
+				// The host starts work that can overlap the parse (the drawing's webfonts).
+				this.#beforeParse?.(owned);
+			} catch {
+				// A failing hook never blocks the load.
+			}
 			document = await this.parser(Uint8Array.from(owned));
 			if (this.#destroyed || id !== this.#loadId) return;
 			assertViewableDocument(document);
@@ -526,6 +580,11 @@ export class ViewerController {
 			this.#change({ loading: false, error });
 			if (!this.#destroyed && id === this.#loadId) this.#emit('document-error', error);
 			throw error;
+		}
+		const ready = this.#beforeShow?.(document);
+		if (ready) {
+			await ready.catch(() => undefined);
+			if (this.#destroyed || id !== this.#loadId) return;
 		}
 		this.#history = history;
 		this.#selectionHistory = new WeakMap();
@@ -604,6 +663,35 @@ export class ViewerController {
 			return preview(undefined);
 		}
 		return this.#preview(commands, preview);
+	}
+	/** The mounted canvas registers how its inline text draft is committed; see `commitTextEdit`. */
+	registerTextCommitter(committer: TextEditCommitter): () => void {
+		this.#textCommitter = committer;
+		return () => {
+			if (this.#textCommitter === committer) this.#textCommitter = undefined;
+		};
+	}
+	/**
+	 * Commit the text being typed into a shape on the mounted canvas, so a host Save sees it. Resolves
+	 * after the edit completed (also one already being committed) with a typed outcome; with no draft
+	 * or no canvas it is `unchanged`. A draft of another document is never applied.
+	 */
+	async commitTextEdit(): Promise<TextEditOutcome> {
+		if (this.#destroyed)
+			return {
+				status: 'cancelled',
+				reason: 'destroyed',
+				sourceGeneration: this.#sourceGeneration,
+				documentGeneration: this.#documentGeneration,
+			};
+		const committer = this.#textCommitter;
+		if (committer) return committer();
+		return {
+			status: 'unchanged',
+			reason: 'no-draft',
+			sourceGeneration: this.#sourceGeneration,
+			documentGeneration: this.#documentGeneration,
+		};
 	}
 	/** True while `previewing` runs, so a caller that wraps edits can skip its own follow-up work. */
 	get isPreviewing(): boolean {
@@ -696,10 +784,13 @@ export class ViewerController {
 		return this.#replacement.apply(plan, token);
 	}
 	/** Gesture batches may only edit the captured current-page selection. */
-	async applySelectionEdits(edits: readonly VisioEdit[]): Promise<void> {
+	async applySelectionEdits(
+		edits: readonly VisioEdit[],
+		expected?: VisioGeometryExpectation,
+	): Promise<void> {
 		const preview = this.#previewSink;
 		try {
-			return await this.#applySelectionEdits(edits, preview);
+			return await this.#applySelectionEdits(edits, preview, expected);
 		} catch (error) {
 			if (!preview) throw error;
 			preview(undefined);
@@ -708,6 +799,7 @@ export class ViewerController {
 	async #applySelectionEdits(
 		edits: readonly VisioEdit[],
 		preview: ((document: VisioDocument | undefined) => void) | undefined,
+		expected?: VisioGeometryExpectation,
 	): Promise<void> {
 		this.#assertAlive();
 		const revision = this.#revision;
@@ -718,6 +810,7 @@ export class ViewerController {
 		// Members of a selected container move with it, as in Visio.
 		const selected = new Set(page ? visioWithContainerMembers(page, ids) : ids);
 		const commands = snapshotEdits(edits);
+		const geometry = expected && snapshotVisioGeometryExpectation(expected);
 		if (this.#destroyed || revision !== this.#revision)
 			throw new DOMException('The selection edit was superseded or cancelled.', 'AbortError');
 		if (
@@ -725,14 +818,36 @@ export class ViewerController {
 			!selected.size ||
 			!commands.length ||
 			!state.selectedShapes.every((shape) => visioSelectionIsOnPage(shape, pageId)) ||
+			(geometry &&
+				(geometry.pageId !== pageId ||
+					geometry.members.some((member) => !selected.has(member.id)))) ||
 			commands.some(
 				(command) =>
 					!('shapeId' in command) || command.pageId !== pageId || !selected.has(command.shapeId),
 			)
 		)
 			throw new Error('Selection edits must target selected shapes on the current page.');
-		if (preview) return this.#preview(commands, preview);
-		return this.#mutate('edit', commands, undefined, undefined, true);
+		const upkeep = !preview && page ? visioContainerUpkeep(page, commands) : undefined;
+		if (preview)
+			return this.#preview(commands, (document) => {
+				try {
+					if (document && geometry) assertVisioGeometryExpectation(document, geometry);
+				} catch {
+					return preview(undefined);
+				}
+				preview(document);
+			});
+		return this.#mutate(
+			'edit',
+			[...commands, ...(upkeep ? [upkeep] : [])],
+			undefined,
+			undefined,
+			true,
+			undefined,
+			undefined,
+			undefined,
+			geometry,
+		);
 	}
 	/** Capture an internal drawing intent before pointer movement or draft input. */
 	captureCreationToken(pageId: string): ViewerCreationToken {
@@ -780,9 +895,11 @@ export class ViewerController {
 		)
 			throw new Error('Creation edits must create shapes on the captured current page.');
 		const shapeIds = Object.freeze([...created]);
+		const createPage = this.#state.document?.pages.find((item) => item.id === context.pageId);
+		const createUpkeep = createPage ? visioContainerUpkeep(createPage, commands) : undefined;
 		return this.#mutate(
 			'edit',
-			commands,
+			[...commands, ...(createUpkeep ? [createUpkeep] : [])],
 			undefined,
 			{ pageId: context.pageId, shapeIds },
 			true,
@@ -1215,6 +1332,7 @@ export class ViewerController {
 		creation?: CreationContext,
 		replacement?: ReplacementMutation,
 		remoteChange?: RemoteSourceChange,
+		geometry?: VisioGeometryExpectation,
 	): Promise<void> {
 		this.#assertAlive();
 		if (kind !== 'remote' && !this.canEdit) throw new Error('The drawing is read-only.');
@@ -1277,6 +1395,7 @@ export class ViewerController {
 			assertViewableDocument(document);
 			if (document.format !== 'vsdx')
 				throw new Error('A VSDX edit or history operation cannot change the source format.');
+			if (geometry) assertVisioGeometryExpectation(document, geometry);
 			if (edited && !edited.changedParts.length) {
 				if (replacement)
 					this.#requireReplacement({ ...replacement.context, operationGeneration: id }, true);

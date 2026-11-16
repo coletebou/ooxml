@@ -5,14 +5,16 @@ import {
 	getShapeEffectLayerPlacement,
 	getShapeEffectAnimationLayerStyle,
 	getBackgroundAnimationState,
-	isHollowShapeElement,
+	passesClicksThroughBox,
 	isMediaFullscreenActive,
 	resolveElementAriaAttributes,
 	isElementRendered,
 	inlineElementPointerEvents,
+	probeElementRenderFault,
 	LINK_TOOLTIP_HOST_CLASS,
 	resolveElementInteractivity,
 	shouldRenderHitTarget,
+	tableFrameCss,
 } from 'ooxml-ui/pptx';
 import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
 import React, { useState, useCallback, useMemo } from 'react';
@@ -31,6 +33,7 @@ import {
 	renderVectorShape,
 } from '../utils';
 import { build3DExtrusionData } from '../utils/shape-visual-3d';
+import { ElementErrorBoundary } from './ElementErrorBoundary';
 import { ActionAffordances, useActionAffordance } from './elements/ActionAffordance';
 import { ConnectorElementRenderer } from './elements/ConnectorElementRenderer';
 import { getElementInteractionProps } from './elements/element-interaction-props';
@@ -52,7 +55,23 @@ export { shapeParams } from './elements/element-shape-params';
 
 export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ React.memo(
 	// oxlint-disable-next-line prefer-arrow-callback -- named fn gives the memo component its displayName
-	function ElementRendererInner({
+	function ElementRendererInner(props) {
+		return (
+			<ElementErrorBoundary
+				key={props.element.id}
+				element={props.element}
+				slideId={props.activeSlide?.id}
+				onElementRenderError={props.onElementRenderError}
+			>
+				<ElementRendererImpl {...props} />
+			</ElementErrorBoundary>
+		);
+	},
+);
+
+const ElementRendererImpl: React.FC<ElementRendererProps> = /* @__PURE__ */ React.memo(
+	// oxlint-disable-next-line prefer-arrow-callback -- keep the implementation named in React stacks
+	function ElementRendererImpl({
 		element: el,
 		activeSlide,
 		isSelected,
@@ -68,6 +87,7 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 		opacity,
 		templateEditing,
 		zIndex,
+		edgeBleed,
 		imageAltText,
 		showResizeHandles,
 		renderInk: doInk,
@@ -95,6 +115,8 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 		fieldContext,
 		tableStyleContext,
 	}) {
+		// Test-only fault hook (inert unless a test page sets it); inside the element boundary.
+		probeElementRenderFault(el);
 		const {
 			cellSelectHandler,
 			cellCommitHandler,
@@ -269,6 +291,7 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 			shapeVisualStyle: backgroundAnimationState ? {} : ss,
 			has3DExtrusion: extrusionData.hasExtrusion,
 			templateEditing,
+			edgeBleed,
 		});
 		const interactionProps = getElementInteractionProps({
 			element: el,
@@ -321,7 +344,7 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 					// outline only, so its interior must not swallow clicks meant for what it
 					// is drawn over. ShapeEffectOverlay paints a transparent
 					// pointer-events:stroke band that opts the outline back in.
-					isHollowShapeElement(el) ? 'pointer-events-none' : '',
+					passesClicksThroughBox(el) ? 'pointer-events-none' : '',
 					isFullscreenMedia ? 'pointer-events-auto' : '',
 					selB,
 					// Shared class the tooltip's `:hover` rule keys off (see
@@ -330,6 +353,15 @@ export const ElementRenderer: React.FC<ElementRendererProps> = /* @__PURE__ */ R
 					actionAffordance.showLinkTooltip && LINK_TOOLTIP_HOST_CLASS,
 				)}
 				style={{
+					// The table style's drop shadow (Themed Style 1/2) sits on the clipping frame.
+					...(el.type === 'table'
+						? (tableFrameCss(el.tableData, {
+								tableStyleMap: tableStyleContext?.tableStyleMap,
+								colorScheme: tableStyleContext?.theme?.colorScheme,
+								fontScheme: tableStyleContext?.theme?.fontScheme,
+								formatScheme: tableStyleContext?.theme?.formatScheme,
+							}) as CSSProperties)
+						: {}),
 					...containerStyle,
 					...(isSelected ? selectionOutlineStyle(selClr) : {}),
 				}}

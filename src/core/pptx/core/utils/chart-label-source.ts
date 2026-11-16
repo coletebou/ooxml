@@ -1,11 +1,16 @@
 import { XMLParser } from 'fast-xml-parser';
 import type JSZip from 'jszip';
 
+import { readPartXml } from '../core/runtime/load-part-reader';
 import type { IPptxXmlLookupService } from '../services';
 import type { PptxExternalData, PptxChartSeries, XmlObject } from '../types';
 import { collectChartWorkbookWrite, writeChartWorkbookUpdates } from './chart-xlsx-writer';
 import { xmlAttr, xmlChild, xmlChildren } from './xml-access';
 import { parseChartFormulaRange, expandRangeAddresses } from './chart-xlsx-cellref';
+import { at } from '../../../geometry/indexed';
+
+// Shared so that, during a load, each relationship part is parsed once for every chart.
+const relationshipParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
 
 function formulaCount(value: unknown): number {
 	if (!value || typeof value !== 'object') return 0;
@@ -42,7 +47,8 @@ export async function chartLabelsHaveEditableSources(
 	const writes = [];
 	const labelOwners = new Map<string, string>();
 	for (const [index, node] of seriesNodes.entries()) {
-		const entry = series[index];
+		// `seriesNodes` and `series` have the same length (checked above).
+		const entry = at(series, index);
 		for (const [name, numeric, values] of [
 			['tx', false, [entry.name]],
 			['cat', false, [...categories]],
@@ -77,12 +83,11 @@ export async function chartLabelsHaveEditableSources(
 	if (!external.targetPath || !external.embeddedWorkbookData) return false;
 	const target = resolve(chartPartPath, external.targetPath);
 	let references = 0;
-	const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
 	try {
 		for (const path of Object.keys(zip.files)) {
 			if (!path.endsWith('.rels') || !path.includes('/_rels/')) continue;
 			const source = path.replace('/_rels/', '/').slice(0, -5);
-			const tree = parser.parse(await zip.file(path)!.async('string')) as XmlObject;
+			const tree = await readPartXml(zip, relationshipParser, path);
 			for (const rel of xmlChildren(xmlChild(tree, 'Relationships'), 'Relationship')) {
 				const relationshipTarget = xmlAttr(rel, 'Target');
 				if (

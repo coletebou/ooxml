@@ -17,8 +17,9 @@
 import { inject, Injectable, signal } from '@angular/core';
 import {
 	buildInlineTextCommitPatch,
+	getCellText,
 	overlayInlineTextSnapshot,
-	publishLiveInlineText,
+	reportInlineTextDraft,
 	slideSpaceElement,
 } from 'ooxml-ui/pptx';
 import type { InlineListController, InlineTextEditSnapshot } from 'ooxml-ui/pptx';
@@ -32,12 +33,14 @@ import type {
 } from 'pptx-viewer-core';
 import { hasTextProperties } from 'pptx-viewer-core';
 
+import { AutosaveService } from './autosave.service';
 import { CollaborationService } from './collaboration.service';
 import { EditorStateService } from './editor-state.service';
 import { InlineListSession } from './inline-list-session';
 import { textStylePatch } from './inspector-helpers';
+import { ListConversionScopeService } from './list-conversion-scope.service';
 import { patchTextStyle } from './ribbon-text-helpers';
-import { setCellText } from './table-data-helpers';
+import { setCellText, tableCellEditPatch } from './table-data-helpers';
 import type { TableCellCommit } from './table-renderer.component';
 import { ViewerDialogsService } from './viewer-dialogs.service';
 import { ViewerFormatPainterService } from './viewer-format-painter.service';
@@ -60,8 +63,11 @@ export class ViewerCanvasEditingService {
 	private readonly dialogs = inject(ViewerDialogsService);
 	private readonly formatPainter = inject(ViewerFormatPainterService);
 	private readonly collab = inject(CollaborationService);
+	private readonly autosave = inject(AutosaveService, { optional: true });
 	/** Options > Proofing > AutoCorrect, applied to committed inline-edit text. */
 	private readonly viewerOpts = inject(ViewerOptionsService, { optional: true });
+	/** The host `listConversionScope` input, for list formats sent from the inline editor. */
+	private readonly listScope = inject(ListConversionScopeService, { optional: true });
 
 	/** Id of the element being inline text-edited, or null. */
 	readonly editingId = signal<string | null>(null);
@@ -214,6 +220,7 @@ export class ViewerCanvasEditingService {
 				event.updates,
 				snapshot,
 				(next) => this.formatInlineSnapshot(next),
+				this.listScope?.options(),
 			);
 			return;
 		}
@@ -247,8 +254,10 @@ export class ViewerCanvasEditingService {
 			event.snapshot.textSegments
 				? event.snapshot
 				: undefined;
-		publishLiveInlineText(
-			this.collab.livePatcher,
+		// The collaboration preview, and the autosave draft: typing that was
+		// never committed still reaches the recovery snapshot.
+		reportInlineTextDraft(
+			{ livePatcher: this.collab.livePatcher, autosave: this.autosave },
 			this.requireHost().activeSlide(),
 			event.id,
 			event.text,
@@ -413,6 +422,18 @@ export class ViewerCanvasEditingService {
 		this.editor.sendSelectedBackward(this.requireHost().activeSlideIndex());
 	}
 
+	/** A Selection Pane drag: move the element at stacking position `from` to `to`. */
+	onSelectionPaneReorder(event: { from: number; to: number }): void {
+		const host = this.requireHost();
+		const elements = [...(host.activeSlide()?.elements ?? [])];
+		const [moved] = elements.splice(event.from, 1);
+		if (!moved) {
+			return;
+		}
+		elements.splice(event.to, 0, moved);
+		this.editor.updateSlide(host.activeSlideIndex(), { elements });
+	}
+
 	onToggleElementHidden(id: string): void {
 		const host = this.requireHost();
 		const el = host.activeSlide()?.elements.find((e) => e.id === id);
@@ -453,8 +474,27 @@ export class ViewerCanvasEditingService {
 		if (!el || el.type !== 'table') {
 			return;
 		}
+		if (event.commit.end) {
+			// The rich cell editor: runs, an appended row or a grid paste, as one edit.
+			const patch = tableCellEditPatch(
+				el,
+				event.commit.rowIndex,
+				event.commit.colIndex,
+				event.commit.end,
+				this.viewerOpts
+					? (text, previous) => this.viewerOpts!.autoCorrect(text, previous)
+					: undefined,
+			);
+			if (patch) {
+				this.editor.updateElement(host.activeSlideIndex(), event.id, patch);
+			}
+			return;
+		}
 		const text = this.viewerOpts
-			? this.viewerOpts.autoCorrect(event.commit.text)
+			? this.viewerOpts.autoCorrect(
+					event.commit.text,
+					getCellText(el, event.commit.rowIndex, event.commit.colIndex),
+				)
 			: event.commit.text;
 		const updated = setCellText(el, event.commit.rowIndex, event.commit.colIndex, text);
 		this.editor.updateElement(host.activeSlideIndex(), event.id, {

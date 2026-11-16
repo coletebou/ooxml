@@ -70,7 +70,11 @@ it('wraps the selection in a container behind it, moves it with its members, one
 		},
 	]);
 	expect(page(view).shapes.map((shape) => shape.id)).toEqual(['1', '4', '2', '3']);
-	expect(page(view).shapes[1]!.structure).toEqual({ type: 'container', memberIds: ['2', '3'] });
+	expect(page(view).shapes[1]!.structure).toEqual({
+		type: 'container',
+		memberIds: ['2', '3'],
+		options: { margin: 0.25, resize: 1 },
+	});
 	expect(view.controller.state.selectedShapes.map((shape) => shape.id)).toEqual(['4']);
 	expect(view.feedback).toContain('Inserted a Banner container.');
 
@@ -98,6 +102,54 @@ it('wraps the selection in a container behind it, moves it with its members, one
 	view.viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
 	await view.done();
 	expect(page(view).shapes.map((shape) => shape.id)).toEqual(['1', '2', '3']);
+	view.dispose();
+	view.controller.destroy();
+});
+
+it('drops into and out of a container, grows it, and undoes each as one step', async () => {
+	const view = await setup();
+	select(view, ['3']);
+	pick(view, 'container', 'plain');
+	await view.done();
+	const members = () => {
+		const structure = page(view).shapes.find((shape) => shape.id === '4')!.structure;
+		return structure?.type === 'container' ? structure.memberIds : [];
+	};
+	const frame = () => page(view).shapes.find((shape) => shape.id === '4')!;
+	expect(members()).toEqual(['3']);
+	const width = frame().width;
+
+	// Dragging shape 2 (1 x 1) into the frame around shape 3 makes it a member.
+	select(view, ['2']);
+	const origin = frame().transform;
+	await view.controller.applySelectionEdits([
+		{
+			type: 'move-shape',
+			pageId: '1',
+			shapeId: '2',
+			x: origin[4] + 0.75,
+			y: origin[5] + 0.75,
+		},
+	]);
+	expect(members()).toEqual(['3', '2']);
+	expect(frame().width).toBeGreaterThanOrEqual(width);
+	await view.controller.undo();
+	expect(members()).toEqual(['3']);
+	await view.controller.redo();
+	expect(members()).toEqual(['3', '2']);
+
+	// Dragging it far away removes it again.
+	const moved = page(view).shapes.find((shape) => shape.id === '2')!;
+	await view.controller.applySelectionEdits([
+		{
+			type: 'move-shape',
+			pageId: '1',
+			shapeId: '2',
+			x: moved.rotation!.pinX + 20,
+			y: moved.rotation!.pinY + 20,
+		},
+	]);
+	expect(members()).toEqual(['3']);
 	view.dispose();
 	view.controller.destroy();
 });

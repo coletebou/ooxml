@@ -10,7 +10,12 @@
  * the "make slide N the live DOM, then capture it" choreography.
  */
 import type { WritableSignal } from '@angular/core';
-import type { RasterizeElementTilesResult } from 'ooxml-ui/pptx';
+import type {
+	CompatibilityWarningToast,
+	PdfExportSettings,
+	RasterizeElementTilesResult,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import { slideProgressPercent, slideStatusLabel } from 'ooxml-ui/pptx';
 import type { PptxSlide } from 'pptx-viewer-core';
 
@@ -39,6 +44,16 @@ export interface ExportHost {
 	 * fidelity" preset) when omitted.
 	 */
 	readonly imageResolutionScale?: () => number;
+	/** Options > Advanced > Save as PDF; vector pages without hidden slides when omitted. */
+	readonly pdfExportSettings?: () => PdfExportSettings;
+	/** The displayed deck's slides (only `hidden` is read) and canvas size, for the vector PDF. */
+	readonly slides?: () => readonly { hidden?: boolean }[];
+	/** Where File > Export > PDF mounts its options dialog (inside the viewer root, for the theme). */
+	readonly pdfOptionsContainer?: () => HTMLElement | undefined;
+	/** Show a notice in the viewer's toast stack (what a vector PDF approximated). */
+	readonly notify?: (toast: CompatibilityWarningToast) => void;
+	/** Tell the host what a vector PDF approximated (the `pdfExportReport` output). */
+	readonly onPdfExportReport?: (result: VectorPdfExportResult) => void;
 }
 
 /** Progress-reporting sinks the capture loops write to. */
@@ -56,7 +71,10 @@ const SETTLE_MS = 150;
  * reuses one stage node, so every capture must happen *while its slide is
  * the live DOM*: a deferred capture would yield the same (last) slide.
  */
-async function flipToSlide(host: ExportHost, index: number): Promise<HTMLElement | undefined> {
+export async function flipToSlide(
+	host: ExportHost,
+	index: number,
+): Promise<HTMLElement | undefined> {
 	host.activeSlideIndex.set(index);
 	await new Promise<void>((resolve) => {
 		setTimeout(resolve, SETTLE_MS);

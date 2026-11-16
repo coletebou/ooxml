@@ -1,15 +1,17 @@
+import { rowSpanOf, tableGrid } from '../table-grid';
 import {
 	resolveCellVisuals,
 	resolveThemeColorReference,
-	twips,
 	twipsToPixels,
 	type DocumentModel,
 	type Paragraph,
 	type Table,
 	type TableBorderSide,
-	type TableCellMargins,
 } from '../index';
 import { expectDefined } from '../expect-defined';
+import { autofitOverhangsCellMargins, compatibilityProfile } from '../compatibility';
+import { floatingFrame } from './adapt-table-floating';
+import { resolveTableCellMargins } from '../table-margins';
 import { cellSourceBlocks } from '../cell-blocks';
 import type {
 	LayoutBorder,
@@ -22,13 +24,6 @@ import type {
 } from './input';
 
 const twipsToPx = twipsToPixels;
-/** Word's default table cell margins (`w:tblCellMar`): 108 twips (0.075in) left and right. */
-const DEFAULT_PADDING_TWIPS: Required<TableCellMargins> = {
-	top: twips(0),
-	right: twips(108),
-	bottom: twips(0),
-	left: twips(108),
-};
 
 /** `#rrggbb` from a model color, which the parser stores with or without its `#`. */
 export function cssHex(value: string | undefined): string | undefined {
@@ -101,6 +96,9 @@ export function adaptTable(
 			return start;
 		});
 	});
+	const merges = tableGrid(table);
+	// Default cell margins: the table's own, its style chain, then the default table style.
+	const tableMargins = resolveTableCellMargins(table, model.tableStyles);
 	const cellAt = (rowIndex: number, gridIndex: number) => {
 		const position = gridIndexes[rowIndex]?.indexOf(gridIndex) ?? -1;
 		return position >= 0 ? table.rows[rowIndex]?.[position] : undefined;
@@ -111,6 +109,22 @@ export function adaptTable(
 		...(grid ? { widthPx: grid.reduce((sum, width) => sum + width, 0) } : {}),
 		...(table.indentTwips ? { indentPx: twipsToPx(table.indentTwips) } : {}),
 		...(table.alignment ? { alignment: table.alignment } : {}),
+		...(table.layout === 'autofit'
+			? {
+					autofit: {
+						columns: Math.max(
+							columnCount,
+							...table.rows.map((row) => row.reduce((sum, cell) => sum + (cell.gridSpan ?? 1), 0)),
+						),
+						...(table.widthTwips ? { widthPx: twipsToPx(table.widthTwips) } : {}),
+						...(table.widthPercent ? { widthFraction: table.widthPercent } : {}),
+						...(autofitOverhangsCellMargins(compatibilityProfile(model))
+							? { legacyMargins: true }
+							: {}),
+					},
+				}
+			: {}),
+		...(table.floating && !_nested ? { floating: floatingFrame(table.floating) } : {}),
 		rows: table.rows.map((row, rowIndex) => ({
 			...rowLayout(table.rowProperties?.[rowIndex]),
 			cells: row.map((cell, cellIndex): LayoutTableCell => {
@@ -136,7 +150,7 @@ export function adaptTable(
 				}
 				if (cell.verticalMerge === 'continue') delete borders.top;
 				if (cellAt(rowIndex + 1, start)?.verticalMerge === 'continue') delete borders.bottom;
-				const margins = { ...DEFAULT_PADDING_TWIPS, ...table.cellMargins, ...cell.margins };
+				const margins = { ...tableMargins, ...cell.margins };
 				const padding: LayoutCellPadding = {
 					top: twipsToPx(margins.top),
 					right: twipsToPx(margins.right),
@@ -147,10 +161,13 @@ export function adaptTable(
 					gridWidth(start, span) ?? (cell.widthTwips ? twipsToPx(cell.widthTwips) : undefined);
 				const xPx = grid ? gridWidth(0, start) : undefined;
 				const fill = cssHex(visuals.shadingFill);
+				const entry = merges?.rows[rowIndex]?.[cellIndex];
+				const rowSpan = merges && entry ? rowSpanOf(merges, entry) : 1;
 				return {
 					paragraphs: cell.paragraphs.map(adaptParagraph),
 					...(cell.gridSpan !== undefined ? { gridSpan: cell.gridSpan } : {}),
 					...(cell.verticalMerge ? { verticalMerge: cell.verticalMerge } : {}),
+					...(rowSpan > 1 ? { rowSpan } : {}),
 					...(cell.sourceBlocks
 						? {
 								blocks: cellSourceBlocks(cell).map((block) =>
@@ -162,6 +179,8 @@ export function adaptTable(
 						: {}),
 					...(width !== undefined ? { widthPx: width } : {}),
 					...(grid && xPx !== undefined ? { xPx } : {}),
+					...(cell.widthTwips ? { preferredWidthPx: twipsToPx(cell.widthTwips) } : {}),
+					...(cell.widthPercent ? { preferredFraction: cell.widthPercent } : {}),
 					padding,
 					...(Object.keys(borders).length ? { borders } : {}),
 					...(fill ? { shading: fill } : {}),

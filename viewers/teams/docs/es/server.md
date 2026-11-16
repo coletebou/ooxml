@@ -11,21 +11,24 @@ El chat viaja como actualizaciones de Yjs a través de tu servidor, que almacena
 Requiere Node 22 o posterior.
 
 ```bash
-npx openteams-server                    # listens on 127.0.0.1:8787
-TEAMS_TOKEN=change-me TEAMS_ORIGINS=https://app.example.com TEAMS_DATA=/var/lib/openteams npx openteams-server
+TEAMS_USERS_FILE=users.json TEAMS_SESSION_SECRET=change-me TEAMS_ORIGINS=https://app.example.com TEAMS_DATA=/var/lib/openteams npx openteams-server
+npx openteams-server --insecure-dev     # solo para desarrollo local: escucha en 127.0.0.1:8787, sin cuentas
 ```
 
-Se configura únicamente mediante el entorno; el comando no admite indicadores.
+El servidor es **seguro por defecto**: sin archivo de cuentas (`TEAMS_USERS_FILE`), hook `authenticate` ni hook `authorizeSync`
+se niega a arrancar. `--insecure-dev` (opción `insecureDev: true`) lo arranca igualmente, con una advertencia, para desarrollo
+local. Se configura mediante el entorno más los indicadores `--insecure-dev`, `--trust-proxy[=N]` e `--insecure` (véanse
+`TEAMS_INSECURE` y `TEAMS_TRUST_PROXY` en la [guía de despliegue](./deploy.md)). `SIGTERM` y `SIGINT` guardan todas las salas antes de salir.
 
-| Variable        | Valor por defecto | Significado                                                                                                                        |
-| --------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`          | `8787`            | Puerto de escucha.                                                                                                                 |
-| `HOST`          | `127.0.0.1`       | Dirección de escucha. Enlaza `0.0.0.0` solo detrás de TLS.                                                                         |
-| `TEAMS_TOKEN`   | ninguno           | Si se define, los sockets lo reciben como `?token=` y las peticiones de archivos como `Authorization: Bearer`.                     |
-| `TEAMS_ORIGINS` | ninguno           | `Origin` permitidos, separados por comas, para sockets y archivos. Sin valor: cualquier origen con token, solo loopback sin token. |
-| `TEAMS_DATA`    | `./data`          | Directorio de datos: instantáneas `rooms/<room>.bin` y `files/<workspace>/`.                                                       |
+| Variable        | Valor por defecto | Significado                                                                                                                                                               |
+| --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`          | `8787`            | Puerto de escucha.                                                                                                                                                        |
+| `HOST`          | `127.0.0.1`       | Dirección de escucha. Enlaza `0.0.0.0` solo detrás de TLS.                                                                                                                |
+| `TEAMS_TOKEN`   | ninguno           | Si se define, los sockets lo reciben en la cabecera `Sec-WebSocket-Protocol` (`?token=` solo como alternativa) y las peticiones de archivos como `Authorization: Bearer`. |
+| `TEAMS_ORIGINS` | ninguno           | `Origin` permitidos, separados por comas, para sockets y archivos. Sin valor: cualquier origen con token, solo loopback sin token.                                        |
+| `TEAMS_DATA`    | `./data`          | Directorio de datos: instantáneas `rooms/<room>.bin` y `files/<workspace>/`.                                                                                              |
 
-El servidor lee más variables para las cuentas (`TEAMS_USERS_FILE`, `TEAMS_SESSION_SECRET`, `TEAMS_ADMIN_TOKEN`, `TEAMS_AUTH_RATE_*`) y para los límites (`TEAMS_INSECURE`, `TEAMS_MAX_CONNECTIONS`, `TEAMS_MAX_CONNECTIONS_PER_IP`, `TEAMS_MAX_ROOMS`, `TEAMS_MAX_DOC_MB`, `TEAMS_MESSAGE_RATE`, `TEAMS_MESSAGE_BURST`, `TEAMS_FILES_QUOTA_MB`). La [guía de despliegue](/es/deploy) lista los límites; el README del servidor es la referencia completa. Las opciones correspondientes de `createTeamsServer` son `users`, `authenticate`, `sessionSecret`, `adminToken`, `sessionRate`, `authorizeSync`, `maxConnections`, `maxRooms`, `messageRate`, `filesQuotaBytes` e `insecure`.
+El servidor lee más variables para las cuentas (`TEAMS_USERS_FILE`, `TEAMS_SESSION_SECRET`, `TEAMS_ADMIN_TOKEN`, `TEAMS_AUTH_RATE_*`) y para los límites (`TEAMS_INSECURE`, `TEAMS_MAX_CONNECTIONS`, `TEAMS_MAX_CONNECTIONS_PER_IP`, `TEAMS_MAX_ROOMS`, `TEAMS_MAX_DOC_MB`, `TEAMS_MESSAGE_RATE`, `TEAMS_MESSAGE_BURST`, `TEAMS_FILES_QUOTA_MB`, `TEAMS_WORKSPACE_QUOTA_MB`, `TEAMS_COMPACT_INTERVAL_MIN`, `TEAMS_METRICS_TOKEN`, `TEAMS_LOG_FORMAT`). La [guía de despliegue](/es/deploy) lista los límites; el README del servidor es la referencia completa. Las opciones correspondientes de `createTeamsServer` son `users`, `authenticate`, `sessionSecret`, `adminToken`, `sessionRate`, `authorizeSync`, `maxConnections`, `maxRooms`, `messageRate`, `filesQuotaBytes`, `workspaceQuotaBytes`, `metricsToken`, `compactIntervalMs`, `insecure`, `insecureDev` y `trustProxy`.
 
 O incrústalo:
 
@@ -33,6 +36,7 @@ O incrústalo:
 import { createTeamsServer } from 'openteams-server';
 
 const server = createTeamsServer({
+	users: { alice: 'long-random-secret' },
 	token: process.env.TEAMS_TOKEN,
 	origins: ['https://app.example.com'],
 	dataDir: '/var/lib/openteams',
@@ -59,19 +63,22 @@ const config = {
 
 ## Endpoints
 
-| Endpoint                              | Qué hace                                                                                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ws /sync/<room>`                     | Sincronización compatible con y-websocket: un `Y.Doc` y su awareness por sala, persistido en `rooms/<room>.bin`. Mensajes de hasta 32 MB.  |
-| `ws /signal/<room>`                   | Relé JSON para la señalización de llamadas: reenvía cada mensaje de texto a los demás sockets de la sala. Mensajes de hasta 256 KB.        |
-| `POST /files/<workspace>/<name>`      | Almacena un adjunto (límite de 25 MB) y responde `201 { url, size }`.                                                                      |
-| `GET /files/<workspace>/<name>`       | Lo descarga como adjunto (`Content-Disposition: attachment`, `Referrer-Policy: no-referrer`, `nosniff`).                                   |
-| `POST /files/link/<workspace>/<name>` | Devuelve `{ url }`: un enlace firmado para ese único archivo, válido durante cinco minutos, de modo que el token nunca aparece en una URL. |
-| `GET /health`                         | `{ ok, rooms, calls, auth }`.                                                                                                              |
-| `POST /auth/session`                  | Firma una sesión para `{ user, credential }` (con límite de frecuencia). Consulta "Accounts and sessions" en el README del servidor.       |
-| `POST /auth/check`, `/auth/signout`   | Comprueba una `{ session }` (204 o 401); cierra sesión, lo que revoca las sesiones del usuario.                                            |
-| `POST /auth/revoke`                   | Revocación por el operador de `{ user }` con `TEAMS_ADMIN_TOKEN`; un 404 sin token de administrador.                                       |
+| Endpoint                              | Qué hace                                                                                                                                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ws /sync/<room>`                     | Sincronización compatible con y-websocket: un `Y.Doc` y su awareness por sala, persistido en `rooms/<room>.bin`. Mensajes de hasta 32 MB.                                                |
+| `ws /signal/<room>`                   | Relé JSON para la señalización de llamadas: reenvía cada mensaje de texto a los demás sockets de la sala. Mensajes de hasta 256 KB.                                                      |
+| `POST /files/<workspace>/<name>`      | Almacena un adjunto (límite de 25 MB) y responde `201 { url, size }`.                                                                                                                    |
+| `GET /files/<workspace>/<name>`       | Lo descarga como adjunto (`Content-Disposition: attachment`, `Referrer-Policy: no-referrer`, `nosniff`).                                                                                 |
+| `POST /files/link/<workspace>/<name>` | Devuelve `{ url }`: un enlace firmado para ese único archivo, válido durante cinco minutos, de modo que el token nunca aparece en una URL.                                               |
+| `GET /files/<scope>`                  | Lista los archivos de un ámbito como `{ files: [{ name, size, modified, uploader }] }`. Un ámbito es un id de espacio de trabajo o el nombre de sala de un chat privado (solo miembros). |
+| `DELETE /files/<scope>/<name>`        | Borra un archivo (quien lo subió o un moderador). `204`, `403` o `404`.                                                                                                                  |
+| `GET /metrics`                        | Texto de Prometheus, solo con `TEAMS_METRICS_TOKEN` como token Bearer (404 si no está definido).                                                                                         |
+| `GET /health`                         | `{ ok, rooms, calls, auth }`.                                                                                                                                                            |
+| `POST /auth/session`                  | Firma una sesión para `{ user, credential }` (con límite de frecuencia). Consulta "Accounts and sessions" en el README del servidor.                                                     |
+| `POST /auth/check`, `/auth/signout`   | Comprueba una `{ session }` (204 o 401); cierra sesión, lo que revoca las sesiones del usuario.                                                                                          |
+| `POST /auth/revoke`                   | Revocación por el operador de `{ user }` con `TEAMS_ADMIN_TOKEN`; un 404 sin token de administrador.                                                                                     |
 
-Los nombres de sala deben cumplir `^[\w-]{1,128}$` y los ids de espacio de trabajo en las rutas de archivos `^[\w-]{1,64}$`; los nombres de archivo se depuran a letras, dígitos, `.`, `-`, `_`, espacios y paréntesis, y se limitan a 120 caracteres.
+Los nombres de sala deben cumplir `^[\w-]{1,128}$` y los ids de espacio de trabajo en las rutas de archivos `^[\w-]{1,128}$`; los nombres de archivo se depuran a letras, dígitos, `.`, `-`, `_`, espacios y paréntesis, y se limitan a 120 caracteres.
 
 ## Los contratos
 
@@ -89,7 +96,13 @@ Cualquier servidor que haga estas tres cosas funciona con todos los bindings.
 
 Opcional. `POST|GET <origin>/files/<workspace>/<name>` con el token en una cabecera `Authorization: Bearer`, más `POST <origin>/files/link/<workspace>/<name>`, que devuelve un `{ url }` firmado de corta duración para abrir un archivo en una pestaña del navegador. El origen se toma de `syncUrl`. Sin servidor de archivos, entrega al elemento una función `uploadFile` (para guardar los adjuntos en tu propio almacén de objetos); de lo contrario, los adjuntos se comparten solo por nombre.
 
-Ambos sockets reciben `?token=<token>` cuando hay un token configurado, porque un navegador no puede establecer cabeceras en un WebSocket. Aplícalo, junto con una lista de orígenes permitidos, en el servidor.
+Los archivos tienen ámbito. `<scope>` es el id del espacio de trabajo para los archivos de canal, o el nombre de sala de un
+chat privado (`chat-<hash>-<chat id>`), cuyos archivos solo pueden alcanzar sus miembros. Un servidor con cuentas espera la
+sesión firmada en la cabecera `X-Teams-Session` en cada petición de archivo (uno sin cuentas lee el usuario declarado de
+`X-Teams-User`); el cliente envía ambas. También opcionales: `GET <origin>/files/<scope>` para listar y
+`DELETE <origin>/files/<scope>/<name>` para quien lo subió o un moderador.
+
+Ambos sockets reciben el token en la cabecera `Sec-WebSocket-Protocol` cuando hay un token configurado, porque un navegador no puede establecer otras cabeceras en un WebSocket. La cadena de consulta (`?token=`) solo es una alternativa para un token que la cabecera no puede transportar. Aplícalo, junto con una lista de orígenes permitidos, en el servidor.
 
 ## Llamadas: STUN y TURN
 
@@ -103,6 +116,12 @@ Ten esto claro antes de poner personas en él:
 - **Cuentas opcionales y pequeñas.** Con `users` (o `TEAMS_USERS_FILE`) o una función `authenticate`, el servidor firma sesiones (`POST /auth/session`), toma el id de usuario de la sesión y puede revocarla. Sin ellas, `TEAMS_TOKEN` es un único secreto compartido para todos, almacenado en el navegador, y los ids de usuario son declaraciones. No hay restablecimiento de contraseñas, gestión de cuentas, SSO ni control de acceso por equipo. Las comprobaciones de autor y de rol en el cliente pueden eludirse con un cliente hostil, así que el servidor es el límite de confianza: usa `authenticate` con tu proveedor de identidad y `authorizeSync` para permisos por sala.
 - **Sin TLS propio.** Ejecútalo detrás de un proxy inverso que termine TLS y actualice las conexiones a WebSocket; los navegadores rechazan `ws://` desde una página `https://`.
 - **Un proceso, salas en memoria.** No escala horizontalmente. Una sala se descarga 30 segundos después de que se cierre su último socket.
-- **Una instantánea por sala, sin compactación.** El documento crece con el historial y nunca se poda.
-- **Almacenamiento de archivos simple.** Sin listado, sin borrado, sin cuota por espacio de trabajo; subir un archivo con un nombre existente lo reemplaza. Los archivos están limitados a 25 MB cada uno.
+- **Una instantánea por sala.** Se recodifica como una única actualización compacta al cargar la sala y con un temporizador
+  (`TEAMS_COMPACT_INTERVAL_MIN`), pero el historial nunca se poda, así que una sala activa sigue creciendo; el límite de
+  tamaño (`TEAMS_MAX_DOC_MB`) lo acota.
+- **Almacenamiento de archivos simple.** Los archivos se separan por espacio de trabajo y por chat privado (solo sus miembros
+  llegan a sus archivos), quien los subió o un moderador puede listarlos y borrarlos, y se cuentan por espacio de trabajo
+  (`TEAMS_WORKSPACE_QUOTA_MB`). Los archivos de canal los puede leer cualquier usuario con sesión; no hay compartición por
+  archivo, versionado ni análisis de virus. Una subida nunca sobrescribe un archivo: un nombre ya usado se guarda con otro
+  nuevo. Los archivos están limitados a 25 MB cada uno.
 - **Sin limitación de tasa** y sin servidor multimedia: las llamadas son de par a par (malla).

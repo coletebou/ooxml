@@ -46,7 +46,7 @@ to custom controls. Formatting fields are null for mixed values. Formatting insp
 bounded to 4096 cells: larger selections return null and `formattingComplete=false`.
 
 `enabled` has one flag per callback: `bold`, `italic`, `underline`, `fontFamily`, `fontSize`,
-`alignment`, `numberFormat`, `undo`, `redo` and the host workflows `share`, `settings`,
+`alignment`, `numberFormat`, `undo`, `redo` and the host workflows `openShareDialog`, `settings`,
 `formatCells`, `findReplace` and `insertFunction`. `canUndo` and `canRedo` repeat the undo and
 redo flags. `options` lists the choices a custom font, size, alignment or number format control
 can offer (`fontFamilies`, `fontSizes`, `alignments`, `numberFormats`), and `labels` holds the
@@ -95,6 +95,49 @@ the callback was given (the formatting and insert ones also need edit permission
 calls `onOpenShareDialog`; without one it does nothing, and `enabled.openShareDialog` is false. A
 workflow without a callback is unreachable, never silently mounted. Hosts that want the
 bundled dialogs render the full `SpreadsheetEditor` instead.
+
+## Context menus and workflow operations {#context-menus-and-workflow-operations}
+
+The types, signatures and refusal conditions are in the [Element API reference](/api#host-menus-and-workflows).
+
+`onOpenFormatCells`, `onOpenFindReplace` and `onOpenInsertFunction` receive the context above plus
+the operations to finish the workflow. The same operations are on `toolbarProps.workflows`, so a
+panel that is always open needs no callback. Every operation re-reads read-only state, sheet
+protection and the pending cell edit when it runs, goes through the edit session (undo, redo,
+dirty state and `onWorkbookChange` behave as for the bundled UI) and reports a refusal by its
+return value.
+
+- `workflows.formatCells`: `getState()` returns `{ font, alignment, border, protection }` (each
+  `{ value, mixed }`, the shared properties and the names that differ), `numFmt` and `fill` (null
+  when mixed) and `complete` (false for a selection too large to examine). `canApply()` and
+  `apply(patch)` apply a style patch to the selection as one undo step.
+- `workflows.find`: `findAll(query)`, `findNext(query, { backwards })`, `select(match)`,
+  `replace(query, text)`, `replaceAll(query, text)` and `canReplace()`. Finding works in a
+  read-only workbook; replacing is refused there, and cells locked by sheet protection are skipped. Like Excel's own Replace, `replace` and `replaceAll` do not apply data validation by default: a replacement is written even when the cell's rule would refuse it typed in. To check it, pass `{ validate: true, onRefused }` as a third argument, or set the editor option `validateReplace` (the `validateReplace` prop of every binding and property of `<xlsx-editor>`), which the bundled Find and Replace dialog honours too. A value the rule refuses leaves its cell unchanged and is listed in `onRefused(cells)` (`{ sheet, row, col, ref, value, message, title? }`); the dialog shows a notice with the count. `{ validate: false }` opts one call out of the editor option.
+- `workflows.insertFunction`: `categories()`, `search({ text, category })` (documented `name`,
+  `category`, `syntax` and a localized `description`), `canInsert()` and `insert(name, args?)`,
+  which inserts `NAME(` at the caret of the active formula draft (starting one when none is open)
+  and returns `{ text, caret }` so your input can follow. A plain-text draft is refused.
+
+To draw your own context menu, pass `onContextMenu(request)`. It runs for a right click on a cell,
+a row or column header, and (when a tab strip is mounted) a sheet tab. Return `true` to suppress
+the native menu and render `request.items` (`id`, `label`, `command`, `enabled`, `checked`,
+`shortcut`, `separatorBefore`) at `request.x`, `request.y`; run a choice with
+`request.execute(id)`. Any other return value shows the native menu. Without a right click,
+`toolbarProps.contextMenu('cell' | 'row' | 'column' | 'tab', sheet?)` returns the same model, which
+is how a host with its own sheet tabs gets the tab menu. A surface registers few commands, so most
+items are listed with `enabled: false` rather than pretended to work; Format Cells is enabled when
+`onOpenFormatCells` is installed and the workbook is editable. `enabled.contextMenu`,
+`enabled.find`, `enabled.replace`, `enabled.applyFormatCells` and `enabled.insertFunctionCall`
+report what works now. To keep the native menu and change it, pass `onContextMenuItems(request)` instead (it runs only
+when `onContextMenu` did not return `true`) and return `{ hide, add }`. `hide` lists native item
+ids from `request.items`; `add` lists host items `{ id, label, enabled, requiresEdit, checked,
+separatorBefore, position, onSelect(request) }`, placed above (`position: 'top'`, the default) or
+below (`'bottom'`) the native items. `enabled` may be a function. Native items keep their
+disabled state and are rechecked when they run; a host item is rechecked too (its `enabled`, and
+`requiresEdit` against a read-only workbook), so a menu left open cannot run a stale choice. It
+complements `hiddenActions` and `contextMenu.extraCommands` in `customization`, which apply to
+the bundled application.
 
 ## Validation failures
 

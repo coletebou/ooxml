@@ -7,6 +7,76 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.5.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.5.0) - 2026-11-13
+
+### Features
+
+- **xlsx:** Host-owned context menus and workflow operations ([18854c4](https://github.com/ChristopherVR/ooxml/commit/18854c444095dfaea70f087f3c868211316436a7))
+- **xlsx:** Filter and extend the native context menu ([554d354](https://github.com/ChristopherVR/ooxml/commit/554d354d5f2ec8ce9146ce43645301b379f71d11))
+- **xlsx:** Make replace validation configurable ([093f478](https://github.com/ChristopherVR/ooxml/commit/093f4782640506ab8274134f70ad4abb8a2e4e50))
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.4.1](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.4.1) - 2026-11-06
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [1.4.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.4.0) - 2026-11-05
+
+### Features
+
+- **xlsx:** Open workbooks from cloud places in File > Open ([f1b19e4](https://github.com/ChristopherVR/ooxml/commit/f1b19e495f8ac1fe43ed1a540f76ce5c6cbc2710))
+- **ui:** Expose openCloudFile on the word, excel and visio bindings ([b4837c7](https://github.com/ChristopherVR/ooxml/commit/b4837c76398c125755458861ce62679d7c179003))
+
+## [1.3.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.3.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+### Dependencies
+
+- **deps:** Bump the angular group with 8 updates ([b233fe0](https://github.com/ChristopherVR/ooxml/commit/b233fe0bd00783876e01b5f0c7488a8f9e139fe6))
+- **deps:** Merge angular dependency updates ([#234](https://github.com/ChristopherVR/ooxml/issues/234)) ([5c642cf](https://github.com/ChristopherVR/ooxml/commit/5c642cf7e6fc39265778fb062e4b13772af47a8e))
+
+## [1.2.2](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.2.2) - 2026-10-29
+
+## [1.2.1](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.2.1) - 2026-10-23
+
+### Other
+
+- Shared binding kit (wave6-1) ([98ab396](https://github.com/ChristopherVR/ooxml/commit/98ab396a11b31675c0266acd5242060412642bd3))
+
+### Refactor
+
+- **docx:** Build the Word bindings on ooxml-ui/bindings ([90e8131](https://github.com/ChristopherVR/ooxml/commit/90e81310800081ad484e93a3bab25806a07bc3e4))
+- **xlsx:** Build the Excel bindings on ooxml-ui/bindings ([31ca812](https://github.com/ChristopherVR/ooxml/commit/31ca812ba4513f0b0e0db643ab4b36643cbe62e5))
+
+## [1.2.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.2.0) - 2026-10-22
+
+### Features
+
+- **xlsx:** Route save and open through host-owned storage ([ef768a6](https://github.com/ChristopherVR/ooxml/commit/ef768a684f558275071be347d68406503aef8c23))
+- **xlsx:** Forward file-command, workbook, ribbon and sheet events ([5aaf6db](https://github.com/ChristopherVR/ooxml/commit/5aaf6dbdc767a1ff8c30b1b8619c0dcb09cfdc38))
+- **xlsx:** Take the shared customization contract in <xlsx-editor> ([f96a544](https://github.com/ChristopherVR/ooxml/commit/f96a5449a6a36fba59997197b484ddefb4f2d8e8))
+- **embedding:** Land the host customization, read-only and storage contracts ([822a6a0](https://github.com/ChristopherVR/ooxml/commit/822a6a073840b9e9d1671476542322b28332dc42))
+
+### Bug Fixes
+
+- **xlsx:** Report read-only with the lock and host switch ([782adb9](https://github.com/ChristopherVR/ooxml/commit/782adb95a4c8ad4dded13d73e8a5fa5aee2c8666))
+
+### Other
+
+- Integrate the customization contract into host storage ([629554b](https://github.com/ChristopherVR/ooxml/commit/629554b3030728bfe16e11ac8ae5b2530bb28a17))
+
+### Styling
+
+- **xlsx:** Format the react binding test ([a2e8b70](https://github.com/ChristopherVR/ooxml/commit/a2e8b70fe6f25b51b02cbd612675f492f247b2fc))
+
 ## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/xlsx-angular-viewer@1.1.0) - 2026-10-22
 
 ### Features

@@ -16,6 +16,11 @@ The rendering is done by the framework-agnostic [`pptx-viewer-core`](https://www
 
 Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app) &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; **[PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme)** &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
 
+The optional AI assistant loads its chat engine, tool catalogue and schemas only
+when the assistant panel starts. The main entry uses the lightweight
+`ooxml-ui/pptx/ai/host` helpers, so those runtime modules and `zod` stay out of a
+code-split host application's initial chunks. Existing public imports remain supported.
+
 ## Features
 
 - **Standalone component**: `<pptx-viewer>`, no NgModule needed.
@@ -63,11 +68,21 @@ degrade gracefully (poster images, no live session).
 
 ## Usage
 
+Load the base chrome styles (toolbar, thumbnails, layout) once, through the
+`styles` array of your build target in `angular.json`:
+
+```json
+"styles": ["pptx-angular-viewer/styles.css", "src/styles.css"]
+```
+
+or with `@import 'pptx-angular-viewer/styles.css';` at the top of
+`src/styles.css`. Do not import the stylesheet from a TypeScript file: the
+Angular CLI's application builder writes CSS imported from TypeScript to a
+separate file that `index.html` never links, so the viewer renders unstyled.
+
 ```ts
 import { Component, signal } from '@angular/core';
 import { PowerPointViewerComponent } from 'pptx-angular-viewer';
-// Base chrome styles (toolbar, thumbnails, layout). Import once.
-import 'pptx-angular-viewer/styles';
 
 @Component({
 	selector: 'app-root',
@@ -247,7 +262,7 @@ geometry or user zoom. See the [cross-binding defaults](../../docs/guide/viewpor
 | `onOpenFile`                                                               | `() => void`                         | n/a     | Host override for File > Open; bypasses the built-in file picker.                                                                                                                                                                                                                                                                                                    |
 | `smartArt3D`                                                               | `boolean`                            | `false` | Opt-in Three.js 3D SmartArt renderer (needs the optional `three` peer; falls back to SVG without it).                                                                                                                                                                                                                                                                |
 | `surfaceChart3D`, `barChart3D`, `lineChart3D`, `areaChart3D`, `pieChart3D` | `boolean`                            | `false` | Independently opt in to interactive Three.js renderers for the matching 3D chart kinds; each falls back to SVG when WebGL is unavailable.                                                                                                                                                                                                                            |
-| `ai`                                                                       | `PptxAiConfig`                       | n/a     | Optional AI assistant configuration. The SDK peer loads only when its panel is opened.                                                                                                                                                                                                                                                                               |
+| `ai`                                                                       | `PptxAiAssistant \| PptxAiConfig`    | n/a     | Optional AI assistant: a handle from `createAiAssistant` (`pptx-angular-viewer/ai`), or a plain config. The SDK peer loads only when its panel is opened. See the [AI assistant guide](https://christophervr.github.io/ooxml/pptx/guide/ai-assistant#ai-entry).                                                                                                      |
 | `hiddenActions`                                                            | `ToolbarActionId[]`                  | `[]`    | Toolbar buttons/ribbon tabs to hide individually (e.g. `['share', 'broadcast']`), instead of hiding the whole toolbar.                                                                                                                                                                                                                                               |
 | `ribbonAddIns`                                                             | `RibbonAddInTab[]`                   | n/a     | Ribbon tabs the host adds after Help; a command runs its `run` callback and raises `office-ribbon-add-in` (see the customization guide)                                                                                                                                                                                                                              |
 | `customization`                                                            | `ViewerCustomization`                | -       | Hide, lock or remap any part of the UI (ribbon tabs/buttons, File > Options pages/sections/settings, File tab, context menus, shortcuts, panels, AI/collaboration, dialogs); the same helpers (`hideRibbonTab`, `lockSetting`, ...) are on the component instance. See the [UI Customization guide](https://christophervr.github.io/ooxml/pptx/guide/customization). |
@@ -393,6 +408,25 @@ The other subpaths are `i18n/fr` (`translationsFr`), `i18n/es`
 [localization guide](https://christophervr.github.io/ooxml/pptx/guide/localization)
 for registration and runtime switching. Existing English imports are unchanged.
 
+## Privacy and network use
+
+The viewer renders and saves decks in the browser and never uploads them. It contacts other servers only in these cases:
+
+- **Fonts that are neither installed nor embedded.** When a deck uses such a font and Google Fonts serves it (or a metric-compatible clone, such as Carlito for Calibri), the viewer downloads it from `fonts.googleapis.com` and `fonts.gstatic.com`, so the reader's IP address and the needed family names reach Google. This is on by default, as in PowerPoint, which downloads its cloud fonts. Turn it off with `googleFonts: false`, or send the same requests to a self-hosted mirror with `googleFonts: { baseUrl: 'https://fonts.example.com/css2' }`. Readers can also turn it off in File > Options > Trust Center ("Download fonts that are not installed or embedded (Google Fonts)"); a host value locks that toggle. With downloads off, text uses installed, embedded or substitute fonts and line breaks can differ from PowerPoint. If the download is slow, the deck waits up to 8 seconds, and it opens at once when the font server cannot be reached (offline use works). See [font loading](https://github.com/ChristopherVR/ooxml/blob/main/docs/font-loading.md).
+- **Linked pictures and media** in a deck are fetched from their URLs while the Trust Center option "Allow external content" is on (the default). `allowExternalContent: false` blocks them.
+- **Share and Broadcast**, only when started: updates go to the server you configure; with no server, peers meet through y-webrtc's public signaling server and public STUN servers.
+
+Nothing collects analytics or telemetry. The full list, including what is kept in local storage, is in [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 [Apache-2.0](LICENSE). Please keep the [`NOTICE`](NOTICE) file with redistributions.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#powerpoint-pptx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

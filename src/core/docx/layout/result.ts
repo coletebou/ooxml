@@ -90,6 +90,8 @@ export interface LayoutCellGeometry {
 	/** Nested frame borders are already included in source-coordinate content insets. */
 	borderInsetsReserved?: boolean;
 	alignmentHeightPx?: number;
+	/** Rows covered by a vertical merge that starts in this cell; its alignment spans them all. */
+	mergeRows?: number;
 }
 
 export interface LayoutTableRowBox {
@@ -113,6 +115,11 @@ export interface LayoutTableBox {
 	yPx: number;
 	heightPx: number;
 	rows: LayoutTableRowBox[];
+	/**
+	 * A floating table (`w:tblpPr`), placed out of the text flow: text on its page wraps around it,
+	 * keeping these distances. `xPx`, `yPx` and `widthPx` are always set for one.
+	 */
+	floating?: { topPx: number; rightPx: number; bottomPx: number; leftPx: number };
 	/** Source outer edges repainted at each measured nested physical fragment. */
 	fragmentEdges?: {
 		top: (import('./input').LayoutBorder | undefined)[];
@@ -121,6 +128,11 @@ export interface LayoutTableBox {
 }
 
 export type LayoutBlockBox = LayoutParagraphBox | LayoutTableBox;
+
+/** Whether a box takes room in its column's flow (a floating table does not). */
+export function inFlow(block: LayoutBlockBox): boolean {
+	return block.kind !== 'table' || !block.floating;
+}
 
 export interface LayoutColumnBox {
 	xPx: number;
@@ -195,13 +207,16 @@ export interface LayoutFloatBox {
 	yPx: number;
 	widthPx: number;
 	heightPx: number;
+	pictureFill?: Extract<import('../../drawingml/types').DrawingFill, { kind: 'picture' }>;
 	partName: string;
 	contentType: string;
 	/** A drawing shape painted as SVG (it has no media part); the print view draws it like a chart. */
-	chart?: { svg?: string; label: string };
+	chart?: { svg?: string; label: string; shape?: true };
 	behindText: boolean;
 	/** `wp:wrapSquare`, `wrapTopAndBottom`… (`none` floats over or behind the text). */
 	wrap?: string;
+	/** `wrapText`: which sides of the picture text may use (bothSides, left, right, largest). */
+	wrapText?: string;
 }
 
 export interface LayoutResult {

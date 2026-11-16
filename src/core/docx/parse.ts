@@ -1,6 +1,8 @@
 import { parseCoreProperties } from './core-properties';
+import { readPackageInformation } from './package-information';
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
 import { declaredEntrySize, openZip } from '../opc/zip-limits';
+import { inspectPackageSignatures } from '../opc/signature/index';
 import { DOCX_ZIP_LIMITS, MAX_DOCUMENT_PART_BYTES } from './package-limits';
 import type { Block, DocumentModel, LoadedDocument } from './model';
 import { children, first, getW, parseXml, type XmlDocument, WORD_NS } from './xml';
@@ -10,6 +12,7 @@ import { parseBlocksFromContainer } from './block-parser';
 import { parseDocumentParts } from './document-parts';
 import { parseNumberingCatalog } from './numbering-parse';
 import { parseComments } from './comments';
+import { readCommentParts } from './comment-parts';
 import { parseFormSettings, parseReviewPreferences, parseTrackChangesSetting } from './settings';
 import { parsePageBackground } from './page-background';
 import { parseRunStyleCatalog } from './character-styles';
@@ -24,8 +27,9 @@ import { parseContentTypes, parseRelationships } from './package-parts';
 import { withParseWarnings } from './parse-diagnostics';
 import { warningsFor, imageAndBookmarkWarnings, forEachParagraph } from './parse-warnings';
 import { diagramWarnings, resolveDocumentDiagrams } from './diagram-document';
-import { resolveDocumentCharts } from './chart';
+import { documentDrawingBlocks, resolveDocumentCharts } from './chart';
 import { readPlaceholderTexts } from './glossary';
+import { readPackageProperties } from './package-properties';
 
 export interface PackageContext {
 	original: Uint8Array;
@@ -33,21 +37,17 @@ export interface PackageContext {
 	base: DocumentModel;
 }
 
-/** What a user may still do under each enforced editing restriction this editor does not apply. */
-const RESTRICTED_TO: Record<string, string | undefined> = {
-	readOnly: 'reading',
-	comments: 'comments',
-	trackedChanges: 'tracked changes',
-};
-
 /** The load warning for an enforced editing restriction (`w:documentProtection`), if any. */
 function protectionWarning(edit: string): string | undefined {
 	if (edit === 'forms')
-		return 'The document is protected for filling in forms: the editor lets only form fields, content controls and sections left unprotected change. The protection password is not checked.';
-	const allowed = RESTRICTED_TO[edit];
-	return allowed
-		? `The document limits editing to ${allowed}; the restriction is kept but not enforced while editing.`
-		: undefined;
+		return 'The document is protected for filling in forms: the editor lets only form fields, content controls and sections left unprotected change. The protection password is checked only when you stop the protection.';
+	if (edit === 'readOnly')
+		return 'The document is protected against changes: the editor lets only its editable regions change. Stop protection (Review > Restrict Editing) to edit the rest.';
+	if (edit === 'comments')
+		return 'The document is protected for comments: the editor lets you add comments and change its editable regions. Stop protection (Review > Restrict Editing) to edit the rest.';
+	if (edit === 'trackedChanges')
+		return 'The document is protected for tracked changes: every change is recorded and cannot be accepted or rejected until the protection is stopped (Review > Restrict Editing).';
+	return undefined;
 }
 
 export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
@@ -97,6 +97,10 @@ export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
 		},
 		warnings: warningsFor(document),
 	};
+	if ((await inspectPackageSignatures(zip)).hasSignatures)
+		model.warnings.push(
+			'The document contains digital signatures. They have not been verified. Saving edits removes them because changes invalidate signatures; saving an unchanged document preserves the original file.',
+		);
 	const stylesFile = zip.file('word/styles.xml');
 	if (stylesFile) {
 		const stylesXml = await stylesFile.async('string');
@@ -126,17 +130,21 @@ export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
 			);
 		}
 		model.warnings.push(
-			'Theme colors and fonts resolve for rendering through a separate layer; direct theme references are preserved and never flattened onto runs.',
+			'Theme colors and fonts resolve for rendering through a separate layer; direct theme references are preserved and never flattened onto runs. Theme tint and shade quantization is approximate.',
 		);
 	}
 	const numberingFile = zip.file('word/numbering.xml');
 	if (numberingFile) {
 		const numberingXml = await numberingFile.async('string');
+		const numberingRels = zip.file('word/_rels/numbering.xml.rels');
+		const numberingRelationships = parseRelationships(
+			numberingRels ? await numberingRels.async('string') : undefined,
+		);
 		model.numberingCatalog = withParseWarnings(schemaWarnings, () =>
-			parseNumberingCatalog(numberingXml),
+			parseNumberingCatalog(numberingXml, numberingRelationships),
 		);
 		model.warnings.push(
-			'Numbering is resolved for decimal, Roman numeral, letter, ordinal, cardinal/ordinal text and bullet formats, including multilevel lvlText and legal numbering. Picture bullets, style-linked numbering and other custom formats fall back to Decimal Number and are not rendered as Word would.',
+			'Numbering is resolved for decimal, Roman numeral, letter, ordinal, cardinal/ordinal text and bullet formats, including multilevel lvlText and legal numbering. Style-linked numbering and other custom formats fall back to Decimal Number and are not rendered as Word would.',
 			...model.numberingCatalog.warnings,
 		);
 	} else if (document.getElementsByTagNameNS(WORD_NS, 'numPr').length > 0) {
@@ -151,6 +159,8 @@ export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
 	const parts = await parseDocumentParts(zip, body, blocks, drawings);
 	model.sections = parts.sections;
 	if (parts.compatibilityMode !== undefined) model.compatibilityMode = parts.compatibilityMode;
+	if (parts.doNotUseHtmlParagraphAutoSpacing) model.doNotUseHtmlParagraphAutoSpacing = true;
+	if (parts.kinsoku) model.kinsoku = parts.kinsoku;
 	if (parts.footnotes) model.footnotes = parts.footnotes;
 	if (parts.footnoteSeparators) model.footnoteSeparators = parts.footnoteSeparators;
 	if (parts.endnotes) model.endnotes = parts.endnotes;
@@ -163,20 +173,29 @@ export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
 		const properties = parseCoreProperties(await coreFile.async('string'));
 		if (properties) model.properties = properties;
 	}
+	const packageProperties = await readPackageProperties(zip);
+	if (packageProperties) model.packageProperties = packageProperties;
+	const packageInformation = await readPackageInformation(zip);
+	if (packageInformation) model.packageInformation = packageInformation;
 	await readPlaceholderTexts(zip, drawings.rels, model);
-	const pageColor = parsePageBackground(document.documentElement);
+	const pageColor = parsePageBackground(document.documentElement, model.theme);
 	if (pageColor) model.pageColor = pageColor;
 	model.warnings.push(...parts.warnings);
-	if (blocks.some((block) => block.type === 'table' && !block.structureEditable))
+	if (
+		blocks.some(
+			(block) => block.type === 'table' && !block.structureEditable && !block.restructurable,
+		)
+	)
 		model.warnings.push(
 			'Merged, nested, or complex tables can be read, but their row and column structure cannot be edited safely.',
 		);
-	const commentsFile = zip.file('word/comments.xml');
-	if (commentsFile) {
-		const extendedFile = zip.file('word/commentsExtended.xml');
+	const commentParts = await readCommentParts(zip);
+	if (commentParts.comments.xml) {
 		model.comments = parseComments(
-			await commentsFile.async('string'),
-			await extendedFile?.async('string'),
+			commentParts.comments.xml,
+			commentParts.extended.xml,
+			commentParts.ids.xml,
+			commentParts.extensible.xml,
 		);
 		model.warnings.push(
 			'Comment ranges are modeled at run granularity (they may span paragraphs); a range edge outside any run, such as around an empty paragraph or a table, moves to the nearest commented text when that paragraph is edited.',
@@ -197,24 +216,17 @@ export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
 		)
 	)
 		model.warnings.push(
-			'Text in nested tables is editable; the grid, merges and formatting of a nested table are preserved but cannot be changed.',
+			'Text and structure (rows, columns, merged and split cells) of nested tables are editable; their borders, shading and other formatting are preserved but cannot be changed.',
 		);
 	// Every block that can hold a drawing: body, headers, footers, footnotes and endnotes.
-	const pictureBlocks = [
-		...blocks,
-		...(model.sections ?? []).flatMap((section) =>
-			[section.headers, section.footers].flatMap((slots) =>
-				Object.values(slots ?? {}).flatMap((content) => content?.blocks ?? []),
-			),
-		),
-		...Object.values(model.footnoteSeparators ?? {}).flatMap((note) => note.blocks),
-		...[...(model.footnotes ?? []), ...(model.endnotes ?? [])].flatMap((note) => note.blocks),
-	];
+	const pictureBlocks = documentDrawingBlocks({ ...model, blocks });
 	await resolveDocumentDiagrams(pictureBlocks, async (partName) =>
 		zip.file(partName)?.async('string'),
 	);
-	await resolveDocumentCharts(pictureBlocks, async (partName) =>
-		zip.file(partName)?.async('string'),
+	await resolveDocumentCharts(
+		pictureBlocks,
+		async (partName) => zip.file(partName)?.async('string'),
+		async (partName) => zip.file(partName)?.async('uint8array'),
 	);
 	model.warnings.push(...imageAndBookmarkWarnings(blocks), ...diagramWarnings(pictureBlocks));
 	for (const warning of schemaWarnings)
@@ -223,9 +235,16 @@ export async function readPackage(input: Uint8Array | ArrayBuffer): Promise<{
 	const imagePartNames = new Set<string>();
 	forEachParagraph(pictureBlocks, (paragraph) => {
 		for (const run of paragraph.runs)
-			for (const part of [run.image?.partName, run.image?.svgPartName])
+			for (const part of [
+				run.image?.partName,
+				run.image?.svgPartName,
+				...Object.values(run.image?.diagram?.drawing?.pictureParts ?? {}),
+				...Object.values(run.image?.diagram?.layoutSource?.pictureParts ?? {}),
+			])
 				if (part) imagePartNames.add(part);
 	});
+	for (const bullet of Object.values(model.numberingCatalog?.pictureBullets ?? {}))
+		imagePartNames.add(bullet.partName);
 	const media = new Map<string, Uint8Array>();
 	for (const partName of imagePartNames) {
 		const part = zip.file(partName);
@@ -241,9 +260,9 @@ export async function loadDocx(input: Uint8Array | ArrayBuffer): Promise<LoadedD
 	return {
 		model,
 		media,
-		save: (next = model, pendingMedia) => {
+		save: (next = model, pendingMedia, options) => {
 			if (next !== model) remember(next, context);
-			return saveDocx(next, pendingMedia);
+			return saveDocx(next, pendingMedia, options);
 		},
 	};
 }

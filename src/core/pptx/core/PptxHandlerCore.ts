@@ -9,6 +9,7 @@ import type {
 	PptxHandlerLoadOptions,
 	PptxHandlerSaveOptions,
 } from './core';
+import { assertPptxInputWithinLimits, resolvePptxLoadLimits } from './core/load-limits';
 import { convertPptToPptx, isEncryptedLegacyPpt, isLegacyPpt } from './ppt';
 import type {
 	PptxChartData,
@@ -23,6 +24,7 @@ import type {
 	PptxThemeColorScheme,
 	PptxThemeFontScheme,
 	PptxThemeFormatScheme,
+	PptxThemePartSchemes,
 	PptxThemePreset,
 	PptxThemeVariant,
 	ResolvedStyleMatrix,
@@ -254,9 +256,33 @@ export class PptxHandlerCore {
 	}
 
 	/**
+	 * Point one slide master at a theme part already in the package; scheme edits and saves follow
+	 * it. Does nothing when the package has no such master or part.
+	 *
+	 * @param masterPath - The master's part path (e.g. `ppt/slideMasters/slideMaster2.xml`).
+	 * @param themePath - The theme part's path (e.g. `ppt/theme/theme1.xml`).
+	 */
+	public async setSlideMasterTheme(masterPath: string, themePath: string): Promise<void> {
+		await this.runtime.setSlideMasterTheme(masterPath, themePath);
+	}
+
+	/**
+	 * Read one theme part's colour, font and format schemes and its name without changing the
+	 * loaded theme, for example to show what switching to it would apply.
+	 *
+	 * @param themePath - The theme part's path (e.g. `ppt/theme/theme2.xml`).
+	 * @returns The part's schemes, or `undefined` when the package has no such part.
+	 */
+	public async getThemePartSchemes(themePath: string): Promise<PptxThemePartSchemes | undefined> {
+		return this.runtime.getThemePartSchemes(themePath);
+	}
+
+	/**
 	 * Modify the theme’s colour scheme (accent colours, background, text, etc.).
 	 *
 	 * @param colorScheme - A {@link PptxThemeColorScheme} with hex colour values.
+	 * @param themePaths - Only these theme parts (e.g. `ppt/theme/theme2.xml`); every part a slide
+	 *   master uses when omitted.
 	 *
 	 * @example
 	 * ```ts
@@ -269,14 +295,19 @@ export class PptxHandlerCore {
 	 * // => void — colour scheme updated in the in-memory theme XML
 	 * ```
 	 */
-	public async updateThemeColorScheme(colorScheme: PptxThemeColorScheme): Promise<void> {
-		await this.runtime.updateThemeColorScheme(colorScheme);
+	public async updateThemeColorScheme(
+		colorScheme: PptxThemeColorScheme,
+		themePaths?: readonly string[],
+	): Promise<void> {
+		await this.runtime.updateThemeColorScheme(colorScheme, themePaths);
 	}
 
 	/**
 	 * Update the theme’s font scheme (heading + body typefaces).
 	 *
 	 * @param fontScheme - A {@link PptxThemeFontScheme} with font family names.
+	 * @param themePaths - Only these theme parts (e.g. `ppt/theme/theme2.xml`); every part a slide
+	 *   master uses when omitted.
 	 *
 	 * @example
 	 * ```ts
@@ -287,17 +318,22 @@ export class PptxHandlerCore {
 	 * // => void — font scheme updated in the in-memory theme XML
 	 * ```
 	 */
-	public async updateThemeFontScheme(fontScheme: PptxThemeFontScheme): Promise<void> {
-		await this.runtime.updateThemeFontScheme(fontScheme);
+	public async updateThemeFontScheme(
+		fontScheme: PptxThemeFontScheme,
+		themePaths?: readonly string[],
+	): Promise<void> {
+		await this.runtime.updateThemeFontScheme(fontScheme, themePaths);
 	}
 
 	/**
 	 * Rename the presentation theme.
 	 *
 	 * @param name - New display name for the theme.
+	 * @param themePaths - Only these theme parts (e.g. `ppt/theme/theme2.xml`); every part a slide
+	 *   master uses when omitted.
 	 */
-	public async updateThemeName(name: string): Promise<void> {
-		await this.runtime.updateThemeName(name);
+	public async updateThemeName(name: string, themePaths?: readonly string[]): Promise<void> {
+		await this.runtime.updateThemeName(name, themePaths);
 	}
 
 	/**
@@ -327,6 +363,18 @@ export class PptxHandlerCore {
 		fmtSchemeXml: string,
 	): Promise<PptxThemeFormatScheme | undefined> {
 		return this.runtime.applyThemeFormatSchemeXml(fmtSchemeXml);
+	}
+
+	/**
+	 * Put a format scheme a theme part held before back into the theme parts (or only `themePaths`),
+	 * as the part held it: Undo and Redo of an Effects pick. Only a scheme this handler wrote into a
+	 * part or over one can come back; for any other it writes nothing and returns `undefined`.
+	 */
+	public async restoreThemeFormatScheme(
+		scheme: PptxThemeFormatScheme,
+		themePaths?: readonly string[],
+	): Promise<PptxThemeFormatScheme | undefined> {
+		return this.runtime.restoreThemeFormatScheme(scheme, themePaths);
 	}
 
 	/** The real theme variants the loaded package carries (`themeVariants/` parts), or none. */
@@ -493,6 +541,9 @@ export class PptxHandlerCore {
 	 * ```
 	 */
 	public async load(data: ArrayBuffer, options: PptxHandlerLoadOptions = {}): Promise<PptxData> {
+		// `limits.maxInputBytes` (and the validity of every limit) is checked
+		// before the input is sniffed, decrypted, converted or unzipped.
+		assertPptxInputWithinLimits(data.byteLength, resolvePptxLoadLimits(options));
 		const detection = detectFileFormat(data);
 
 		if (detection.format === 'ole') {
@@ -731,7 +782,7 @@ export class PptxHandlerCore {
 	 * Scan the loaded PPTX archive for all theme parts (`ppt/theme/theme*.xml`)
 	 * and return their paths and display names.
 	 */
-	public async getAvailableThemes(): Promise<Array<{ path: string; name?: string }>> {
+	public async getAvailableThemes(): Promise<Array<{ path: string; name?: string | undefined }>> {
 		return this.runtime.getAvailableThemes();
 	}
 

@@ -275,6 +275,121 @@ custom shell with text and shape editing, save, zoom, and both presence overlays
 The [host-owned collaboration contract](/guide/host-owned-collaboration) and its
 same-textbox concurrency limitations apply equally to custom and full-viewer UI.
 
+### Slide thumbnail rail
+
+`SlidesPanelComponent` (`<pptx-slides-panel>`) is the rail of slide thumbnails that
+`PowerPointViewerComponent` shows beside the canvas, and a custom shell can place it beside its
+own canvas. It lists every slide (grouped by section when the deck has sections) and highlights
+the active one; clicking a thumbnail emits `select` and edits nothing, so the deck stays clean.
+With `[canEdit]`, it also adds, duplicates, deletes, hides, reorders and groups slides.
+
+Setting `[slides]` makes the rail host-driven: it renders only its inputs and emits every command
+as an output. `createSlidesPanelEditorCommands(editor, canEdit)` applies those outputs through the
+shell's `EditorStateService`, so they share the canvas's undo history and collaboration sync; the
+multi-selection commands duplicate each slide right after itself.
+
+```ts
+import {
+	createSlidesPanelEditorCommands,
+	SlidesPanelComponent,
+	ViewerCollaborationShellService,
+} from 'pptx-angular-viewer';
+
+@Component({
+	// ...providers and canvas as in the example above
+	imports: [SlideCanvasComponent, SlidesPanelComponent],
+	template: `
+		<div style="display: flex; height: 600px">
+			<pptx-slides-panel
+				[slides]="shell.editor.slides()"
+				[templateElementsBySlideId]="shell.editor.templateElementsBySlideId()"
+				[sections]="shell.editor.sections()"
+				[canvasSize]="shell.loader.canvasSize()"
+				[mediaDataUrls]="shell.loader.mediaDataUrls()"
+				[activeIndex]="shell.activeSlideIndex()"
+				[canEdit]="shell.canEdit()"
+				[firstSlideNumber]="shell.loader.firstSlideNumber()"
+				(select)="shell.activeSlideIndex.set($event)"
+				(addSlide)="rail.addSlideAfter($event)"
+				(moveSlide)="rail.moveSlide($event)"
+				(duplicateSlides)="rail.duplicateSlides($event)"
+				(deleteSlides)="rail.deleteSlides($event)"
+				(toggleHideSlides)="rail.toggleHideSlides($event)"
+				(openLayoutGallery)="openLayouts($event)"
+			/>
+			<pptx-slide-canvas style="flex: 1; min-width: 0" ... />
+		</div>
+	`,
+})
+export class CustomSlidesComponent {
+	readonly shell = inject(ViewerCollaborationShellService);
+	readonly rail = createSlidesPanelEditorCommands(this.shell.editor, () => this.shell.canEdit());
+}
+```
+
+The section outputs (`addSectionAt`, `renameSection`, `deleteSection`, `moveSectionUp`,
+`moveSectionDown`, `toggleSectionCollapse`) and `addSlideAfter` (the menu's New Slide and Enter)
+map onto the commands of the same name. The thumbnails draw what the canvas draws: their field
+context (slide numbers, including a deck whose numbering starts at `firstSlideNum`, header/footer
+text, document properties) and table styles come from `[headerFooter]`, `[customProperties]`,
+`[firstSlideNumber]`, `[locale]`, `[theme]` and `[tableStyleMap]`, each falling back to the
+enclosing `LoadContentService` when unset. The "Layout" entry of a slide's context menu emits
+`select` for that slide, then `openLayoutGallery({ slideIndex, x, y })`, since a custom shell
+renders its own Layout gallery. Read-only (`[canEdit]="false"`) shows no footer and no menus. The
+rail has no collapse control; show or hide it with `@if`. Without `[slides]` the rail reads and
+edits the enclosing `EditorStateService` itself, as it does inside `PowerPointViewerComponent`.
+
+The rail's layout is in its own component styles; load `pptx-angular-viewer/styles.css` once
+through your global styles (as for any building block, see
+[Getting Started](/angular/getting-started#styling-required-css)) for the theme tokens and the
+scoped reset its thumbnails use.
+
+### Single slide thumbnail
+
+`SlideThumbnailComponent` (`<pptx-slide-thumbnail>`, exported from the package root) draws one
+slide the way `<pptx-slides-panel>` draws it, for a host that keeps its own thumbnail strip. It
+renders from the slide model, so it follows unsaved edits, and it is static: no selection,
+editing, pointer handlers, focus stops or element ids, so it never competes with the editing
+canvas. A slide with a transition other than Cut shows the transition's name in a small badge in
+its top-right corner, as the thumbnail does in every binding (`<pptx-slides-panel>` draws no
+badge). Its inputs are `[slide]`, `[templateElements]` (the slide's layout and master elements,
+drawn beneath its own; default none), `[canvasSize]` and `[previewWidth]` (pixels; default the
+rail thumbnail width; the height follows the deck's aspect ratio), plus these rail inputs with the
+same meaning and the same fallback to the enclosing `LoadContentService`: `[mediaDataUrls]`,
+`[headerFooter]`, `[customProperties]`, `[firstSlideNumber]`, `[locale]`, `[theme]` and
+`[tableStyleMap]`. Feed it from the values you bind on the rail:
+
+```ts
+import { SlideThumbnailComponent, ViewerCollaborationShellService } from 'pptx-angular-viewer';
+
+@Component({
+	// ...providers as in the example above
+	imports: [SlideThumbnailComponent],
+	template: `
+		<ul class="my-strip">
+			@for (slide of shell.editor.slides(); track slide.id) {
+				<li style="width: 120px">
+					<pptx-slide-thumbnail
+						[slide]="slide"
+						[templateElements]="shell.editor.templateElementsBySlideId()[slide.id] ?? []"
+						[canvasSize]="shell.loader.canvasSize()"
+						[mediaDataUrls]="shell.loader.mediaDataUrls()"
+						[firstSlideNumber]="shell.loader.firstSlideNumber()"
+						[previewWidth]="120"
+					/>
+				</li>
+			}
+		</ul>
+	`,
+})
+export class CustomStripComponent {
+	readonly shell = inject(ViewerCollaborationShellService);
+}
+```
+
+The thumbnail fills its container's width and is as tall as `previewWidth` at the deck's aspect
+ratio, so give the container that width. It needs the same `pptx-angular-viewer/styles.css`.
+
 The collaboration service and components are exported from the package root (there is no separate
 subpath the way `pptx-react-viewer/viewer` has one) if you want to drive sync or render your own
 presence UI:

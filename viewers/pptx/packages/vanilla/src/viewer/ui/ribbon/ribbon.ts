@@ -1,3 +1,4 @@
+import type { FindReplaceMode } from 'ooxml-ui/pptx';
 import type {
 	AccountAuthConfig,
 	PptxUiRibbonAddInElement,
@@ -8,7 +9,9 @@ import type {
 } from 'ooxml-ui/pptx';
 import {
 	attachRibbonOverflow,
+	createRibbonDisplayController,
 	EMPTY_RESOLVED_CUSTOMIZATION,
+	HOME_LAUNCHER_SECTIONS,
 	homeLaunchers,
 	filterVisibleTabs,
 	isActionHidden,
@@ -23,6 +26,7 @@ import type { PptxElement } from 'pptx-viewer-core';
 
 import type { Translator } from '../../i18n';
 import { createEl } from '../../render';
+import { MOBILE_CHROME_MEDIA } from '../../styles/mobile-sheet-css';
 import { createEquationPanel } from './equation-panel';
 import { createFindReplacePanel } from './find-replace-panel';
 import { createFormatBackgroundPanel } from './format-background-panel';
@@ -33,6 +37,7 @@ import { createPictureSizeStrip } from './gallery/picture-size-strip';
 import type { HomeTab } from './home/home-tab';
 import { createHomeTab } from './home/home-tab';
 import type { Ribbon } from './ribbon-api';
+import { createRibbonDisplay } from './ribbon-display';
 import { buildHomeSyncState } from './ribbon-home-sync';
 import { createRibbonPrimaryRow } from './ribbon-primary-row';
 import { createRibbonTabBar } from './ribbon-tab-bar';
@@ -79,15 +84,42 @@ export function createRibbon(
 	el.setAttribute('role', 'toolbar');
 	el.setAttribute('aria-label', t('pptx.toolbar.presentationToolbarAria'));
 
+	// A short window collapses the ribbon while it is still being built, before the panes and the
+	// active tab exist; the first `setActiveTab` below applies that layout instead.
+	let panesReady = false;
 	const primary = createRibbonPrimaryRow(doc, t, handlers, hiddenActions);
 	el.append(primary.el);
 
-	const tabBar = createRibbonTabBar(doc, t, (tab) => setActiveTab(tab), hiddenActions, {
-		startRecording: () => handlers.slideShow.startRehearsal(),
-		openComments: () => handlers.nav.openComments(),
-	});
+	const tabBar = createRibbonTabBar(
+		doc,
+		t,
+		(tab) => {
+			setActiveTab(tab);
+			displayState.tabChosen(tab);
+		},
+		hiddenActions,
+		{
+			startRecording: () => handlers.slideShow.startRehearsal(),
+			openComments: () => handlers.nav.openComments(),
+		},
+	);
 	tabBar.el.hidden = true;
 	el.appendChild(tabBar.el);
+	// Ribbon Display Options sit at the right end of the tab row, as in PowerPoint. The viewer
+	// owns the state (it survives a chrome rebuild); a ribbon built on its own gets a private one.
+	const displayState = handlers.nav.getRibbonDisplay?.() ?? createRibbonDisplayController();
+	const display = createRibbonDisplay(doc, t, {
+		controller: displayState,
+		ribbon: el,
+		tabBar: tabBar.el,
+		onLayout: () => {
+			if (panesReady) {
+				applyPanes();
+			}
+		},
+	});
+	(tabBar.el.querySelector('.pptxv-tabrow-actions') ?? tabBar.el).appendChild(display.button);
+	el.appendChild(display.menuAnchor);
 
 	// The host can remove the Find and Equation panels outright; every path that
 	// opens them (ribbon, keyboard, context menu) goes through these guards.
@@ -95,9 +127,9 @@ export function createRibbon(
 		handlers.nav.getCustomization?.() ?? EMPTY_RESOLVED_CUSTOMIZATION;
 	const findReplace = createFindReplacePanel(doc, t, handlers.findReplace);
 	el.appendChild(findReplace.el);
-	const toggleFindReplace = (): void => {
+	const toggleFindReplace = (mode?: FindReplaceMode): void => {
 		if (isPanelVisible(resolved(), 'findReplace')) {
-			findReplace.toggle();
+			findReplace.toggle(mode);
 		}
 	};
 
@@ -223,8 +255,12 @@ export function createRibbon(
 	// Font, Paragraph and Drawing launchers open the Properties pane (there are no modal dialogs).
 	const launchers = homeLaunchers(
 		() => t('pptx.inspector.properties'),
-		() => {
-			if (!inspectorOpen) {
+		(group) => {
+			// Switch to Properties and reveal the group's section (Font, Paragraph, Fill);
+			// the request opens the inspector when it is closed.
+			if (handlers.nav.requestFormatPane) {
+				handlers.nav.requestFormatPane(HOME_LAUNCHER_SECTIONS[group]);
+			} else if (!inspectorOpen) {
 				openInspector();
 			}
 		},
@@ -270,14 +306,34 @@ export function createRibbon(
 		activeTab = tab;
 		tabBar.setActive(tab);
 		fileTab?.setVisible(tab === 'file');
+		// "Show tabs only" keeps the commands away until a tab is chosen, then lays them over the
+		// slide; the File backstage is never part of that.
+		const { effectiveMode, layout } = displayState.getSnapshot();
+		const commands = layout.commands;
 		for (const id of Object.keys(panes) as AnyTabId[]) {
 			const pane = panes[id];
 			if (pane) {
-				pane.hidden = id !== tab;
+				const collapsible = id !== 'file';
+				pane.hidden = id !== tab || (collapsible && commands === 'hidden');
+				pane.toggleAttribute(
+					'data-ribbon-overlay',
+					id === tab && collapsible && commands === 'overlay' && effectiveMode === 'tabs',
+				);
 			}
 		}
+		// The galleries of the tab now showing build the tiles they put off while it was hidden.
+		galleryHub.reveal();
 	}
 	setActiveTab(activeTab);
+	panesReady = true;
+	function applyPanes(): void {
+		setActiveTab(activeTab);
+	}
+
+	// A gallery out of sight puts off building its tiles; the desktop layout brings the ribbon back.
+	const revealGalleries = (): void => galleryHub.reveal();
+	const phoneLayout = doc.defaultView?.matchMedia?.(MOBILE_CHROME_MEDIA);
+	phoneLayout?.addEventListener('change', revealGalleries);
 
 	let latestSelected: PptxElement | undefined;
 	let latestExtra: RibbonSelectionState = { hasClipboard: false, slideCount: 0, selectedCount: 0 };
@@ -297,6 +353,8 @@ export function createRibbon(
 	const syncHome = (): void => {
 		galleryHub.sync(latestExtra.galleryContext, lastEditable);
 		syncContextual();
+		// A contextual pane just mounted, or the ribbon itself just entered the document.
+		galleryHub.reveal();
 		homeTab?.update(buildHomeSyncState(lastEditable, latestSelected, latestExtra));
 		insertTab?.setLayouts(latestExtra.layouts ?? [], latestExtra.currentLayoutPath);
 		pictureSize.update({ ...latestExtra, editable: lastEditable });
@@ -375,6 +433,8 @@ export function createRibbon(
 	return {
 		el,
 		destroy() {
+			phoneLayout?.removeEventListener('change', revealGalleries);
+			display.destroy();
 			for (const detach of detachOverflow.splice(0)) {
 				detach();
 			}
@@ -386,7 +446,8 @@ export function createRibbon(
 		},
 		setEditState(state) {
 			primary.setEditState(state);
-			tabBar.el.hidden = !state.editable;
+			// Read-only too: the File tab is how another (editable) file is opened.
+			tabBar.el.hidden = false;
 		},
 		setNotesExpanded() {},
 		setAutosaveStatus: (label, kind) => primary.setAutosaveStatus(label, kind),
@@ -448,6 +509,7 @@ export function createRibbon(
 		showDefaultTab: () => setActiveTab(defaultVisibleTab),
 		setHiddenOptionTabs,
 		setRibbonAddIns,
+		syncRibbonDisplay: () => display.sync(),
 		applyScreenTips: (tip) => tabBar.applyScreenTips(tip),
 		updateSelection(selectedElement, extra) {
 			latestSelected = selectedElement;

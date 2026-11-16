@@ -1,9 +1,15 @@
 param(
     [string]$OutputFolder = (Join-Path $env:TEMP 'ooxml-chart-gradient-raster'),
-    [ValidateSet('opaque','transparent','interior','three','three-transparent','crossed','coincident','path-corner','path-center','path-corner-transparent','path-center-transparent','path-center-circle','path-corner-circle','path-center-circle-transparent','path-corner-circle-transparent','path-center-shape','path-corner-shape','path-center-shape-transparent','path-corner-shape-transparent')]
+    [ValidateSet('opaque','transparent','interior','three','three-transparent','rg-unequal','rg-swapped','crossed','coincident','path-corner','path-center','path-corner-transparent','path-center-transparent','path-center-circle','path-corner-circle','path-center-circle-transparent','path-corner-circle-transparent','path-center-shape','path-corner-shape','path-center-shape-transparent','path-corner-shape-transparent')]
     [string]$Profile = 'opaque',
     [ValidateSet('chart-area','series-column','series-bar')]
-    [string]$Target = 'chart-area'
+    [string]$Target = 'chart-area',
+    [int[]]$Angles = @(0,45,90,135,180,225,270,315,30,60),
+    # Series targets only: paint the chart area a solid colour so the exported PNG is opaque and
+    # keeps no PARGB-to-ARGB truncation. Two backdrops (black, white) let a translucent
+    # fill be checked by compositing the model over the same colour.
+    [ValidateSet('none','black','white')]
+    [string]$Backdrop = 'none'
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -38,7 +44,7 @@ try {
         $directions = switch -Wildcard ($Profile) {
             'path-corner*' {@(1,2,3,4)}
             'path-center*' {@(1,2)}
-            default {@(0,45,90,135,180,225,270,315,30,60)}
+            default {$Angles}
         }
         foreach($angle in $directions) {
             $object=$sheet.ChartObjects().Add(20,20,$size[0],$size[1]); $chart=$object.Chart
@@ -52,7 +58,12 @@ try {
                 $fill=$chart.ChartArea.Format.Fill
                 $fillXPath='/c:chartSpace/c:spPr/a:gradFill'
             } else {
-                $chart.ChartArea.Format.Fill.Visible=0
+                if($Backdrop -eq 'none') {$chart.ChartArea.Format.Fill.Visible=0}
+                else {
+                    $chart.ChartArea.Format.Fill.Visible=-1; $chart.ChartArea.Format.Fill.Solid()
+                    $chart.ChartArea.Format.Fill.ForeColor.RGB=$(if($Backdrop -eq 'white'){16777215}else{0})
+                    $chart.ChartArea.Format.Fill.Transparency=[single]0
+                }
                 $fill=$chart.SeriesCollection(1).Format.Fill
                 $fillXPath='/c:chartSpace/c:chart/c:plotArea/c:barChart/c:ser/c:spPr/a:gradFill'
             }
@@ -76,6 +87,16 @@ try {
                     $fill.GradientStops.Item(1).Transparency=[single]0.37
                     $fill.GradientStops.Insert(65280,[single]0.56,[single]0.13)
                 }
+                'rg-unequal' {
+                    $fill.GradientStops.Item(2).Color.RGB=65280
+                    $fill.GradientStops.Item(1).Transparency=[single]0.37
+                    $fill.GradientStops.Item(2).Transparency=[single]0.13
+                }
+                'rg-swapped' {
+                    $fill.GradientStops.Item(2).Color.RGB=65280
+                    $fill.GradientStops.Item(1).Transparency=[single]0.13
+                    $fill.GradientStops.Item(2).Transparency=[single]0.37
+                }
                 'crossed' {
                     $fill.GradientStops.Item(1).Position=[single]0.85
                     $fill.GradientStops.Item(2).Position=[single]0.56
@@ -94,6 +115,7 @@ try {
             $name="angle-$angle-$($size[0])x$($size[1])"
             if($Profile -ne 'opaque') {$name="$Profile-$name"}
             if($Target -ne 'chart-area') {$name="$Target-$name"}
+            if($Backdrop -ne 'none') {$name="$Backdrop-$name"}
             $path=Join-Path $OutputFolder "$name.xlsx"; $book.SaveCopyAs($path)
             $pathType = if($Profile -match '-(circle|shape)(-transparent)?$') {$Matches[1]} else {$null}
             if($pathType) {

@@ -3,7 +3,9 @@ import { createVsdxFixture } from './fixture.mjs';
 import { openDemo } from './demo-page';
 
 async function menuItem(viewer: Locator, path: readonly string[]): Promise<void> {
-	const effects = viewer.locator('office-ui-menu-button[data-menu="effects"]');
+	const effects = viewer.locator(
+		'[data-ribbon-tab]:not([data-contextual]) office-ui-menu-button[data-menu="effects"]',
+	);
 	await effects.getByRole('button', { name: 'Effects', exact: true }).click();
 	let scope: Locator = effects;
 	for (const [index, name] of path.entries()) {
@@ -38,7 +40,9 @@ test('applies a page theme and variant, shape effects and Format Shape values', 
 	await shape.click();
 	// A Quick Style, as dropped masters get, so the theme recolours the shape. The ribbon shows a
 	// row of tiles; the More button opens the whole gallery.
-	const quick = viewer.locator('office-ui-gallery[data-menu="quick-styles"]');
+	const quick = viewer.locator(
+		'[data-ribbon-tab]:not([data-contextual]) office-ui-gallery[data-menu="quick-styles"]',
+	);
 	await quick.locator('.trigger').click();
 	await quick.locator('.popup [data-gallery-item="quick-style-2-4"]').click();
 	await expect(shape.locator('[data-geometry]').first()).toHaveAttribute('fill', '#5b9bd5');
@@ -51,7 +55,11 @@ test('applies a page theme and variant, shape effects and Format Shape values', 
 	await themes.locator('.popup [data-gallery-item="theme-harbor"]').click();
 	await expect(shape.locator('[data-geometry]').first()).toHaveAttribute('fill', '#1f78b4');
 	await expect(variants).not.toHaveAttribute('disabled', '');
-	await expect(viewer.locator('[command="theme-fonts"]')).toHaveAttribute('disabled', '');
+	// Variants > More > Fonts applies a theme's fonts alone; with a theme it is available and marks
+	// the page's current font scheme.
+	const fonts = viewer.locator('[data-menu="theme-fonts"]');
+	await expect(fonts).not.toHaveAttribute('disabled', '');
+	await expect(fonts.locator('[command="fonts-harbor"]')).toHaveAttribute('checked', 'true');
 	await variants.locator('.trigger').click();
 	await variants.locator('.popup [data-gallery-item="variant-2"]').click();
 	await expect(shape.locator('[data-geometry]').first()).toHaveAttribute('fill', '#1f78b4');
@@ -68,7 +76,16 @@ test('applies a page theme and variant, shape effects and Format Shape values', 
 	);
 	await menuItem(viewer, ['Reflection', 'Half Reflection, touching']);
 	await expect(shape.locator('[data-reflection]')).toHaveCount(1);
-	await expect(viewer.locator('[command="bevel"]')).toHaveAttribute('disabled', '');
+	// Bevel and 3-D Rotation write Visio's cells and are drawn as approximations.
+	await menuItem(viewer, ['Bevel', 'Soft Round']);
+	await expect(shape.locator('[data-bevel]')).toHaveCount(1);
+	await expect(shape.locator('[data-bevel]')).toHaveAttribute(
+		'filter',
+		/^url\(#visio-bevel-\d+\)$/,
+	);
+	await menuItem(viewer, ['3-D Rotation', 'Isometric Right Up']);
+	await expect(shape.locator('[data-rotation3d]')).toHaveAttribute('transform', /^matrix\(/);
+	await expect(shape.locator('[data-rotation3d] [data-geometry]').first()).toBeVisible();
 
 	// Glow Options... opens the Format Shape task pane at Effects; a change applies at once.
 	await menuItem(viewer, ['Glow', 'Glow Options...']);
@@ -80,7 +97,7 @@ test('applies a page theme and variant, shape effects and Format Shape values', 
 	await soft.press('Tab');
 	await expect(shape.locator('[data-geometry]').first()).not.toHaveAttribute('filter', /.+/);
 
-	for (let step = 0; step < 6; step++) await viewer.locator('.qat [data-command="undo"]').click();
+	for (let step = 0; step < 8; step++) await viewer.locator('.qat [data-command="undo"]').click();
 	await expect(shape.locator('[data-glow]')).toHaveCount(0);
 	await expect(shape.locator('[data-geometry]').first()).toHaveAttribute('fill', '#5b9bd5');
 	expect(errors).toEqual([]);

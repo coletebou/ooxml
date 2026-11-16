@@ -1,10 +1,13 @@
+import { refreshFormControlParts } from './form-control';
 import { RELATIONSHIP_TYPES } from '../../opc/index';
 import { NS } from '../../xml/index';
 import { formatRange } from '../address';
 import type { Worksheet } from '../model';
 import { CONTENT_TYPES } from '../read/package';
 import { printOptionsXml } from '../read/print-options';
-import { conditionalFormatsXml, dataValidationsXml } from './conditional';
+import { conditionalFormatsXml } from './conditional';
+import { dataValidationsXml } from './data-validations';
+import { validationExtensionsXml } from '../validation-extensions';
 import { conditionalExtensionsXml } from '../conditional-extensions';
 import { RelationshipSet } from './package-writer';
 import { pageXml } from './page-setup';
@@ -16,6 +19,7 @@ import {
 	writeTables,
 	type SaveContext,
 } from './sheet-parts';
+import { sheetSortStateXml } from './sort-state';
 import {
 	autoFilterXml,
 	colsXml,
@@ -27,52 +31,12 @@ import {
 	sheetViewsXml,
 } from './sheet-props';
 import { scenariosXml } from './scenarios';
+import { customSheetViewsXml } from './custom-views';
+import { ignoredErrorsXml } from './ignored-errors';
+import { WORKSHEET_CHILD_ORDER as ORDER } from '../read/worksheet-children';
 import { XML_HEADER, attrs, inlineFragment } from './xml-out';
 
 export type { SaveContext } from './sheet-parts';
-
-/** CT_Worksheet child order; kept elements are slotted in by local name. */
-const ORDER = [
-	'sheetPr',
-	'dimension',
-	'sheetViews',
-	'sheetFormatPr',
-	'cols',
-	'sheetData',
-	'sheetCalcPr',
-	'sheetProtection',
-	'protectedRanges',
-	'scenarios',
-	'autoFilter',
-	'sortState',
-	'dataConsolidate',
-	'customSheetViews',
-	'mergeCells',
-	'phoneticPr',
-	'conditionalFormatting',
-	'dataValidations',
-	'hyperlinks',
-	'printOptions',
-	'pageMargins',
-	'pageSetup',
-	'headerFooter',
-	'rowBreaks',
-	'colBreaks',
-	'customProperties',
-	'cellWatches',
-	'ignoredErrors',
-	'smartTags',
-	'drawing',
-	'legacyDrawing',
-	'legacyDrawingHF',
-	'drawingHF',
-	'picture',
-	'oleObjects',
-	'controls',
-	'webPublishItems',
-	'tableParts',
-	'extLst',
-];
 
 /** Relationship types the writer regenerates from the model instead of keeping. */
 const REGENERATED = new Set<string>([
@@ -142,8 +106,11 @@ export function writeWorksheet(
 	);
 	blocks.set('sheetProtection', protectionXml(sheet));
 	blocks.set('scenarios', scenariosXml(sheet.scenarios));
-	blocks.set('autoFilter', autoFilterXml(sheet));
+	blocks.set('customSheetViews', customSheetViewsXml(sheet.customViews));
+	blocks.set('autoFilter', autoFilterXml(sheet, ctx.styles));
+	blocks.set('sortState', sheetSortStateXml(sheet, ctx.styles));
 	blocks.set('mergeCells', mergeCellsXml(sheet));
+	blocks.set('ignoredErrors', ignoredErrorsXml(sheet.ignoredErrors));
 	blocks.set('conditionalFormatting', conditionalFormatsXml(sheet.conditionalFormats, ctx.styles));
 	blocks.set('dataValidations', dataValidationsXml(sheet.dataValidations));
 	const links = sheet.hyperlinks.map((link) => {
@@ -163,10 +130,15 @@ export function writeWorksheet(
 	);
 	blocks.set('headerFooter', page.headerFooter);
 	blocks.set('drawing', writeSheetDrawing(ctx, sheet, partName, rels, sourceDrawing));
+	refreshFormControlParts(writer, ctx.workbook, sheet);
 	blocks.set('legacyDrawing', writeComments(ctx, sheet, index, partName, rels));
 	blocks.set('tableParts', tableParts);
 	ctx.pivots?.writeSheet(writer, sheet, partName, rels);
-	const extensions = conditionalExtensionsXml(sheet);
+	const extensions = validationExtensionsXml(
+		sheet,
+		conditionalExtensionsXml(sheet),
+		(ctx.validationIds ??= new Set()),
+	);
 	blocks.set(
 		'extLst',
 		ctx.slicers?.active ? ctx.slicers.writeSheet(sheet, partName, rels, extensions) : extensions,
@@ -176,7 +148,7 @@ export function writeWorksheet(
 			key.startsWith('source:') ||
 			!ORDER.includes(key) ||
 			(blocks.get(key) ?? '') !== '' ||
-			(key === 'extLst' && ctx.slicers?.active)
+			key === 'extLst'
 		)
 			continue;
 		const valid = list.filter((xml) =>

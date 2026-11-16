@@ -10,17 +10,64 @@ import {
 	visioDataGraphicEdits,
 	visioDataGraphicFields,
 	visioDataGraphicParts,
+	visioDataGraphicConfigs,
+	visioPositionDataGraphicEdits,
+	visioAutoSpaceDataGraphicEdits,
 	visioLegendEdits,
 	visioRemoveDataGraphicEdits,
 	visioWithDataGraphics,
 } from './data-graphics';
 
-async function linked(): Promise<{ bytes: Uint8Array; document: VisioDocument }> {
+/**
+ * Two shapes linked to a two-row table. Stencil instances keep the marked-shape drawing of a data
+ * graphic; local shapes (`stencil` false) get the native one, tested in `data-graphic-native.test.ts`.
+ */
+export async function linked(
+	stencil = true,
+): Promise<{ bytes: Uint8Array; document: VisioDocument }> {
 	let bytes = (
-		await editVsdx(await createVsdx(), [
-			{ type: 'create-rectangle', pageId: '0', shapeId: '1', x: 2, y: 5, width: 1.5, height: 1 },
-			{ type: 'create-rectangle', pageId: '0', shapeId: '2', x: 5, y: 5, width: 1.5, height: 1 },
-		])
+		await editVsdx(
+			await createVsdx(),
+			stencil
+				? [
+						{
+							type: 'drop-stencil-master',
+							pageId: '0',
+							shapeId: '1',
+							master: 'rectangle',
+							x: 2,
+							y: 5,
+						},
+						{
+							type: 'drop-stencil-master',
+							pageId: '0',
+							shapeId: '2',
+							master: 'rectangle',
+							x: 5,
+							y: 5,
+						},
+					]
+				: [
+						{
+							type: 'create-rectangle',
+							pageId: '0',
+							shapeId: '1',
+							x: 2,
+							y: 5,
+							width: 1.5,
+							height: 1,
+						},
+						{
+							type: 'create-rectangle',
+							pageId: '0',
+							shapeId: '2',
+							x: 5,
+							y: 5,
+							width: 1.5,
+							height: 1,
+						},
+					],
+		)
 	).bytes;
 	bytes = (
 		await editVsdx(bytes, [
@@ -60,7 +107,7 @@ const apply = async (bytes: Uint8Array, edits: Parameters<typeof editVsdx>[1]) =
 };
 
 describe('data graphics', () => {
-	it('keeps generated text, bars and icons at their offsets when a local owner moves', async () => {
+	it('removes marked graphics of a stencil owner and deletes them with it', async () => {
 		let state = await linked();
 		for (const kind of ['text', 'bar', 'icon'] as const)
 			state = await apply(
@@ -79,23 +126,15 @@ describe('data graphics', () => {
 				.map((part) => part.id),
 		);
 		const before = page.shapes.filter((shape) => ids.has(shape.id));
-		const moved = await apply(state.bytes, [
-			{ type: 'move-shape', pageId: page.id, shapeId: '1', x: 4, y: 6 },
-		]);
-		for (const prior of before) {
-			const after = moved.document.pages[0]!.shapes.find((shape) => shape.id === prior.id)!;
-			expect(after.rotation!.pinX - prior.rotation!.pinX).toBeCloseTo(2);
-			expect(after.rotation!.pinY - prior.rotation!.pinY).toBeCloseTo(1);
-		}
 		const removed = await apply(
-			moved.bytes,
-			visioRemoveDataGraphicEdits(moved.document.pages[0]!, ['1']),
+			state.bytes,
+			visioRemoveDataGraphicEdits(state.document.pages[0]!, ['1']),
 		);
 		expect(visioDataGraphicParts(removed.document.pages[0]!).size).toBe(0);
-		const deleteIds = visioWithDataGraphics(moved.document.pages[0]!, ['1', before[0]!.id]);
+		const deleteIds = visioWithDataGraphics(state.document.pages[0]!, ['1', before[0]!.id]);
 		expect(new Set(deleteIds).size).toBe(deleteIds.length);
 		// Linked external data must be explicitly unlinked before deleting any owner.
-		const unlinked = await apply(moved.bytes, [
+		const unlinked = await apply(state.bytes, [
 			{ type: 'unlink-data-rows', pageId: page.id, recordsetId: '0', shapeIds: ['1'] },
 		]);
 		const deleted = await apply(
@@ -168,6 +207,55 @@ describe('data graphics', () => {
 		expect(removed.document.pages[0]!.shapes.map((shape) => shape.id)).toEqual(['1', '2']);
 	});
 
+	it('moves and auto spaces graphics from the config they remember', async () => {
+		let state = await linked();
+		for (const kind of ['text', 'bar'] as const)
+			state = await apply(
+				state.bytes,
+				visioDataGraphicEdits(state.document.pages[0]!, ['1'], {
+					kind,
+					field: kind === 'text' ? 'Name' : 'Load',
+				}),
+			);
+		expect(visioDataGraphicConfigs(state.document.pages[0]!, '1')).toEqual([
+			{ kind: 'text', field: 'Name' },
+			{ kind: 'bar', field: 'Load', min: 0, max: 20 },
+		]);
+		const centre = (document: VisioDocument, kind: string) => {
+			const page = document.pages[0]!;
+			const part = visioDataGraphicParts(page)
+				.get('1')!
+				.find((item) => item.kind === kind)!;
+			return page.shapes.find((shape) => shape.id === part.id)!.rotation!;
+		};
+		const owner = state.document.pages[0]!.shapes.find((shape) => shape.id === '1')!.rotation!;
+		const above = await apply(
+			state.bytes,
+			visioPositionDataGraphicEdits(state.document.pages[0]!, ['1'], 'top'),
+		);
+		const text = centre(above.document, 'text');
+		const bar = centre(above.document, 'bar');
+		expect(text.pinY).toBeGreaterThan(owner.pinY);
+		expect(bar.pinY).toBeGreaterThan(text.pinY + 0.2);
+		expect(visioDataGraphicConfigs(above.document.pages[0]!, '1')[1]).toMatchObject({
+			position: 'top',
+			min: 0,
+			max: 20,
+		});
+		// Drawn fresh the text and the bar overlap; Auto Space separates them.
+		const spaced = await apply(
+			state.bytes,
+			visioAutoSpaceDataGraphicEdits(state.document.pages[0]!, ['1']),
+		);
+		const gap = centre(spaced.document, 'text').pinY - centre(spaced.document, 'bar').pinY;
+		expect(Math.abs(gap)).toBeGreaterThan(0.2);
+		expect(visioDataGraphicParts(spaced.document.pages[0]!).get('1')).toHaveLength(3);
+		const right = await apply(
+			state.bytes,
+			visioPositionDataGraphicEdits(state.document.pages[0]!, ['1'], 'right'),
+		);
+		expect(centre(right.document, 'text').pinX).toBeGreaterThan(owner.pinX + 0.75);
+	});
 	it('colours by value, remembers the fill, restores it and inserts a grouped legend', async () => {
 		const start = await linked();
 		const page = start.document.pages[0]!;

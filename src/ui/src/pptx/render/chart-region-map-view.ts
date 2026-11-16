@@ -1,3 +1,4 @@
+import { regionMapGeometry } from 'ooxml-core/chart/region-map';
 /**
  * View-model builder for the regionMap (choropleth) chart kind.
  *
@@ -16,7 +17,7 @@
 
 import type { PptxChartData, PptxElement } from 'ooxml-core/pptx';
 
-import { regionBounds, regionViewBounds, scalePathD, WORLD_REGIONS } from './chart-map-projection';
+import { regionBounds, regionViewBounds, scalePathD } from './chart-map-projection';
 import { resolveRegionCode } from './chart-region-map-alias';
 import {
 	buildRegionMapColorLegend,
@@ -26,7 +27,6 @@ import {
 import {
 	buildRegionMapEntries,
 	buildValueColorScale,
-	formatRegionMapValue,
 	resolveValueColorStops,
 	shouldRenderRegionLabel,
 } from './chart-region-map-data';
@@ -37,6 +37,7 @@ import {
 import type { UnmatchedRegionRow } from './chart-region-map-fallback-table';
 import type { ChartValueDrag, ChartViewModel, SvgPath, SvgRect, SvgText } from './chart-view-model';
 import { formatAxisValue } from './chart-view-model';
+import { buildDataLabelText } from './chart-data-label-text';
 
 /**
  * Build the view-model for a regionMap (choropleth) chart.
@@ -61,12 +62,14 @@ export function buildRegionMapViewModel(
 	const categories = categoryLabels.length > 0 ? categoryLabels : chartData.categories;
 	const series = chartData.series[0];
 	const options = series?.regionMapOptions;
-	const entries = buildRegionMapEntries(
-		categories,
-		series?.values ?? [],
-		options,
-		resolveRegionCode,
-	);
+	const geometry = regionMapGeometry(options);
+	const regions = geometry.regions;
+	const resolve = (label: string) =>
+		regions.find(
+			(r) =>
+				r.entityId === label || r.code === label || r.name.toLowerCase() === label.toLowerCase(),
+		)?.code ?? resolveRegionCode(label);
+	const entries = buildRegionMapEntries(categories, series?.values ?? [], options, resolve);
 	const values = entries.map((entry) => entry.value);
 
 	const finiteVals = values.filter((v) => Number.isFinite(v));
@@ -82,7 +85,9 @@ export function buildRegionMapViewModel(
 		minVal,
 		maxVal,
 	);
-	const colorScale = valueColorStops ? buildValueColorScale(valueColorStops) : sequentialColorScale;
+	const colorScale = valueColorStops
+		? buildValueColorScale(valueColorStops)
+		: (t: number) => sequentialColorScale(t, series?.color ?? '#4472C4');
 
 	// Build region -> value lookup.
 	const regionValueMap = new Map<string, { value: number; label: string; sourceIndex: number }>();
@@ -106,7 +111,7 @@ export function buildRegionMapViewModel(
 	const titleH = chartData.title ? 22 : 0;
 	const mapAreaH = Math.max(svgHeight - titleH - legendHeight - fallbackTableH - 8, 80);
 
-	const viewBounds = regionViewBounds(options?.viewedRegionType, regionValueMap);
+	const viewBounds = regionViewBounds(options?.viewedRegionType, regionValueMap, regions);
 	const viewWidth = Math.max(viewBounds.maxX - viewBounds.minX, 1);
 	const viewHeight = Math.max(viewBounds.maxY - viewBounds.minY, 1);
 	const mapScale = Math.min((svgWidth - 20) / viewWidth, mapAreaH / viewHeight);
@@ -142,7 +147,7 @@ export function buildRegionMapViewModel(
 		: undefined;
 
 	// Region shape paths.
-	for (const region of WORLD_REGIONS) {
+	for (const region of regions) {
 		const entry = regionValueMap.get(region.code);
 		let fill = '#e2e8f0';
 
@@ -150,6 +155,7 @@ export function buildRegionMapViewModel(
 			const t = normalizeValue(entry.value, minVal, maxVal);
 			fill = colorScale(t);
 		}
+		if (options?.fixedColor) fill = options.fixedColor;
 
 		// Embed the transform in the path's d attribute via a manual coordinate
 		// scale+translate since SvgPath has no transform field.  We replicate
@@ -161,8 +167,8 @@ export function buildRegionMapViewModel(
 			kind: 'path',
 			d: scaledPath,
 			fill,
-			stroke: '#94a3b8',
-			strokeWidth: Math.max(0.5 / mapScale, 0.3),
+			stroke: series?.lineWidth && !series.lineNoFill ? (series.color ?? '#000000') : 'none',
+			strokeWidth: series?.lineWidth ?? 0,
 			// Hover tooltip. A choropleth prints only the value inside the shape
 			// (and only where the shape is big enough), so without this the reader
 			// has no way to find out WHICH country a patch of colour is.
@@ -194,13 +200,35 @@ export function buildRegionMapViewModel(
 				kind: 'text',
 				x: lx,
 				y: ly,
-				text: formatRegionMapValue(entry.value, options?.cultureLanguage),
+				text: region.name,
 				fontSize: Math.max(6, 7 * mapScale),
 				fill: '#1e293b',
 				textAnchor: 'middle',
 				fontWeight: 'bold',
 				dominantBaseline: 'central',
 			} satisfies SvgText);
+		}
+		if (
+			entry &&
+			series &&
+			(series.dataLabelOptions || series.dataLabels?.length || chartData.style?.dataLabels)
+		) {
+			const label = buildDataLabelText({
+				chartData,
+				series,
+				pointIndex: entry.sourceIndex,
+				value: entry.value,
+			});
+			if (label)
+				primitives.push({
+					kind: 'text',
+					x: region.labelXY[0] * mapScale + mapOffsetX,
+					y: region.labelXY[1] * mapScale + mapOffsetY,
+					text: label.text,
+					fontSize: 10,
+					fill: label.color ?? '#000000',
+					textAnchor: 'middle',
+				} satisfies SvgText);
 		}
 	}
 
@@ -220,6 +248,16 @@ export function buildRegionMapViewModel(
 
 	// Fallback table for unmatched regions.
 	primitives.push(...buildRegionMapFallbackTable(unmatchedRows, legendY, svgWidth, svgHeight));
+	if (geometry.approximate)
+		primitives.push({
+			kind: 'text',
+			x: 8,
+			y: titleH + 12,
+			text: '≈',
+			fontSize: 8,
+			fill: '#595959',
+			textAnchor: 'start',
+		} satisfies SvgText);
 
 	const dataLabels: SvgText[] = titlePrimitive !== undefined ? [titlePrimitive] : [];
 
@@ -240,6 +278,7 @@ export function buildRegionMapViewModel(
 	};
 
 	return {
+		reports: geometry.approximate ? ['approximate-country-outlines'] : [],
 		svgWidth,
 		svgHeight,
 		title: undefined, // Rendered inline as a dataLabel text primitive above.

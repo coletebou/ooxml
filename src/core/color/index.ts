@@ -5,3 +5,5 @@ export * from './unit-rgb';
 export * from './sigma-gradient-stops';
 export * from './hex-rgb';
 export * from './theme-palette';
+export * from './straight-alpha-stops';
+export * from './office-gradient-stops';

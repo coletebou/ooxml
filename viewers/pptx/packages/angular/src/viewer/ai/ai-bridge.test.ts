@@ -4,6 +4,7 @@ import type {
 	ParsedTableStyleMap,
 	PptxAppProperties,
 	PptxCoreProperties,
+	PptxCustomShow,
 	PptxCustomProperty,
 	PptxElement,
 	PptxPresentationProperties,
@@ -29,6 +30,7 @@ function slide(id: string, elements: PptxElement[]): PptxSlide {
 interface DeckState {
 	canvas: { width: number; height: number };
 	sections: readonly PptxSection[];
+	customShows: readonly PptxCustomShow[];
 	presentationProperties: PptxPresentationProperties;
 	customProperties: readonly PptxCustomProperty[];
 	coreProperties: PptxCoreProperties | undefined;
@@ -52,6 +54,7 @@ function setup(): {
 	const deck: DeckState = {
 		canvas: { width: 960, height: 540 },
 		sections: [],
+		customShows: [],
 		presentationProperties: {},
 		customProperties: [],
 		coreProperties: undefined,
@@ -81,6 +84,11 @@ function setup(): {
 			/* not exercised here */
 		},
 		getSections: () => deck.sections,
+		getCustomShows: () => deck.customShows,
+		setCustomShows: (shows) => {
+			deck.customShows = shows;
+			editor.dirty.set(true);
+		},
 		getPresentationProperties: () => deck.presentationProperties,
 		getCustomProperties: () => deck.customProperties,
 		getCoreProperties: () => deck.coreProperties,
@@ -237,6 +245,16 @@ describe('createAngularAiBridge', () => {
 		expect(editor.dirty()).toBeTruthy();
 	});
 
+	it('applyDeckData commits changed custom shows to the setter', () => {
+		const { editor, bridge, deck } = setup();
+		bridge.applyDeckData?.((data) => {
+			data.customShows = [{ id: '0', name: 'Short', slideRIds: ['s1'] }];
+			return data;
+		}, 'AI custom shows');
+		expect(deck.customShows).toStrictEqual([{ id: '0', name: 'Short', slideRIds: ['s1'] }]);
+		expect(editor.dirty()).toBeTruthy();
+	});
+
 	// viewProperties/tableStyleMap/tableStylesDefaultId/tags were missing from
 	// this seam entirely: the main Save/Export path (`loader.saveSlides`)
 	// persists them, but an MCP deck tool operating on
@@ -273,5 +291,22 @@ describe('createAngularAiBridge', () => {
 		expect(deck.tagCollections).toStrictEqual([
 			{ path: 'ppt/tags/tag1.xml', tags: [{ name: 'a', value: 'b' }] },
 		]);
+	});
+});
+
+describe('createAngularAiBridge (shared bridge)', () => {
+	it('two element updates in one tick both land, each as one undo step', () => {
+		const { editor, bridge } = setup();
+		editor.setSlides([slide('s1', [textElement('a', 'A'), textElement('b', 'B')])]);
+		bridge.updateElement(0, 'a', { x: 1 });
+		bridge.updateElement(0, 'b', { x: 2 });
+		expect(editor.slides()[0]?.elements.map((el) => el.x)).toEqual([1, 2]);
+		editor.undo();
+		expect(editor.slides()[0]?.elements.map((el) => el.x)).toEqual([1, 10]);
+	});
+
+	it('scopes the assistant to the whole active slide without a panel focus', () => {
+		const { bridge } = setup();
+		expect(bridge.getFocusedTargets?.()).toEqual([{ kind: 'slide', slideIndex: 0 }]);
 	});
 });

@@ -34,6 +34,7 @@ import {
 	getAssetsMap,
 	isAssetRefKey,
 	isAssetVersionKey,
+	isLocalOnlyUrl,
 	readAssetFields,
 	writeAssetFields,
 } from './collaboration-assets';
@@ -89,7 +90,9 @@ export interface YjsFactories {
 	createArray: () => YArrayLike;
 	createText: () => YTextLike;
 	/** Track character identities using the binding's existing Yjs runtime. */
-	createTextPositions?: (text: YTextEditableLike) => TextSessionPositions<TrackedTextPosition>;
+	createTextPositions?:
+		| ((text: YTextEditableLike) => TextSessionPositions<TrackedTextPosition>)
+		| undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +315,7 @@ export const COMPLEX_SLIDE_FIELDS: Readonly<Record<string, string>> = {
 	activeXControls: '_ax',
 	legacyVmlElements: '_lvml',
 	backgroundPattern: '_bp',
+	backgroundGradientFill: '_bgf',
 	backgroundImageProperties: '_bip',
 	backgroundStyleRef: '_bsr',
 	modernCommentPart: '_mc',
@@ -338,7 +342,9 @@ export function writeElementToYMap(
 			continue;
 		}
 		if (SCALAR_ELEMENT_KEYS.has(key)) {
-			ymap.set(key, value);
+			if (!isLocalOnlyUrl(value)) {
+				ymap.set(key, value);
+			}
 		} else if (key === 'textSegments') {
 			if (Array.isArray(value)) {
 				const ytext = factories.createText();
@@ -394,7 +400,7 @@ export function writeSlideToYMap(
 ): void {
 	const rec = slide as unknown as Record<string, unknown>;
 	for (const key of SCALAR_SLIDE_KEYS) {
-		if (rec[key] !== undefined) {
+		if (rec[key] !== undefined && !isLocalOnlyUrl(rec[key])) {
 			ymap.set(key, rec[key]);
 		}
 	}
@@ -470,12 +476,26 @@ export function writeSlidesToYDoc(
 	}, origin);
 }
 
+/**
+ * Read the deck from the document. A slide id that appears more than once (two
+ * peers seeded the same empty room concurrently) is read once, from its first
+ * copy, which is also the copy `reconcileSlidesInYDoc` keeps.
+ */
 export function readSlidesFromYDoc(ydoc: YDocLike): PptxSlide[] {
 	const assets = getAssetsMap(ydoc);
 	const arr = ydoc.getArray(YDOC_SLIDES_KEY);
 	const slides: PptxSlide[] = [];
+	const seen = new Set<string>();
 	for (let i = 0; i < arr.length; i++) {
-		slides.push(readSlideFromYMap(arr.get(i) as YMapLike, assets));
+		const map = arr.get(i) as YMapLike;
+		const id = typeof map?.get === 'function' ? map.get('id') : undefined;
+		if (typeof id === 'string') {
+			if (seen.has(id)) {
+				continue;
+			}
+			seen.add(id);
+		}
+		slides.push(readSlideFromYMap(map, assets));
 	}
 	return slides;
 }

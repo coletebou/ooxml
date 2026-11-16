@@ -1,11 +1,11 @@
 import type { ToolbarActionId } from 'ooxml-ui/pptx';
-import { isPanelVisible } from 'ooxml-ui/pptx';
 import {
 	buildFieldSubstitutionContext,
+	isPanelVisible,
 	isPresentationAdvanceClick,
 	PRESENT_TOOLBAR_CLASSES,
 	resolvePresentationAction,
-	shouldConfirmExternalHyperlink,
+	openExternalHyperlinkConfirmed,
 	toggleBlackboard,
 } from 'ooxml-ui/pptx';
 import type { PptxAction, PptxElement, PptxElementAnimation, PptxSlide } from 'pptx-viewer-core';
@@ -14,7 +14,6 @@ import type { PptxAction, PptxElement, PptxElementAnimation, PptxSlide } from 'p
  * find/replace panel, and presentation annotation / toolbar overlays.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
 import {
 	FindReplacePanel,
@@ -23,7 +22,6 @@ import {
 	SlideCanvas,
 	PresentationAnnotationOverlay,
 	PresentationSubtitleBar,
-	PresentationTransitionOverlay,
 	PresentationToolbar,
 	PresentationTouchControls,
 } from '.';
@@ -37,9 +35,10 @@ import type { TableOperationHandlers } from '../hooks/useTableOperations';
 import { useToolbarVisibility } from '../hooks/useToolbarVisibility';
 import type { ViewerState } from '../hooks/useViewerState';
 import type { UseZoomViewportResult } from '../hooks/useZoomViewport';
+import { useTranslation } from '../i18n/use-translation';
 import type { CanvasSize, TableCellEditorState } from '../types';
 import type { ViewerMode } from '../types-core';
-import { safeOpenUrl, isPpactionUrl, parsePpactionUrl } from '../utils/hyperlink-security';
+import { isPpactionUrl, parsePpactionUrl } from '../utils/hyperlink-security';
 import type { TableStyleContext } from '../utils/table-parse';
 import type { FieldSubstitutionContext } from '../utils/text-field-substitution';
 import { CollaborationCursorOverlay, RemoteSelectionOverlay } from './collaboration';
@@ -48,6 +47,7 @@ import { PresentationAudienceEffects } from './PresentationAudienceEffects';
 import type { PresentationContextMenuState } from './PresentationContextMenu';
 import { PresentationContextMenu } from './PresentationContextMenu';
 import { PresentationEndOverlay } from './PresentationEndOverlay';
+import { PresentationTransitionMount } from './PresentationTransitionMount';
 import { PresenterSlideNavigator } from './PresenterSlideNavigator';
 import { useViewerCustomizationContext } from './viewer-customization-context';
 import { useViewerOptionsContext } from './viewer-options-context';
@@ -93,7 +93,7 @@ export interface ViewerCanvasAreaProps {
 		setFindIncludeChartTitles: (value: boolean) => void;
 		setFindIncludeChartData: (value: boolean) => void;
 		setFindIncludeNotes: (value: boolean) => void;
-		findResults: Array<{
+		findResults: ReadonlyArray<{
 			slideIndex: number;
 			elementId: string;
 			segmentIndex: number;
@@ -204,13 +204,7 @@ export function ViewerCanvasArea(props: ViewerCanvasAreaProps) {
 	// before opening (Options > Trust Center > confirm external hyperlinks).
 	const openExternalUrl = useCallback(
 		(url: string) => {
-			if (
-				shouldConfirmExternalHyperlink(viewerOptions, url) &&
-				!window.confirm(`${t('pptx.options.trust.confirmHyperlinks')}\n\n${url}`)
-			) {
-				return;
-			}
-			safeOpenUrl(url);
+			void openExternalHyperlinkConfirmed(viewerOptions, url, { t });
 		},
 		[viewerOptions, t],
 	);
@@ -315,17 +309,13 @@ export function ViewerCanvasArea(props: ViewerCanvasAreaProps) {
 	);
 
 	// ── Blackboard toggle: black screen + pen armed / disarmed as a pair ──
-	// `setPresentationTool` toggles a re-selected tool off, so the tool setter
-	// is only invoked when the target differs from what is already armed.
 	const handleToggleBlackboard = useCallback(() => {
 		const next = toggleBlackboard(
 			presentation.presenterSnapshot.blackout,
 			annotations.presentationTool,
 		);
 		presentation.setPresenterBlackout(next.blackout);
-		if (next.tool !== annotations.presentationTool) {
-			annotations.setPresentationTool(next.tool);
-		}
+		annotations.selectPresentationTool(next.tool);
 	}, [annotations, presentation]);
 
 	// ── Toolbar hover handling: keep toolbar visible while hovering ────
@@ -457,21 +447,15 @@ export function ViewerCanvasArea(props: ViewerCanvasAreaProps) {
 							    transition plays, then tears itself down on completion.
 							    Parented to the scaled slide box so it matches the live
 							    slide instead of stretching across the whole display. */}
-							{presentation.transitionOverlay &&
-								slides[presentation.transitionOverlay.outgoingSlideIndex] && (
-									<PresentationTransitionOverlay
-										key={`${presentation.transitionOverlay.outgoingSlideIndex}-${presentation.transitionOverlay.incomingSlideIndex}`}
-										outgoingSlide={slides[presentation.transitionOverlay.outgoingSlideIndex]}
-										templateElements={templateElements}
-										canvasSize={canvasSize}
-										transition={presentation.transitionOverlay.transition}
-										durationMs={presentation.transitionOverlay.durationMs}
-										scale={stageScale}
-										morphPlan={presentation.morphPlan}
-										incomingSlide={slides[presentation.transitionOverlay.incomingSlideIndex]}
-										onComplete={presentation.handleTransitionOverlayComplete}
-									/>
-								)}
+							{/* One overlay per transition, each slide behind its own
+							    layout; see `PresentationTransitionMount`. */}
+							<PresentationTransitionMount
+								presentation={presentation}
+								slides={slides}
+								templateElementsBySlideId={s.templateElementsBySlideId}
+								canvasSize={canvasSize}
+								scale={stageScale}
+							/>
 
 							{/* Ink/laser overlay, sharing the slide box origin so strokes
 							    land under the cursor rather than offset by the letterbox.
@@ -655,7 +639,7 @@ export function ViewerCanvasArea(props: ViewerCanvasAreaProps) {
 							presentation.presenterSnapshot.blackout === value ? 'none' : value,
 						)
 					}
-					onPointerTool={(tool) => annotations.setPresentationTool(tool === 'none' ? 'none' : tool)}
+					onPointerTool={annotations.selectPresentationTool}
 					onEraseInk={annotations.clearAnnotations}
 				/>
 			)}
@@ -693,7 +677,8 @@ export function ViewerCanvasArea(props: ViewerCanvasAreaProps) {
 						presentationTool={annotations.presentationTool}
 						penColor={annotations.penColor}
 						highlighterColor={annotations.highlighterColor}
-						hasAnnotations={annotations.annotationStrokes.length > 0}
+						hasAnnotations={annotations.hasAnyAnnotations}
+						hasSlideAnnotations={annotations.annotationStrokes.length > 0}
 						onSetTool={annotations.setPresentationTool}
 						onSetPenColor={annotations.setPenColor}
 						onSetHighlighterColor={annotations.setHighlighterColor}

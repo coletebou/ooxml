@@ -17,7 +17,20 @@ import {
 	type VisioDataGraphicOptions,
 	type VisioDataGraphicKind,
 } from './data-graphic-rules';
+import {
+	encodeDataGraphicConfig,
+	visioDataGraphicCenter,
+	visioRespaceDataGraphicEdits,
+	VISIO_DATA_GRAPHIC_DEFAULT_POSITION,
+	type VisioDataGraphicPosition,
+} from './data-graphic-config';
+import {
+	visioNativeGraphicAccepts,
+	visioNativeGraphicItems,
+	visioSetNativeGraphicEdit,
+} from './data-graphic-native';
 export * from './data-graphic-rules';
+export * from './data-graphic-config';
 
 const hidden = (label: string, value: string): VisioShapeDataFields => ({
 	label,
@@ -33,12 +46,22 @@ export function visioRemoveDataGraphicEdits(
 	page: VisioPage,
 	shapeIds: readonly string[],
 	kind?: VisioDataGraphicKind,
+	fieldName?: string,
 ): VisioEdit[] {
 	const edits: VisioEdit[] = [];
 	const parts = visioDataGraphicParts(page);
 	for (const owner of shapeIds) {
+		if (kind !== 'color') {
+			const items = visioNativeGraphicItems(page, owner);
+			const keep = items.filter(
+				(item) =>
+					!((!kind || item.kind === kind) && (fieldName === undefined || item.field === fieldName)),
+			);
+			if (keep.length !== items.length) edits.push(visioSetNativeGraphicEdit(page, owner, keep));
+		}
 		for (const part of parts.get(owner) ?? []) {
 			if (kind && part.kind !== kind) continue;
+			if (fieldName !== undefined && part.field !== fieldName) continue;
 			// Groups (a legend) are ungrouped first; only plain shapes can be deleted.
 			const group = page.shapes.find((item) => item.id === part.id && item.kind === 'group');
 			if (group) edits.push({ type: 'ungroup-shape', pageId: page.id, shapeId: part.id });
@@ -47,7 +70,12 @@ export function visioRemoveDataGraphicEdits(
 		}
 		const shape = page.shapes.find((item) => item.id === owner);
 		const fill = shape && field(shape, VISIO_DATA_GRAPHIC_FILL_ROW);
-		if (shape && fill && (!kind || kind === 'color')) {
+		if (
+			shape &&
+			fill &&
+			(!kind || kind === 'color') &&
+			(fieldName === undefined || fill.label === fieldName)
+		) {
 			const color = String(fill.value ?? '');
 			if (/^#[0-9a-f]{6}$/i.test(color))
 				edits.push({ type: 'format-shape', pageId: page.id, shapeId: owner, fillColor: color });
@@ -77,29 +105,65 @@ export function visioDataGraphicEdits(
 	const targets = page.shapes.filter(
 		(shape) => shapeIds.includes(shape.id) && !marker(shape) && field(shape, options.field),
 	);
+	// Local shapes get a native data graphic; the others keep the marked-shape drawing.
+	const native = new Set(
+		options.kind === 'color'
+			? []
+			: targets.filter((shape) => visioNativeGraphicAccepts(page, shape)).map((shape) => shape.id),
+	);
 	// Re-applying replaces the owner's parts of this kind; colour keeps the remembered fill.
 	const edits =
-		options.kind === 'color'
+		options.kind === 'color' || options.replace === 'none'
 			? []
 			: visioRemoveDataGraphicEdits(
 					page,
-					targets.map((shape) => shape.id),
+					targets.filter((shape) => !native.has(shape.id)).map((shape) => shape.id),
 					options.kind,
+					options.replace === 'field' ? options.field : undefined,
 				);
 	const ratio = page.drawingToPageScale ?? 1;
-	let next = Number(visioNextShapeId(page));
+	let next = options.idStart ?? Number(visioNextShapeId(page));
 	const id = () => String(next++);
+	const values = targets.map((shape) => numberOf(shape, options.field));
+	const known = values.filter((value): value is number => value !== undefined);
+	const min = options.min ?? Math.min(0, ...known);
+	const max = options.max ?? Math.max(...known, min + 1);
+	// The marker keeps what Position, Configure and Auto Space need to redraw the graphic.
 	const mark = (shapeId: string, owner: string): VisioEdit => ({
 		type: 'set-shape-data',
 		pageId: page.id,
 		shapeId,
 		row: VISIO_DATA_GRAPHIC_ROW,
-		data: hidden(options.kind, owner),
+		data: {
+			...hidden(options.kind, owner),
+			prompt: options.field,
+			format:
+				options.kind === 'color'
+					? ''
+					: encodeDataGraphicConfig({
+							kind: options.kind,
+							field: options.field,
+							...(options.position ? { position: options.position } : {}),
+							...(options.kind === 'text' ? {} : { min, max }),
+						}),
+		},
 	});
-	const values = targets.map((shape) => numberOf(shape, options.field));
-	const known = values.filter((value): value is number => value !== undefined);
-	const min = options.min ?? Math.min(0, ...known);
-	const max = options.max ?? Math.max(...known, min + 1);
+	const slot = options.slot ?? 0;
+	// Without a chosen position or slot a graphic keeps its original place.
+	const placed = (
+		kind: 'text' | 'bar' | 'icon',
+		part: { width: number; height: number },
+		original: { x: number; y: number },
+		owner: { x: number; y: number; width: number; height: number },
+	) =>
+		options.position || slot
+			? visioDataGraphicCenter(
+					owner,
+					part,
+					options.position ?? VISIO_DATA_GRAPHIC_DEFAULT_POSITION[kind],
+					slot,
+				)
+			: original;
 	const colors =
 		options.kind === 'color'
 			? visioColorRules(
@@ -109,12 +173,31 @@ export function visioDataGraphicEdits(
 				)
 			: undefined;
 	for (const [index, shape] of targets.entries()) {
+		if (native.has(shape.id)) {
+			const kept = visioNativeGraphicItems(page, shape.id).filter(
+				(item) =>
+					options.replace === 'none' ||
+					!(
+						item.kind === options.kind &&
+						(options.replace !== 'field' || item.field === options.field)
+					),
+			);
+			const item = {
+				kind: options.kind as 'text' | 'bar' | 'icon',
+				field: options.field,
+				...(options.position ? { position: options.position } : {}),
+				...(options.kind === 'text' ? {} : { min, max }),
+			};
+			edits.push(visioSetNativeGraphicEdit(page, shape.id, [...kept, item]));
+			continue;
+		}
 		const box = visioShapePageBox(page, shape);
 		if (!box) continue;
 		const centreX = (box.x + box.width / 2) / ratio;
 		const bottom = (page.height - box.y - box.height) / ratio;
 		const top = (page.height - box.y) / ratio;
 		const width = box.width / ratio;
+		const owner = { x: centreX, y: (top + bottom) / 2, width, height: top - bottom };
 		const value = values[index];
 		const target = {
 			pageId: page.id,
@@ -125,15 +208,16 @@ export function visioDataGraphicEdits(
 		if (options.kind === 'text') {
 			const text = visioShapeDataText(shape, options.field) ?? '';
 			const shapeId = id();
+			const part = { width: Math.max(width, 1), height: 0.3 };
+			const at = placed('text', part, { x: centreX, y: bottom - 0.2 }, owner);
 			edits.push(
 				{
 					...target,
 					type: 'create-text-box',
 					shapeId,
-					x: centreX,
-					y: bottom - 0.2,
-					width: Math.max(width, 1),
-					height: 0.3,
+					x: at.x,
+					y: at.y,
+					...part,
 					text,
 				},
 				mark(shapeId, shape.id),
@@ -143,14 +227,20 @@ export function visioDataGraphicEdits(
 			const barWidth = Math.min(Math.max(width, 0.8), 2);
 			const fraction = Math.max(0, Math.min(1, (value - min) / (max - min || 1)));
 			const frame = id();
-			const left = centreX - barWidth / 2;
+			const at = placed(
+				'bar',
+				{ width: barWidth, height: 0.16 },
+				{ x: centreX, y: bottom - 0.15 },
+				owner,
+			);
+			const left = at.x - barWidth / 2;
 			edits.push(
 				{
 					...target,
 					type: 'create-rectangle',
 					shapeId: frame,
-					x: centreX,
-					y: bottom - 0.15,
+					x: at.x,
+					y: at.y,
 					width: barWidth,
 					height: 0.16,
 				},
@@ -172,7 +262,7 @@ export function visioDataGraphicEdits(
 						type: 'create-rectangle',
 						shapeId: bar,
 						x: left + (barWidth * fraction) / 2,
-						y: bottom - 0.15,
+						y: at.y,
 						width: barWidth * fraction,
 						height: 0.16,
 					},
@@ -185,13 +275,19 @@ export function visioDataGraphicEdits(
 			const share = (value - min) / (max - min || 1);
 			const color = share >= 2 / 3 ? ICONS.high : share >= 1 / 3 ? ICONS.mid : ICONS.low;
 			const icon = id();
+			const at = placed(
+				'icon',
+				{ width: 0.22, height: 0.22 },
+				{ x: centreX + width / 2 + 0.15, y: top - 0.11 },
+				owner,
+			);
 			edits.push(
 				{
 					...target,
 					type: 'create-ellipse',
 					shapeId: icon,
-					x: centreX + width / 2 + 0.15,
-					y: top - 0.11,
+					x: at.x,
+					y: at.y,
 					width: 0.22,
 					height: 0.22,
 				},
@@ -316,3 +412,28 @@ export function visioLegendEdits(
 	);
 	return edits;
 }
+
+/**
+ * Data Graphics > Position: move the generated graphics of these shapes to a place around them.
+ * Graphics that end up together are stacked so they do not overlap.
+ */
+export const visioPositionDataGraphicEdits = (
+	page: VisioPage,
+	shapeIds: readonly string[],
+	position: VisioDataGraphicPosition,
+): VisioEdit[] =>
+	visioRespaceDataGraphicEdits(
+		page,
+		shapeIds,
+		(p, ids, options) => visioDataGraphicEdits(p, ids, options),
+		position,
+	);
+
+/** Data Graphics > Auto Space: keep each graphic where it is and stack those that overlap. */
+export const visioAutoSpaceDataGraphicEdits = (
+	page: VisioPage,
+	shapeIds: readonly string[],
+): VisioEdit[] =>
+	visioRespaceDataGraphicEdits(page, shapeIds, (p, ids, options) =>
+		visioDataGraphicEdits(p, ids, options),
+	);

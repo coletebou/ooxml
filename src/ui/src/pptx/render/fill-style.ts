@@ -20,10 +20,23 @@
  */
 import type { PptxElement, PptxThemeColorRef, ShapeStyle } from 'ooxml-core/pptx';
 import { hasShapeProperties, ooxmlGradientAngleToCssDegrees } from 'ooxml-core/pptx';
-import { clampUnitInterval, colorWithOpacity, normalizeHexColor } from 'ooxml-core/color';
+import {
+	clampUnitInterval,
+	colorWithOpacity,
+	normalizeHexColor,
+	officeGradientStops,
+} from 'ooxml-core/color';
 
 import { DEFAULT_FILL_COLOR } from '../constants';
+import {
+	buildFocalCircleGradientImage,
+	buildScaledLinearGradientImage,
+} from './gradient-svg-image';
+import { shapePathGradientField } from 'ooxml-core/diagram';
 import { buildRectPathGradientImage } from './path-gradient-rect';
+import { buildOutlineShapePathGradient } from './shape-path-gradient-fill';
+import { silhouetteFillsLayer } from './silhouette-effects';
+import { paintsLiveSlideBackground, slideBackgroundShapeFill } from './slide-background-fill';
 import { suppressesCssFill } from './subpath-fill-overlay';
 
 export {
@@ -185,20 +198,28 @@ export function buildCirclePathGradient(
 	stops: SanitizedStop[],
 	focalPoint?: ShapeStyle['fillGradientFocalPoint'],
 	fillToRect?: ShapeStyle['fillGradientFillToRect'],
+	bounds?: { width?: number; height?: number },
 ): string {
 	const stopStr = stops.map(toCssGradientStop).join(', ');
 	const { cx, cy } = computeGradientCenter(fillToRect, focalPoint);
 
-	const posX =
-		Math.round(cx) === 50 && !focalPoint && !fillToRect ? 'center' : `${Math.round(cx)}%`;
-	const posY =
-		Math.round(cy) === 50 && !focalPoint && !fillToRect ? 'center' : `${Math.round(cy)}%`;
-
-	if (fillToRect) {
-		const radius = Math.round(Math.max(cx, 100 - cx, cy, 100 - cy));
-		return `radial-gradient(ellipse ${radius}% ${radius}% at ${posX} ${posY}, ${stopStr})`;
+	// PowerPoint 16 draws a centred circle path as a true circle that reaches the
+	// box's farthest corner (measured: equal colour at equal pixel distance, last
+	// stop on the corner), which is CSS `circle farthest-corner`.
+	if (Math.abs(cx - 50) < 0.5 && Math.abs(cy - 50) < 0.5) {
+		return `radial-gradient(circle farthest-corner at 50% 50%, ${stopStr})`;
 	}
-	return `radial-gradient(circle at ${posX} ${posY}, ${stopStr})`;
+	// An off-centre focus runs every ray to the circle circumscribing the box,
+	// which only an SVG focal gradient expresses (and only with the box size).
+	const { width, height } = bounds ?? {};
+	if (typeof width === 'number' && typeof height === 'number' && width > 0 && height > 0) {
+		return buildFocalCircleGradientImage(stops, cx / 100, cy / 100, width, height);
+	}
+
+	const posX = `${Math.round(cx)}%`;
+	const posY = `${Math.round(cy)}%`;
+	const radius = Math.round(Math.max(cx, 100 - cx, cy, 100 - cy));
+	return `radial-gradient(ellipse ${radius}% ${radius}% at ${posX} ${posY}, ${stopStr})`;
 }
 
 /**
@@ -396,6 +417,17 @@ export interface GradientRenderContext {
 	width?: number;
 	/** Element height in px. */
 	height?: number;
+	/**
+	 * The element is a plain rectangle (`prstGeom rect`): a `path="shape"`
+	 * gradient then follows the box, which is the `path="rect"` field.
+	 */
+	rectangular?: boolean;
+	/** The element's preset geometry name, for the `path="shape"` field. */
+	shapeType?: string;
+	/** The element's preset adjustments. */
+	shapeAdjustments?: Record<string, number> | undefined;
+	/** The element is a freeform (`a:custGeom`): `path="shape"` paints the circle. */
+	freeform?: boolean;
 }
 
 /** Normalise a degree value into the [0, 360) range. */
@@ -439,6 +471,26 @@ function adjustLinearGradientAngle(
 }
 
 /**
+ * Whether a linear gradient is `scaled="1"` (the default) on a visibly
+ * non-square box at an angle that is not a multiple of 90 degrees: the one case
+ * where the stretch changes the iso-line direction.
+ */
+function isStretchedLinear(
+	gradient: ShapeStyle,
+	angle: number,
+	context: GradientRenderContext | undefined,
+): boolean {
+	const { width, height } = context ?? {};
+	if (gradient.fillGradientScaled === false || !width || !height) {
+		return false;
+	}
+	if (Math.abs(width - height) < 0.5) {
+		return false;
+	}
+	return Math.abs(angle % 90) > 0.01 && Math.abs((angle % 90) - 90) > 0.01;
+}
+
+/**
  * Converts a structured OOXML gradient on a `ShapeStyle` to a CSS
  * `linear-gradient(...)` / `radial-gradient(...)` string.
  *
@@ -464,10 +516,14 @@ export function buildGradientCss(
 		return undefined;
 	}
 
-	const stops = sanitizeGradientStops(gradient.fillGradientStops);
-	if (stops.length === 0) {
+	const sanitized = sanitizeGradientStops(gradient.fillGradientStops);
+	if (sanitized.length === 0) {
 		return gradient.fillGradient;
 	}
+	// CSS gradients interpolate premultiplied sRGB; Office blends colour and
+	// alpha straight and paints a two-stop 0/100 pair on its sigma curve in
+	// gamma 2.2 light, so the ramp is re-sampled to paint the same colours.
+	const stops: SanitizedStop[] = officeGradientStops(sanitized);
 
 	const gradientType = gradient.fillGradientType || 'linear';
 	if (gradientType === 'radial') {
@@ -475,19 +531,53 @@ export function buildGradientCss(
 		const fp = gradient.fillGradientFocalPoint;
 		const ftr = gradient.fillGradientFillToRect;
 
-		if (pathType === 'rect') {
+		if (pathType === 'rect' || (pathType === 'shape' && context?.rectangular)) {
 			return buildRectPathGradient(stops, fp, ftr);
 		}
 		if (pathType === 'shape') {
+			const field = context?.freeform
+				? 'circle'
+				: context?.shapeType
+					? shapePathGradientField(context.shapeType)
+					: 'legacy';
+			if (field === 'circle') {
+				return buildCirclePathGradient(stops, fp, ftr, context);
+			}
+			if (field === 'outline' && context?.shapeType) {
+				const { cx, cy } = computeGradientCenter(ftr, fp);
+				const scaled = buildOutlineShapePathGradient(
+					stops,
+					{
+						shapeType: context.shapeType,
+						width: context.width ?? 0,
+						height: context.height ?? 0,
+						adjustments: context.shapeAdjustments,
+					},
+					{ x: cx / 100, y: cy / 100 },
+				);
+				if (scaled) return scaled;
+			}
 			return buildShapePathGradient(stops, fp, ftr);
 		}
-		return buildCirclePathGradient(stops, fp, ftr);
+		return buildCirclePathGradient(stops, fp, ftr, context);
 	}
 
 	const normalizedAngle =
 		typeof gradient.fillGradientAngle === 'number' && Number.isFinite(gradient.fillGradientAngle)
 			? gradient.fillGradientAngle
 			: 90;
+	// A `scaled="1"` angle on a non-square box stretches the whole field, so the
+	// iso-lines are no longer perpendicular to the angle and no CSS angle draws
+	// it; only an SVG image does. Axis-aligned angles, square boxes, flipped
+	// tiles and gradients pinned to the page frame keep the CSS path.
+	const flipped = gradient.fillGradientFlip && gradient.fillGradientFlip !== 'none';
+	if (
+		isStretchedLinear(gradient, normalizedAngle, context) &&
+		!flipped &&
+		gradient.fillGradientRotWithShape !== false
+	) {
+		return buildScaledLinearGradientImage(stops, normalizedAngle);
+	}
 	// `@scaled` / `@rotWithShape` are corrections in OOXML angle space, so they
 	// are applied first and the result converted to CSS degrees exactly once.
 	const effectiveAngle = convertOoxmlAngleToCss(
@@ -1154,7 +1244,7 @@ export function getComputedFillStyle(
 	// `background-color` here would show through underneath it, and for a
 	// `fill="none"` sub-path (the smiley's eyes) it would paint a solid dot
 	// where PowerPoint draws nothing.
-	if (suppressesCssFill(element)) {
+	if (suppressesCssFill(element) || silhouetteFillsLayer(element)) {
 		return { backgroundColor: 'transparent' };
 	}
 
@@ -1173,7 +1263,12 @@ export function getComputedFillStyle(
  * `@scaled`/`@rotWithShape` corrections). Split out so grpFill children can
  * resolve the parent group's style through the identical pipeline.
  */
-function resolveComputedFill(ss: ShapeStyle, element: PptxElement): ComputedFillStyle {
+export function resolveComputedFill(ss: ShapeStyle, element: PptxElement): ComputedFillStyle {
+	// 0. A shape switched to the slide background in this session: paint the
+	//    background the stage publishes (a loaded one carries a resolved copy).
+	if (paintsLiveSlideBackground(ss)) {
+		return slideBackgroundShapeFill(element);
+	}
 	// 1. Image fill  -  highest priority.
 	const imageFillUrl = ss.fillMode === 'image' && ss.fillImageUrl ? ss.fillImageUrl : undefined;
 	if (imageFillUrl) {
@@ -1187,10 +1282,26 @@ function resolveComputedFill(ss: ShapeStyle, element: PptxElement): ComputedFill
 	}
 
 	// 2. Gradient (structured, with prebuilt-string fallback).
+	const freeform =
+		element.type === 'shape' &&
+		(Boolean(element.pathData) || (element.customGeometryPaths?.length ?? 0) > 0);
 	const geometry: GradientRenderContext = {
 		rotation: element.rotation,
 		width: element.width,
 		height: element.height,
+		// `getShapeType` folds every preset it does not model onto `rect`, so the
+		// raw name decides: only a real rectangle follows the box.
+		rectangular:
+			element.type === 'shape' &&
+			!freeform &&
+			(!element.shapeType || element.shapeType.toLowerCase() === 'rect'),
+		...(element.type === 'shape'
+			? {
+					freeform,
+					...(element.shapeType ? { shapeType: element.shapeType } : {}),
+					shapeAdjustments: element.shapeAdjustments,
+				}
+			: {}),
 	};
 	const gradient =
 		buildGradientCss(ss, geometry) ?? (ss.fillMode === 'gradient' ? ss.fillGradient : undefined);
@@ -1227,12 +1338,9 @@ function resolveComputedFill(ss: ShapeStyle, element: PptxElement): ComputedFill
 		// gradient (which auto-sizes to the background box), an `url(...)` image
 		// defaults to its own intrinsic size and to `repeat`, which would tile the
 		// normalised 0-100 artwork instead of stretching it across the shape.
-		const isRectPathImage =
-			ss.fillMode === 'gradient' &&
-			(ss.fillGradientType || 'linear') === 'radial' &&
-			(ss.fillGradientPathType || 'circle') === 'rect' &&
-			sanitizeGradientStops(ss.fillGradientStops).length > 0;
-		if (isRectPathImage) {
+		// The scaled-linear and off-centre circle gradients are SVG images too.
+		const isSvgImage = gradient.startsWith('url(');
+		if (isSvgImage) {
 			return {
 				backgroundImage: gradient,
 				backgroundSize: '100% 100%',

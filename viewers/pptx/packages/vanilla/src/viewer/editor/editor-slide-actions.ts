@@ -1,11 +1,12 @@
 import {
 	buildSlideTemplateSlide,
 	createBlankSlide,
+	insertedLayoutCompletion,
 	makeSlideId,
 	resetSlideLayoutPath,
 	templateSchemeFromTheme,
 } from 'ooxml-ui/pptx';
-import type { SlideTemplateId } from 'ooxml-ui/pptx';
+import type { InsertedLayoutCompletion, SlideTemplateId } from 'ooxml-ui/pptx';
 /* oxlint-disable eslint/one-var -- pervasive pre-existing pattern in this file
    (many independent short-lived `const`s per action, each computed from the
    previous statement's result); merging them isn't a style choice here. */
@@ -38,8 +39,12 @@ export interface SlideActions {
 	insertSlideFromTemplate(templateId: SlideTemplateId): void;
 	/** Resolved deck theme scheme map for template builds and gallery previews. */
 	getTemplateScheme(): Record<string, string>;
-	/** Re-key the current slide onto another layout (React's Layout button). */
-	applyLayout(layoutPath: string): void;
+	/**
+	 * Re-key the current slide onto another layout (React's Layout button). Settles once the
+	 * layout landed: true when it was applied, false when it could not be (not editable, no deck,
+	 * or a layout the deck cannot resolve).
+	 */
+	applyLayout(layoutPath: string): Promise<boolean>;
 	/** Reset the current slide to its own layout's defaults (React's Reset). */
 	resetSlide(): void;
 }
@@ -62,41 +67,61 @@ export function createSlideActions(deps: SlideActionsDeps): SlideActions {
 	/**
 	 * Walk the layout XML for `index` and merge the handler's result back into
 	 * the slide, but only while it still carries the id we started from (guards
-	 * against a concurrent edit having moved/replaced it). History-integrated.
+	 * against a concurrent edit having moved/replaced it). A layout change is its
+	 * own undo step; a new slide's layout (`placed`, the draft as the store holds
+	 * it) completes the insertion, which recorded the step already, and leaves an
+	 * edit made to the draft meanwhile in place, taking only the artwork.
 	 */
-	function resolveLayout(index: number, layoutPath: string, expectedId: string): void {
+	function resolveLayout(
+		index: number,
+		layoutPath: string,
+		expectedId: string,
+		placed?: PptxSlide,
+	): Promise<boolean> {
 		const handler = deps.getHandler();
 		if (!handler) {
-			return;
+			return Promise.resolve(false);
 		}
-		void handler
+		return handler
 			.applyLayoutToSlide(index, layoutPath, [...store.get().slides])
 			.then(
 				async (updated) => {
 					const templateElements = await handler.getTemplateElementsForSlide(updated.id);
 					const current = store.get();
-					if (current.slides[index]?.id === expectedId) {
-						ops.pushHistory();
-						const slides = [...current.slides];
-						slides[index] = updated;
-						store.set({
-							slides,
-							templateElementsBySlideId: {
-								...current.templateElementsBySlideId,
-								[updated.id]: templateElements,
-							},
-						});
-						ops.commitChange();
+					let completion: InsertedLayoutCompletion = 'none';
+					if (placed) {
+						completion = insertedLayoutCompletion(current.slides[index], placed);
+					} else if (current.slides[index]?.id === expectedId) {
+						completion = 'replace';
 					}
+					if (completion === 'none') {
+						return undefined;
+					}
+					if (!placed) {
+						ops.pushHistory();
+					}
+					const slides = [...current.slides];
+					if (completion === 'replace') {
+						slides[index] = updated;
+					}
+					store.set({
+						slides,
+						templateElementsBySlideId: {
+							...current.templateElementsBySlideId,
+							[updated.id]: templateElements,
+						},
+					});
+					ops.commitChange();
 					return undefined;
 				},
 				() => {
 					// Layout couldn't be resolved; the slide keeps its layoutPath so the
 					// renderer can still resolve placeholders.
-					return undefined;
+					return false;
 				},
 			)
-			.catch(() => undefined);
+			.then((outcome) => outcome !== false)
+			.catch(() => false);
 	}
 
 	return {
@@ -194,7 +219,7 @@ export function createSlideActions(deps: SlideActionsDeps): SlideActions {
 				selectedElementIds: [],
 			});
 			ops.commitChange();
-			resolveLayout(insertAt, layoutPath, draft.id);
+			void resolveLayout(insertAt, layoutPath, draft.id, store.get().slides[insertAt]);
 		},
 
 		insertSlideFromTemplate(templateId) {
@@ -231,9 +256,9 @@ export function createSlideActions(deps: SlideActionsDeps): SlideActions {
 			const state = store.get();
 			const target = state.slides[state.currentSlide];
 			if (!state.editable || !target || !layoutPath) {
-				return;
+				return Promise.resolve(false);
 			}
-			resolveLayout(state.currentSlide, layoutPath, target.id);
+			return resolveLayout(state.currentSlide, layoutPath, target.id);
 		},
 
 		resetSlide() {
@@ -247,7 +272,7 @@ export function createSlideActions(deps: SlideActionsDeps): SlideActions {
 			if (!state.editable || !target || !path) {
 				return;
 			}
-			resolveLayout(state.currentSlide, path, target.id);
+			void resolveLayout(state.currentSlide, path, target.id);
 		},
 	};
 }

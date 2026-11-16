@@ -37,6 +37,7 @@ import type { PptxTableCell, PptxTableCellStyle, TablePptxElement } from 'ooxml-
 export function withCellText(cell: PptxTableCell, text: string): PptxTableCell {
 	const next: PptxTableCell = { ...cell, text };
 	delete next.textRuns;
+	delete next.textSegments;
 	if (cell.paragraphs) {
 		next.paragraphs = cell.paragraphs.slice(0, 1);
 	}
@@ -107,4 +108,16 @@ export function setCellText(
 		};
 	});
 	return { ...element, tableData: { ...tableData, rows } };
+}
+
+/**
+ * The text of a single cell, or `undefined` when the table has no data or the
+ * cell does not exist.
+ */
+export function getCellText(
+	element: TablePptxElement,
+	rowIndex: number,
+	colIndex: number,
+): string | undefined {
+	return element.tableData?.rows[rowIndex]?.cells[colIndex]?.text;
 }

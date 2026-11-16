@@ -1,38 +1,13 @@
 /**
  * Styles for the inspector's format panels that have no React-equivalent
- * chrome elsewhere in this stylesheet: the Quick Styles gallery, the 3D-text
- * fields, the chart data grid, the table data grid, the media trim timeline,
- * the slide-transition direction picker, the Tags list and the theme editor
- * card.
+ * chrome elsewhere in this stylesheet: the 3D-text fields, the chart data
+ * grid, the table data grid, the media trim timeline, the slide-transition
+ * direction picker, the Tags list and the theme editor card.
  *
  * Kept in its own module so `editor-css.ts` (already the largest chrome sheet)
  * stays inside the project's file-size budget.
  */
 export const INSPECTOR_FORMAT_CSS = `
-/* ── Quick Styles gallery ────────────────────────────────────────────── */
-.pptxv-quick-styles {
-	display: grid;
-	grid-template-columns: repeat(6, minmax(0, 1fr));
-	gap: 4px;
-}
-.pptxv-quick-style {
-	height: 26px;
-	min-width: 0;
-	padding: 0;
-	border: 1px solid var(--pptx-border);
-	border-radius: var(--pptx-radius);
-	cursor: pointer;
-}
-.pptxv-quick-style:hover:not(:disabled) { outline: 2px solid var(--pptx-primary); outline-offset: -1px; }
-.pptxv-quick-style:disabled { opacity: 0.5; cursor: default; }
-/* Each preset is a discrete, individually-named action button (not a colour
-   swatch), so it gets the shared WCAG touch target below the mobile
-   breakpoint (768px, MOBILE_BREAKPOINT / getDensePanelTouchTargetPx in
-   pptx-viewer-shared) rather than an exemption - CLAUDE.md Rule 2. */
-@media (max-width: 767px) {
-	.pptxv-quick-style { height: 44px !important; min-width: 44px !important; }
-}
-
 /* ── 3D text ─────────────────────────────────────────────────────────── */
 .pptxv-text3d-options { display: grid; gap: 6px; }
 .pptxv-text3d-options[hidden] { display: none; }
@@ -45,67 +20,8 @@ export const INSPECTOR_FORMAT_CSS = `
 .pptxv-text3d-bevel-label { color: var(--pptx-muted-foreground); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
 .pptxv-text3d-color { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
-/* ── Chart data grid ─────────────────────────────────────────────────── */
-.pptxv-chart-grid { display: grid; gap: 4px; margin: 6px 0; max-width: 100%; overflow-x: auto; }
-.pptxv-chart-grid[hidden] { display: none; }
-.pptxv-chart-grid-toolbar { display: flex; justify-content: flex-end; gap: 4px; }
-.pptxv-chart-grid-btn {
-	padding: 2px 6px;
-	border: 1px solid var(--pptx-border);
-	border-radius: var(--pptx-radius);
-	background: var(--pptx-muted);
-	color: var(--pptx-foreground);
-	font: inherit;
-	font-size: 10px;
-	cursor: pointer;
-}
-.pptxv-chart-grid-btn:hover:not(:disabled) { background: var(--pptx-accent); color: var(--pptx-accent-foreground); }
-.pptxv-chart-grid-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.pptxv-chart-grid-table th, .pptxv-chart-grid-table td { padding: 1px; min-width: 72px; }
-.pptxv-chart-grid-table th { font-weight: 400; }
-.pptxv-chart-grid-table :is(th, td) { display: table-cell; white-space: nowrap; }
-.pptxv-chart-grid-cell {
-	box-sizing: border-box;
-	width: 100%;
-	min-width: 52px;
-	padding: 2px 4px;
-	border: 1px solid var(--pptx-border);
-	border-radius: var(--pptx-radius);
-	background: var(--pptx-background);
-	color: var(--pptx-foreground);
-	font: inherit;
-	font-size: 11px;
-}
-.pptxv-chart-grid-cell:focus-visible { outline: 2px solid var(--pptx-ring); outline-offset: -1px; }
-/* Ring-highlight for the cell matching the on-canvas chart part selection. */
-.pptxv-chart-grid-cell-highlight { outline: 2px solid var(--pptx-ring); outline-offset: -1px; }
-.pptxv-chart-grid-remove {
-	margin-left: 2px;
-	padding: 0 3px;
-	border: none;
-	background: transparent;
-	color: var(--pptx-muted-foreground);
-	font: inherit;
-	cursor: pointer;
-}
-.pptxv-chart-grid-remove:hover { color: var(--pptx-destructive); }
-/* Below this width, matches isDensePanelCompact()/MOBILE_BREAKPOINT (768) in
-   pptx-viewer-shared: getDenseGridLayoutPlan(width) returns
-   stickyFirstColumn: true, minCellWidthPx: 64, and
-   getDensePanelTouchTargetPx(width) returns MIN_TOUCH_TARGET_PX (44). Pins
-   the category-label column so a value scrolled into view still reads
-   against its row, and gives the add/remove controls a touch-sized hit area. */
-@media (max-width: 767px) {
-	.pptxv-chart-grid-table th, .pptxv-chart-grid-table td { min-width: 64px; }
-	.pptxv-chart-grid-table th:first-child, .pptxv-chart-grid-table td:first-child {
-		position: sticky;
-		left: 0;
-		z-index: 1;
-		background: var(--pptx-background);
-	}
-	.pptxv-chart-grid-table thead th:first-child { z-index: 2; }
-	.pptxv-chart-grid-btn, .pptxv-chart-grid-remove { min-width: 44px !important; min-height: 44px !important; }
-}
+/* ── Chart data sheet (the shared pptx-ui-chart-data-sheet styles itself) ── */
+.pptxv-chart-sheet { margin: 6px 0; }
 
 /* ── Table data grid ─────────────────────────────────────────────────── */
 .pptxv-table-grid-header { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
@@ -373,8 +289,8 @@ export const INSPECTOR_FORMAT_CSS = `
 	   (chart-filtered-series-section.ts, connector-arrow-controls.ts,
 	   table-cell-formatting.ts, shape-effects-controls.ts) carry no class of
 	   their own on the control either; same fix, through each section's own
-	   container class. Buttons get !important (css.ts's baseline, see the
-	   .pptxv-quick-style rule above); selects/inputs do not need it. */
+	   container class. Buttons get !important (they must beat css.ts's
+	   baseline button rules); selects/inputs do not need it. */
 	.pptxv-chart-filters select, .pptxv-chart-filters input,
 	.pptxv-inspector-connector-arrows select, .pptxv-inspector-connector-arrows input,
 	.pptxv-inspector-table-cell select, .pptxv-inspector-table-cell input,

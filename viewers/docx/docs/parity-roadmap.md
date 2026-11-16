@@ -18,16 +18,16 @@ then exercise it through each adapter.
 
 The current implemented subset includes:
 
-| Area                   | Available behavior                                                                                                                                                        | Evidence and remaining boundary                                                                                                                                                                                                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Text and formatting    | Editing, undo/redo, paragraph and character styles, theme fonts/colors, direct formatting, direction/language metadata, font scale/spacing/position/kerning and ligatures | `editor.spec.ts`, `advanced-font-preservation.spec.ts`, `font-advanced-controls.spec.ts`, core style/theme/toggle tests. Browser shaping and Word glyph metrics can differ.                                                                                                                         |
-| Lists                  | Bullets, numbering, multilevel definitions, heading-linked outlines, restart rules and marker alignment                                                                   | `numbering-restart.spec.ts`, `heading-numbering.spec.ts`, `multilevel-list-dialog.spec.ts`, core numbering tests. Picture bullets and some style-linked/custom numbering remain limited.                                                                                                            |
-| Tables                 | Rectangular row/column commands, row height/repeat/split properties, default and selected-cell margins, cell borders and Cell/Table solid shading                         | `table-properties.spec.ts`, `table-borders.spec.ts`, `table-shading.spec.ts`, `table-cell-margins.spec.ts`, core table preservation tests. Merged/nested/complex structural edits stay protected. No per-side border pens or pattern-fill editor.                                                   |
-| Sections and stories   | Per-section page setup and breaks, editable headers/footers/notes, first/even/default variants, Link to Previous, page-number fields                                      | Header/footer context, variants, link and history browser contracts, core story creation/editing tests. Decorative galleries and full Word story layout remain missing.                                                                                                                             |
-| References and review  | Editable field results, TOC/table of figures, captions/cross-references, explicit Update Fields, comments and tracked-change commands                                     | `fields.spec.ts` and shared-editor/core field, caption, comment and revision tests. Unsupported field switches and automatic recalculation remain limited.                                                                                                                                          |
-| Pictures and objects   | Pictures, supported floating-picture layout, hyperlinks/bookmarks, simple inline text boxes, display of saved SmartArt drawings, read-only chart drawing                  | Picture/text-box/diagram core and viewer tests. Charts are drawn from their cached values (bar, column, line, area, pie, doughnut, scatter, radar); bubble, stock, surface and chartex charts show a labelled frame. SmartArt editing, chart editing and general shape editing remain missing.      |
-| File and preferences   | File Home, Info/properties, New/Open/Save/Save As/Export/Print; display language, theme, review author, spelling/ruler/marks/thumbnails preferences                       | `file-tab.spec.ts`, `document-properties.spec.ts`, backstage/chrome tests. Preferences apply to this editor session; recent files and account/cloud sharing are missing. Protection for filling in forms is enforced (`form-fields.spec.ts`); other editing restrictions are kept but not enforced. |
-| Search and coauthoring | Literal Unicode-aware find/replace, authority-based step synchronization and peer cursors                                                                                 | Search/controller and collaboration tests plus the local coauthoring demo. Networking, permissions, persistence and shared-save coordination belong to the host.                                                                                                                                    |
+| Area                   | Available behavior                                                                                                                                                                             | Evidence and remaining boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Text and formatting    | Editing, undo/redo, paragraph and character styles, theme fonts/colors, direct formatting, direction/language metadata, font scale/spacing/position/kerning and ligatures                      | `editor.spec.ts`, `advanced-font-preservation.spec.ts`, `font-advanced-controls.spec.ts`, core style/theme/toggle tests. Browser shaping and Word glyph metrics can differ.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Lists                  | Bullets, numbering, multilevel definitions, heading-linked outlines, restart rules and marker alignment                                                                                        | `numbering-restart.spec.ts`, `heading-numbering.spec.ts`, `multilevel-list-dialog.spec.ts`, core numbering tests. Picture bullets and some style-linked/custom numbering remain limited.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Tables                 | Rectangular row/column commands, row height/repeat/split properties, default and selected-cell margins, cell borders and Cell/Table solid shading                                              | `table-properties.spec.ts`, `table-borders.spec.ts`, `table-shading.spec.ts`, `table-cell-margins.spec.ts`, core table preservation tests. Merged and nested tables take row, column, merge and split commands (matched to Word, see [preservation](/preservation)); tables with row offsets, tracked row changes or inline markup in cells stay protected. No per-side border pens or pattern-fill editor.                                                                                                                                                                                                                                                                                                                                            |
+| Sections and stories   | Per-section page setup and breaks, editable headers/footers/notes, first/even/default variants, Link to Previous, page-number fields                                                           | Header/footer context, variants, link and history browser contracts, core story creation/editing tests. Decorative galleries and full Word story layout remain missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| References and review  | Editable field results, TOC/table of figures, captions/cross-references, explicit Update Fields, comments and tracked-change commands                                                          | `fields.spec.ts` and shared-editor/core field, caption, comment and revision tests. Unsupported field switches and automatic recalculation remain limited.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Pictures and objects   | Pictures, supported floating-picture layout, hyperlinks/bookmarks, simple inline text boxes, SmartArt display/insert/node/text/layout/style/colour editing, chart and admitted ChartEx editing | Shared chart/diagram core and product browser tests cover history and save/reopen across six bindings. The Format pane exposes supported effects, shape 3D, text, pattern fill, analysis, markers and axis titles; picture media allocation, wider combo cases and native typography/effect fidelity remain limited. SmartArt uses the neutral interpreter with explicit fallback and conservatively generated 2D caches; Styles/Change Colors retain node overrides. Wider native styles, complex 3D/rich-text authoring and drawings in page stories remain incomplete. Native Word/Excel semantic reopen checks are scoped in the [shared delivery ledger](https://github.com/ChristopherVR/ooxml/blob/main/docs/office-shared-parity-delivery.md). |
+| File and preferences   | File Home, Info/properties, New/Open/Save/Save As/Export/Print; display language, theme, review author, spelling/ruler/marks/thumbnails preferences                                            | `file-tab.spec.ts`, `document-properties.spec.ts`, backstage/chrome tests. Preferences apply to this editor session; recent files and account/cloud sharing are missing. Protection for filling in forms is enforced (`form-fields.spec.ts`); other editing restrictions are kept but not enforced.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Search and coauthoring | Literal Unicode-aware find/replace, authority-based step synchronization and peer cursors                                                                                                      | Search/controller and collaboration tests plus the local coauthoring demo. Networking, permissions, persistence and shared-save coordination belong to the host.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Five display locales are available: English, French, German, Spanish and
 Simplified Chinese. This is interface localization, separate from document
@@ -35,20 +35,23 @@ language and spelling. Spelling uses the browser service; there is no bundled
 Word-equivalent grammar or proofing engine.
 
 Imported inline and display equations now render through native MathML using
-`ooxml-core/math`. They remain display-only: the original OMML is preserved when
-surrounding text is edited and saved. Unsupported equation previews show a visible
-notice. Print Layout uses an `[Equation]` placeholder with an approximation warning;
-it does not typeset the equation or reproduce Word's equation layout.
+`ooxml-core/math`. Insert > Equation adds new equations from LaTeX or the gallery, and the
+selected equation can be edited. An imported equation that is not edited keeps its original
+OMML when surrounding text is edited and saved. Unsupported equation previews show a visible
+notice. Print Layout draws equations as SVG from the shared `ooxml-core/math` box model
+(the `[Equation]` placeholder appears only when no drawn object is available); this does
+not reproduce Word's equation layout.
 
 Print Layout already paginates through `ooxml-core/docx/layout`, including
 sections/columns, keep rules, table row fragmentation, repeating table headers,
 footnotes, headers/footers, page fields and supported floating pictures. The main
 editing surface remains continuous, and Print Layout pages are editable too: the caret,
 selection and IME run through the editor's ProseMirror input and are painted on the pages
-(`print-editing.spec.ts`, `print-cursor.spec.ts`). Nested and merged table cells are read-only
-on pages; headers, footers and footnotes are not edited by clicking on the page; floats,
-pictures and text boxes are not selectable there; and caret placement at line and page
-boundaries is heuristic. Pagination is approximate.
+(`print-editing.spec.ts`, `print-cursor.spec.ts`). Headers, footers, footnotes and endnotes
+are edited in place on the pages (double-click a header or footer; press a note's text),
+and floating pictures are selectable there (see `outstanding-work.md`). Merged table cells
+are read-only on pages, and caret placement at line
+and page boundaries is heuristic. Pagination is approximate.
 
 Selected-cell vertical alignment is editable with save/reopen and undo coverage
 (`table-cell-alignment.spec.ts`). Toolbar/context-menu clipboard commands retain
@@ -61,21 +64,33 @@ of unsupported OOXML properties or objects.
 This is the one live list of open work. [Outstanding work](/outstanding-work) records the
 detail and limits of each feature already built.
 
-1. **Editable pages and reliable layout.** Establish stable page/line/run mappings
-   for caret placement, selections, scrolling, keyboard movement and IME before
-   adding editing directly to pages. Improve footnote continuation, per-column
-   notes, text-box layout, complex scripts and font substitution against references.
-2. **Document preservation under richer edits.** Add merged-cell/table commands,
-   remaining table/cell geometry controls only with imported-package surgery,
-   identity-aware undo and save/reopen tests. Extend formatted clipboard coverage
-   across paragraphs, cells and document stories.
-3. **Drawing and embedded objects.** Reuse the format-neutral core for SmartArt,
-   shapes, charts and equations. Add insertion/editing only after model, parser,
-   layout and serializer contracts preserve the source package. Keep UI controls
+1. **Reliable layout.** Print Layout pages are editable (caret, selection, IME and
+   stories). What remains is fidelity: merged cells on pages, caret placement at line
+   and page boundaries, hyphenation (`autoHyphenation` is read but never applied), wrap
+   polygons for tight and through wrapping, table autofit, floats inside table cells,
+   text-box layout, vertical and East Asian text, complex scripts and font substitution
+   against Word-rendered references.
+2. **Document preservation under richer edits.** Merge and split cells and row and
+   column commands exist. Next are table-level properties (width, alignment, indent,
+   borders, style, look), modelled table-structure revisions (`cellIns`, `cellDel`,
+   `cellMerge`, `tblPrChange`, `trPrChange`, `tcPrChange`), the tables that stay
+   refused (`gridBefore`/`gridAfter`, `hMerge`, row SDTs, inline markup in cells),
+   identity-aware undo and save/reopen tests, and formatted clipboard coverage across
+   paragraphs, cells and stories. Legacy `.doc` import is main-body text only and needs
+   tables, headers, images, fields and formatting.
+3. **Drawing and embedded objects.** SmartArt, classic charts and admitted ChartEx editing
+   run on the format-neutral core and shared `ooxml-ui` elements. SmartArt style/colour galleries
+   and admitted generated 2D caches are implemented. Next are wider native styles, complex
+   typography/3D, picture relationship authoring and shapes beyond preset geometry. Add each only after model, parser, layout and
+   serializer contracts preserve the source package. Keep UI controls in `ooxml-ui`
    and framework adapters in the viewer.
-4. **Word authoring breadth.** Extend style-definition editing, object positioning
-   and wrapping, citations/bibliography/index, field recalculation and accessibility
-   inspection. Unsupported imported content must remain visible or explicitly
+4. **Word authoring breadth.** Creating styles and editing the style catalogue and
+   theme (both refused on save today), the Design tab (themes, colours, fonts,
+   paragraph spacing, all disabled), Mailings (all 16 commands disabled, no merge
+   engine), object positioning and wrapping (no Layout > Arrange group, no Picture
+   Format tab), citations/bibliography/index/Table of Authorities, recalculating IF,
+   `=`, DOCPROPERTY and INCLUDE fields, Read Mode, Web Layout and Outline views,
+   wildcard and formatting Find & Replace, and accessibility inspection. Unsupported imported content must remain visible or explicitly
    identified and preserved.
 5. **Production review and integration.** Add proofing services, compare/protection
    and application persistence as explicit contracts. Complete cross-browser,
@@ -101,6 +116,9 @@ For each supported feature, require:
   tolerances. A passing serializer test does not establish visual parity.
 - Accessibility, clipboard and IME coverage; browser and font versions recorded
   with visual references so differences can be investigated.
+
+The Word reference corpus, how to regenerate it and its current results are in
+[verification](/verification).
 
 The existing Word COM checks documented in [outstanding work](/outstanding-work)
 validate specific exported properties. They are useful evidence for those cases,

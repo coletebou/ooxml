@@ -3,9 +3,10 @@ import { connections, indexedPart, related, validateBackgrounds, visioXml } from
 import { prepareImages } from './prepare-images';
 import type { VisioImageOptions } from './media';
 import { createLayerBudget, indexLayers, pageLayers } from './layers';
-import { visioPageTheme } from './page-theme';
+import { visioPageTheme, visioPageThemeSchemes } from './page-theme';
 import type { Resources } from './style';
 import { elements } from '../xml/index';
+import { DRAWING_MAIN_TYPES, STENCIL_MAIN_TYPES } from './package-kind';
 import type { VisioDocument, VisioMaster, VisioPage } from './model';
 import { diagnosticCollector } from './diagnostics';
 import {
@@ -42,6 +43,7 @@ import {
 	type Report,
 } from './sheet';
 import { listVisioMasters } from './master-list';
+import { adoptSwimlaneContents } from './swimlane-membership';
 import { readVisioStencilWindows } from './stencil-windows';
 import { readVisioFieldProperties } from './text-field-context';
 import { visioWallClock } from './text-fields';
@@ -63,8 +65,8 @@ export interface ParseVsdxOptions {
 	maxDiagnostics?: number;
 	/**
 	 * Read a stencil or template package (.vssx, .vstx) for its masters: its main part may carry
-	 * the stencil or template content type, and a missing pages part means no pages. Macro-enabled
-	 * packages stay refused.
+	 * the stencil or template content type (macro-enabled or not), and a missing pages part means
+	 * no pages.
 	 */
 	stencil?: boolean;
 	/**
@@ -82,10 +84,6 @@ export interface ParseVsdxOptions {
 	documentCache?: VisioDocumentCache;
 }
 
-const STENCIL_MAIN_TYPES = new Set([
-	'application/vnd.ms-visio.stencil.main+xml',
-	'application/vnd.ms-visio.template.main+xml',
-]);
 function option(value: number | undefined, fallback: number): number {
 	if (value === undefined) return fallback;
 	if (!Number.isSafeInteger(value) || value <= 0)
@@ -125,13 +123,17 @@ export async function parseVsdx(
 			(node) => node.localName === 'Override' && attribute(node, 'PartName') === `/${documentPart}`,
 		)
 		?.getAttribute('ContentType');
-	if (
-		documentType !== 'application/vnd.ms-visio.drawing.main+xml' &&
-		!(options.stencil && documentType && STENCIL_MAIN_TYPES.has(documentType))
-	)
+	const allowed = options.stencil ? STENCIL_MAIN_TYPES : DRAWING_MAIN_TYPES;
+	if (!documentType || !allowed.has(documentType))
 		throw new VisioPackageError(
 			'UNSUPPORTED_FORMAT',
-			'Only VSDX drawing packages are supported; VSD, VDX, VSDM and templates are not supported.',
+			'Only VSDX, VSDM, VSTX, VSTM, VSSX and VSSM packages are supported (stencils open for their masters only); VSD and VDX are not.',
+		);
+	if (pkg.paths().some((path) => /(^|\/)vbaProject\.bin$/i.test(path)))
+		report(
+			'macros-not-run',
+			'This package contains a VBA project. It is kept when the drawing is saved and is never run.',
+			{ severity: 'info' },
 		);
 	// Validate every relationship part, including unused ones; never dereference external URLs.
 	for (const path of pkg.paths()) {
@@ -297,6 +299,7 @@ export async function parseVsdx(
 		}
 		resources.pageCells = new Map([...pageCells, ...sheet.cells]);
 		const theme = visioPageTheme(resources.themes, resources.pageCells);
+		const themeSchemes = visioPageThemeSchemes(resources.themes, resources.pageCells);
 		comments.push(...readVisioAnnotations(sheet, id));
 		const pageNumber = foreground.indexOf(page) + 1;
 		resources.fieldContext = {
@@ -309,10 +312,14 @@ export async function parseVsdx(
 		const layers = pageLayers(sheet, resources, localReport);
 		context.layers = indexLayers(layers);
 		const drawingToPageScale = visioPageGeometryScale(sheet.cells, localReport);
-		const width = number(sheet.cells, 'PageWidth', 8.5, localReport) * drawingToPageScale,
-			height = number(sheet.cells, 'PageHeight', 11, localReport) * drawingToPageScale;
+		const pageWidth = number(sheet.cells, 'PageWidth', 8.5, localReport),
+			pageHeight = number(sheet.cells, 'PageHeight', 11, localReport);
+		const width = pageWidth * drawingToPageScale,
+			height = pageHeight * drawingToPageScale;
 		if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0)
 			throw new VisioPackageError('INVALID_PAGE_SIZE', 'Page dimensions must be positive.');
+		// Shape geometry is still in drawing units here; normalizeVisioPageGeometry scales it later.
+		context.pageSize = { width: pageWidth, height: pageHeight };
 		const backgroundPageId = attribute(page, 'BackPage');
 		if (backgroundPageId !== undefined) metadata(backgroundPageId, 256, 'Background page ID');
 		const rawShapes = readShapes(root);
@@ -326,6 +333,7 @@ export async function parseVsdx(
 		);
 		const shapes = normalizeShapes(rawShapes, context);
 		normalizeVisioPageGeometry(shapes, drawingToPageScale, checkTime);
+		adoptSwimlaneContents(shapes);
 		const seen = new Set<string>();
 		const visit = (items: typeof shapes): void => {
 			for (const shape of items) {
@@ -392,6 +400,7 @@ export async function parseVsdx(
 			connectors,
 			layers,
 			...(theme ? { theme } : {}),
+			...(themeSchemes ? { themeSchemes } : {}),
 		});
 	}
 	checkTime();

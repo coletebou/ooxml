@@ -8,6 +8,7 @@ import {
 	resolveEffectiveHiddenActions,
 } from 'ooxml-ui/pptx';
 import type {
+	GoogleFontsOption,
 	ResolvedCustomization,
 	ToolbarActionId,
 	ViewerCustomization,
@@ -152,9 +153,13 @@ export function customizationContext(reader: ViewerCustomizationReader): Map<sym
  */
 export function useViewerCustomizationRoot(
 	getCustomization: () => ViewerCustomization | undefined,
+	getAllowExternalContent: () => boolean | undefined = () => undefined,
+	getGoogleFonts: () => GoogleFontsOption | undefined = () => undefined,
 ): ViewerCustomizationState {
 	const initial = untrack(getCustomization);
 	const state = new ViewerCustomizationState(initial);
+	followAllowExternalContent(state, getAllowExternalContent);
+	followGoogleFonts(state, getGoogleFonts);
 	provideViewerCustomization(state);
 	let last = initial;
 	$effect.pre(() => {
@@ -167,6 +172,40 @@ export function useViewerCustomizationRoot(
 	});
 	onDestroy(() => state.destroy());
 	return state;
+}
+
+/**
+ * Follow the host `allowExternalContent` switch, which locks the Trust Center
+ * "Allow external content" setting: applied once synchronously (so the
+ * constraints applied next, and the first load, already see the lock), then
+ * on every change (a no-op when the value did not change). Must run inside a
+ * component script or an effect root.
+ */
+export function followAllowExternalContent(
+	state: ViewerCustomizationState,
+	getAllowExternalContent: () => boolean | undefined,
+): void {
+	state.controller.setAllowExternalContent(untrack(getAllowExternalContent));
+	$effect.pre(() => {
+		const allow = getAllowExternalContent();
+		untrack(() => state.controller.setAllowExternalContent(allow));
+	});
+}
+
+/**
+ * Follow the host `googleFonts` policy, which locks the Trust Center
+ * "Download fonts" setting (off for `false` or an invalid mirror, on for a
+ * valid `{ baseUrl }`), the same way as {@link followAllowExternalContent}.
+ */
+export function followGoogleFonts(
+	state: ViewerCustomizationState,
+	getGoogleFonts: () => GoogleFontsOption | undefined,
+): void {
+	state.controller.setGoogleFonts(untrack(getGoogleFonts));
+	$effect.pre(() => {
+		const host = getGoogleFonts();
+		untrack(() => state.controller.setGoogleFonts(host));
+	});
 }
 
 /** The options store surface `useCustomizationConstraints` drives. */

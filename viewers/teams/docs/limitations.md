@@ -1,6 +1,6 @@
 # Limitations
 
-OpenTeams is an early implementation. This page lists what it does not do, so you can decide
+OpenTeams is in beta. This page lists what it does not do, so you can decide
 before you rely on it.
 
 ## Not Microsoft Teams
@@ -25,18 +25,20 @@ It does **not** implement recording, background blur, live captions, push or ema
 
 Word previews read-only; Excel offers local editing and saving new channel copies
 when storage is configured; Visio uses its existing viewer.
-There is no coediting, overwrite or versioned save-back. PowerPoint needs a
-host-configured embedded viewer page. Missing integrations are reported in the pane.
+There is no coediting, overwrite or versioned save-back. PowerPoint opens in a
+native preview; a host can supply an embedded viewer page instead. Missing integrations are reported in the pane.
 Text reads are limited to 2 MiB and native Office reads to 32 MiB. The interface is available in
 English, German, Spanish, French and Simplified Chinese (the `locale` prop); text people wrote is
 never translated.
 
 Files views support direct upload, blank Excel creation and metadata search when
-storage is configured. Uploads show a busy state and allow retry, with no byte
-progress or cancellation. Failed batches can leave unreferenced storage objects;
-the reference server has no cleanup contract for these objects. Folders, document
-content indexing, file version history and authenticated file permissions are
-not implemented.
+storage is configured. Uploads show a busy state and allow cancellation and retry, with no byte
+progress. A failed batch can leave files that were uploaded before the failure and are not
+referenced by any message; the reference server removes its partial uploads and lets the uploader or a
+moderator delete the rest (`DELETE /files/<scope>/<name>`), but does not remove them on its own.
+The reference server limits private chat files to the chat's members and counts storage per
+workspace; channel files are readable by every signed-in user of the server. Folders, document
+content indexing and file version history are not implemented.
 
 Markdown supports headings, bullets, quotes, fenced code, basic emphasis and web
 links, flat task lists, top-level pipe tables and file-relative web links. It does not
@@ -56,11 +58,12 @@ in the client and require server authorization to become enforceable.
   TURN relay cannot decrypt it).
 - **Authorization is the server's job.** Author and role checks run in the client; a hostile
   client can write anything the server accepts.
-- **Accounts are optional.** The reference server can sign sessions for configured users (or your
-  `authenticate` hook) and take the user id from the session, and `authorizeSync` can decide access
-  per room. Without them its token is one shared secret stored in the browser, not per-user
-  authentication, and user ids are claims. There is no SSO, password reset or team and channel
-  access control. See [what the reference server does not do](/server#what-the-reference-server-does-not-do).
+- **Authentication is required by default.** The reference server refuses to start unless it has
+  accounts, an `authenticate` hook or `authorizeSync`; `--insecure-dev` opts into an open development
+  mode with a warning. With accounts it signs sessions for configured users (or your `authenticate`
+  hook) and takes the user id from the session, and `authorizeSync` can decide access per room. A
+  shared `TEAMS_TOKEN` alone is one secret stored in the browser, not per-user authentication, and
+  user ids are claims. There is no SSO, password reset or team and channel access control. See [what the reference server does not do](/server#what-the-reference-server-does-not-do).
 - **Presence is advisory and unauthenticated**, like any Yjs awareness: a client can claim any
   name.
 - Everything a peer sends is re-validated when read back and rendered as text, never as markup.
@@ -69,7 +72,7 @@ in the client and require server authorization to become enforceable.
 
 - **Mesh calls** connect every participant to every other one. That needs no media server and
   works for a handful of people (the default cap is 12), not a webinar.
-- **History grows.** The reference server keeps one snapshot per room and never compacts it.
+- **History grows.** The reference server keeps one snapshot per room and compacts it when the room loads and every 6 hours by default (`TEAMS_COMPACT_INTERVAL_MIN`).
 - **One server process.** The reference server keeps rooms in memory and does not scale
   horizontally.
 

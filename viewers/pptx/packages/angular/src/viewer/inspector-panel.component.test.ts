@@ -75,10 +75,25 @@ describe('inspector panel theme colour swatch grid (W3-G2)', () => {
 	});
 
 	it('a theme-swatch pick commits fillColorRef/strokeColorRef/colorRef alongside the hex', () => {
-		expect(source).toContain('shapeStylePatch(cur, { fillColor: color, fillColorRef: ref })');
-		expect(source).toContain(
-			'shapeOutlineChange(color, ref, hasShapeProperties(cur) ? (cur.shapeStyle ?? {}) : {})',
-		);
+		expect(source).toContain('shapeStylePatch(cur, shapeFillChange(color, ref))');
+		expect(source).toContain('strokeColorPatch(cur, color, ref)');
 		expect(source).toContain('textStylePatch(cur, { color, colorRef: ref })');
+	});
+});
+
+describe('inspector panel text effects', () => {
+	it('mounts Text Effects in the Font section before 3-D text; text options go to Paragraph', () => {
+		const mount = '<pptx-text-effects-panel [element]="el()" (patch)="onPatch($event)" />';
+		expect(source).toContain(mount);
+		expect(source).toContain('TextEffectsPanelComponent,');
+		const font = source.indexOf('pptxFormatSection="font"');
+		const paragraph = source.indexOf('pptxFormatSection="paragraph"');
+		const effects = source.indexOf(mount);
+		const text3d = source.indexOf('<pptx-text-3d-panel');
+		const advanced = source.indexOf('<pptx-text-advanced-panel');
+		expect(font).toBeLessThan(effects);
+		expect(effects).toBeLessThan(text3d);
+		expect(text3d).toBeLessThan(paragraph);
+		expect(paragraph).toBeLessThan(advanced);
 	});
 });

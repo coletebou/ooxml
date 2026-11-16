@@ -32,15 +32,26 @@ element, forward props and options, call `load` when new bytes arrive, and
 re-emit its events as callbacks.
 
 - A behaviour bug (grid, ribbon, dialog, editing, rendering, keyboard) is fixed
-  in `web-component`, once, and reaches all six bindings automatically.
+  in `ooxml-ui/xlsx` (`src/ui/src/xlsx`), once, and reaches all six bindings automatically.
 - A binding-only bug is almost always prop, event or lifecycle wiring. When you
   fix one, grep the other adapters in `packages/bindings/src` for the same
   pattern and fix them in the same change; the binding contract tests in
   `packages/bindings/src/*.test.ts` and `packages/vanilla/src/index.test.ts`
   should cover all of them.
-- Never put editor logic in an adapter. If two adapters need the same helper, it
-  goes in `packages/bindings/src/index.ts` (or the web component);
-  `packages/bindings/src/common.ts` is the re-export surface every package shares.
+- Never put editor logic in an adapter. The props, events and handle every
+  adapter shares are one contract, `EDITOR_CONTRACT` in
+  `packages/bindings/src/contract.ts`, and `contract-parity.test.ts` checks each
+  adapter against it. Binding machinery that is not Excel-specific (prop
+  tracking, event mapping, the `src` loader, the deferred handle, the React, Vue
+  and Solid component factories) lives in the shared kit `ooxml-ui/bindings`
+  (`src/ui/src/bindings`, see its README section); a helper only Excel needs
+  goes in `packages/bindings/src/index.ts` (or the web component). `contract.ts`
+  keeps only Excel's wrappers over the kit (`deferredHandle`, typed to the editor
+  binding, and `svelteEditorOptions`, which maps Svelte's lower-case callbacks).
+  `packages/bindings/src/common.ts` is the re-export surface that every framework
+  package spreads (the workbook model API, the web component, `loadWorkbook` and
+  the other load helpers, the binding types and `mountEditorSurface`); add an
+  export there only when a published package must see it.
 
 ## Working agreements
 
@@ -72,12 +83,14 @@ re-emit its events as callbacks.
 - `ole2` (legacy compound-file codecs) reaches this repository only through
   `ooxml-core/xlsx/load`, which inlines it. Never add `@christophervr/ole2` or an
   internal package to a manifest here, and never fork its code.
-- The browser text measurer (column auto-fit, overflow) stays in
-  `packages/web-component` and is injected into the core's layout functions; it
+- The browser text measurer (column auto-fit, overflow) lives in
+  `src/ui/src/xlsx/grid/measure.ts` (ooxml repository) and is injected into the core's layout functions; it
   is the one piece of layout that needs a DOM.
 - Unsupported workbook features must be reported honestly (for example pivots from
-  external or OLAP sources and Power Query are preserved but not shown or refreshed, sparkline style
-  galleries and grouping are missing, charts are display-only; `docs/features.md` has the full table).
+  external or OLAP sources and Power Query are preserved but not shown or refreshed, the sparkline style
+  gallery is missing, chart style definitions cannot be authored, surface charts show a
+  labelled frame, a chart part the model cannot carry is never rewritten and is reported, and a SmartArt
+  drawn with an approximate layout is badged as such; `docs/features.md` has the full table).
   Never claim Excel parity or lossless export.
 - Bun, TypeScript strict mode (with `exactOptionalPropertyTypes` and
   `noUncheckedIndexedAccess`, no `any`), Vitest (tests next to the code) and
@@ -90,17 +103,17 @@ re-emit its events as callbacks.
 
 ## Packages
 
-| Directory                | npm name                           | Published | What it is                                                                    |
-| ------------------------ | ---------------------------------- | --------- | ----------------------------------------------------------------------------- |
-| `packages/core`          | `@christophervr/xlsx-core`         | yes       | Re-export of `ooxml-core/xlsx` and `/xlsx/load`.                              |
-| `packages/web-component` | `xlsx-web-component`               | internal  | One-line re-export of `ooxml-ui/xlsx`, the `<xlsx-editor>` element.           |
-| `packages/bindings`      | `xlsx-bindings`                    | internal  | Framework adapters over one framework-neutral core (`index.ts`, `common.ts`). |
-| `packages/react`         | `@christophervr/xlsx-react-viewer` | yes       | React entry (`SpreadsheetEditor`).                                            |
-| `packages/vue`           | `xlsx-vue-viewer`                  | yes       | Vue 3 entry (`SpreadsheetEditor`).                                            |
-| `packages/angular`       | `xlsx-angular-viewer`              | yes       | Angular entry (`SpreadsheetEditorComponent`).                                 |
-| `packages/svelte`        | `xlsx-svelte-viewer`               | yes       | Svelte 5 entry (`/runtime`, `mountEditor`).                                   |
-| `packages/solid`         | `xlsx-solid-viewer`                | yes       | Solid entry (`SpreadsheetEditor`).                                            |
-| `packages/vanilla`       | `xlsx-vanilla-viewer`              | yes       | Plain `<xlsx-editor>` registration and `mountEditor`.                         |
+| Directory                | npm name                           | Published | What it is                                                                                                           |
+| ------------------------ | ---------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`          | `@christophervr/xlsx-core`         | yes       | Re-export of `ooxml-core/xlsx` and `/xlsx/load`.                                                                     |
+| `packages/web-component` | `xlsx-web-component`               | internal  | One-line re-export of `ooxml-ui/xlsx`, the `<xlsx-editor>` element.                                                  |
+| `packages/bindings`      | `xlsx-bindings`                    | internal  | Framework adapters over one framework-neutral core (`contract.ts`, `index.ts`, `common.ts`) and `ooxml-ui/bindings`. |
+| `packages/react`         | `@christophervr/xlsx-react-viewer` | yes       | React entry (`SpreadsheetEditor`).                                                                                   |
+| `packages/vue`           | `xlsx-vue-viewer`                  | yes       | Vue 3 entry (`SpreadsheetEditor`).                                                                                   |
+| `packages/angular`       | `xlsx-angular-viewer`              | yes       | Angular entry (`SpreadsheetEditorComponent`).                                                                        |
+| `packages/svelte`        | `xlsx-svelte-viewer`               | yes       | Svelte 5 entry (`/runtime`, `mountEditor`).                                                                          |
+| `packages/solid`         | `xlsx-solid-viewer`                | yes       | Solid entry (`SpreadsheetEditor`).                                                                                   |
+| `packages/vanilla`       | `xlsx-vanilla-viewer`              | yes       | Plain `<xlsx-editor>` registration and `mountEditor`.                                                                |
 
 `demos/xlsx/demo-vanilla` is the single demo app; `?framework=<name>` mounts the
 editor through that framework's adapter (`demos/xlsx/demo-vanilla/framework.ts` at the repository root), and
@@ -130,17 +143,19 @@ first. The release flow rewrites the ranges to the versions released with them.
 
 ### Where does my change go?
 
-| The change is about...                                                                | Make it in                                                                       |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Parsing, the workbook model, saving or round-trip loss                                | `src/core/xlsx/` in `ooxml`, with a round-trip test                              |
-| Formulas, functions, recalculation, number formats, editing commands, undo            | `ooxml` (`xlsx/formula`, `numfmt`, `edit`)                                       |
-| Grid metrics, cell views, conditional formats, chart view models, keyboard navigation | `ooxml` (`xlsx/layout`)                                                          |
-| `.xls` loading, CSV, format detection                                                 | `ooxml` (`xlsx/load`)                                                            |
-| A control shared by Excel, Word and PowerPoint (shared ribbon controls, dialogs)      | `ooxml-ui` in `ooxml` (`src/ui`)                                                 |
-| `.xls` / `.doc` / `.ppt` binary codecs, CFB containers                                | `ole2`                                                                           |
-| Ribbon, dialogs, panels, painting the grid, input handling, styling, locales          | `src/ui/src/xlsx` in the ooxml repository                                        |
-| Framework wiring (props, events, lifecycle)                                           | `packages/<framework>/src`; neutral engine ownership only in `packages/bindings` |
-| Demos, docs site, browser tests, packaging and release scripts                        | here                                                                             |
+| The change is about...                                                                              | Make it in                                                                                            |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Parsing, the workbook model, saving or round-trip loss                                              | `src/core/xlsx/` in `ooxml`, with a round-trip test                                                   |
+| Formulas, functions, recalculation, number formats, editing commands, undo                          | `ooxml` (`xlsx/formula`, `numfmt`, `edit`)                                                            |
+| Grid metrics, cell views, conditional formats, chart view models, keyboard navigation               | `ooxml` (`xlsx/layout`)                                                                               |
+| `.xls` loading, CSV, format detection                                                               | `ooxml` (`xlsx/load`)                                                                                 |
+| A control shared by Excel, Word and PowerPoint (shared ribbon controls, dialogs)                    | `ooxml-ui` in `ooxml` (`src/ui`)                                                                      |
+| `.xls` / `.doc` / `.ppt` binary codecs, CFB containers                                              | `ole2`                                                                                                |
+| Ribbon, dialogs, panels, painting the grid, input handling, styling, locales                        | `src/ui/src/xlsx` in the ooxml repository                                                             |
+| Chart or SmartArt edit operations, part writers, layout (shared by every product)                   | `src/core/chart`, `src/core/diagram`; Excel's chart edits over `ChartSpace` in `src/core/xlsx/edit`   |
+| Chart Design and SmartArt Design tabs, the text pane beside the grid, Insert > Chart and > SmartArt | `src/ui/src/xlsx` (`smartart-controller.ts`, `dialogs/insert-chart.ts`, `dialogs/insert-smartart.ts`) |
+| Framework wiring (props, events, lifecycle)                                                         | `packages/<framework>/src`; neutral engine ownership only in `packages/bindings`                      |
+| Demos, docs site, browser tests, packaging and release scripts                                      | here                                                                                                  |
 
 ### GitHub Pages
 

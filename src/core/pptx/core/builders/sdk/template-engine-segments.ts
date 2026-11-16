@@ -25,6 +25,7 @@ import {
 	processInlineConditionals,
 } from './template-engine-helpers';
 import type { TemplateData } from './template-engine-types';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Cross-segment token replacement
@@ -48,7 +49,7 @@ export function replaceTokensAcrossSegments(segments: TextSegment[], data: Templ
 	const segmentMap: Array<{ segmentIndex: number; localOffset: number }> = [];
 
 	for (let i = 0; i < segments.length; i++) {
-		const seg = segments[i];
+		const seg = at(segments, i);
 		if (seg.isParagraphBreak) {
 			// Paragraph breaks don't contribute text but we need to track them
 			continue;
@@ -56,7 +57,7 @@ export function replaceTokensAcrossSegments(segments: TextSegment[], data: Templ
 		const text = seg.text ?? '';
 		for (let c = 0; c < text.length; c++) {
 			segmentMap.push({ segmentIndex: i, localOffset: c });
-			textParts.push(text[c]);
+			textParts.push(at(text, c));
 		}
 	}
 
@@ -83,7 +84,7 @@ export function replaceTokensAcrossSegments(segments: TextSegment[], data: Templ
 	}> = [];
 	let match: RegExpExecArray | null;
 	while ((match = PLACEHOLDER_RE.exec(fullText)) !== null) {
-		const key = match[1].trim();
+		const key = at(match, 1).trim();
 		// Skip block tags
 		if (
 			EACH_OPEN_RE.test(key) ||
@@ -107,7 +108,7 @@ export function replaceTokensAcrossSegments(segments: TextSegment[], data: Templ
 
 	// Process tokens in reverse order so earlier offsets remain valid
 	for (let t = tokens.length - 1; t >= 0; t--) {
-		const token = tokens[t];
+		const token = at(tokens, t);
 		const value = resolvePath(data, token.key);
 		if (value === undefined) {
 			continue;
@@ -128,26 +129,27 @@ export function replaceTokensAcrossSegments(segments: TextSegment[], data: Templ
 
 		if (startInfo.segmentIndex === endInfo.segmentIndex) {
 			// Token is entirely within one segment -- simple case
-			const seg = segments[startInfo.segmentIndex];
+			// `segmentMap` indexes into `segments`, so its segment indices are in range.
+			const seg = at(segments, startInfo.segmentIndex);
 			const before = seg.text.slice(0, startInfo.localOffset);
 			const after = seg.text.slice(endInfo.localOffset + 1);
 			seg.text = before + replacement + after;
 		} else {
 			// Token spans multiple segments
 			// Put replacement in the first segment, clear the spanned parts from others
-			const firstSeg = segments[startInfo.segmentIndex];
+			const firstSeg = at(segments, startInfo.segmentIndex);
 			const before = firstSeg.text.slice(0, startInfo.localOffset);
 			firstSeg.text = before + replacement;
 
 			// Clear fully-spanned middle segments
 			for (let s = startInfo.segmentIndex + 1; s < endInfo.segmentIndex; s++) {
-				if (!segments[s].isParagraphBreak) {
-					segments[s].text = '';
+				if (!at(segments, s).isParagraphBreak) {
+					at(segments, s).text = '';
 				}
 			}
 
 			// Trim the end segment
-			const lastSeg = segments[endInfo.segmentIndex];
+			const lastSeg = at(segments, endInfo.segmentIndex);
 			if (!lastSeg.isParagraphBreak) {
 				lastSeg.text = lastSeg.text.slice(endInfo.localOffset + 1);
 			}
@@ -245,6 +247,6 @@ export function extractPlaceholdersFromText(text: string, found: Set<string>): v
 	PLACEHOLDER_RE.lastIndex = 0;
 	let match: RegExpExecArray | null;
 	while ((match = PLACEHOLDER_RE.exec(text)) !== null) {
-		found.add(match[1].trim());
+		found.add(at(match, 1).trim());
 	}
 }

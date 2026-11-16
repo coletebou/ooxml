@@ -6,6 +6,7 @@ import { persistModernCommentPackage } from '../../utils/modern-comment-package'
 import { PptxSaveStateBuilder } from '../builders';
 import { createPptxSaveConstants } from '../factories';
 import type { PptxHandlerSaveOptions } from '../types';
+import { withValidCustomShowIds } from './custom-show-save-ids';
 import { shouldKeepSourceCommentAuthors } from './comment-authors-retention';
 import { applyHeaderFooterToMaster } from './header-footer-parts';
 import { slidesPerPageToPrintOutput } from './pptx-print-properties';
@@ -29,8 +30,32 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		return this.isStrictOoxml ? 'strict' : 'transitional';
 	}
 
+	/** The save running now, or the last one: see {@link save}. */
+	private saveQueue: Promise<unknown> = Promise.resolve();
+
+	/**
+	 * Saves run one at a time. A save rewrites `this.zip` in place across many awaits and moves
+	 * per-part baselines (slide fingerprints, chart data, pending chart updates) while it runs, so
+	 * a second save that starts mid-way (a viewer's autosave snapshot firing during the user's own
+	 * save) read half-written state: it skipped the slide as unchanged and wrote the chart part's
+	 * original XML back over the edit, in both outputs. Each save now waits for the one before it;
+	 * one that fails does not hold up the next.
+	 */
 	async save(slides: PptxSlide[], options?: PptxHandlerSaveOptions): Promise<Uint8Array> {
+		const valid = withValidCustomShowIds(slides, options);
+		// `saveQueue` never rejects (the catch below), so a failed save does not hold up this one.
+		const run = this.saveQueue.then(() => this.saveNow(valid.slides, valid.options));
+		this.saveQueue = run.catch(() => undefined);
+		return run;
+	}
+
+	/** One save, with the package to itself; callers go through {@link save}. */
+	private async saveNow(
+		slides: PptxSlide[],
+		options?: PptxHandlerSaveOptions,
+	): Promise<Uint8Array> {
 		validateSlideGeometry(slides);
+		this.saveFixedDate = validFixedDate(options?.fixedDate);
 		const templates = [
 			...(options?.slideMasters ?? []),
 			...(options?.slideLayouts ?? []),
@@ -47,8 +72,9 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// pipeline below (it builds/mutates `this.zip`) rather than converting
 		// an already-produced .pptx. See `PptxHandlerRuntimeSaveLegacyPpt`.
 		if (options?.outputFormat === 'ppt') {
+			// Already inside the queue: the inner OOXML save must not wait for this one.
 			return this.saveAsLegacyPpt(slides, options, () =>
-				this.save(slides, {
+				this.saveNow(slides, {
 					...options,
 					pptPassword: undefined,
 					outputFormat: 'pptx',
@@ -91,8 +117,11 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// Process each slide (this may embed new media files that register
 		// extensions in usedMediaPaths, so content-types must be updated after).
 		this.templateElementBaselines.beginSave();
+		// Every slide has its part by now (new ones were given theirs above): a slide jump made in
+		// the editor resolves its target slide's part from its index.
+		const slidePaths = slides.map((slide) => slide.id);
 		for (const slide of slides) {
-			await this.processSlideForSave(slide, saveSession, saveConstants);
+			await this.processSlideForSave(slide, saveSession, saveConstants, slidePaths);
 		}
 		// The layout/master parts patched above are flushed further down; from
 		// here on the copies written this save are what those parts hold.
@@ -302,6 +331,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			coreProperties: options?.coreProperties,
 			appProperties: options?.appProperties,
 			customProperties: options?.customProperties,
+			fixedDate: this.saveFixedDate,
 		});
 
 		await this.applyTagCollectionChanges(options?.tags);
@@ -362,7 +392,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// schema validation passes (validators iterate logical parts, so they
 		// never see directory entries).
 		for (const name of Object.keys(this.zip.files)) {
-			if (this.zip.files[name].dir) {
+			if (this.zip.files[name]?.dir) {
 				delete this.zip.files[name];
 			}
 		}
@@ -373,6 +403,13 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// same size as the one they opened. Level 6 is zlib's default: the knee
 		// of the ratio/time curve, and near-free next to the XML re-serialization
 		// that already dominates a save.
+		// A reproducible save dates every ZIP entry the same, not when each part
+		// was last written.
+		if (this.saveFixedDate) {
+			for (const file of Object.values(this.zip.files)) {
+				file.date = this.saveFixedDate;
+			}
+		}
 		return await this.zip.generateAsync({
 			type: 'uint8array',
 			compression: 'DEFLATE',
@@ -466,4 +503,15 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		root['Relationship'] = filtered;
 		this.zip.file(relsPath, this.builder.build(relsData));
 	}
+}
+
+/** `fixedDate` when it is a valid date; an invalid one throws rather than saving a broken date. */
+function validFixedDate(date: Date | undefined): Date | undefined {
+	if (date === undefined) {
+		return undefined;
+	}
+	if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+		throw new RangeError('PptxHandlerSaveOptions.fixedDate must be a valid Date');
+	}
+	return date;
 }

@@ -5,6 +5,9 @@ import {
 	applyRenderedElementAccessibility,
 	deviceStrokeStageStyle,
 	getSlideBackgroundStyle,
+	resolveStageEdgeBleeds,
+	stageKeepsElementIds,
+	stripElementIdMarkers,
 	visibleTemplateElements,
 } from 'ooxml-ui/pptx';
 import type { PptxElement, PptxSlide } from 'pptx-viewer-core';
@@ -12,10 +15,12 @@ import type { CSSProperties } from 'vue';
 import { computed, ref, watchPostEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import { provideElementRenderSlide } from '../composables/element-render-errors';
 import { provideSlideFieldContext } from '../composables/field-context';
+import { useRendering3DFlags } from '../composables/rendering-3d-flags';
 import { provideSlideElements } from '../composables/slide-elements';
-import { stripElementIdMarkers } from '../composables/stage-element-markers';
 import type { CanvasSize } from '../types';
+import ElementBoundary from './ElementBoundary.vue';
 import ElementRenderer from './ElementRenderer.vue';
 
 /**
@@ -37,8 +42,11 @@ import ElementRenderer from './ElementRenderer.vue';
  * `SlideCanvas.tsx`, so the interactive stage itself stays unlabelled. Only the
  * standalone live presentation stage (`presenting`, no wrapper) self-labels.
  * Static stages (thumbnails, sorter, previews, export) are `aria-hidden` and
- * additionally have their `data-element-id` markers stripped post-render (see
- * `stripElementIdMarkers`) so element queries always hit the real canvas copy.
+ * additionally have their `data-element-id` markers stripped post-render (the
+ * shared `stageKeepsElementIds` / `stripElementIdMarkers`, as in Svelte and
+ * vanilla) so element queries always hit the real canvas copy. Safe against
+ * re-renders: Vue's patcher only rewrites an attribute whose bound value
+ * changes, and a structural change re-runs the effect below.
  */
 const props = withDefaults(
 	defineProps<{
@@ -91,6 +99,11 @@ const props = withDefaults(
 		 * instead of duplicating it underneath the editor (issue #182).
 		 */
 		inlineEditingElementId?: string | null;
+		/**
+		 * The selection: its boxes never grow under a neighbour (see
+		 * `edgeBleeds`), so a drag never uncovers a grown strip.
+		 */
+		selectedElementIds?: readonly string[];
 	}>(),
 	{ scale: 1 },
 );
@@ -117,6 +130,22 @@ const templateElements = computed<PptxElement[]>(() => [
 // find the rest of its chain and render only its own slice of the overflow.
 // Template elements are included because a chain may be authored on a layout.
 provideSlideElements(() => [...templateElements.value, ...(props.slide?.elements ?? [])]);
+// Element render errors on this stage report the slide it paints.
+provideElementRenderSlide(() => props.slide?.id);
+
+/**
+ * Boxes that grow under an abutting opaque box to close the anti-aliasing seam
+ * (issue #141). Not on a Morph layer, whose copies animate independently.
+ */
+const edgeBleeds = computed(() =>
+	props.preserveElementIds
+		? new Map()
+		: resolveStageEdgeBleeds(
+				templateElements.value,
+				props.slide,
+				props.selectedElementIds?.length ? new Set(props.selectedElementIds) : undefined,
+			),
+);
 
 /** Number of template elements, used to offset the main layer's z-index above them. */
 const templateCount = computed(() => templateElements.value.length);
@@ -135,15 +164,30 @@ const templateLayerInteractive = computed(
 	() => (props.interactive ?? false) && (props.editTemplateMode ?? false),
 );
 
+const rendering3DFlags = useRendering3DFlags();
+
 watchPostEffect(() => {
 	const stage = stageRef.value;
 	// Read the element list in both branches so structural changes re-trigger
 	// this effect for static stages too (the strip must re-run after them).
 	const elements = accessibleElements.value;
+	// A 3D rendering option swaps an element's renderer (SmartArt, charts) and
+	// mounts a new, marked node without changing the element list.
+	void rendering3DFlags.value;
 	if (!stage) {
 		return;
 	}
-	if (props.interactive || props.presenting) {
+	const keepElementIds = stageKeepsElementIds({
+		interactive: props.interactive,
+		presenting: props.presenting,
+		preserveElementIds: props.preserveElementIds,
+	});
+	if (!keepElementIds) {
+		// Static surface (thumbnail, sorter, preview, export stage): remove the
+		// `data-element-id` markers so only the real canvas / presentation stage
+		// exposes them, matching React's marker-free static renderer.
+		stripElementIdMarkers(stage);
+	} else if (props.interactive || props.presenting) {
 		applyRenderedElementAccessibility(stage, elements, { presenting: props.presenting === true });
 		// The on-canvas action affordances (amber badge + hover link tooltip) are
 		// painted at the stage boundary rather than inside `ElementRenderer`,
@@ -163,17 +207,10 @@ watchPostEffect(() => {
 				labels: actionAffordanceLabels((key) => t(key)),
 			},
 		);
-	} else if (props.preserveElementIds) {
-		// Morph drives per-element CSS keyed on `data-element-id`, so the two
-		// transition layers must keep their markers. Safe because the host hides
-		// its own stage while the overlay is mounted, so there is still exactly
-		// one marked copy of each element on the page.
-	} else {
-		// Static surface (thumbnail, sorter, preview, export stage): remove the
-		// `data-element-id` markers so only the real canvas / presentation stage
-		// exposes them, matching React's marker-free static renderer.
-		stripElementIdMarkers(stage);
 	}
+	// Otherwise a Morph layer (`preserveElementIds`): its per-element CSS is keyed
+	// on `data-element-id`. Safe because the host hides its own stage while the
+	// overlay is mounted, so there is still exactly one marked copy per element.
 });
 
 const stageStyle = computed<CSSProperties>(() => ({
@@ -217,28 +254,39 @@ const stageStyle = computed<CSSProperties>(() => ({
 		     `marked` keeps the data-pptx-element contract on these elements even
 		     while they are interaction-locked (outside edit-template mode): the
 		     marker means "rendered slide element", not "editable right now". -->
-		<ElementRenderer
+		<ElementBoundary
 			v-for="(element, index) in templateElements"
 			:key="element.id"
 			:element="element"
-			:media-data-urls="mediaDataUrls"
-			:z-index="index"
-			:interactive="templateLayerInteractive"
-			:marked="interactive ?? false"
-			:template-editing="editTemplateMode ?? false"
-			:inline-editing-element-id="inlineEditingElementId"
-		/>
+		>
+			<ElementRenderer
+				:element="element"
+				:media-data-urls="mediaDataUrls"
+				:z-index="index"
+				:edge-bleed="edgeBleeds.get(element.id)"
+				:interactive="templateLayerInteractive"
+				:marked="interactive ?? false"
+				:template-editing="editTemplateMode ?? false"
+				:inline-editing-element-id="inlineEditingElementId"
+			/>
+		</ElementBoundary>
 		<!-- Slide content (template-free after the load-time partition). -->
-		<ElementRenderer
+		<ElementBoundary
 			v-for="(element, index) in slide?.elements ?? []"
 			:key="element.id"
 			:element="element"
-			:media-data-urls="mediaDataUrls"
-			:z-index="index + templateCount"
-			:interactive="interactive ?? false"
-			:presenting="presenting ?? false"
-			:inline-editing-element-id="inlineEditingElementId"
-		/>
+		>
+			<ElementRenderer
+				:element="element"
+				:media-data-urls="mediaDataUrls"
+				:z-index="index + templateCount"
+				:edge-bleed="edgeBleeds.get(element.id)"
+				:interactive="interactive ?? false"
+				:presenting="presenting ?? false"
+				:selected="selectedElementIds?.includes(element.id) ?? false"
+				:inline-editing-element-id="inlineEditingElementId"
+			/>
+		</ElementBoundary>
 		<!-- Optional editing overlay (selection handles, etc.) shares this scaled space -->
 		<slot />
 	</div>

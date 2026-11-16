@@ -1,7 +1,7 @@
 {
 	"name": "openteams-angular-viewer",
-	"version": "0.3.0",
-	"description": "Angular standalone component and service for OpenTeams, the open-source bring-your-own-server team workspace. Self-contained: includes the <teams-app> UI.",
+	"version": "1.1.2",
+	"description": "Angular standalone component and service for OpenTeams, the open-source bring-your-own-server team workspace (sync protocol 1). Self-contained: includes the <teams-app> UI.",
 	"keywords": [
 		"angular",
 		"chat",
@@ -47,7 +47,7 @@
 		"ooxml-ui": "*"
 	},
 	"devDependencies": {
-		"@angular/core": "^22.2.3"
+		"@angular/core": "^22.2.6"
 	},
 	"peerDependencies": {
 		"@angular/core": ">=17"

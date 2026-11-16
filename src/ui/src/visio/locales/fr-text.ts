@@ -1,5 +1,7 @@
 /** Visio ribbon strings for the fr locale (text), keyed by the English text. Not reviewed by a native speaker. */
 export const frText: Readonly<Record<string, string>> = {
+	'This chart contains unsupported content and is read-only. Its original workbook is preserved.':
+		'Ce graphique contient du contenu non pris en charge et est en lecture seule. Son classeur d’origine est conservé.',
 	'Diagram controls': 'Commandes du diagramme',
 	'Home commands': "Commandes de l'onglet Accueil",
 	'Insert commands': "Commandes de l'onglet Insertion",
@@ -45,22 +47,15 @@ export const frText: Readonly<Record<string, string>> = {
 		'Ouvrez un fichier .vsdx pour ajouter des arrière-plans.',
 	'Open a .vsdx file to lay out its shapes.': 'Ouvrez un fichier .vsdx pour disposer ses formes.',
 	'open a .vsdx file to lay out its shapes.': 'Ouvrez un fichier .vsdx pour disposer ses formes.',
-	'3-D rotation needs a 3-D renderer.': 'La rotation 3D nécessite un moteur de rendu 3D.',
-	'Bevel needs 3-D lighting the SVG renderer does not draw.':
-		'Le biseau nécessite un éclairage 3D que le moteur SVG ne dessine pas.',
 	'Custom theme colour sets are not written yet; pick a theme or variant.':
 		'Les jeux de couleurs de thème personnalisés ne sont pas encore écrits ; choisissez un thème ou une variante.',
 	'DWG and DXF import is not supported.': "L'importation de DWG et DXF n'est pas prise en charge.",
-	'Data graphics are chosen in the Data Graphics menu; there is no fields pane.':
-		"Les graphiques de données se choisissent dans le menu Graphiques de données ; il n'y a pas de volet des champs.",
 	'Data graphics are placed at their default position; this option is not built yet.':
 		"Les graphiques de données sont placés à leur position par défaut ; cette option n'est pas encore disponible.",
 	'Embedded Excel charts are not supported.':
 		'Les graphiques Excel incorporés ne sont pas pris en charge.',
 	'Embedded OLE objects are not supported; only pictures can be inserted.':
 		'Les objets OLE incorporés ne sont pas pris en charge ; seules les images peuvent être insérées.',
-	'Embellishment needs theme-driven shape geometry.':
-		"L'embellissement nécessite une géométrie de forme pilotée par le thème.",
 	'Feedback is not collected by this viewer.':
 		'Cette visionneuse ne recueille pas de commentaires.',
 	'Ink strokes are not supported.': "Les traits d'encre ne sont pas pris en charge.",
@@ -73,12 +68,6 @@ export const frText: Readonly<Record<string, string>> = {
 	'Rows are linked by dragging them from the External Data window; the linking wizard is not built yet.':
 		"Les lignes se lient en les faisant glisser depuis la fenêtre Données externes ; l'assistant de liaison n'est pas encore disponible.",
 	'The viewer shows one drawing window.': 'La visionneuse affiche une seule fenêtre de dessin.',
-	'Theme connector styles cannot be chosen separately yet.':
-		'Les styles de connecteur du thème ne peuvent pas encore être choisis séparément.',
-	'Theme effect styles are not rendered yet.':
-		"Les styles d'effet du thème ne sont pas encore rendus.",
-	'Theme fonts are written to the theme part, but text does not follow theme fonts yet.':
-		'Les polices du thème sont écrites dans la partie du thème, mais le texte ne les suit pas encore.',
 	'Visio rule sets (formula-based RuleFilter and RuleTest) are not evaluated; only the built-in generic rules run.':
 		"Les jeux de règles Visio (RuleFilter et RuleTest à base de formules) ne sont pas évalués ; seules les règles génériques intégrées s'exécutent.",
 	'Bottom Right': 'En bas à droite',
@@ -116,4 +105,5 @@ export const frText: Readonly<Record<string, string>> = {
 	Open: 'Ouvrir',
 	Options: 'Options',
 	Share: 'Partager',
+	'Style {n}': 'Style {n}',
 };

@@ -14,12 +14,17 @@ import { isVisioGroupEdit, snapshotGroupEdit } from '../edit-group-commands';
 import { isVisioPageSetupEdit, snapshotPageSetupEdit } from '../edit-page-setup-commands';
 import { isVisioDiagramPartEdit, snapshotDiagramPartEdit } from '../edit-diagram-parts-commands';
 import { snapshotShapeDataEdit } from '../edit-shape-data-commands';
+import { isVisioControlEdit, snapshotControlEdit } from '../edit-control';
+import { isVisioActionEdit, snapshotActionEdit } from '../edit-action';
 import { isVisioDataEdit, snapshotDataEdit } from '../edit-data-commands';
 import { snapshotAssignLayers } from '../edit-layer-commands';
 import { snapshotLayerProperties } from '../edit-layer-properties';
 import { snapshotMasterInstance } from '../edit-master-instance';
 import { snapshotStencilMasterDrop } from '../edit-master-drop';
+import { isVisioDataGraphicEdit, snapshotDataGraphicEdit } from '../edit-data-graphic';
 import { isVisioGuideEdit, snapshotGuideEdit } from '../edit-guide-commands';
+import { isVisioContainerEdit, snapshotContainerEdit } from '../edit-container-options';
+import { isVisioPictureEdit, snapshotPictureEdit } from '../edit-picture-adjust';
 import { snapshotResizeAnchor } from '../resize-anchor';
 import {
 	isVisioConnectorEdit,
@@ -59,7 +64,10 @@ export function snapshotEdits(edits: readonly VisioEdit[]): VisioEdit[] {
 		if (command.type === 'set-layer-properties') return snapshotLayerProperties(command);
 		if (command.type === 'insert-master-instance') return snapshotMasterInstance(command);
 		if (command.type === 'drop-stencil-master') return snapshotStencilMasterDrop(command);
+		if (isVisioDataGraphicEdit(command)) return snapshotDataGraphicEdit(command);
 		if (isVisioGuideEdit(command)) return snapshotGuideEdit(command);
+		if (isVisioContainerEdit(command)) return snapshotContainerEdit(command);
+		if (isVisioPictureEdit(command)) return snapshotPictureEdit(command);
 		if (isVisioMetadataEdit(command)) return snapshotMetadataEdit(command);
 		if (isVisioGroupEdit(command)) return snapshotGroupEdit(command);
 		if (isVisioPageSetupEdit(command)) return snapshotPageSetupEdit(command);
@@ -67,6 +75,8 @@ export function snapshotEdits(edits: readonly VisioEdit[]): VisioEdit[] {
 		if (command.type === 'create-subprocess') return snapshotSubprocessEdit(command);
 		if (isVisioDiagramPartEdit(command)) return snapshotDiagramPartEdit(command);
 		if (command.type === 'set-shape-data') return snapshotShapeDataEdit(command);
+		if (isVisioControlEdit(command)) return snapshotControlEdit(command);
+		if (isVisioActionEdit(command)) return snapshotActionEdit(command);
 		if (isVisioDataEdit(command)) return snapshotDataEdit(command);
 		if (isVisioConnectorEdit(command)) return snapshotConnectorEdit(command);
 		if (command.type === 'reorder-page') {
@@ -156,6 +166,7 @@ export function snapshotEdits(edits: readonly VisioEdit[]): VisioEdit[] {
 					endY: command.endY,
 					...(connect ? { connect } : {}),
 					...(route ? { route } : {}),
+					...(command.text !== undefined ? { text: text(command.text) } : {}),
 				};
 			}
 			case 'replace-plain-text':
@@ -167,7 +178,11 @@ export function snapshotEdits(edits: readonly VisioEdit[]): VisioEdit[] {
 			case 'update-text-field':
 				return snapshotTextFieldUpdate(command);
 			case 'delete-shape':
-				return { type: command.type, ...target };
+				return {
+					type: command.type,
+					...target,
+					...(command.deferred ? { deferred: true } : {}),
+				};
 			case 'rotate-shape':
 				numbers(command.angle);
 				return { type: command.type, ...target, angle: command.angle };

@@ -27,7 +27,10 @@ export class TeamsPresentationPreview extends TeamsLitElement {
 	private observer: ResizeObserver | undefined;
 	private resizeFrame = 0;
 	private fontUrls: string[] = [];
+	/** Releases the shown deck's fonts from the shared glyph-outline cache. */
+	private releaseOutlineFonts: (() => void) | undefined;
 	private generation = 0;
+	private detachOutlineFonts: (() => void) | undefined;
 
 	constructor() {
 		super();
@@ -73,7 +76,15 @@ export class TeamsPresentationPreview extends TeamsLitElement {
 			);
 			this.fontCss = fonts.fontFaceCss;
 			this.fontUrls = fonts.objectUrls;
-			renderer.glyphOutlineFontCache.registerEmbeddedFonts(data.embeddedFonts);
+			this.releaseOutlineFonts = renderer.glyphOutlineFontCache.registerEmbeddedFonts(
+				data.embeddedFonts,
+			);
+			// The font parser loads on the first envelope glyph that needs it:
+			// repaint the slide once it has filled in that glyph's outline.
+			this.detachOutlineFonts = renderer.glyphOutlineFontCache.subscribe(() => {
+				this.showSlide();
+				this.requestUpdate();
+			});
 			this.showSlide();
 			await this.updateComplete;
 			if (generation !== this.generation || !this.isConnected) return;
@@ -119,11 +130,15 @@ export class TeamsPresentationPreview extends TeamsLitElement {
 		this.stageNode = null;
 	}
 	private clear(): void {
+		this.detachOutlineFonts?.();
+		this.detachOutlineFonts = undefined;
 		cancelAnimationFrame(this.resizeFrame);
 		this.observer?.disconnect();
 		this.observer = undefined;
 		this.stopMedia();
 		this.data?.handler.dispose();
+		this.releaseOutlineFonts?.();
+		this.releaseOutlineFonts = undefined;
 		this.renderer?.revokeBlobUrls([...(this.data?.blobUrls ?? []), ...this.fontUrls]);
 		this.fontUrls = [];
 		this.fontCss = '';

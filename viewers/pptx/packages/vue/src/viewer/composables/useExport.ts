@@ -1,6 +1,15 @@
-import type { RasterizeElementResult, RasterizeElementTilesResult } from 'ooxml-ui/pptx';
+import type {
+	CompatibilityWarningToast,
+	MountedPdfSlide,
+	PdfExportSettings,
+	RasterizeElementResult,
+	RasterizeElementTilesResult,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import {
+	downloadBlob,
 	downloadDataUrl,
+	runPdfExport,
 	exportAbortError,
 	placeTileOnPage,
 	rasterResultToPngDataUrl,
@@ -41,6 +50,16 @@ export interface UseExportOptions {
 	rasterizeSlideToTiles?: (index: number) => Promise<RasterizeElementTilesResult>;
 	/** Base file name (without extension) for downloads. Defaults to `presentation`. */
 	fileName?: Ref<string> | string;
+	/** Mount a slide on the capture stage, for the vector PDF export. */
+	mountSlide?: (index: number) => Promise<MountedPdfSlide>;
+	/** Options > Advanced > Save as PDF. Defaults to vector pages without hidden slides. */
+	getPdfExportSettings?: () => PdfExportSettings;
+	/** Options > Advanced image resolution multiplier, for effects drawn as pictures. */
+	imageExportScale?: () => number;
+	/** The viewer's `pdf-export-report` emit: told what every vector PDF approximated. */
+	onReport?: (result: VectorPdfExportResult) => void;
+	/** Show the PDF notice in the viewer's compatibility toast stack. */
+	notify?: (toast: CompatibilityWarningToast) => void;
 }
 
 /** Per-slide progress callback: `(currentSlideIndex, totalSlides)`. */
@@ -52,6 +71,17 @@ export interface ExportPdfOptions {
 	onProgress?: ExportProgress;
 	/** Abort the export early; the loop checks this between slides. */
 	signal?: AbortSignal;
+	/** Include hidden slides (vector export; default from Options > Advanced > Save as PDF). */
+	includeHiddenSlides?: boolean;
+	/** 1-based slide range (vector export). */
+	from?: number;
+	to?: number;
+	/** Explicit 0-based slide indexes (the current slide); overrides `from`/`to` (vector export). */
+	slideIndexes?: readonly number[];
+	/** `pictures` writes one image per slide (the compatibility export); default from the options. */
+	mode?: PdfExportSettings['mode'];
+	/** Told what the vector PDF approximated (effects drawn as pictures, substituted fonts). */
+	onReport?: (result: VectorPdfExportResult) => void;
 }
 
 export interface UseExportResult {
@@ -101,6 +131,48 @@ export function useExport(options: UseExportOptions): UseExportResult {
 			return;
 		}
 		const { onProgress, signal } = opts;
+		const defaults = options.getPdfExportSettings?.() ?? {
+			mode: 'vector',
+			includeHiddenSlides: false,
+		};
+		const mode = options.mountSlide ? (opts.mode ?? defaults.mode) : 'pictures';
+		const reporters = [opts.onReport, options.onReport].filter(
+			(report): report is (result: VectorPdfExportResult) => void => report !== undefined,
+		);
+		if (mode === 'vector' && options.mountSlide) {
+			exporting.value = true;
+			try {
+				const baseName = resolveBaseName(options.fileName);
+				await runPdfExport({
+					settings: {
+						mode,
+						includeHiddenSlides: opts.includeHiddenSlides ?? defaults.includeHiddenSlides,
+					},
+					vector: {
+						document,
+						slides: slides.value,
+						canvasSize: canvasSize.value,
+						mountSlide: options.mountSlide,
+						rasterScale: 2 * (options.imageExportScale?.() ?? 1),
+						title: baseName,
+						...(opts.from !== undefined ? { from: opts.from } : {}),
+						...(opts.to !== undefined ? { to: opts.to } : {}),
+						...(opts.slideIndexes ? { slideIndexes: opts.slideIndexes } : {}),
+						...(signal ? { signal } : {}),
+						...(onProgress ? { onProgress } : {}),
+					},
+					pictures: () => Promise.resolve(),
+					save: (blob) => downloadBlob(blob, `${baseName}.pdf`),
+					...(reporters.length
+						? { onApproximated: (result) => reporters.forEach((report) => report(result)) }
+						: {}),
+					...(options.notify ? { notify: options.notify } : {}),
+				});
+			} finally {
+				exporting.value = false;
+			}
+			return;
+		}
 		exporting.value = true;
 		try {
 			const { jsPDF } = await import('jspdf'),

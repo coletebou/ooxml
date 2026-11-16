@@ -6,8 +6,10 @@ import { translations as application_shell } from './application-shell';
 import { translations as backstage } from './backstage';
 import { translations as chart_format } from './chart-format';
 import { translations as charts } from './charts';
+import { translations as cloudFiles } from './cloud-files';
 import { translations as collaboration_and_sharing } from './collaboration-and-sharing';
 import { translations as compare_and_waterfall } from './compare-and-waterfall';
+import { translations as pdf_export } from './pdf-export';
 import { translations as design_galleries } from './design-galleries';
 import { translations as drawing_and_layout } from './drawing-and-layout';
 import { translations as editing_and_review } from './editing-and-review';
@@ -35,6 +37,7 @@ import { translations as viewer_options } from './viewer-options';
 export const translationsDe: Record<string, string> = {
 	...application_shell,
 	...backstage,
+	...cloudFiles,
 	...ai_assistant,
 	...editing_and_review,
 	...editing_and_review_2,
@@ -59,6 +62,7 @@ export const translationsDe: Record<string, string> = {
 	...ribbon_galleries_effects,
 	...ribbon_galleries_picture,
 	...compare_and_waterfall,
+	...pdf_export,
 	...ribbon_galleries_smartart_layouts,
 	...ribbon_galleries_adjust,
 	...ribbon_galleries_data,

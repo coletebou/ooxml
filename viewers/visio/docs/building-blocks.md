@@ -99,6 +99,35 @@ them it calls `markClean()` (on the hook result, the controller or the handle). 
 `state.edit.dirty`, fires `onDirtyChange(false)` and a `document-change` event of kind `save`.
 Later edits and undo steps are measured from that saved point.
 
+## Saving while a shape's text is being edited {#saving-while-editing-text}
+
+When the user presses a host-owned Save while typing inside a shape, the draft is not in the
+document yet. Call `await commitTextEdit()` first (on the hook result, the session, the vanilla
+blocks, the Angular service or the controller/handle), then `exportVsdx()`. It resolves only after
+the draft's edit completed, including one a blur or Esc already started, and returns a
+`TextEditOutcome`:
+
+| `status`    | `reason`                                    | Meaning                                                                          |
+| ----------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
+| `committed` |                                             | The draft was applied as one undoable edit; `text` is what was applied.          |
+| `unchanged` | `no-draft`, `same-text`                     | Nothing to apply.                                                                |
+| `refused`   | `read-only`, `rejected`                     | The editor refused it; `message` says why and `text` keeps the draft to recover. |
+| `cancelled` | `stale-document`, `superseded`, `destroyed` | The draft's document went away or the edit was superseded; `text` is the draft.  |
+
+Every outcome carries `sourceGeneration` and `documentGeneration`, and `pageId` and `shapeId` when
+a draft existed. A draft belongs to the document it was typed in: loading another file drops it and unmounting
+the canvas discards it, so it is never applied to a different document. When a load dropped an
+unsaved draft, the next `commitTextEdit()` returns it once as `cancelled` / `stale-document` with
+its `text`, `pageId`, `shapeId` and the old `sourceGeneration`, so a Save racing a document switch
+can recover what was typed. Validation and
+undo/redo are the normal edit path. Save only when `status` is `committed` or `unchanged`.
+
+```ts
+const outcome = await blocks.commitTextEdit();
+if (outcome.status === 'refused') showError(outcome.message, outcome.text);
+else if (outcome.status !== 'cancelled') save(blocks.inspectorProps.controller.exportVsdx());
+```
+
 ## Packages
 
 Every framework package re-exports `ooxml-ui/visio`, so `mountDiagramCanvas(host, controller)`,

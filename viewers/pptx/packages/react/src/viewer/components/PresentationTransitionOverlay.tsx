@@ -16,6 +16,8 @@ import {
 	SLIDE_TRANSITION_KEYFRAMES,
 } from '../utils/slide-transitions';
 import type { SlideTransitionAnimations } from '../utils/slide-transitions';
+import { ElementRenderErrorReportingContext } from './ElementErrorBoundary';
+import type { ElementRenderErrorHandler } from './ElementErrorBoundary';
 import { FragmentedTransitionLayer } from './FragmentedTransitionLayer';
 import { MorphTransitionOverlay } from './MorphTransitionOverlay';
 import { SlideLayer } from './SlideTransitionSlideLayer';
@@ -25,6 +27,7 @@ import { SlideLayer } from './SlideTransitionSlideLayer';
 // ---------------------------------------------------------------------------
 
 export interface PresentationTransitionOverlayProps {
+	onElementRenderError?: ElementRenderErrorHandler;
 	/** The outgoing (old) slide to render in the overlay layer. */
 	outgoingSlide: PptxSlide;
 	/** Template/master elements that belong to the outgoing slide. */
@@ -64,6 +67,13 @@ export interface PresentationTransitionOverlayProps {
 	 * transition ignores it.
 	 */
 	incomingSlide?: PptxSlide;
+	/**
+	 * Template/master elements that belong to the INCOMING slide, painted
+	 * behind it in the arriving layer. Defaults to `templateElements`, which is
+	 * only right when both slides share a layout: a slide whose layout carries a
+	 * full-slide picture otherwise lost it the moment a cover began (issue #141).
+	 */
+	incomingTemplateElements?: PptxElement[];
 	/** Called when the transition animation completes. */
 	onComplete: () => void;
 }
@@ -72,7 +82,20 @@ export interface PresentationTransitionOverlayProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function PresentationTransitionOverlay({
+export function PresentationTransitionOverlay(
+	props: PresentationTransitionOverlayProps,
+): React.ReactElement {
+	const inherited = React.useContext(ElementRenderErrorReportingContext);
+	const reporter = props.onElementRenderError ?? inherited?.onElementRenderError;
+	const errorReporting = useMemo(() => ({ onElementRenderError: reporter }), [reporter]);
+	return (
+		<ElementRenderErrorReportingContext.Provider value={errorReporting}>
+			<PresentationTransitionOverlayContent {...props} />
+		</ElementRenderErrorReportingContext.Provider>
+	);
+}
+
+function PresentationTransitionOverlayContent({
 	outgoingSlide,
 	templateElements,
 	canvasSize,
@@ -81,6 +104,7 @@ export function PresentationTransitionOverlay({
 	scale: stageScale,
 	morphPlan,
 	incomingSlide,
+	incomingTemplateElements = templateElements,
 	onComplete,
 }: PresentationTransitionOverlayProps): React.ReactElement | null {
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -207,7 +231,7 @@ export function PresentationTransitionOverlay({
 				<FragmentedTransitionLayer
 					layer={fragmented.incoming}
 					slide={incomingSlide}
-					templateElements={templateElements}
+					templateElements={incomingTemplateElements}
 					canvasSize={canvasSize}
 					scale={scale}
 					zIndex={animations.outgoingOnTop ? 0 : 10}
@@ -234,7 +258,7 @@ export function PresentationTransitionOverlay({
 					>
 						<SlideLayer
 							slide={incomingSlide}
-							templateElements={templateElements}
+							templateElements={incomingTemplateElements}
 							canvasSize={canvasSize}
 						/>
 					</div>

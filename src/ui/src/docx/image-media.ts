@@ -1,10 +1,16 @@
+import { pictureNeedsSvg, pictureSvg } from '../picture-view';
+import { imageContentType } from 'ooxml-core/drawingml';
 import { DOMSerializer, type Node as ProseMirrorNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
+import { NodeSelection } from 'prosemirror-state';
+import { closeHistory } from 'prosemirror-history';
+import { createResizeHandle } from './resize-handle';
 import { schema } from './schema';
 import { chartNodeSpec, placementClass } from 'ooxml-core/docx/ui';
 import { parseDiagram, smartArtNodeView } from './smartart-node-view';
 import { shapeNodeView } from './shape-node-view';
 import type { ThemeCatalog } from 'ooxml-core/docx';
+import type { EditorLocale } from './localization';
 
 /**
  * Resolves inline picture bytes (kept off the JSON model by docx-core) into object URLs. URLs are
@@ -46,25 +52,101 @@ export class ImageMediaCache {
 export interface ImageNodeViewOptions {
 	/** Opens Format Picture for the picture at `pos` (double-click). */
 	editPicture?(pos: number): void;
+	/** Opens Edit Data for the selected chart (double-click on a chart). */
+	editChart?(): void;
 	/** The widest a picture may be resized to, in CSS pixels. */
 	maxWidth?(): number;
 	/** The document theme, for resolving SmartArt and chart colours. */
 	theme?(): ThemeCatalog | undefined;
+	/** The editor's locale, for the notes beside a SmartArt. */
+	locale?(): EditorLocale;
 }
 
 const MIN_SIZE = 16;
 
-/** Sets a picture's size in the document, keeping every other attribute. */
+/**
+ * Sets a picture's or chart's size in the document, keeping every other attribute and the node
+ * selected; one undo step. Saving writes the size to the drawing's `wp:extent` (and `a:ext`).
+ */
 export function resizePicture(view: EditorView, pos: number, widthPx: number, heightPx: number) {
 	const node = view.state.doc.nodeAt(pos);
 	if (!node || node.type !== schema.nodes.image) return;
-	view.dispatch(
-		view.state.tr.setNodeMarkup(pos, undefined, {
-			...node.attrs,
-			widthPx: Math.max(MIN_SIZE, Math.round(widthPx)),
-			heightPx: Math.max(MIN_SIZE, Math.round(heightPx)),
-		}),
-	);
+	const selected =
+		view.state.selection instanceof NodeSelection && view.state.selection.from === pos;
+	const tr = view.state.tr.setNodeMarkup(pos, undefined, {
+		...node.attrs,
+		widthPx: Math.max(MIN_SIZE, Math.round(widthPx)),
+		heightPx: Math.max(MIN_SIZE, Math.round(heightPx)),
+	});
+	if (selected) tr.setSelection(NodeSelection.create(tr.doc, pos));
+	view.dispatch(closeHistory(tr));
+}
+
+/** The size, limits and commit every inline drawing's resize handle shares. */
+function sizeOf(
+	node: ProseMirrorNode,
+	view: EditorView,
+	getPos: () => number | undefined,
+	options: ImageNodeViewOptions,
+) {
+	return {
+		editable: () => view.editable,
+		size: () => ({ width: Number(node.attrs.widthPx), height: Number(node.attrs.heightPx) }),
+		min: MIN_SIZE,
+		maxWidth: () => options.maxWidth?.() ?? Number.POSITIVE_INFINITY,
+		commit: (width: number, height: number) => {
+			const pos = getPos();
+			if (pos !== undefined) resizePicture(view, pos, width, height);
+		},
+	};
+}
+
+/**
+ * A chart: painted with the document theme inside a frame with Word's corner resize handle (free,
+ * Shift keeps the aspect ratio). An edit or resize replaces the node, which repaints it at its
+ * size. A right press selects it first, so the context menu offers the chart commands.
+ */
+function chartNodeView(
+	node: ProseMirrorNode,
+	view: EditorView,
+	getPos: () => number | undefined,
+	options: ImageNodeViewOptions,
+): NodeView {
+	const chart = DOMSerializer.renderSpec(document, chartNodeSpec(node, options.theme?.()))
+		.dom as HTMLElement;
+	const dom = document.createElement('span');
+	dom.className = 'dve-chart-frame';
+	dom.append(chart);
+	const select = () => {
+		const pos = getPos();
+		if (pos === undefined) return false;
+		view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+		return true;
+	};
+	chart.addEventListener('dblclick', () => {
+		if (view.editable && select()) options.editChart?.();
+	});
+	chart.addEventListener('contextmenu', () => {
+		const { selection } = view.state;
+		if (!(selection instanceof NodeSelection && selection.from === getPos())) select();
+	});
+	const handle = createResizeHandle('dve-picture-handle', {
+		...sizeOf(node, view, getPos, options),
+		keepRatio: (event) => event.shiftKey,
+		zoomOf: () => chart,
+		preview: (width, height) => {
+			chart.style.width = `${width}px`;
+			chart.style.height = `${height}px`;
+		},
+	});
+	dom.append(handle);
+	return {
+		dom,
+		ignoreMutation: () => true,
+		selectNode: () => dom.classList.add('dve-chart-selected'),
+		deselectNode: () => dom.classList.remove('dve-chart-selected'),
+		stopEvent: (event) => event.target === handle,
+	};
 }
 
 function renderSpec(node: ProseMirrorNode): HTMLElement {
@@ -81,20 +163,35 @@ export function imageNodeView(cache: ImageMediaCache, options: ImageNodeViewOpti
 	return (node: ProseMirrorNode, view: EditorView, getPos: () => number | undefined): NodeView => {
 		if (node.attrs.shape) return shapeNodeView(node, view, getPos, () => options.theme?.());
 		const diagram = parseDiagram(node.attrs.diagram);
-		if (diagram) return smartArtNodeView(node, diagram, options.theme?.());
-		if (node.attrs.chart) {
-			// The chart is painted read-only with the document theme; its part is preserved on save.
-			const spec = chartNodeSpec(node, options.theme?.());
-			return { dom: DOMSerializer.renderSpec(document, spec).dom, ignoreMutation: () => true };
-		}
+		if (diagram)
+			return smartArtNodeView(node, diagram, options.theme?.(), options.locale?.(), (part) =>
+				cache.urlFor(part, imageContentType(part)),
+			);
+		if (node.attrs.chart) return chartNodeView(node, view, getPos, options);
 		const content = renderSpec(node);
 		// A placeholder (unsupported drawing or text box) shows static child text that ProseMirror must leave alone.
 		if (content.tagName !== 'IMG') return { dom: content, ignoreMutation: () => true };
+		let painted: SVGSVGElement | undefined;
+		const fill =
+			typeof node.attrs.pictureFill === 'string' ? JSON.parse(node.attrs.pictureFill) : undefined;
 		const refresh = () => {
 			const src =
 				(node.attrs.svgPartName && cache.urlFor(String(node.attrs.svgPartName), 'image/svg+xml')) ||
 				cache.urlFor(String(node.attrs.partName), String(node.attrs.contentType));
 			if (src) content.setAttribute('src', src);
+			if (src && pictureNeedsSvg(fill)) {
+				const next = pictureSvg(
+					content.ownerDocument,
+					fill,
+					src,
+					Number(node.attrs.widthPx),
+					Number(node.attrs.heightPx),
+				);
+				if (painted) painted.replaceWith(next);
+				else content.after(next);
+				painted = next;
+				content.style.display = 'none';
+			}
 			content.classList.toggle('dve-image-missing', !src);
 		};
 		refresh();
@@ -102,35 +199,23 @@ export function imageNodeView(cache: ImageMediaCache, options: ImageNodeViewOpti
 		const dom = document.createElement('span');
 		dom.className = ['dve-picture', placementClass(node.attrs.placement)].filter(Boolean).join(' ');
 		dom.append(content);
-		content.addEventListener('dblclick', () => {
+		if (painted) dom.append(painted);
+		dom.addEventListener('dblclick', () => {
 			const pos = getPos();
 			if (pos !== undefined && view.editable) options.editPicture?.(pos);
 		});
-		const handle = document.createElement('span');
-		handle.className = 'dve-picture-handle';
-		handle.setAttribute('aria-hidden', 'true');
-		handle.addEventListener('pointerdown', (event) => {
-			if (!view.editable) return;
-			event.preventDefault();
-			const startX = event.clientX;
-			const startWidth = Number(node.attrs.widthPx);
-			const ratio = Number(node.attrs.heightPx) / Math.max(1, startWidth);
-			const maxWidth = options.maxWidth?.() ?? Number.POSITIVE_INFINITY;
-			let width = startWidth;
-			const move = (moveEvent: PointerEvent) => {
-				width = Math.min(maxWidth, Math.max(MIN_SIZE, startWidth + moveEvent.clientX - startX));
-				content.setAttribute('width', String(Math.round(width)));
-				content.setAttribute('height', String(Math.round(width * ratio)));
-			};
-			const up = () => {
-				window.removeEventListener('pointermove', move);
-				window.removeEventListener('pointerup', up);
-				const pos = getPos();
-				if (pos !== undefined && Math.round(width) !== startWidth)
-					resizePicture(view, pos, width, width * ratio);
-			};
-			window.addEventListener('pointermove', move);
-			window.addEventListener('pointerup', up);
+		const handle = createResizeHandle('dve-picture-handle', {
+			...sizeOf(node, view, getPos, options),
+			keepRatio: () => true,
+			zoomOf: () => dom,
+			preview: (width, height) => {
+				content.setAttribute('width', String(width));
+				content.setAttribute('height', String(height));
+				if (painted) {
+					painted.setAttribute('width', String(width));
+					painted.setAttribute('height', String(height));
+				}
+			},
 		});
 		dom.append(handle);
 		return {

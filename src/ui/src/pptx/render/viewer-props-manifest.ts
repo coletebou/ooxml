@@ -62,6 +62,8 @@ export const VIEWER_PROPS: readonly ViewerSurfaceEntry[] = [
 	// Host-owned storage (`ooxml-core/embedding`): Save goes to `storage.save`, recovery copies
 	// to its recovery methods instead of IndexedDB.
 	{ id: 'storage' },
+	// File > Open cloud places (OneDrive, or a host's own provider): see render/cloud-open.ts.
+	{ id: 'fileProviders' },
 	{
 		id: 'className',
 		names: CLASS_NAMES,
@@ -83,11 +85,18 @@ export const VIEWER_PROPS: readonly ViewerSurfaceEntry[] = [
 	{ id: 'areaChart3D' },
 	{ id: 'pieChart3D' },
 	{ id: 'initialSlide' },
+	{ id: 'googleFonts' },
+	// Bare-caret Bullets / Numbering reach: 'paragraph' (PowerPoint, default) or 'list' (opt-in).
+	{ id: 'listConversionScope' },
+	{ id: 'allowExternalContent' },
+	// Host load limits (`PptxLoadLimits`), passed to `PptxHandler.load` for the deck the viewer opens.
+	{ id: 'limits' },
 	{ id: 'showToolbar' },
 	{ id: 'showThumbnails' },
 	{ id: 'showCompatibilityToasts' },
 	{ id: 'hiddenActions' },
 	{ id: 'ribbonAddIns' },
+	{ id: 'ribbonDisplay' },
 	{ id: 'inspectorInitiallyOpen' },
 	{ id: 'customization' },
 	{ id: 'ai' },
@@ -136,10 +145,22 @@ export const VIEWER_EVENTS: readonly ViewerSurfaceEntry[] = [
 	},
 	{ id: 'modeChange' },
 	{ id: 'zoomChange' },
+	{ id: 'ribbonDisplayChange' },
 	{ id: 'selectionChange' },
 	{ id: 'slideCountChange' },
 	{ id: 'load' },
 	{ id: 'error' },
+	// The element render error reporter (`ElementRenderErrorHandler`). A callback prop or input in
+	// every binding, spelled as the building blocks spell it, so its absence keeps the
+	// `console.error` default.
+	{
+		id: 'elementRenderError',
+		names: {
+			vue: 'onElementRenderError',
+			angular: 'onElementRenderError',
+			svelte: 'onElementRenderError',
+		},
+	},
 	{ id: 'startCollaboration' },
 	{ id: 'stopCollaboration' },
 	// The shared `CollaborationState` every Office editor reports (`collaboration-change`).
@@ -167,6 +188,9 @@ export const VIEWER_EVENTS: readonly ViewerSurfaceEntry[] = [
 	{ id: 'autosaveRecovery' },
 	// Raw connection status only; `collaborationChange` carries the full shared state everywhere.
 	{ id: 'collaborationStatus' },
+	// What a vector PDF export approximated (`VectorPdfExportResult`), for File > Export > PDF and
+	// the API alike; vanilla, vue and svelte also take `exportPdf({ onReport })` per call.
+	{ id: 'pdfExportReport' },
 ];
 
 const capitalised = (id: string): string => id.charAt(0).toUpperCase() + id.slice(1);

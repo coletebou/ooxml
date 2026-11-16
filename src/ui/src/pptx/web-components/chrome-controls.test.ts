@@ -159,6 +159,41 @@ describe('pptx-ui-compat-toasts', () => {
 		expect(q(host, '.overflow')!.textContent).toBe('+3');
 	});
 
+	it('joins translated parts into the message and lists details under an expander', () => {
+		const host = document.createElement('pptx-ui-compat-toasts');
+		const words: Record<string, string> = {
+			'pptx.compatibility.partSeparator': '; ',
+			'pptx.compatibility.details': 'More',
+			summary: 'Saved: {{parts}}.',
+			a: '{{count}} pictures',
+			b: '1 font',
+			line: 'Line {{n}}',
+		};
+		host.state = {
+			toasts: [
+				{
+					...toast(1, 'info'),
+					messageKey: 'summary',
+					parts: [{ key: 'a', params: { count: '3' } }, { key: 'b' }],
+					details: [{ key: 'line', params: { n: '1' } }],
+				},
+				toast(2),
+			],
+			translate: (key, params) =>
+				(words[key] ?? key).replace(/\{\{(\w+)\}\}/gu, (_, name: string) =>
+					String(params?.[name] ?? ''),
+				),
+		};
+		document.body.append(host);
+		const [first, second] = host.shadowRoot!.querySelectorAll('[data-testid="pptx-compat-toast"]');
+		expect(first!.querySelector('.message')!.textContent).toBe('Saved: 3 pictures; 1 font.');
+		const details = first!.querySelector('details')!;
+		expect(details.open).toBe(false);
+		expect(details.querySelector('summary')!.textContent).toBe('More');
+		expect([...details.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Line 1']);
+		expect(second!.querySelector('details')).toBeNull();
+	});
+
 	it('emits dismiss and dismiss-all intents and keeps focus across inset updates', () => {
 		const host = document.createElement('pptx-ui-compat-toasts');
 		host.state = { toasts: [toast(1), toast(2, 'info')] };
@@ -240,5 +275,37 @@ describe('pptx-ui-dialog-footer', () => {
 		host.shadowRoot!.querySelectorAll('button')[1].focus();
 		host.state = { actions: [...actions, { id: 'c', label: 'C' }] };
 		expect((host.shadowRoot!.activeElement as HTMLElement).dataset.action).toBe('b');
+	});
+});
+
+describe('pptx-ui-export-progress', () => {
+	const t = (key: string) => `t:${key}`;
+	const mount = (state = {}) => {
+		const host = document.createElement('pptx-ui-export-progress');
+		document.body.append(host);
+		host.state = { open: true, title: 'Export as PDF', progress: 30, translate: t, ...state };
+		return host;
+	};
+
+	it('is the shared progress dialog with the pptx strings and test ids', () => {
+		const host = mount({ status: 'Rendering slide 2 of 4...' });
+		const dialog = q<HTMLElement>(host, '[role="dialog"]')!;
+		expect(dialog.dataset.testid).toBe('pptx-export-progress-dialog');
+		expect(q(host, '#title')!.textContent).toBe('Export as PDF');
+		expect(q(host, '[role="progressbar"]')!.getAttribute('aria-valuenow')).toBe('30');
+		expect(q(host, '#status')!.textContent).toBe('Rendering slide 2 of 4...');
+		expect(q(host, '[data-testid="pptx-export-progress-cancel"]')!.textContent).toBe(
+			't:pptx.export.cancel',
+		);
+	});
+
+	it('says Processing without a status line, and Cancel asks the host to stop', () => {
+		const host = mount();
+		expect(q(host, '#status')!.textContent).toBe('t:pptx.export.processing');
+		const cancel = listen(host, 'export-cancel');
+		q<HTMLButtonElement>(host, '[data-testid="pptx-export-progress-cancel"]')!.click();
+		expect(cancel).toHaveBeenCalledOnce();
+		host.state = { open: false, title: 'Export as PDF', progress: 100 };
+		expect(q(host, '[role="dialog"]')).toBeNull();
 	});
 });

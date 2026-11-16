@@ -73,6 +73,50 @@ function rig(
 }
 
 describe('AutoRecover saving', () => {
+	it('removes a pending recovery copy after an explicit file save', async () => {
+		const { recover, store } = rig();
+		let finish!: () => void;
+		const pending = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		const put = store.put;
+		store.put = async (entry) => {
+			await pending;
+			await put(entry);
+		};
+		recover.configure(true, 5);
+		const saving = recover.saveNow();
+		recover.saved();
+		finish();
+		await saving;
+		await Promise.resolve();
+		expect(store.entries.size).toBe(0);
+	});
+	it('serializes overlapping saves and captures edits made during the first write', async () => {
+		const { recover, store, setBytes } = rig();
+		let finish!: () => void;
+		const pending = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		const put = store.put;
+		let writes = 0;
+		store.put = async (entry) => {
+			if (++writes === 1) await pending;
+			await put(entry);
+		};
+		recover.configure(true, 5);
+		const first = recover.saveNow();
+		setBytes(bytes(4, 5));
+		const second = recover.saveNow();
+		expect(writes).toBe(1);
+		finish();
+		expect(await first).toBe(true);
+		expect(await second).toBe(true);
+		expect([...store.entries.get('Plan.vsdx')!.bytes]).toEqual([4, 5]);
+		expect(writes).toBe(2);
+		recover.dispose();
+		expect(await recover.saveNow()).toBe(false);
+	});
 	it('keeps a copy of a drawing with unsaved changes, under its file name', async () => {
 		const { recover, store } = rig();
 		recover.configure(true, 5);

@@ -20,13 +20,12 @@ import {
 	effectIsPurelyStyleMatrix,
 	fillIsPurelyStyleMatrix,
 } from './authored-shape-style';
+import { parseXml, type XmlElement } from '../../../../xml/index';
+import { HeldFormatSchemes } from './held-format-schemes';
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeStyleMatrixResolve';
 
-/** Slides and template (master/layout) elements after style references were resolved again. */
-export interface StyleReferenceReResolution {
-	slides: PptxSlide[];
-	templateElementsBySlideId: Record<string, PptxElement[]>;
-}
+import type { StyleReferenceReResolution } from '../handler-result-types';
+export type { StyleReferenceReResolution } from '../handler-result-types';
 
 /** Copy `keys` of `from` onto a copy of `style`, dropping the keys `from` leaves unset. */
 function withKeys(
@@ -45,6 +44,15 @@ function withKeys(
 	return next as ShapeStyle;
 }
 
+/** The DOM root of an `a:fmtScheme`'s text, or `undefined` when it does not parse. */
+function formatSchemeElement(xml: string): XmlElement | undefined {
+	try {
+		return parseXml(xml, { label: 'DrawingML format scheme' }).documentElement;
+	} catch {
+		return undefined;
+	}
+}
+
 function refNode(idx: number, colorXml: XmlObject | undefined): XmlObject {
 	return { '@_idx': String(idx), ...(colorXml ?? {}) };
 }
@@ -60,6 +68,9 @@ function refNode(idx: number, colorXml: XmlObject | undefined): XmlObject {
  */
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	private readonly effectSchemeCache = new Map<string, PptxThemeFormatScheme>();
+
+	/** Every `a:fmtScheme` written into a theme part or over one ({@link restoreThemeFormatScheme}). */
+	private readonly heldFormatSchemes = new HeldFormatSchemes();
 
 	/**
 	 * Resolve a `<p:style>` node as the base class does, against built-in effect scheme
@@ -94,13 +105,14 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	private parseEffectScheme(
 		preset: Pick<PptxThemeEffectScheme, 'fmtSchemeXml'>,
 	): { node: XmlObject; scheme: PptxThemeFormatScheme } | undefined {
-		const parsed = this.parser.parse(wrapFormatSchemeXml(preset.fmtSchemeXml)) as XmlObject;
+		const xml = wrapFormatSchemeXml(preset.fmtSchemeXml);
+		const parsed = this.parser.parse(xml) as XmlObject;
 		const node = parsed['a:fmtScheme'] as XmlObject | undefined;
 		if (!node) {
 			return undefined;
 		}
 		delete node['@_xmlns:a'];
-		return { node, scheme: this.parseFormatScheme(node) };
+		return { node, scheme: this.parseFormatScheme(node, formatSchemeElement(xml)) };
 	}
 
 	/**
@@ -123,34 +135,91 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		fmtSchemeXml: string,
 	): Promise<PptxThemeFormatScheme | undefined> {
 		const parsed = this.parseEffectScheme({ fmtSchemeXml });
-		if (!parsed) {
-			return undefined;
+		return parsed ? this.writeFormatScheme(() => parsed.node) : undefined;
+	}
+
+	/**
+	 * Put back a format scheme the deck held before (Undo and Redo of an Effects pick), as the parts
+	 * held it: each theme part a master references gets back what it held the last time the deck's
+	 * scheme was `scheme` over those same parts, so a part with a scheme of its own gets its own back
+	 * (with no such time, `scheme`'s own element goes into every one). With `themePaths`, `scheme`'s
+	 * own element goes into those parts only.
+	 *
+	 * @returns the deck's format scheme now, or `undefined` (nothing written) for a scheme no part
+	 *   held while this handler wrote into it
+	 */
+	public async restoreThemeFormatScheme(
+		scheme: PptxThemeFormatScheme,
+		themePaths?: readonly string[],
+	): Promise<PptxThemeFormatScheme | undefined> {
+		const parts = themePaths
+			? undefined
+			: this.heldFormatSchemes.parts(scheme, await this.resolveThemeEditTargets());
+		if (parts) {
+			return this.writeFormatScheme((path) => parts.get(path));
 		}
-		const written = await this.rewriteThemeParts(undefined, (data) => {
+		const element = this.heldFormatSchemes.element(scheme);
+		return element ? this.writeFormatScheme(() => element, themePaths) : undefined;
+	}
+
+	/**
+	 * Write `elementFor(part)` into every theme part a master references (or only `themePaths`),
+	 * skipping a part it gives none, holding what each part held and now holds, and refresh the
+	 * in-memory format schemes of the masters on those parts and, when the deck's part is among
+	 * them, the deck's.
+	 */
+	private async writeFormatScheme(
+		elementFor: (themePath: string) => XmlObject | undefined,
+		themePaths?: readonly string[],
+	): Promise<PptxThemeFormatScheme | undefined> {
+		const deckBefore = this.getThemeFormatScheme();
+		const replaced = new Map<string, XmlObject>();
+		const schemes = new Map<string, PptxThemeFormatScheme>();
+		const written = await this.rewriteThemeParts(themePaths, (data, path) => {
+			const element = elementFor(path);
 			const elements = (data['a:theme'] as XmlObject | undefined)?.['a:themeElements'] as
 				| XmlObject
 				| undefined;
-			if (!elements) {
+			if (!element || !elements) {
 				return false;
 			}
-			elements['a:fmtScheme'] = structuredClone(parsed.node);
+			const previous = elements['a:fmtScheme'] as XmlObject | undefined;
+			if (previous) {
+				this.heldFormatSchemes.hold(this.parseFormatScheme(previous), previous);
+				replaced.set(path, structuredClone(previous));
+			}
+			const scheme = this.parseFormatScheme(element);
+			this.heldFormatSchemes.hold(scheme, element);
+			elements['a:fmtScheme'] = structuredClone(element);
+			schemes.set(path, scheme);
 			return true;
 		});
 		if (written.length === 0) {
 			return undefined;
+		}
+		if (deckBefore) {
+			this.heldFormatSchemes.holdParts(deckBefore, replaced);
 		}
 		for (const path of written) {
 			const xml = await this.zip.file(path)?.async('string');
 			if (xml !== undefined) {
 				this.originalThemeXmlByPath.set(path, xml);
 			}
+			for (const masterPath of this.mastersUsingThemes([path])) {
+				this.masterThemeFormatSchemes.set(masterPath, schemes.get(path)!);
+			}
 		}
-		for (const masterPath of this.mastersUsingThemes(written)) {
-			this.masterThemeFormatSchemes.set(masterPath, parsed.scheme);
+		const primary = await this.resolvePrimaryThemePath();
+		const deck = primary === undefined ? undefined : schemes.get(primary);
+		if (deck) {
+			this.globalThemeFormatSchemeSnapshot = deck;
+			this.themeFormatScheme = deck;
+			this.heldFormatSchemes.holdParts(
+				deck,
+				new Map(written.map((path) => [path, elementFor(path)!])),
+			);
 		}
-		this.globalThemeFormatSchemeSnapshot = parsed.scheme;
-		this.themeFormatScheme = parsed.scheme;
-		return parsed.scheme;
+		return this.getThemeFormatScheme();
 	}
 
 	/** The real theme variants the loaded package carries, or none. */

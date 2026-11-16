@@ -7,10 +7,11 @@
 	 * `unknown` still falls through to the typed placeholder.
 	 */
 	import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
-	import { getBackgroundAnimationLayers, getBackgroundAnimationState, build3DExtrusionData, buildParagraphs, buildTextStyleOverrideCss, getGroupChildParentFill, getOverflowSegments, hasTextWarp, inlineElementPointerEvents, isElementHidden, isEquationOnlyText, isTemplateElement, placeholderPromptDescriptor, shouldRenderHitTarget } from 'ooxml-ui/pptx';
+	import { getBackgroundAnimationLayers, getBackgroundAnimationState, build3DExtrusionData, buildParagraphs, highlightFindMatches, buildTextStyleOverrideCss, getGroupChildParentFill, getOverflowSegments, hasTextWarp, inlineElementPointerEvents, isElementHidden, isEquationOnlyText, isTemplateElement, placeholderPromptDescriptor, shouldRenderHitTarget, probeElementRenderFault } from 'ooxml-ui/pptx';
 
 	import { getContainerStyle, getElementHitTargetStyle, getShapeBoxStyle, getShapeFillStrokeStyle, getTextBlockStyle, mergeStyles, styleToString } from '../style';
 	import { getFieldContextGetter } from '../state/field-context';
+	import { getElementFindHighlightsGetter } from '../state/find-highlights';
 	import { getSlideElementsGetter } from '../state/slide-elements';
 	import {
 		getPresentationElementStatesGetter,
@@ -19,6 +20,7 @@
 	// Self-import: groups recurse into this same component (Svelte 5 pattern).
 	// eslint-disable-next-line import/no-self-import
 	import ElementRenderer from './ElementRenderer.svelte';
+	import ElementBoundary from './ElementBoundary.svelte';
 	import ChartView from './ChartView.svelte';
 	import ConnectorView from './ConnectorView.svelte';
 	import DuotoneFilterDefs from './DuotoneFilterDefs.svelte';
@@ -41,8 +43,10 @@
 	import WordArtText from './WordArtText.svelte';
 	import type { ElementRendererProps } from './props';
 
-	const { element, mediaDataUrls, zIndex, presenting = false, interactive = false, marked = false, editTemplateMode = false, editingElementId = null, editable = false, selectedElementIds, parentGroupFill, ontablecellcommit, onsmartartnodecommit, onsmartartnodefill, onchartpointcommit, ontableresizecolumns, ontableresizerow }: ElementRendererProps =
+	const { element, mediaDataUrls, zIndex, edgeBleed, presenting = false, interactive = false, marked = false, editTemplateMode = false, editingElementId = null, editable = false, selectedElementIds, parentGroupFill, ontablecellcommit, onsmartartnodecommit, onsmartartnodefill, onchartpointcommit, ontableresizecolumns, ontableresizerow }: ElementRendererProps =
 		$props();
+	// Test-only fault hook (inert unless a test page sets it), inside this element's `ElementBoundary`.
+	$effect.pre(() => probeElementRenderFault(element));
 	/** Whether THIS element is part of the current selection; see `ElementRendererProps.selectedElementIds`. */
 	const isSelected = $derived(selectedElementIds?.includes(element.id) ?? false);
 	/** This exact element is open in the element-level inline text editor right now. */
@@ -120,7 +124,7 @@
 	const allAnimStates = $derived(getAllAnimStates?.());
 	const backgroundState = $derived(getBackgroundAnimationState(element, allAnimStates));
 	const visualState = $derived(backgroundState ?? animationState);
-	const backgroundLayers = $derived(getBackgroundAnimationLayers(element, getShapeBoxStyle(element, zIndex, parentGroupFill, visualState?.animatesFill, visualState?.animatesStroke), backgroundState));
+	const backgroundLayers = $derived(getBackgroundAnimationLayers(element, getShapeBoxStyle(element, zIndex, parentGroupFill, visualState?.animatesFill, visualState?.animatesStroke, edgeBleed), backgroundState));
 
 	/**
 	 * The host's resolved 3D flags (provided by PowerPointViewer). Charts
@@ -155,7 +159,11 @@
 	const linkedSegments = $derived(getOverflowSegments(element, getSlideElements?.()));
 
 	/** Rendered paragraphs (runs + bullet/indent), built by shared logic. */
-	const paragraphs = $derived(buildParagraphs(element, fieldContext, linkedSegments));
+	// Captured at init, like the getters above: the Find bar's marks in this text (editing canvas only).
+	const getFindHighlights = getElementFindHighlightsGetter(() => element.id);
+	const paragraphs = $derived(
+		highlightFindMatches(buildParagraphs(element, fieldContext, linkedSegments), getFindHighlights()),
+	);
 	const hasText = $derived(
 		paragraphs.some((p) => p.runs.length > 0 || p.bulletMarker !== undefined),
 	);
@@ -242,7 +250,13 @@
 		{/if}
 		<ShapeEffectOverlay {element} {mediaDataUrls} {zIndex} />
 		{#each element.children ?? [] as child, i (child.id)}
-			<ElementRenderer element={child} {mediaDataUrls} zIndex={i} {presenting} {interactive} {marked} {editTemplateMode} {editingElementId} {editable} {selectedElementIds} parentGroupFill={childParentGroupFill} {ontablecellcommit} {onsmartartnodecommit} {onsmartartnodefill} {onchartpointcommit} {ontableresizecolumns} {ontableresizerow} />
+			<!-- Read here, before the child exists: `getGroupChildParentFill` also links the
+			     children to this group for the device-pixel stroke snap, and a child that never
+			     reads its `parentGroupFill` prop (a connector) would otherwise never trigger it. -->
+			{@const parentFill = childParentGroupFill}
+			<ElementBoundary element={child}>
+				<ElementRenderer element={child} {mediaDataUrls} zIndex={i} {presenting} {interactive} {marked} {editTemplateMode} {editingElementId} {editable} {selectedElementIds} parentGroupFill={parentFill} {ontablecellcommit} {onsmartartnodecommit} {onsmartartnodefill} {onchartpointcommit} {ontableresizecolumns} {ontableresizerow} />
+			</ElementBoundary>
 		{/each}
 	</div>
 {:else if isImageLike}
@@ -258,7 +272,7 @@
 {:else if element.type === 'smartArt'}
 	<SmartArtView {element} {mediaDataUrls} {zIndex} interactive={elementInteractive} marked={elementMarked} {animationState} {onsmartartnodecommit} {onsmartartnodefill} {editable} {presenting} />
 {:else if element.type === 'media'}
-	<MediaBox {element} {mediaDataUrls} {zIndex} {presenting} interactive={elementInteractive} marked={elementMarked} {editable} />
+	<MediaBox {element} {mediaDataUrls} {zIndex} {presenting} interactive={elementInteractive} marked={elementMarked} {editable} {selectedElementIds} />
 {:else if element.type === 'ink'}
 	<InkView {element} {mediaDataUrls} {zIndex} {presenting} interactive={elementInteractive} marked={elementMarked} {editable} />
 {:else if element.type === 'ole'}

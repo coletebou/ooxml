@@ -25,7 +25,8 @@ import { localZone } from './time-zone';
 import { shouldNotify } from './notifications';
 import { createMessageTransfers, type MessageTransfer } from './message-transfer';
 import { checkFileAbort, withFileAbort, type FileOperationOptions } from './file-transfer';
-import { uploadTeamsServerFile } from './server-file-storage';
+import { chatRoomId } from './chats';
+import { fileRequestHeaders, uploadTeamsServerFile } from './server-file-storage';
 import type { ChannelTab, TabContent } from './tabs';
 import { channelThreads, type MessageThread } from './threads';
 import { tabConversationId } from './tab-conversation';
@@ -42,7 +43,9 @@ import {
 	type PresenceView,
 	createPresenceController,
 } from './presence-controller';
+import type { SchemaStatus } from './schema';
 import { defaultPresenceSetting, type StatusDuration } from './presence';
+import { meetingWindows } from './presence-meetings';
 import {
 	type ChannelView,
 	type FileEntry,
@@ -67,6 +70,11 @@ import {
 export interface StorageLike {
 	getItem: (key: string) => string | null;
 	setItem: (key: string, value: string) => void;
+	/**
+	 * Optional: calls `listener` with the key whenever another tab or window changes the storage
+	 * (null when it was cleared). The browser binding is the `storage` event. Returns the unsubscribe.
+	 */
+	subscribe?: (listener: (key: string | null) => void) => () => void;
 }
 export interface UploadableFile {
 	name: string;
@@ -122,7 +130,11 @@ export interface CallView {
 export interface TeamsState {
 	status: ConnectionStatus;
 	mode: 'local' | 'server';
+	/** Whether this app may edit the workspace; `unsupported-schema` means a newer app wrote it. */
+	schema: SchemaStatus;
 	user: { id: string; name: string };
+	/** The signed session grants moderation (hide others' messages, manage others' channels and tabs). */
+	moderator: boolean;
 	/** What others see for you: your chosen status, or Away when idle. */
 	availability: Availability;
 	/** Your chosen status and message with their expiry, idleness and the idle setting. */
@@ -191,6 +203,10 @@ export interface TeamsClient extends ChatActions, MeetingActions {
 	readonly workspace: TeamsWorkspace;
 	select: (channelId: string) => void;
 	createChannel: (name: string, topic?: string) => void;
+	/** Rename a channel you created (or any channel as a moderator). */
+	renameChannel: (id: string, name: string) => boolean;
+	/** Archive a channel you created (or any channel as a moderator). */
+	archiveChannel: (id: string) => boolean;
 	addTab: (
 		name: string,
 		content: TabContent,
@@ -435,6 +451,7 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 				name: ws.user.name,
 				color: ws.session.identity.userColor,
 				availability: presenceView().effective,
+				...(presenceView().activity ? { activity: presenceView().activity! } : {}),
 				statusMessage: presenceView().message,
 				inCall: call?.phase === 'connected',
 			},
@@ -460,7 +477,9 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 		return {
 			status: ws.session.status,
 			mode: ws.config.mode,
+			schema: ws.schema.status(),
 			user: ws.user,
+			moderator: ws.user.moderator === true,
 			availability: presenceView().effective,
 			presence: presenceView(),
 			channels: channelViews({
@@ -480,6 +499,7 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 				messagesOf,
 				selfId: ws.user.id,
 				selfStatus: presenceView().effective,
+				...(presenceView().activity ? { selfActivity: presenceView().activity! } : {}),
 				lastRead,
 				peers: p,
 				workspaceId,
@@ -550,12 +570,16 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 
 	let state = compute();
 	let queued = false;
+	/** Tell presence when the person's meetings are, so it shows Busy while one is in progress. */
+	const syncMeetingPresence = (): void =>
+		presence?.setMeetingWindows(meetingWindows(ws.meetings.list(), ws.user.id, now()));
 	const refresh = (): void => {
 		if (queued || destroyed) return;
 		queued = true;
 		queueMicrotask(() => {
 			queued = false;
 			if (destroyed) return;
+			syncMeetingPresence();
 			state = compute();
 			for (const l of [...listeners]) l();
 			for (const item of feed.drain()) notices.emit('notification', item);
@@ -563,7 +587,7 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 	};
 
 	const saveSnapshot = (): void => {
-		if (!storage) return;
+		if (!storage || ws.schema.status().state === 'unsupported-schema') return;
 		try {
 			const text = toBase64(Y.encodeStateAsUpdate(doc));
 			if (text.length <= MAX_SNAPSHOT_CHARS) storage.setItem(STORAGE_DOC + workspaceId, text);
@@ -587,22 +611,40 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 	doc.on('update', scheduleSave);
 	onChatDocUpdate = scheduleSave;
 
+	const presenceKey = `teams:presence:${encodeURIComponent(workspaceId)}:${encodeURIComponent(ws.user.id)}`;
 	presence = createPresenceController({
 		storage,
-		storageKey: `teams:presence:${encodeURIComponent(workspaceId)}:${encodeURIComponent(ws.user.id)}`,
+		storageKey: presenceKey,
+		...(storage?.subscribe
+			? {
+					// A status chosen in another tab of this person reaches this one.
+					subscribe: (onChange: () => void) =>
+						storage.subscribe!((key) => {
+							if (key === null || key === presenceKey) onChange();
+						}),
+				}
+			: {}),
 		idleMinutes: options.idleMinutes,
-		publish: (status, message) => {
-			ws.setAvailability(status);
+		publish: (status, message, activity) => {
+			ws.setAvailability(status, activity);
 			ws.setStatusMessage(message);
 		},
 		changed: refresh,
 	});
+	syncMeetingPresence();
 	state = compute();
 
 	const unsubs = [
 		ws.chat.observe(refresh),
 		ws.session.on('peers', refresh),
 		ws.session.on('status', refresh),
+		ws.schema.subscribe((s) => {
+			if (s.state === 'unsupported-schema')
+				notice(
+					'This workspace was upgraded by a newer version of the app. It is read-only until you update.',
+				);
+			refresh();
+		}),
 		ws.session.on('error', (e) => notice(e.message)),
 	];
 
@@ -631,8 +673,17 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 		return { base: u.origin, token: config.token };
 	};
 
-	const upload = async (file: UploadableFile & Blob, signal?: AbortSignal): Promise<Attachment> => {
+	const upload = async (
+		file: UploadableFile & Blob,
+		signal?: AbortSignal,
+		channelId?: string,
+	): Promise<Attachment> => {
 		checkFileAbort(signal);
+		// A private chat's files are stored under its room so the server limits them to its members.
+		const scopeId =
+			channelId !== undefined && ws.chat.isChat(channelId)
+				? chatRoomId(workspaceId, channelId)
+				: workspaceId;
 		const attachment: Attachment = {
 			name: file.name,
 			kind: 'other',
@@ -650,7 +701,8 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 				return attachment;
 			}
 			attachment.url = (
-				await uploadTeamsServerFile(ws.config, workspaceId, file, {
+				await uploadTeamsServerFile(ws.config, scopeId, file, {
+					userId: ws.user.id,
 					...(signal ? { signal } : {}),
 					...(options.fetch ? { fetch: options.fetch } : {}),
 				})
@@ -669,6 +721,15 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 		changed: refresh,
 	});
 
+	/** The creator or a moderator may rename or archive a shared channel (not a private chat). */
+	const canManageChannel = (id: string): boolean => {
+		const channel = ws.chat.channels().find((c) => c.id === id);
+		return (
+			channel !== undefined &&
+			channel.kind === 'channel' &&
+			(channel.createdBy === ws.user.id || ws.user.moderator === true)
+		);
+	};
 	const act =
 		<A extends unknown[]>(fn: (...args: A) => void) =>
 		(...args: A): void => {
@@ -726,6 +787,8 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 	});
 	const checkReminders = (): void => {
 		if (destroyed) return;
+		// A repeat that was beyond the look-ahead when the meetings last changed comes into range.
+		syncMeetingPresence();
 		const settings = feed.settings.get();
 		const status = presenceView().effective;
 		const due = reminders.due(ws.meetings.list(), ws.user.id, now(), (item) =>
@@ -801,6 +864,20 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 			},
 		}),
 		select: act(selectId),
+		renameChannel(id, name) {
+			const ok = canManageChannel(id) && ws.chat.renameChannel(id, name);
+			if (ok) refresh();
+			else notice('You cannot rename this channel');
+			return ok;
+		},
+		archiveChannel(id) {
+			const ok = canManageChannel(id);
+			if (ok) {
+				ws.chat.archiveChannel(id, true);
+				refresh();
+			} else notice('You cannot archive this channel');
+			return ok;
+		},
 		createChannel: act((name, topic = '') => {
 			const channel = ws.chat.createChannel({ name, topic });
 			if (channel) {
@@ -983,7 +1060,7 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 		async fileUrl(attachment) {
 			const target = server();
 			const raw = attachment.url;
-			if (!raw || !target?.token) return raw;
+			if (!raw || !target) return raw;
 			// Attachment URLs come from peers: the token goes only to the exact configured origin
 			// (a prefix test would match `http://host:8787.evil.example`), only for /files/ paths,
 			// and never to a URL carrying credentials.
@@ -1001,7 +1078,7 @@ export function createTeamsClient(options: TeamsClientOptions): TeamsClient {
 					`${target.base}/files/link${url.pathname.slice('/files'.length)}`,
 					{
 						method: 'POST',
-						headers: { Authorization: `Bearer ${target.token}` },
+						headers: fileRequestHeaders(ws.config, ws.user.id),
 					},
 				);
 				if (!res.ok) throw new Error(`Link failed (${res.status})`);

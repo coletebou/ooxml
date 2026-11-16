@@ -8,7 +8,7 @@ description: 从 npm 安装 pptx-viewer，为 React、Vue 3、Angular、Svelte �
 `pptx-viewer` 的各个包在 npm 上独立发布。按需安装不依赖框架的[核心引擎](/zh/core/)，或与你使用的框架对应的预览组件即可。
 
 ::: tip Node 版本
-编译 TypeScript 和在浏览器外运行这些包需要 **Node.js 18 或更高版本**。
+编译 TypeScript 和在浏览器外运行这些包需要 **Node.js 22 或更高版本**。
 :::
 
 ## 选择你的框架 {#choose-your-framework}
@@ -21,7 +21,7 @@ description: 从 npm 安装 pptx-viewer，为 React、Vue 3、Angular、Svelte �
 | Svelte 5                    | `pptx-svelte-viewer`  | 与 React 组件使用相同的引擎，功能一致       |
 | 无框架                      | `pptx-vanilla-viewer` | 使用相同的引擎和原生 DOM，无需框架依赖      |
 | 无界面处理（Node / 浏览器） | `pptx-viewer-core`    | 不包含 UI，不依赖框架                       |
-| AI / MCP 工具               | `pptx-viewer-mcp`     | 73 个 MCP 工具、命令行工具和 Y.Doc 编解码器 |
+| AI / MCP 工具               | `pptx-viewer-mcp`     | 74 个 MCP 工具、命令行工具和 Y.Doc 编解码器 |
 
 ## 从 npm 安装 {#installing-from-npm}
 
@@ -50,7 +50,7 @@ bun add pptx-react-viewer react react-dom
 :::
 
 ::: tip 其他同级依赖
-组件还使用 `framer-motion`、`lucide-react`、`react-icons`、`jspdf`、`jszip`、`fast-xml-parser` 和 `i18next`/`react-i18next`，请安装所用功能需要的依赖。
+组件还使用 `framer-motion`、`lucide-react`、`react-icons`、`jspdf`、`jszip`、`fast-xml-parser` 和 `i18next`/`react-i18next`，请安装所用功能需要的依赖。如果通过 `PptxI18nProvider` 翻译，请从 `pptx-react-viewer/no-i18next` 导入：它从不使用也不打包 `i18next` 和 `react-i18next`，但由于它们是声明的 peer 依赖，大多数包管理器仍会安装它们，详见[不使用 react-i18next](/zh/guide/localization#without-react-i18next)。
 :::
 
 ### Vue 3 组件 {#vue-3-viewer}
@@ -60,19 +60,19 @@ Vue 3 组件的包名为 **`pptx-vue-viewer`**，已包含核心引擎。
 ::: code-group
 
 ```bash [npm]
-npm install pptx-vue-viewer vue
+npm install pptx-vue-viewer vue vue-i18n
 ```
 
 ```bash [pnpm]
-pnpm add pptx-vue-viewer vue
+pnpm add pptx-vue-viewer vue vue-i18n
 ```
 
 ```bash [yarn]
-yarn add pptx-vue-viewer vue
+yarn add pptx-vue-viewer vue vue-i18n
 ```
 
 ```bash [bun]
-bun add pptx-vue-viewer vue
+bun add pptx-vue-viewer vue vue-i18n
 ```
 
 :::
@@ -97,19 +97,19 @@ Angular 组件的包名为 **`pptx-angular-viewer`**，已包含核心引擎。
 ::: code-group
 
 ```bash [npm]
-npm install pptx-angular-viewer @angular/core @angular/common
+npm install pptx-angular-viewer @angular/core @angular/common @angular/platform-browser @ngx-translate/core rxjs
 ```
 
 ```bash [pnpm]
-pnpm add pptx-angular-viewer @angular/core @angular/common
+pnpm add pptx-angular-viewer @angular/core @angular/common @angular/platform-browser @ngx-translate/core rxjs
 ```
 
 ```bash [yarn]
-yarn add pptx-angular-viewer @angular/core @angular/common
+yarn add pptx-angular-viewer @angular/core @angular/common @angular/platform-browser @ngx-translate/core rxjs
 ```
 
 ```bash [bun]
-bun add pptx-angular-viewer @angular/core @angular/common
+bun add pptx-angular-viewer @angular/core @angular/common @angular/platform-browser @ngx-translate/core rxjs
 ```
 
 :::
@@ -228,7 +228,7 @@ bun add pptx-viewer-core
 
 ### MCP 服务器与工具 {#mcp-server-and-tools}
 
-基于核心引擎提供 73 个 PPTX 操作工具函数、面向 AI 智能体的 MCP 服务器，以及 Y.Doc 协作编解码器。
+基于核心引擎提供 74 个 PPTX 操作工具函数、面向 AI 智能体的 MCP 服务器，以及 Y.Doc 协作编解码器。
 
 ::: code-group
 

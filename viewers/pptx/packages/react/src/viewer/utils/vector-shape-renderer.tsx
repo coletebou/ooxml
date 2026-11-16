@@ -1,5 +1,8 @@
 import {
 	buildStrokeOutline,
+	connectorNeedsPath,
+	connectorSnapTransform,
+	connectorStrandScreenWidth,
 	isArrowedCustomPath,
 	buildSvgGradientDef,
 	getPresetShapeVectorGeometry,
@@ -59,60 +62,13 @@ export function renderVectorShape(
 		dashType,
 		Math.max(strokeWidth, 1),
 		element.shapeStyle?.customDashSegments,
+		element.shapeStyle?.lineCap,
 	);
-	if (normalizedType === 'can' || normalizedType === 'cylinder') {
-		const width = Math.max(element.width, 1);
-		const height = Math.max(element.height, 1);
-		const rim = Math.max(Math.min(height * 0.16, 28), 6);
-		const stroke = Math.max(strokeWidth, 1);
-		// Never under one device pixel on screen (shared `device-pixel-stroke`).
-		const screenStroke = { strokeWidth: screenStrokeWidth(stroke) };
-		return (
-			<svg
-				viewBox={`0 0 ${width} ${height}`}
-				className='w-full h-full pointer-events-none'
-				preserveAspectRatio='none'
-			>
-				<ellipse
-					cx={width / 2}
-					cy={rim / 2}
-					rx={width / 2}
-					ry={rim / 2}
-					fill={hasFill ? fillPaint : 'none'}
-					stroke={strokeWidth > 0 ? strokePaint : 'none'}
-					strokeWidth={stroke}
-					strokeDasharray={dashArray}
-					vectorEffect='non-scaling-stroke'
-					style={screenStroke}
-				/>
-				<rect
-					x={0}
-					y={rim / 2}
-					width={width}
-					height={Math.max(height - rim, 1)}
-					fill={hasFill ? fillPaint : 'none'}
-					stroke={strokeWidth > 0 ? strokePaint : 'none'}
-					strokeWidth={stroke}
-					strokeDasharray={dashArray}
-					vectorEffect='non-scaling-stroke'
-					style={screenStroke}
-				/>
-				<ellipse
-					cx={width / 2}
-					cy={height - rim / 2}
-					rx={width / 2}
-					ry={rim / 2}
-					fill={hasFill ? fillPaint : 'none'}
-					stroke={strokeWidth > 0 ? strokePaint : 'none'}
-					strokeWidth={stroke}
-					strokeDasharray={dashArray}
-					vectorEffect='non-scaling-stroke'
-					style={screenStroke}
-				/>
-			</svg>
-		);
-	}
 
+	// `can` is deliberately NOT drawn here: it is a split-layout preset (see
+	// `getSplitStrokePresetPaths`) painted by the shared per-sub-path fill overlay and the
+	// stroke outline like in every other binding. A hand-drawn ellipse/rect stand-in used to
+	// live here (React only), which flattened the lid shading and doubled its outline.
 	if (
 		(element.type === 'shape' || element.type === 'image' || element.type === 'picture') &&
 		element.pathData &&
@@ -143,7 +99,10 @@ export function renderVectorShape(
 			// container's `background-image` is suppressed for custom geometry, so
 			// without this the shape fell back to the parser's representative solid
 			// and lost every fade (issue #132).
-			buildSvgGradientDef(element.shapeStyle, element.id),
+			buildSvgGradientDef(element.shapeStyle, element.id, {
+				width: element.width,
+				height: element.height,
+			}),
 		);
 	}
 
@@ -304,11 +263,19 @@ export function renderVectorShape(
 		const endArrowL = element.shapeStyle?.connectorEndArrowLength;
 		const compoundLine = element.shapeStyle?.compoundLine;
 		// Line cap from a:ln/@cap (flat -> butt, sq -> square, rnd -> round).
-		const connectorLineCap = svgLineCap(element.shapeStyle?.lineCap);
+		const connectorLineCap = svgLineCap(element.shapeStyle?.lineCap, dashArray !== undefined);
 		// Hit target width: wide invisible stroke so thin lines are easy to click
 		const hitTargetWidth = Math.max(strokeWidth * 3, 12);
 		const offsets = getCompoundLineOffsets(compoundLine, strokeWidth);
 		const widths = getCompoundLineWidths(compoundLine, strokeWidth);
+		// Snapped to the device grid like the interactive connector (shared
+		// `device-pixel-stroke`): a group's children render through this path.
+		const snapTransform = connectorSnapTransform(
+			element,
+			!connectorNeedsPath(element.shapeType),
+			offsets.length,
+			strokeWidth,
+		);
 
 		return (
 			<svg
@@ -355,8 +322,12 @@ export function renderVectorShape(
 						vectorEffect='non-scaling-stroke'
 						style={{
 							pointerEvents: 'none',
-							strokeWidth: screenStrokeWidth(Math.max(widths[idx] ?? strokeWidth, 1)),
-							...(offset !== 0 ? { transform: `translate(0, ${offset}px)` } : {}),
+							strokeWidth: connectorStrandScreenWidth(widths, strokeWidth, idx),
+							...(offset !== 0
+								? { transform: `translate(0, ${offset}px)` }
+								: snapTransform
+									? { transform: snapTransform }
+									: {}),
 						}}
 					/>
 				))}

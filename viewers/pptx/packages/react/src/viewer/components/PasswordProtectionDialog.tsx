@@ -1,8 +1,9 @@
+import { getPasswordStrength, validatePasswordPair } from 'ooxml-ui/pptx';
 import React, { useState, useCallback, useMemo, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
 import { LuLock, LuShieldCheck, LuX, LuEye, LuEyeOff } from 'react-icons/lu';
 
 import { useModalFocus } from '../hooks/useModalFocus';
+import { useTranslation } from '../i18n/use-translation';
 import { DialogFooter } from './DialogFooter';
 
 // ---------------------------------------------------------------------------
@@ -17,33 +18,11 @@ export interface PasswordProtectionDialogProps {
 	onRemovePassword: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Returns a strength score 0-4 for a password. */
-function getPasswordStrength(password: string): number {
-	if (!password) {
-		return 0;
-	}
-	let score = 0;
-	if (password.length >= 8) {
-		score++;
-	}
-	if (password.length >= 12) {
-		score++;
-	}
-	if (/[A-Z]/u.test(password) && /[a-z]/u.test(password)) {
-		score++;
-	}
-	if (/\d/u.test(password)) {
-		score++;
-	}
-	if (/[^A-Za-z0-9]/u.test(password)) {
-		score++;
-	}
-	return Math.min(score, 4);
-}
+const PASSWORD_ERROR_KEYS = {
+	required: 'pptx.security.errorPasswordRequired',
+	mismatch: 'pptx.security.errorPasswordMismatch',
+	tooShort: 'pptx.security.errorPasswordTooShort',
+} as const;
 
 const STRENGTH_COLORS = [
 	'bg-red-500',
@@ -88,16 +67,9 @@ export function PasswordProtectionDialog({
 
 	const handleSubmit = useCallback(() => {
 		setError('');
-		if (!password) {
-			setError(t('pptx.security.errorPasswordRequired'));
-			return;
-		}
-		if (password !== confirmPassword) {
-			setError(t('pptx.security.errorPasswordMismatch'));
-			return;
-		}
-		if (password.length < 4) {
-			setError(t('pptx.security.errorPasswordTooShort'));
+		const invalid = validatePasswordPair(password, confirmPassword);
+		if (invalid) {
+			setError(t(PASSWORD_ERROR_KEYS[invalid]));
 			return;
 		}
 		onSetPassword(password);

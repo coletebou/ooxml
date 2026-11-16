@@ -8,6 +8,8 @@ import { hasOwnFontDeclaration, paragraphContentEntries } from './paragraph-sibl
 import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeShapeTextParsing';
 import type { ShapeTextParsingContext, ParagraphContentResult } from './PptxHandlerRuntimeTypes';
 import { parseRubyElement } from './ruby-element-parsing';
+import { at } from '../../../../geometry/indexed';
+import { isFiniteNumber } from '../../../../units/finite';
 
 /** `a:p` children that contribute renderable content, in no particular order. */
 const PARAGRAPH_CONTENT_TAGS: ReadonlySet<string> = new Set([
@@ -463,7 +465,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			if (segments.length === 0) {
 				const endParaSz = (p['a:endParaRPr'] as XmlObject | undefined)?.['@_sz'];
 				const endParaPoints = endParaSz !== undefined ? parseInt(String(endParaSz)) / 100 : NaN;
-				if (Number.isFinite(endParaPoints) && endParaPoints > 0) {
+				if (isFiniteNumber(endParaPoints) && endParaPoints > 0) {
 					separatorStyle.fontSize = endParaPoints * (96 / 72);
 				}
 			}
@@ -491,7 +493,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const emptyParagraphStyle = withAuthoredSplit({}) as TextStyle;
 			const endParaSz = (p['a:endParaRPr'] as XmlObject | undefined)?.['@_sz'];
 			const endParaPoints = endParaSz !== undefined ? parseInt(String(endParaSz)) / 100 : NaN;
-			if (Number.isFinite(endParaPoints) && endParaPoints > 0) {
+			if (isFiniteNumber(endParaPoints) && endParaPoints > 0) {
 				emptyParagraphStyle.fontSize = endParaPoints * (96 / 72);
 			}
 			segments.push({ text: '', style: emptyParagraphStyle });
@@ -520,8 +522,11 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			// and dropping those extra fields here silently lost the independent
 			// `buClrTx`/`buSzTx`/`buFontTx` "inherit from text" markers a paragraph
 			// may still author alongside `buNone`.
-			if (xmlHasChild(pPrRaw, 'a:buNone') && segments[firstSegmentIndex].bulletInfo === undefined) {
-				segments[firstSegmentIndex].bulletInfo = paragraphBulletInfo ?? {
+			if (
+				xmlHasChild(pPrRaw, 'a:buNone') &&
+				at(segments, firstSegmentIndex).bulletInfo === undefined
+			) {
+				at(segments, firstSegmentIndex).bulletInfo = paragraphBulletInfo ?? {
 					none: true,
 					ownedByParagraph: true,
 				};
@@ -531,8 +536,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				const lvlParsed = Number.parseInt(String(lvlRaw), 10);
 				// An authored `lvl="0"` is kept as level 0 (not dropped as the
 				// schema default) so a rewritten slide re-emits the attribute.
-				if (Number.isFinite(lvlParsed) && lvlParsed >= 0) {
-					segments[firstSegmentIndex].paragraphLevel = Math.min(Math.max(lvlParsed, 0), 8);
+				if (isFiniteNumber(lvlParsed) && lvlParsed >= 0) {
+					at(segments, firstSegmentIndex).paragraphLevel = Math.min(Math.max(lvlParsed, 0), 8);
 				}
 			}
 			const endParaRPrRaw = p['a:endParaRPr'];
@@ -548,13 +553,13 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 				// mutations on the writer side don't leak back into the parsed
 				// XML object that other parts of the load pipeline still hold a
 				// reference to.
-				segments[firstSegmentIndex].endParaRunProperties =
+				at(segments, firstSegmentIndex).endParaRunProperties =
 					typeof endParaRPrRaw === 'object' && endParaRPrRaw !== null
 						? { ...(endParaRPrRaw as Record<string, unknown>) }
 						: {};
 			}
 			if (entries.length === 0) {
-				segments[firstSegmentIndex].paragraphInsertionStyle = withAuthoredSplit(
+				at(segments, firstSegmentIndex).paragraphInsertionStyle = withAuthoredSplit(
 					endParaRPrRaw && typeof endParaRPrRaw === 'object'
 						? this.extractTextRunStyle(
 								endParaRPrRaw as XmlObject,
@@ -569,15 +574,26 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			// #69: capture this paragraph's own pPr geometry so per-paragraph
 			// alignment / spacing / margins / indent / tabs round-trip instead
 			// of being flattened to one shape-level pPr on save.
+			// `a:spcPct` spacing is a share of the paragraph's own line, so its
+			// basis is the paragraph's text size, not the level default: on
+			// PowerPoint 16 exports a 40pt and a 20pt paragraph with `spcBef`
+			// 50% opened 24pt and 12pt above themselves.
+			const runSizes = segments.flatMap((segment) =>
+				segment.text && segment.text !== '\n' && !segment.bulletInfo && segment.style?.fontSize
+					? [segment.style.fontSize]
+					: [],
+			);
 			const basisFontSize =
-				typeof mergedDefaultRunStyle.fontSize === 'number'
-					? mergedDefaultRunStyle.fontSize
-					: undefined;
+				runSizes.length > 0
+					? Math.max(...runSizes)
+					: typeof mergedDefaultRunStyle.fontSize === 'number'
+						? mergedDefaultRunStyle.fontSize
+						: undefined;
 			const paragraphOwnProps = this.extractParagraphOwnProperties(p, basisFontSize);
 			if (paragraphOwnProps) {
-				segments[firstSegmentIndex].paragraphProperties = paragraphOwnProps;
+				at(segments, firstSegmentIndex).paragraphProperties = paragraphOwnProps;
 			}
-			stampParagraphMarkupFlags(segments[firstSegmentIndex], p, entries.length > 0);
+			stampParagraphMarkupFlags(at(segments, firstSegmentIndex), p, entries.length > 0);
 		}
 
 		return { parts, segments, seedStyle };

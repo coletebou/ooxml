@@ -7,7 +7,10 @@ import {
 	deviceStrokeStageStyle,
 	neutralizeDeviceStrokes,
 	screenBorder,
+	screenBorderWidth,
 	screenStrokeWidth,
+	snappedStrokeShift,
+	snappedStrokeTransform,
 	watchDevicePixelRatio,
 	withAuthoredStrokeWidths,
 } from './device-pixel-stroke';
@@ -15,8 +18,12 @@ import { prepareExportClone } from './export-clone';
 
 describe('screenStrokeWidth', () => {
 	it('holds a painted width at one device pixel or more, authored where the var is unset', () => {
-		expect(screenStrokeWidth(0.13)).toBe('max(0.13px, var(--pptx-device-px, 0px))');
-		expect(screenStrokeWidth(2)).toBe('max(2px, var(--pptx-device-px, 0px))');
+		expect(screenStrokeWidth(0.13)).toBe(
+			'max(max(var(--pptx-device-px, 0px), 0.001px), round(0.13px, max(var(--pptx-device-px, 0px), 0.001px)))',
+		);
+		expect(screenStrokeWidth(2)).toBe(
+			'max(max(var(--pptx-device-px, 0px), 0.001px), round(2px, max(var(--pptx-device-px, 0px), 0.001px)))',
+		);
 	});
 
 	it('keeps a zero, negative, missing or non-finite width at 0px (no invented hairline)', () => {
@@ -26,8 +33,12 @@ describe('screenStrokeWidth', () => {
 	});
 
 	it('never emits exponent notation, which CSS rejects', () => {
-		expect(screenStrokeWidth(1e-7)).toBe('max(0.0001px, var(--pptx-device-px, 0px))');
-		expect(screenStrokeWidth(1 / 3)).toBe('max(0.3333px, var(--pptx-device-px, 0px))');
+		expect(screenStrokeWidth(1e-7)).toBe(
+			'max(max(var(--pptx-device-px, 0px), 0.001px), round(0.0001px, max(var(--pptx-device-px, 0px), 0.001px)))',
+		);
+		expect(screenStrokeWidth(1 / 3)).toBe(
+			'max(max(var(--pptx-device-px, 0px), 0.001px), round(0.3333px, max(var(--pptx-device-px, 0px), 0.001px)))',
+		);
 	});
 
 	it('builds a border shorthand from the same width', () => {
@@ -145,6 +156,8 @@ describe('export keeps authored widths', () => {
 		// attribute back would shift a framework-set transform on the live stage.
 		const { host, stage } = stageWithStroke();
 		stage.style.setProperty('transform', 'scale(0.9958333333)');
+		// What the engine stores for it (some round the number); the restore must leave it as is.
+		const transform = stage.style.getPropertyValue('transform');
 		const writes: string[] = [];
 		const setAttribute = stage.setAttribute.bind(stage);
 		stage.setAttribute = (name: string, value: string) => {
@@ -153,7 +166,7 @@ describe('export keeps authored widths', () => {
 		};
 		withAuthoredStrokeWidths(host, () => undefined);
 		expect(writes).toEqual([]);
-		expect(stage.style.getPropertyValue('transform')).toBe('scale(0.9958333333)');
+		expect(stage.style.getPropertyValue('transform')).toBe(transform);
 		expect(stage.style.getPropertyValue(DEVICE_PX_VAR)).toBe(
 			'calc(1px / (0.5 * var(--pptx-dpr, 1)))',
 		);
@@ -168,5 +181,61 @@ describe('export keeps authored widths', () => {
 		expect(stage.style.getPropertyValue(DEVICE_PX_VAR)).toBe(
 			'calc(1px / (0.5 * var(--pptx-dpr, 1)))',
 		);
+	});
+});
+
+describe('PowerPoint thin-line rule (measured on PowerPoint 16 exports)', () => {
+	const STEP = 'max(var(--pptx-device-px, 0px), 0.001px)';
+
+	it('quantizes a width to whole device pixels instead of keeping the authored fraction', () => {
+		expect(screenStrokeWidth(1.3333)).toBe(`max(${STEP}, round(1.3333px, ${STEP}))`);
+		expect(screenStrokeWidth(1.3333)).not.toBe('max(1.3333px, var(--pptx-device-px, 0px))');
+	});
+
+	it('floors a width off screen only when asked, and never inside a stage', () => {
+		expect(screenStrokeWidth(0.5)).not.toContain('clamp(');
+		const floored = screenStrokeWidth(0.5, 1);
+		expect(floored).toContain('clamp(0px, calc(var(--pptx-device-px, 1000px) - 100px), 1px)');
+		expect(floored).toContain(`round(0.5px, ${STEP})`);
+	});
+
+	it('snaps an axis-aligned stroke by round(centre) - floor(n / 2) device pixels', () => {
+		const shift = snappedStrokeShift(27, 0.3333);
+		expect(shift).toContain(`round(27px, ${STEP})`);
+		expect(shift).toContain('round(down, calc(');
+		expect(shift).toMatch(/- 27px\)$/u);
+	});
+
+	it('shifts a horizontal line in y only, a vertical one in x only, a box in both', () => {
+		expect(snappedStrokeTransform('h', 10, 20, 1)).toMatch(/^translate\(0px, calc\(round\(20px,/u);
+		expect(snappedStrokeTransform('v', 10, 20, 1)).toMatch(
+			/^translate\(calc\(round\(10px,.*\), 0px\)$/u,
+		);
+		const box = snappedStrokeTransform('box', 10, 20, 1) ?? '';
+		expect(box).toContain('calc(round(10px,');
+		expect(box).toContain('calc(round(20px,');
+	});
+
+	it('snaps the far edges of a box on their own: translate to the near edge, scale to the far', () => {
+		const box = snappedStrokeTransform('box', 10, 20, 1, { width: 100, height: 40 }) ?? '';
+		expect(box).toMatch(/^translate\(.*\) scale\(calc\(\(100px \+ calc\(round\(110px,/u);
+		expect(box).toContain('calc((40px + calc(round(60px,');
+		// Without a size only the near edges move, as before.
+		expect(snappedStrokeTransform('box', 10, 20, 1)).not.toContain('scale');
+		expect(snappedStrokeTransform('h', 10, 20, 1, { width: 100, height: 40 })).not.toContain(
+			'scale',
+		);
+	});
+
+	it('shifts nothing for a missing, zero or non-finite width or position', () => {
+		expect(snappedStrokeTransform('h', 1, 1, 0)).toBeUndefined();
+		expect(snappedStrokeTransform('h', 1, 1, undefined)).toBeUndefined();
+		expect(snappedStrokeShift(Number.NaN, 1)).toBe('0px');
+	});
+
+	it('leaves a CSS border width unrounded: Chromium snaps borders in layout space', () => {
+		expect(screenBorderWidth(0.9375)).toBe('max(0.9375px, var(--pptx-device-px, 0px))');
+		expect(screenBorderWidth(0)).toBe('0px');
+		expect(screenBorder(1, 'solid', '#000')).not.toContain('round(');
 	});
 });

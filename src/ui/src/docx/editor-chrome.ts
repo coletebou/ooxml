@@ -1,6 +1,8 @@
 import type { RibbonElement } from './ribbon-tab-api';
-import { saveDocx, type DocumentModel } from 'ooxml-core/docx';
+import type { DocumentModel } from 'ooxml-core/docx';
 import {
+	type CloudFileProvider,
+	type CloudOpenedFile,
 	documentSaveMeta,
 	saveToStorage,
 	type DocumentSaveReason,
@@ -12,14 +14,22 @@ import {
 	announceFileCommand,
 	downloadBytes,
 	downloadText,
+	docxFileName,
 	withExtension,
 	type FileCommand,
 } from './file-commands';
 import { documentStats, plainText } from 'ooxml-core/docx';
-import { localizeElement, translate, type EditorLocale } from './localization';
+import { localizeElement, translate, translateUiText, type EditorLocale } from './localization';
 import { createRibbonActions, type RibbonActions } from './ribbon-actions';
 import { createStatusBar, type StatusBar } from './status-bar';
 import type { ResolvedWordCustomization, WordRegionContext } from './customization';
+import { confirmDialog } from '../dialog/message-dialogs';
+import {
+	attachShareDialog,
+	type ShareDialogController,
+	type ShareDialogHost,
+} from '../dialog/share-controller';
+import { saveProgressLabel } from '../files/save-progress-label';
 import { createTitleBar, type SaveState, type TitleBar } from './title-bar';
 
 /** What the chrome needs from the editor element; keeps component.ts free of chrome details. */
@@ -36,11 +46,19 @@ export interface ChromeHost {
 	save(): Promise<Uint8Array>;
 	/** Host-owned storage for Save and Open, when the host set one. */
 	storage?(): DocumentStorage | undefined;
+	/** Cloud places File > Open offers next to this device. */
+	fileProviders?(): readonly CloudFileProvider[];
+	/** Routes this document's Save to a cloud file's storage; locks it when it cannot be edited. */
+	useCloudFile?(file: CloudOpenedFile): void;
 	print(): void;
 	history(key: 'undo' | 'redo'): void;
 	toggleComments(): void;
 	/** Whether a collaboration session is live (Share then reads pressed). */
 	collaborating(): boolean;
+	/** The session the Share dialog starts, joins and stops (the element's `collaboration`). */
+	share(): ShareDialogHost;
+	/** The name the Share dialog suggests (the review author). */
+	userName(): string;
 	setViewMode(mode: 'draft' | 'print'): void;
 	setZoom(percent: number): void;
 	reportError(error: Error): void;
@@ -55,6 +73,8 @@ export interface ChromeHost {
 	customization(): ResolvedWordCustomization;
 	/** The context of a host region (a File tab page). */
 	regionContext(region: string): WordRegionContext;
+	/** File > Info > Check for Issues: opens the Document Inspector. */
+	inspectDocument?(): void;
 }
 
 export const DEFAULT_FILE_NAME = 'Document1.docx';
@@ -70,6 +90,7 @@ export class EditorChrome {
 	readonly statusBar: StatusBar;
 	readonly fileInput: HTMLInputElement;
 	private ribbon: RibbonElement | undefined;
+	private shareDialog: ShareDialogController | undefined;
 	private _fileName = DEFAULT_FILE_NAME;
 	private state: SaveState = 'saved';
 
@@ -111,6 +132,13 @@ export class EditorChrome {
 			setHiddenActions: (ids) => host.setHiddenActions(ids),
 			customization: () => host.customization(),
 			regionContext: (region) => host.regionContext(region),
+			fileProviders: () => host.fileProviders?.() ?? [],
+			openCloudFile: (file) => this.openCloudFile(file),
+			locale: () => host.locale(),
+			inspectDocument: () => {
+				this.closeBackstage();
+				host.inspectDocument?.();
+			},
 		});
 		this.statusBar = createStatusBar({
 			setViewMode: (mode) => host.setViewMode(mode),
@@ -143,13 +171,25 @@ export class EditorChrome {
 		ribbon.append(this.ribbonActions.element);
 		// The File button belongs to the shared ribbon; it asks for the File view with this event.
 		ribbon.addEventListener('office-ribbon-file', () => this.backstage.open('home'));
+		// Share opens the dialog every product uses, unless a host takes the `share` command.
+		this.shareDialog = attachShareDialog({
+			container: frame,
+			host: this.host.share(),
+			roomPrefix: 'doc',
+			defaults: () => ({ userName: this.host.userName() }),
+			locale: () => this.host.locale(),
+		});
+		this.host.element.addEventListener('collaboration-change', () => {
+			this.shareDialog?.refresh();
+			this.ribbonActions.setSharing(this.host.collaborating());
+		});
 	}
 
 	get fileName(): string {
 		return this._fileName;
 	}
 	set fileName(value: string) {
-		this._fileName = value || DEFAULT_FILE_NAME;
+		this._fileName = docxFileName(value) || DEFAULT_FILE_NAME;
 		this.titleBar.setFileName(this._fileName);
 	}
 	get isDirty(): boolean {
@@ -171,6 +211,7 @@ export class EditorChrome {
 		this.backstage.relocalize();
 		this.titleBar.relocalize();
 		this.ribbonActions.relocalize(locale);
+		this.shareDialog?.relocalize();
 		const fileTab = this.host.ribbon()?.querySelector('.dve-file-tab');
 		if (fileTab) fileTab.textContent = translate(locale, 'File');
 		this.fileInput.setAttribute('aria-label', translate(locale, 'Open'));
@@ -208,19 +249,18 @@ export class EditorChrome {
 		if ((command === 'save' || command === 'saveAs') && this.saving) return;
 		if (!announceFileCommand(this.host.element, command, fileName)) return;
 		try {
-			if (command === 'new') this.newDocument();
+			if (command === 'new') await this.newDocument();
 			else if (command === 'open') await this.open();
 			else if (command === 'print') this.host.print();
-			// Sharing needs the host's transport and authority, so there is no browser default.
-			else if (command === 'share') return;
+			// A host that cancels `file-command` shares its own way; otherwise the Share dialog.
+			else if (command === 'share') this.shareDialog?.open();
 			else if (command === 'exportText')
 				downloadText(plainText(this.host.model()), withExtension(this._fileName, 'txt'));
 			else if (command === 'saveAs') {
 				const name = (fileName ?? '').trim();
 				if (!name) return;
-				// The bytes are in the format the document was opened in, so the extension follows it.
-				const extension = this._fileName.split('.').pop()?.toLowerCase() === 'doc' ? 'doc' : 'docx';
-				this.fileName = withExtension(name, extension);
+				// The editor saves WordprocessingML only (a .doc is converted when opened).
+				this.fileName = withExtension(name, 'docx');
 				// Save As then saves, announced as its own `save` so a host that takes over Save sees it.
 				// A host that removed Save (`save: false`) gets neither that event nor `storage.save`:
 				// Save As then only downloads, as an export.
@@ -228,11 +268,10 @@ export class EditorChrome {
 					await this.saveDocument('saveAs', false);
 				else if (announceFileCommand(this.host.element, 'save')) await this.saveDocument('saveAs');
 			} else if (command === 'save') await this.saveDocument('save');
+			// The session's own save keeps what the standalone writer cannot create (the opened
+			// document's styles, media, parts), and is .docx for every format the editor opens.
 			else if (command === 'export')
-				downloadBytes(
-					await saveDocx(structuredClone(this.host.model())),
-					withExtension(this._fileName, 'docx'),
-				);
+				downloadBytes(await this.host.save(), withExtension(this._fileName, 'docx'));
 		} catch (cause) {
 			if (command === 'save' || command === 'saveAs') this.setSaveState('dirty');
 			this.host.reportError(cause instanceof Error ? cause : new Error(String(cause)));
@@ -257,11 +296,14 @@ export class EditorChrome {
 			const bytes = await this.host.save();
 			const storage = useStorage ? this.host.storage?.() : undefined;
 			if (storage)
-				this.fileName = await saveToStorage(
-					storage,
-					bytes,
-					documentSaveMeta(this._fileName, reason),
-				);
+				this.fileName = await saveToStorage(storage, bytes, {
+					...documentSaveMeta(this._fileName, reason),
+					onProgress: (progress) =>
+						this.titleBar.setSaveState(
+							'saving',
+							saveProgressLabel(progress, (text) => translateUiText(this.titleBar.element, text)),
+						),
+				});
 			else downloadBytes(bytes, this._fileName);
 			this.setSaveState(edited ? 'dirty' : storage ? 'saved' : 'saved-local');
 		} finally {
@@ -281,12 +323,37 @@ export class EditorChrome {
 		this.setSaveState('saved');
 	}
 
-	private newDocument(): void {
-		const prompt = translate(
-			this.host.locale(),
-			'Discard unsaved changes and start a new document?',
-		);
-		if (this.isDirty && typeof confirm === 'function' && !confirm(prompt)) return;
+	/**
+	 * Loads a file chosen in a cloud place. It does not announce `file-command`: the host chose to
+	 * offer the place. A failed load keeps the File view open and reports the error.
+	 */
+	async openCloudFile(file: CloudOpenedFile): Promise<void> {
+		if (this.host.customization().fileCommands.has('open')) return;
+		try {
+			await this.host.load(file.bytes);
+			this.host.useCloudFile?.(file);
+			this.fileName = file.fileName;
+			this.setSaveState('saved');
+			this.closeBackstage();
+		} catch (cause) {
+			this.host.reportError(cause instanceof Error ? cause : new Error(String(cause)));
+		}
+	}
+
+	private async newDocument(): Promise<void> {
+		const locale = this.host.locale();
+		if (
+			this.isDirty &&
+			!(await confirmDialog({
+				title: translate(locale, 'Unsaved changes'),
+				message: translate(locale, 'Discard unsaved changes and start a new document?'),
+				confirmLabel: translate(locale, 'Discard'),
+				cancelLabel: translate(locale, 'Cancel'),
+				tone: 'danger',
+				host: this.host.element,
+			}))
+		)
+			return;
 		this.host.newDocument();
 		this.fileName = DEFAULT_FILE_NAME;
 		this.setSaveState('saved');

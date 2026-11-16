@@ -15,21 +15,21 @@ description: PowerPointViewer 的组合式函数架构、pptx-vue-viewer/viewer 
 
 这些组合式函数说明了查看器的组装方式。它们可以导入（见下文），但依赖特定的组合顺序和共享输入。此表用于理解架构，并非 API 兼容性约定。
 
-| 组合式函数                  | 职责                                                                          |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| `useLoadContent`            | 加载时通过 `PptxHandler` 解析 PPTX 缓冲区。                                   |
-| `useEditorHistory`          | 撤销和重做快照栈，支持模板元素层（母版和布局）。                              |
-| `useEditorOperations`       | 元素创建、更新、删除和复制的基础操作。                                        |
-| `useElementDrag`            | 移动、缩放、旋转和调整，以及吸附和对齐参考线。                                |
-| `useElementInsertion`       | 插入形状、图片、文本框、表格和图表。                                          |
-| `useSlideOperations`        | 添加、删除、复制和重排幻灯片。                                                |
-| `useAutosave`               | 带防抖的自动保存定时器和状态，参见[属性 > 自动保存](/zh/vue/props#autosave)。 |
-| `usePresentationModeWiring` | 将幻灯片放映导航接入组件。                                                    |
-| `useExportWiring`           | 将 PNG / PDF / GIF / WebM 导出和打印接入组件。                                |
-| `useCollaborationWiring`    | 共享或广播对话框，以及由属性驱动的 Yjs 会话生命周期。                         |
-| `useRibbonProps`            | 组装完整的 Office 风格功能区 `RibbonProps` 接口。                             |
-| `useEditorKeyboard`         | 由配置驱动的键盘快捷键注册和分发。                                            |
-| `useIsMobile`               | 判断设备、视口、手机、平板和方向。                                            |
+| 组合式函数                  | 职责                                                                |
+| --------------------------- | ------------------------------------------------------------------- |
+| `useLoadContent`            | 加载时通过 `PptxHandler` 解析 PPTX 缓冲区。                         |
+| `useEditorHistory`          | 撤销和重做快照栈，支持模板元素层（母版和布局）。                    |
+| `useEditorOperations`       | 元素创建、更新、删除和复制的基础操作。                              |
+| `useElementDrag`            | 移动、缩放、旋转和调整，以及吸附和对齐参考线。                      |
+| `useElementInsertion`       | 插入形状、图片、文本框、表格和图表。                                |
+| `useSlideOperations`        | 添加、删除、复制和重排幻灯片。                                      |
+| `useAutosave`               | 自动保存间隔和状态，参见[属性 > 自动保存](/zh/vue/props#autosave)。 |
+| `usePresentationModeWiring` | 将幻灯片放映导航接入组件。                                          |
+| `useExportWiring`           | 将 PNG / PDF / GIF / WebM 导出和打印接入组件。                      |
+| `useCollaborationWiring`    | 共享或广播对话框，以及由属性驱动的 Yjs 会话生命周期。               |
+| `useRibbonProps`            | 组装完整的 Office 风格功能区 `RibbonProps` 接口。                   |
+| `useEditorKeyboard`         | 由配置驱动的键盘快捷键注册和分发。                                  |
+| `useIsMobile`               | 判断设备、视口、手机、平板和方向。                                  |
 
 此外还有数十个组合式函数，负责对话框、批注、节、SmartArt 编辑、表格编辑、放映子逻辑、移动端界面等。按职责分组的完整列表请参见 **[完整组合式函数参考](/zh/vue/composables-reference)** 。
 
@@ -128,6 +128,111 @@ history.undo(); // reverts both, most recent first
 ::: tip 快照顺序
 `pushHistory()` 保存的是**当前**状态，因此必须在提交修改之前运行。`useEditorOperations` 返回的操作会自动处理此顺序；只有自行修改 `slides` 时才需要手动调用 `pushHistory`。
 :::
+
+### 幻灯片缩略图栏 {#slide-thumbnail-rail}
+
+`SlidesPane`（从包根入口和 `pptx-vue-viewer/viewer` 导出）是 `PowerPointViewer` 在画布旁显示的幻灯片缩略图栏。它列出所有幻灯片（演示文稿包含节时归在节标题下）并突出显示当前幻灯片。它本身从不修改演示文稿：点击缩略图会发出 `select`；启用 `canEdit` 后，页脚、右键菜单、Enter 键和拖动重排会发出命令，由你映射到 `useSlideOperations` 和 `useSectionOperations`（同样从 `/viewer` 导出），因此它们共享你的撤销历史和协作同步。请传入 `useLoadContent` 提供的演示文稿属性，使缩略图像画布一样解析幻灯片编号、页眉页脚字段和表格样式。
+
+```vue
+<script setup lang="ts">
+import {
+	SlideCanvas,
+	SlidesPane,
+	useEditorHistory,
+	useLoadContent,
+	useSectionOperations,
+	useSlideOperations,
+} from 'pptx-vue-viewer/viewer';
+import { ref } from 'vue';
+import 'pptx-vue-viewer/styles';
+
+const props = defineProps<{ bytes: ArrayBuffer | null }>();
+const deck = useLoadContent(() => props.bytes);
+const { slides, templateElementsBySlideId } = deck;
+const active = ref(0);
+const history = useEditorHistory(slides);
+const slideOps = useSlideOperations({
+	slides,
+	activeSlideIndex: active,
+	pushHistory: history.pushHistory,
+	templateElementsBySlideId,
+});
+const sectionOps = useSectionOperations({
+	sections: deck.sections,
+	slides,
+	activeSlideIndex: active,
+	pushHistory: history.pushHistory,
+});
+</script>
+
+<template>
+	<div style="display: flex; height: 600px">
+		<SlidesPane
+			:slides="slides"
+			:template-elements-by-slide-id="templateElementsBySlideId"
+			:active-slide-index="active"
+			:canvas-size="deck.canvasSize.value"
+			:media-data-urls="deck.mediaDataUrls.value"
+			:section-groups="sectionOps.slidesBySection.value"
+			:header-footer="deck.headerFooter.value"
+			:custom-properties="deck.customProperties.value"
+			:first-slide-number="deck.firstSlideNumber.value"
+			:theme="deck.theme.value"
+			:table-style-map="deck.tableStyleMap.value"
+			can-edit
+			@select="active = $event"
+			@add-slide="slideOps.addSlide()"
+			@add-slide-after="slideOps.addSlide"
+			@move-slide="slideOps.moveSlide"
+			@duplicate-slide="slideOps.duplicateSlide"
+			@delete-slide="slideOps.deleteSlide"
+			@add-section="sectionOps.addSection"
+			@rename-section="sectionOps.renameSection"
+			@delete-section="sectionOps.deleteSection"
+			@move-section-up="sectionOps.moveSectionUp"
+			@move-section-down="sectionOps.moveSectionDown"
+			@toggle-section-collapse="sectionOps.toggleSectionCollapse"
+		/>
+		<div style="flex: 1; min-width: 0; position: relative">
+			<SlideCanvas
+				:slide="slides[active]"
+				:canvas-size="deck.canvasSize.value"
+				:media-data-urls="deck.mediaDataUrls.value"
+				:template-elements="templateElementsBySlideId[slides[active]?.id ?? '']"
+			/>
+		</div>
+	</div>
+</template>
+```
+
+多张幻灯片的命令会为每张选中的幻灯片各发出一个 `duplicate-slide`、`delete-slide` 或 `toggle-slide-hidden` 事件，按索引从高到低的顺序，因此每个副本都会紧跟在其源幻灯片之后。幻灯片右键菜单中的“版式”项会先为该幻灯片发出 `select`，再携带 `{ slideIndex, x, y }`（点击位置）发出 `open-layout-gallery`，供你渲染自己的版式库。未启用 `canEdit` 时，缩略图栏只用于导航，不显示“添加幻灯片”页脚。`SlidesPane` 需要完整的 `pptx-vue-viewer/styles` 样式表。
+
+### 单张幻灯片缩略图 {#single-slide-thumbnail}
+
+`SlideThumbnail`（与其 `SlideThumbnailProps` 类型一起，从包根入口和 `pptx-vue-viewer/viewer` 导出）按 `SlidesPane` 的方式绘制一张幻灯片，供维护自己缩略图条的宿主使用。它根据幻灯片模型渲染，因此会跟随未保存的编辑；它是静态的：没有选择、编辑、指针处理、焦点停靠或元素 id。设置了切换效果（“剪切”除外）的幻灯片会在右上角以小标记显示切换名称，各绑定的缩略图一致（Vue 的 `SlidesPane` 不绘制该标记）。其属性为 `slide`、`templateElements`（该幻灯片的版式和母版元素，绘制在其自身元素之下；默认为空）、`canvasSize` 和 `previewWidth`（像素；默认为缩略图栏的缩略图宽度；高度按演示文稿的宽高比计算），以及 `SlidesPane` 已接收的演示文稿属性：`mediaDataUrls`、`headerFooter`、`customProperties`、`firstSlideNumber`、`locale`、`theme` 和 `tableStyleMap`。请用相同的 `useLoadContent` 值同时驱动两者：
+
+```vue
+<template>
+	<ul class="my-strip">
+		<li v-for="slide in slides" :key="slide.id" style="width: 120px">
+			<SlideThumbnail
+				:slide="slide"
+				:template-elements="templateElementsBySlideId[slide.id]"
+				:canvas-size="deck.canvasSize.value"
+				:preview-width="120"
+				:media-data-urls="deck.mediaDataUrls.value"
+				:header-footer="deck.headerFooter.value"
+				:custom-properties="deck.customProperties.value"
+				:first-slide-number="deck.firstSlideNumber.value"
+				:theme="deck.theme.value"
+				:table-style-map="deck.tableStyleMap.value"
+			/>
+		</li>
+	</ul>
+</template>
+```
+
+缩略图填满其容器的宽度，高度为 `previewWidth` 按演示文稿宽高比计算的值，因此请为容器设置该宽度。它同样需要 `pptx-vue-viewer/styles` 样式表。
 
 ### `useCollaboration` {#usecollaboration}
 

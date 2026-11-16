@@ -2,7 +2,12 @@
  * Workbook I/O for the element: load (xlsx, xlsm, xls, csv through the core's `loadWorkbook`),
  * new, save, download, and the default handlers of the File commands.
  */
-import { documentSaveMeta, saveToStorage, type DocumentSaveReason } from 'ooxml-core/embedding';
+import {
+	documentSaveMeta,
+	saveToStorage,
+	type CloudOpenedFile,
+	type DocumentSaveReason,
+} from 'ooxml-core/embedding';
 import { createWorkbook, type Workbook } from 'ooxml-core/xlsx';
 import { createTemplateWorkbook, formatNotes, type TemplateId } from './backstage';
 import type { EditorCore } from './editor-core';
@@ -17,13 +22,15 @@ import {
 	withExtension,
 } from './file-commands';
 import { sheetBaseName } from 'ooxml-core/xlsx/ui';
+import { confirmDialog } from '../dialog/message-dialogs';
 import { printWorkbook } from './print';
 import { packagePassword } from './dialogs/package-password';
 import type { SaveState } from './title-bar';
+import { saveProgressLabel } from '../files/save-progress-label';
 
 /** Chrome callbacks the file actions report to (title bar save state, backstage). */
 export interface FileChrome {
-	setSaveState(state: SaveState): void;
+	setSaveState(state: SaveState, detail?: string): void;
 	fileNameChanged(): void;
 }
 
@@ -55,11 +62,14 @@ export async function loadInto(
 	bytes: Uint8Array | ArrayBuffer,
 	fileName: string | undefined,
 	chrome?: FileChrome,
+	cloud?: CloudOpenedFile,
 ): Promise<void> {
 	const generation = ++core.loadGeneration;
 	core.loading = true;
 	core.requestRender();
 	try {
+		// The file's fonts start downloading while it parses.
+		core.webfonts.prefetch(bytes);
 		const { loadWorkbook, isOoxmlCryptoError } = await import('ooxml-core/xlsx/load');
 		let password: string | undefined;
 		let workbook: Workbook;
@@ -81,7 +91,22 @@ export async function loadInto(
 			}
 		}
 		if (generation !== core.loadGeneration) return;
+		// The webfont fallback (`googleFonts`, off by default) waits here, bounded, so the workbook
+		// is first shown with its faces; `loading` stays true meanwhile.
+		await core.webfonts.prepare(workbook);
+		if (generation !== core.loadGeneration) return;
 		showWorkbook(core, workbook, fileName || core.fileName || DEFAULT_FILE_NAME, chrome);
+		if (cloud) {
+			// Set after showing: showing a workbook drops the previous file's storage and lock.
+			core.fileStorage = cloud.storage;
+			if (!cloud.canEdit) {
+				core.setFileReadOnly(true);
+				core.shell?.toast(
+					core.ctx.t('This workbook is read-only because the file cannot be edited.'),
+					'info',
+				);
+			}
+		}
 		if (workbook.warnings.length)
 			emit(core.host, 'workbook-warning', { warnings: [...workbook.warnings] });
 		const notes = formatNotes(workbook, core.ctx.t);
@@ -94,6 +119,40 @@ export async function loadInto(
 			core.requestRender();
 		}
 	}
+}
+
+/** Ask, in an in-app dialog, whether unsaved changes may be discarded. */
+function confirmDiscard(core: EditorCore, message: string): Promise<boolean> {
+	const t = core.ctx.t;
+	return confirmDialog({
+		title: t('Unsaved changes'),
+		message: t(message),
+		confirmLabel: t('Discard'),
+		cancelLabel: t('Cancel'),
+		tone: 'danger',
+		host: core.host,
+	});
+}
+
+/**
+ * Opens a file the user picked in a cloud place: the usual discard confirmation, then the normal
+ * load path. The workbook keeps `file.storage` for Save and Save As until another one is shown,
+ * and is read-only when the file is (the host's own read-only switch still applies on top).
+ */
+export async function openCloudFile(
+	core: EditorCore,
+	file: CloudOpenedFile,
+	chrome?: FileChrome,
+	confirmed?: () => void,
+): Promise<boolean> {
+	if (
+		core.dirty.dirty &&
+		!(await confirmDiscard(core, 'Discard unsaved changes and open another workbook?'))
+	)
+		return false;
+	confirmed?.();
+	await loadInto(core, file.bytes, file.fileName, chrome, file);
+	return core.fileStorage === file.storage;
 }
 
 export function newInto(core: EditorCore, chrome?: FileChrome): void {
@@ -159,7 +218,9 @@ async function saveDownload(
 	const source = core.workbook?.format;
 	let name = withExtension(core.fileName, saveExtension(core.fileName));
 	// A host that removed Save (`save: false`) never gets `storage.save`: Save As then downloads.
-	const storage = core.customization.commands.has('file.save') ? undefined : core.storage;
+	const storage = core.customization.commands.has('file.save')
+		? undefined
+		: (core.fileStorage ?? core.storage);
 	let edited = false;
 	const changed = () => (edited = true);
 	saving.add(core);
@@ -167,7 +228,15 @@ async function saveDownload(
 	try {
 		const bytes = await saveBytes(core, 'xlsx');
 		core.host.addEventListener('workbook-change', changed);
-		if (storage) name = await saveToStorage(storage, bytes, documentSaveMeta(name, reason));
+		if (storage)
+			name = await saveToStorage(storage, bytes, {
+				...documentSaveMeta(name, reason),
+				onProgress: (progress) =>
+					chrome?.setSaveState(
+						'saving',
+						saveProgressLabel(progress, (text) => core.ctx.t(text)),
+					),
+			});
 		else downloadBytes(core.host.ownerDocument, bytes, name);
 	} catch (error) {
 		chrome?.setSaveState('dirty');
@@ -196,6 +265,8 @@ async function saveDownload(
 export interface FileCommandOptions {
 	chrome?: FileChrome;
 	openBackstage?(page: 'saveAs'): void;
+	/** Share's default: the Share dialog. */
+	openShare?(): void;
 }
 
 /** The command id (`hiddenActions` / capability id) of each File command. */
@@ -207,6 +278,7 @@ const FILE_COMMAND_IDS: Record<FileCommand, string> = {
 	export: 'file.export',
 	exportCsv: 'file.export-csv',
 	print: 'file.print',
+	share: 'file.share',
 };
 
 /** Runs a File command unless a host cancels the `file-command` event to handle it itself. */
@@ -228,16 +300,14 @@ export async function runFileCommand(
 			case 'new':
 				if (
 					core.dirty.dirty &&
-					typeof confirm === 'function' &&
-					!confirm(t('Discard unsaved changes and start a new workbook?'))
+					!(await confirmDiscard(core, 'Discard unsaved changes and start a new workbook?'))
 				)
 					return;
 				return newInto(core, chrome);
 			case 'open': {
 				if (
 					core.dirty.dirty &&
-					typeof confirm === 'function' &&
-					!confirm(t('Discard unsaved changes and open another workbook?'))
+					!(await confirmDiscard(core, 'Discard unsaved changes and open another workbook?'))
 				)
 					return;
 				const storage = core.storage;
@@ -271,6 +341,8 @@ export async function runFileCommand(
 					core.shell?.toast(t('Only the current sheet was saved as CSV.'), 'info');
 				return;
 			}
+			case 'share':
+				return options.openShare?.();
 			case 'print':
 				if (!core.workbook) return;
 				return printWorkbook(

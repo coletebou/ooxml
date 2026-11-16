@@ -62,14 +62,15 @@ describe('getShapeVisualStyle soft-edge / fill-overlay effects', () => {
 
 	it('composes the soft-edge filter after glow in the filter chain', () => {
 		const style = getShapeVisualStyle(
-			makeShape({ glowColor: '#00ff00', glowRadius: 8, softEdgeRadius: 4 }),
+			makeShape({ fillColor: '#336699', glowColor: '#00ff00', glowRadius: 8, softEdgeRadius: 4 }),
 			true,
 			'#fff',
 			0,
 			'#000',
 		);
-		expect(style.filter).toContain('drop-shadow(');
-		expect(style.filter).toContain('url(#soft-edge-shape-1)');
+		// the glow is a spread box-shadow layer; the feather is the only filter
+		expect(style.boxShadow).toContain('rgba(0, 255, 0,');
+		expect(style.filter).toBe('url(#soft-edge-shape-1)');
 	});
 
 	it('drops the whole-element mix-blend-mode when a fill-overlay colour is present', () => {
@@ -117,7 +118,9 @@ describe('getShapeVisualStyle gradient tiling (a:tileRect, @flip)', () => {
 			0,
 			'#000',
 		);
-		expect(style.backgroundImage).toBe('linear-gradient(180deg, #ff0000 0%, #0000ff 100%)');
+		expect(style.backgroundImage).toMatch(
+			/^linear-gradient\(180deg, #ff0000 0%, .*#0000ff 100%\)$/iu,
+		);
 		// No explicit size: a gradient has no intrinsic size, so the initial
 		// `background-size: auto` already resolves to the whole positioning area
 		// (the border box, per `background-origin`). This is what the other four
@@ -325,16 +328,72 @@ describe('chart area outer shadow and glow on the chart container', () => {
 		} as unknown as PptxElement;
 	}
 
-	it('casts the shadow as a box-shadow and the glow as a drop-shadow, outside the frame', () => {
+	it('casts the shadow and the glow as box-shadows, outside the frame', () => {
 		const style = getShapeVisualStyle(chart(SHADOW), true, '#fff', 0, '#000') as Record<
 			string,
 			unknown
 		>;
 		expect(String(style['boxShadow'])).toContain('rgba(0, 0, 0, 0.4)');
-		expect(String(style['filter'])).toContain('drop-shadow');
+		expect(String(style['boxShadow'])).toMatch(/0 0 [\d.]+px [\d.]+px rgba\(/);
 	});
 
 	it('leaves a chart without chart-area effects plain', () => {
 		expect(getShapeVisualStyle(chart(undefined), true, '#fff', 0, '#000')).toStrictEqual({});
+	});
+});
+
+const MARKER_STROKE = { strokeColor: '#ffffff', strokeWidth: 4 };
+
+/** Stroked clip must reach past the geometry edge by half the line width (issue #144). */
+describe('react getShapeVisualStyle: centred outline is not clipped to half width', () => {
+	it('widens the clip of a solid stroked preset and leaves an unstroked one exact', () => {
+		const make = (shapeStyle: Record<string, unknown>): PptxElement =>
+			({
+				id: 'm',
+				type: 'shape',
+				shapeType: 'flowChartOffpageConnector',
+				x: 0,
+				y: 0,
+				width: 15,
+				height: 26,
+				shapeStyle,
+			}) as unknown as PptxElement;
+		const clipOf = (style: Record<string, unknown>): string =>
+			String(style['clipPath'] ?? style['clip-path'] ?? '');
+		const stroked = clipOf(getShapeVisualStyle(make(MARKER_STROKE), true, '#fc4c02', 4, '#ffffff'));
+		const bare = clipOf(
+			getShapeVisualStyle(make({ strokeWidth: 0 }), true, '#fc4c02', 0, '#ffffff'),
+		);
+		expect(bare).toContain('path(');
+		expect(stroked.length).toBeGreaterThan(bare.length);
+		expect(stroked.startsWith(bare.slice(0, bare.length - 2))).toBe(true);
+	});
+});
+
+describe('PowerPoint edge profiles of a shape shadow and glow', () => {
+	// Measured on PowerPoint 16 (see src/ui/src/pptx/render/effect-profile.ts): the
+	// blurred shadow is a Gaussian of 0.326 blurRad (CSS length 0.654 blurRad), the
+	// glow one box-shadow layer grown by 0.417 R and blurred by R / 3.
+	it('paints a blurRad 30 shadow at 20px and a rad 30 glow as one spread layer', () => {
+		const style = getShapeVisualStyle(
+			makeShape({
+				fillColor: '#C07020',
+				shadowColor: '#000000',
+				shadowBlur: 30,
+				shadowOpacity: 1,
+				outerShadowXml: {},
+				glowColor: '#FF0000',
+				glowRadius: 30,
+				glowOpacity: 0.6,
+			}),
+			true,
+			'#fff',
+			0,
+			'#000',
+		);
+		expect(String(style.boxShadow)).toBe(
+			'0px 0px 20px rgba(0, 0, 0, 1), 0 0 10px 12.5px rgba(255, 0, 0, 0.6)',
+		);
+		expect(String(style.filter ?? '')).not.toContain('drop-shadow');
 	});
 });

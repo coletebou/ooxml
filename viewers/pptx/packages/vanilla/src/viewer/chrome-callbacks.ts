@@ -24,6 +24,10 @@ import { createLazyActions } from './editor/editor-lazy-actions';
 import type { DrawTool } from './state';
 import type { ChromeOptions } from './ui';
 import type { RegionSet } from './ui/region-set';
+import type { BackstageCloudFiles } from './ui/ribbon/ribbon-types';
+
+/** No File > Open cloud places (the host passed no `fileProviders`). */
+const NO_CLOUD_FILES: BackstageCloudFiles = { providers: [], locale: undefined, open: () => {} };
 
 /**
  * The subset of {@link PptxViewer} behaviour the chrome (ribbon + notes
@@ -87,6 +91,10 @@ export interface ChromeCallbackDeps {
 	toggleMasterNavigation(): void;
 	/** Show/hide the right-hand property inspector panel. */
 	toggleInspector(): void;
+	/** The viewer's Format pane controller (one per viewer). */
+	formatPane?: import('ooxml-ui/pptx').FormatPaneController;
+	/** The viewer's Ribbon Display Options state. */
+	getRibbonDisplay(): import('ooxml-ui/pptx').RibbonDisplayController;
 	/** Select a single element by id (inspector Elements tab). */
 	selectElement(id: string): void;
 	/** Drop the current selection (Design > Slide Size opens the deck panel). */
@@ -111,6 +119,8 @@ export interface ChromeCallbackDeps {
 	openFile(): void;
 	openRecentFile(key: string): void;
 	createPresentation(templateId: string): void;
+	/** The host's `fileProviders` as File > Open places. */
+	getCloudFiles?(): BackstageCloudFiles | undefined;
 	/** Lazily resolve the editor's edit actions (editor is built after chrome). */
 	getEditActions(): EditActions;
 	/**
@@ -206,6 +216,13 @@ export function buildChromeCallbacks(
 			toggleTemplateEditing: () => deps.toggleTemplateEditing(),
 			toggleMasterView: () => deps.toggleMasterNavigation(),
 			toggleInspector: () => deps.toggleInspector(),
+			...(deps.formatPane
+				? {
+						requestFormatPane: (section: import('ooxml-ui/pptx').FormatSectionId) =>
+							deps.formatPane?.requestFormatPane(section, { focus: true }),
+					}
+				: {}),
+			getRibbonDisplay: () => deps.getRibbonDisplay(),
 			clearSelection: () => deps.clearSelection(),
 			toggleViewOption: (option) => deps.getEditActions().toggleViewOption(option),
 			addGuide: (axis) => deps.getEditActions().addGuide(axis),
@@ -221,6 +238,7 @@ export function buildChromeCallbacks(
 			openFile: () => deps.openFile(),
 			openRecentFile: (key) => deps.openRecentFile(key),
 			createPresentation: (templateId) => deps.createPresentation(templateId),
+			getCloudFiles: () => deps.getCloudFiles?.() ?? NO_CLOUD_FILES,
 			openSettings: () => deps.openSettings('general'),
 			getCustomization: deps.getCustomization,
 			getRegionSet: deps.getRegionSet,
@@ -271,7 +289,7 @@ export function buildChromeCallbacks(
 				deps.getEditActions().insert(kind, shapeType, tableSize),
 			insertImage: () => deps.getEditActions().insertImage(),
 			insertMedia: () => deps.getEditActions().insertMedia(),
-			insertChart: (chartType) => deps.getEditActions().insertChart(chartType),
+			insertChart: (chartType, options) => deps.getEditActions().insertChart(chartType, options),
 			insertSmartArt: (layout, defaultItems) =>
 				deps.getEditActions().insertSmartArt(layout, defaultItems),
 			insertEquation: (omml) => deps.getEditActions().insertEquation(omml),
@@ -305,6 +323,7 @@ export function buildChromeCallbacks(
 		},
 	};
 	const inspectorHandlers: ChromeOptions['inspectorHandlers'] = {
+		...(deps.formatPane ? { formatPane: deps.formatPane } : {}),
 		selectElement: (id) => deps.selectElement(id),
 		openDocumentProperties: () => deps.openDocumentProperties(),
 		getChartFollowDataPoint: () => deps.getChartFollowDataPoint(),
@@ -324,6 +343,7 @@ export function buildChromeCallbacks(
 		updateCanvasSize: (size) => deps.getEditActions().updateCanvasSize(size),
 		updateSlideSize: (size) => deps.getEditActions().updateSlideSize(size),
 		applySlideSizeRescale: (size, mode) => deps.getEditActions().applySlideSizeRescale(size, mode),
+		commentsPanel: () => deps.getEditActions().comments.panel,
 		addComment: (text, mentions) =>
 			void deps.getEditActions().comments.addComment(text, undefined, mentions),
 		addCommentReply: (parentId, text, mentions) =>
@@ -343,47 +363,36 @@ export function buildChromeCallbacks(
 			deps.getEditActions().reorderAnimation(elementId, direction),
 		setGeometry: (patch) => deps.getEditActions().setGeometry(patch),
 		toggleElementLock: () => deps.getEditActions().toggleElementLock(),
-		setShapeFill: (color, ref) => deps.getEditActions().setShapeFill(color, ref),
-		setShapeStroke: (color, ref) => deps.getEditActions().setShapeStroke(color, ref),
+		setShapeFill: (color, ref, committed) =>
+			deps.getEditActions().setShapeFill(color, ref, committed),
+		setShapeStroke: (color, ref, committed) =>
+			deps.getEditActions().setShapeStroke(color, ref, committed),
 		setShapeStrokeWidth: (width) => deps.getEditActions().setShapeStrokeWidth(width),
 		setShapeStyle: (patch) => deps.getEditActions().setShapeStyle(patch),
+		liveColor: (target, type, hex) => deps.getEditActions().liveColor(target, type, hex),
+		previewShapeStyle: (patch, target) => deps.getEditActions().previewShapeStyle(patch, target),
+		shapeStyleOf: (id) => deps.getEditActions().shapeStyleOf(id),
 		setShapeType: (shapeType) => deps.getEditActions().setShapeType(shapeType),
 		pushRecentColor: (hex) => deps.getEditActions().pushRecentColor(hex),
 
 		setTextVerticalAlign: (vAlign) => deps.getEditActions().setTextVerticalAlign(vAlign),
 		setTextWrap: (wrap) => deps.getEditActions().setTextWrap(wrap),
 		setAutoFitMode: (mode) => deps.getEditActions().setAutoFitMode(mode),
-		setTextAdvanced: (patch) => deps.getEditActions().setTextAdvanced(patch),
 		setTextStyle: (patch, selection) => deps.getEditActions().setTextStyle(patch, selection),
 
-		setFillOpacity: (opacity) => deps.getEditActions().setFillOpacity(opacity),
 		setStrokeOpacity: (opacity) => deps.getEditActions().setStrokeOpacity(opacity),
-		setGradientFill: (state) => deps.getEditActions().setGradientFill(state),
-		addGradientStop: (color, position) => deps.getEditActions().addGradientStop(color, position),
-		removeGradientStop: (index) => deps.getEditActions().removeGradientStop(index),
-		updateGradientStop: (index, changes) =>
-			deps.getEditActions().updateGradientStop(index, changes),
 
-		setImageBrightness: (value) => deps.getEditActions().setImageBrightness(value),
-		setImageContrast: (value) => deps.getEditActions().setImageContrast(value),
-		setImageSaturation: (value) => deps.getEditActions().setImageSaturation(value),
-		setImageCrop: (edge, value) => deps.getEditActions().setImageCrop(edge, value),
+		patchSelectedElement: (patch) => deps.getEditActions().patchSelectedElement(patch),
 		setImageEffects: (patch) => deps.getEditActions().setImageEffects(patch),
 		replaceImage: () => void deps.getEditActions().replaceSelectedImage(),
 		resetImage: () => deps.getEditActions().resetSelectedImage(),
 		resetCrop: () => deps.getEditActions().resetSelectedCrop(),
 		setElementAction: (trigger, action) => deps.getEditActions().setElementAction(trigger, action),
-		setAltText: (text) => deps.getEditActions().setAltText(text),
-		setTitle: (text) => deps.getEditActions().setTitle(text),
-		setOleName: (name) => deps.getEditActions().setOleName(name),
 		setOleContent: (patch) => deps.getEditActions().setOleContent(patch),
 		getDialogRegions: () => deps.getRegionSet?.(),
 		setChartData: (data) => deps.getEditActions().setChartData(data),
 		setMediaProperties: (patch) => deps.getEditActions().setMediaProperties(patch),
 
-		setTableHeaderRow: (enabled) => deps.getEditActions().setTableHeaderRow(enabled),
-		setTableBandedRows: (enabled) => deps.getEditActions().setTableBandedRows(enabled),
-		setTableCellPadding: (padding) => deps.getEditActions().setTableCellPadding(padding),
 		setTableOptions: (patch, cellStyle) => deps.getEditActions().setTableOptions(patch, cellStyle),
 		setTableData: (data, rawXml) => deps.getEditActions().setTableData(data, rawXml),
 		setTableCellStyle: (row, column, patch) =>
@@ -397,11 +406,6 @@ export function buildChromeCallbacks(
 		mergeTableCells: (cells) => deps.getEditActions().mergeTableCells(cells),
 		splitTableCell: (cell) => deps.getEditActions().splitTableCell(cell),
 
-		setSmartArtNodeText: (nodeId, text) => deps.getEditActions().setSmartArtNodeText(nodeId, text),
-		setSmartArtNodeStyle: (nodeId, patch) =>
-			deps.getEditActions().setSmartArtNodeStyle(nodeId, patch),
-		mutateSmartArtNode: (nodeId, action) =>
-			deps.getEditActions().mutateSmartArtNode(nodeId, action),
 		replaceSmartArtData: (data) => deps.getEditActions().replaceSmartArtData(data),
 		setSmartArtLayout: (layout) => deps.getEditActions().setSmartArtLayout(layout),
 		setSmartArtColorScheme: (scheme) => deps.getEditActions().setSmartArtColorScheme(scheme),

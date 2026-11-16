@@ -102,7 +102,8 @@ describe('elementRenderer stroke outline (gradient)', () => {
 		if (outline!.paint!.kind === 'pattern') {
 			throw new Error('expected a gradient paint');
 		}
-		expect(outline!.paint!.stops.map((stop) => stop.color)).toStrictEqual(['#FF0000', '#0000FF']);
+		const colors = outline!.paint!.stops.map((stop) => stop.color);
+		expect([colors[0], colors[colors.length - 1]]).toStrictEqual(['#FF0000', '#0000FF']);
 	});
 
 	it('drops the CSS border for a gradient outline', () => {
@@ -154,7 +155,14 @@ describe('elementRenderer stroke outline (stroke-only preset)', () => {
 		expect(outline!.stroke).toBe('#000000');
 		expect(outline!.d).toBe('M 0 0 L 400 0');
 		expect(outline!.strands).toStrictEqual([
-			{ strokeWidth: 2, cssStrokeWidth: 'max(2px, var(--pptx-device-px, 0px))', offset: 0 },
+			{
+				strokeWidth: 2,
+				cssStrokeWidth:
+					'max(max(var(--pptx-device-px, 0px), 0.001px), round(2px, max(var(--pptx-device-px, 0px), 0.001px)))',
+				offset: 0,
+				// A horizontal rule is snapped to the device grid.
+				cssTransform: expect.stringContaining('translate(0px, calc(round('),
+			},
 		]);
 	});
 

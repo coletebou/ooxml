@@ -6,6 +6,15 @@
 
 > Shared Office controls, styles and custom elements for browser applications.
 
+For host-owned storage or custom merge/sharing policies, use the provider-neutral
+[`DocumentStorage` and `createStorageSession` integration](../../docs/storage-integrations.md),
+shared across all editor elements and framework bindings.
+
+For the built-in OneDrive transport, use
+[`ooxml-core/embedding/onedrive`](../../docs/onedrive-integration.md). The reference covers
+`ooxml-ui/docx`, `/xlsx`, `/pptx`, `/visio`, every framework binding, OpenTeams sharing and
+conflict recovery. Microsoft authentication belongs to the host. No simulation service is shipped.
+
 [Try the apps](https://christophervr.github.io/ooxml/) | [npm](https://www.npmjs.com/package/ooxml-ui) | [Full docs](https://christophervr.github.io/ooxml/) | [Source](https://github.com/ChristopherVR/ooxml)
 
 Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): **[Office](https://github.com/ChristopherVR/ooxml#ooxml-office-the-whole-suite-in-one-app)** &middot; [Word](https://github.com/ChristopherVR/ooxml/tree/main/viewers/docx#readme) &middot; [Excel](https://github.com/ChristopherVR/ooxml/tree/main/viewers/xlsx#readme) &middot; [PowerPoint](https://github.com/ChristopherVR/ooxml/tree/main/viewers/pptx#readme) &middot; [Visio](https://github.com/ChristopherVR/ooxml/tree/main/viewers/visio#readme) &middot; [OpenTeams](https://github.com/ChristopherVR/ooxml/tree/main/viewers/teams#readme) &middot; [Core](https://github.com/ChristopherVR/ooxml/tree/main/src/core#readme)
@@ -24,6 +33,24 @@ dependencies are `ooxml-core` (types and a few pure helpers) and `lit`, which ev
 > package, which registers them for you. Importing `ooxml-ui` directly is for
 > the viewer packages themselves and for people building their own Office-style UI.
 
+Shared behavior helpers are also available to product hosts. `ooxml-ui/controls`
+exports `createLiveColorInput` and its leaf helpers for target-aware preview/commit
+transactions, plus `createDialogSession` for asynchronous submit and dismissal.
+The package root exports font catalogue, availability and custom-font services
+(`buildFontCatalog`, `scanAvailableFontFamilies`, `createFontFaceScope`) and
+`createRecoveryScheduler`. Hosts retain their document model, undo, storage,
+translation and focus-restoration policies. Dispose owned font scopes and sessions
+when the host unmounts. Font selection and script segmentation are DOM-free APIs
+in `ooxml-core/text`.
+
+PowerPoint hosts can import `buildFontCatalog` from the DOM-free
+`ooxml-ui/pptx/render/font-catalog` runtime entry. Set `includeWeightVariants: true`
+to add `entry.variants` with supported `{ family, weight }` faces, for example
+`DM Sans Medium` at 500; the 400 face keeps the plain family name. Omit the option
+for the existing output. Embedded/custom and unknown families do not inherit Google
+Fonts weights. All five PowerPoint dropdowns use the shared variant rows.
+See [font loading](../../docs/font-loading.md#font-picker-weights) for the input/output table.
+
 ## How the elements are built
 
 `office-ui-smartart` accepts `schemeFonts` (`major` and `minor` Latin typefaces)
@@ -38,7 +65,7 @@ stylesheet imported as `?raw`, tokens only). The folders are `form/` (checkbox, 
 search, zoom), `ribbon/` (button, group, stack, toolbar, tabs, section, toggle), `menu/` (menu button
 and item, separator, context menu, command search), `dialog/` (dialog, options dialog, dialog footer),
 `notices/` (toasts, read-only banner, paste options), `chrome/` (title bar, status bar and item, tab
-strip, task pane, backstage, account, find bar, print preview, ruler), `comments/` (the comments pane), `presence/`,
+strip, task pane, format section, backstage, account, find bar, print preview, ruler), `comments/` (the comments pane), `files/` (the cloud file browser), `presence/`,
 `smartart/` and `teams/`.
 
 - **`OfficeElement`** (`base.ts`) is the base class, exported for products that build their own
@@ -105,33 +132,35 @@ button.addEventListener('office-command', (event) => console.log(event.detail));
 document.body.append(button);
 ```
 
-## API: entries (ESM only)
+## API: entries (ESM, plus CJS for PowerPoint)
 
 The shared `office-ui-gallery` also supports `mode="panel"` for modal pickers.
 It displays labelled preview tiles directly, keeps focus when a pick refreshes the
 selection, and supports arrow, Home and End keys. Panel mode has no dropdown
 trigger or popup; `open` remains false. XLSX uses this mode for chart types while
 PowerPoint continues to use the same component for ribbon galleries. A `compact`
-panel keeps its tiles at their preview size without visible labels, and its arrow
-keys only move focus: PowerPoint's inspector uses it for Text Warp, whose pick
-applies at once.
+panel shows its tiles without visible labels, sharing the panel's width with the
+previews at their size, and its arrow keys only move focus: PowerPoint's inspector
+uses it for Text Warp and Quick Styles, whose picks apply at once.
 
-| Entry               | Contents                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `ooxml-ui`          | everything below plus `registerOfficeUi()` and `OFFICE_UI_TAGS`                                              |
-| `ooxml-ui/theme`    | `THEME_CSS`, `installOfficeUiTheme()` (tokens, dark mode, forced-colors, touch targets)                      |
-| `ooxml-ui/icons`    | icon registry (`registerIcon`, `getIcon`, `listIcons`) and `<office-ui-icon>`                                |
-| `ooxml-ui/controls` | button, checkbox, switch, select, ribbon group, toolbar, dialog, status bar and item, zoom slider, tab strip |
-| `ooxml-ui/presence` | `<office-ui-presence>` avatar stack for collaboration awareness                                              |
-| `ooxml-ui/smartart` | `<office-ui-smartart>`: draws a core `DiagramDrawing` as SVG                                                 |
-| `ooxml-ui/teams`    | the Teams elements and `<teams-app>`                                                                         |
-| `ooxml-ui/suite`    | browser document persistence the Office suite uses                                                           |
-| `ooxml-ui/docx`     | the Word editor and viewer elements (`<docx-editor>`)                                                        |
-| `ooxml-ui/xlsx`     | the Excel editor and viewer elements (`<xlsx-editor>`)                                                       |
-| `ooxml-ui/visio`    | the Visio editor and viewer elements (`<visio-viewer>`)                                                      |
-| `ooxml-ui/pptx`     | the PowerPoint renderer, editor and web components; also `/pptx/theme`, `/loader`, `/i18n`, `/ai`, `/dom`    |
+| Entry                           | Contents                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `ooxml-ui`                      | everything below plus `registerOfficeUi()` and `OFFICE_UI_TAGS`                                              |
+| `ooxml-ui/theme`                | `THEME_CSS`, `installOfficeUiTheme()` (tokens, dark mode, forced-colors, touch targets)                      |
+| `ooxml-ui/icons`                | icon registry (`registerIcon`, `getIcon`, `listIcons`) and `<office-ui-icon>`                                |
+| `ooxml-ui/controls`             | button, checkbox, switch, select, ribbon group, toolbar, dialog, status bar and item, zoom slider, tab strip |
+| `ooxml-ui/presence`             | `<office-ui-presence>` avatar stack for collaboration awareness                                              |
+| `ooxml-ui/smartart`             | `<office-ui-smartart>` (draws a core `DiagramDrawing`), the SmartArt picker, text pane and Design galleries  |
+| `ooxml-ui/chart-format-locales` | the Chart Format pane's own translations (`CHART_FORMAT_STRINGS`), for a product dictionary to extend        |
+| `ooxml-ui/teams`                | the Teams elements and `<teams-app>`                                                                         |
+| `ooxml-ui/bindings`             | the framework binding kit; `/bindings/react`, `/vue` and `/solid` are its component factories                |
+| `ooxml-ui/suite`                | browser document persistence the Office suite uses                                                           |
+| `ooxml-ui/docx`                 | the Word editor and viewer elements (`<docx-editor>`)                                                        |
+| `ooxml-ui/xlsx`                 | the Excel editor and viewer elements (`<xlsx-editor>`)                                                       |
+| `ooxml-ui/visio`                | the Visio editor and viewer elements (`<visio-viewer>`)                                                      |
+| `ooxml-ui/pptx`                 | the PowerPoint renderer, editor and web components; also `/pptx/theme`, `/loader`, `/i18n`, `/ai`, `/dom`    |
 
-Every entry declares an `import` and a `default` export condition, so CommonJS consumers on Node 20.19+ or 22.12+ load it through `require(esm)`.
+Most entries declare an `import` and a `default` export condition, so CommonJS consumers on Node 20.19+ or 22.12+ load them through `require(esm)`; the `ooxml-ui/pptx` entries also declare a `require` condition for the CJS build.
 
 `installOfficeUiTheme()` installs one theme stylesheet in the document by default. Pass a
 `ShadowRoot` to install scoped mode and control rules inside an embedding app's shadow tree.
@@ -148,6 +177,39 @@ controls follow the product palette.
 Importing an entry never touches the DOM (SSR-safe). Elements are defined by the `define*` /
 `register*` functions, which are idempotent, no-ops without a `window`, and refuse to coexist
 with an incompatible build of this package.
+
+## Framework binding kit (`ooxml-ui/bindings`)
+
+The machinery every product's framework adapters share (Word, Excel, Visio and Teams), so a product
+binding only declares what is its own. It has no framework imports and touches no DOM at import.
+
+- **A contract per product** (`BindingContract`): `props` lists each forwarded prop in forwarding
+  order with its policy (`always`, `changed`, `defined`: written only when set and changed, or
+  `manual`: left to the product's mount function), an optional `fallback`, equality (`same`),
+  `initial` value and `apply`; `events` maps each element event to its handler option
+  (`onDocumentChange`) and arguments (`eventArgs.detail`, `.event` for cancelable events such as
+  `file-command`, `.readOnly`, `.detailAndEvent`, `.field(name)`), and `readOnlyChange` adds the
+  `v-model:readOnly` / `[(readOnly)]` model that mirrors the host's own switch; `handle` lists the
+  imperative handle's members.
+- **`bindElement(element, contract, handlers)`** listens to the events (reading the current
+  handlers at event time) and forwards changed props; the product's mount function keeps what is
+  its own around it (Word's document model after collaboration, Excel's workbook, bytes and `src`
+  supersession, Visio's revision-aware patches, the Teams host class with `syncClassName`).
+- **Helpers**: `createPropTracker`, `shallowEqual`, `sameList`, `createSrcLoader`, `nameFromUrl`,
+  `deferredHandle` (a handle that throws a clear error before mount), `installHandle` (the same
+  members on an Angular component's prototype), `pickProps`, `eventOptions`, `contractOptions`,
+  `angularOutputs` and the framework naming rules (`svelteHandlerName`, `angularOutputName`).
+- **Component factories** for frameworks that need no compiler: `createReactBinding`
+  (`ooxml-ui/bindings/react`, a `forwardRef` component whose ref is the handle), `defineVueBinding`
+  (`/vue`: props, kebab-case emits, `v-model` and `expose` from the contract) and
+  `createSolidBinding` (`/solid`: a host element, reactive options and an `editorRef` callback).
+  React, Vue and Solid are optional peer dependencies. Angular components and `.svelte` files need
+  their compilers, so they stay in each product, as small as the helpers above make them.
+
+Each product checks every adapter against its contract (`contract-parity.test.ts` in the Word,
+Excel and Visio bindings, `bindings-contract.test.ts` in Teams). How a product defines a contract,
+how `bindElement` and the handle work, and how each framework adapter consumes them is in
+`src/ui/src/bindings/README.md`.
 
 ## One theme for composed editors
 
@@ -177,6 +239,22 @@ not require remounting the editor. The semantic palette includes `--office-backg
 and application background), `--office-surface` (toolbar and panel surfaces), `--office-foreground`,
 `--office-muted-foreground`, `--office-border`, `--office-selected`, and the accent and focus tokens
 above. Document paper, cell fills and slide artwork remain document content.
+
+### Looks
+
+`data-office-look` on the same scope as `data-office-theme` picks the chrome's shape, elevation
+and density; it never changes a colour. Without it the chrome keeps its flat default look.
+`data-office-look="cards"` (opt-in; the PowerPoint editor today) floats the ribbon, thumbnail rail,
+canvas, notes and side pane as rounded, shadowed cards 12px apart on a workspace background, turns
+the status bar's view switcher and zoom into pills, rounds menus, and gives the Format pane 36px
+section headings, 32px fields and a segmented tab strip. `applyOfficeLook(element, 'cards')` from
+`ooxml-ui/theme` sets it; switching keeps mounted editors as they are. The look's tokens
+(`--office-shadow-card`, `--office-shadow-card-strong`, `--office-card-border`,
+`--office-radius-surface`, `--office-radius-toolbar`, `--office-radius-control`,
+`--office-workspace-gap`, `--office-side-pane-width`, `--office-pane-heading-height`,
+`--office-pane-field-height`) have light and dark values; a host may also set
+`--office-workspace` for the background behind the cards. Put the attribute on the document root
+when a product attaches floating menus to `body`.
 
 Library-supplied native building blocks opt into `BUILDING_BLOCKS_CSS` through
 `prepareOfficeUiBlock(element, kind, product)`, exported by `ooxml-ui/theme`. It installs the shared
@@ -229,13 +307,19 @@ Arrow navigation stays within the current menu and skips disabled entries.
 | `office-ui-dialog-footer`                             | `state` `{ actions: [{ id, label, variant?, icon?, disabled?, busy?, title?, align?, testId? }] }`, `focusAction(id)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `office-dialog-footer-request` `{ id }`                                                                                                                                                                                                           |
 | `office-ui-toasts`                                    | `state` `{ toasts: [{ id, code?, severity, message }], overflowCount?, labels? }`; hidden when empty, host positions it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `office-toasts-request` `{ id: 'dismiss', toastId }` or `{ id: 'dismissAll' }`                                                                                                                                                                    |
 | `office-ui-read-only-banner`                          | `state` `{ kind, message, passwordPromptOpen?, passwordError?, checkingPassword?, labels? }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `office-read-only-request` (Edit anyway, Dismiss, password submit or cancel)                                                                                                                                                                      |
+| `office-ui-progress-dialog`                           | `state` `{ open, title, progress, status, cancelLabel? }`; a modal with a `role="progressbar"` (0 to 100) and a polite status line; Escape and the backdrop do nothing; focus moves to Cancel and returns on close                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `office-progress-cancel` (Cancel)                                                                                                                                                                                                                 |
 | `office-ui-paste-options`                             | `state` `{ left, top, options: [{ id, label }], label? }`; fixed 4px past the pasted object                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `office-paste-options-request` `{ format }`, `office-paste-options-dismiss`                                                                                                                                                                       |
 | `office-ui-title-bar`                                 | `state` `{ appMark?, fileName, status?, tone?, autosave?, quickAccess?: { label, items, showLabels? }, search? }`, `placement` (`titleBar`, `belowRibbon`); slots `collaboration`, `account`; tokens `--office-title-bar-*`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `office-autosave-toggle`, `office-command` `{ command }`, `office-command-search` `{ query, command? }`                                                                                                                                           |
 | `office-ui-ribbon-section`                            | `groups` `[{ id, label, commands: [{ id, label, icon, title?, size?, badge?, disabled?, active?, compact?, hidden?, caret?, pressed?, expanded?, column? }] }]`; keyed groups and commands in the light DOM                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | the commands' own events (`office-command`)                                                                                                                                                                                                       |
 | `office-ui-gallery`                                   | `state` `{ id, label, moreLabel?, disabled?, command?, sections: [{ title?, columns, tileWidth, tileHeight, items: [{ id, label, applied?, preview? }] }], inline? }`, `mode` (`inline`, `panel`), `compact` (a panel of unlabelled tiles), `chevron-only`, `icon`; `open`, `disabled`, `close()`; tiles in light DOM (`data-gallery-item`), previews parsed by `parseSvgPreview`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `office-gallery-pick` `{ gallery, itemId }`                                                                                                                                                                                                       |
 | `office-ui-comments-pane`                             | `threads` `[{ id, anchorLabel?, resolved, comments: [{ id, author, initials?, color?, created?, text, edited? }] }]`, `activeThreadId`, `read-only` (controls disabled), `list-only` (navigation list only), `closable`, `add-disabled`, `currentAuthor` (may edit own comments), `labels` (every string), `classNames` (`{ thread?, comment? }` product hook classes), `locale`; arrows, Home and End between threads, Enter or Space selects                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `comment-add` `{ text }`, `comment-reply` `{ threadId, text }`, `comment-edit` `{ threadId, commentId, text }`, `comment-delete` `{ threadId, commentId }`, `thread-resolve` / `thread-reopen` / `thread-select` `{ threadId }`, `comments-close` |
 | `office-ui-presence`                                  | `participants`, `max`, `label`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `office-presence-select` `{ id }`                                                                                                                                                                                                                 |
-| `office-ui-smartart`                                  | `drawing` (core `DiagramDrawing`), `schemeColors`, `label`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `office-smartart-render` (render report)                                                                                                                                                                                                          |
+| `office-ui-smartart`                                  | `drawing` (core `DiagramDrawing`), `schemeColors`, `schemeFonts`, `label`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `office-smartart-render` (render report)                                                                                                                                                                                                          |
+| `office-ui-smartart-picker`                           | `categories`, `layouts`, `labels`, `drawPreview`, `value`, `category`, `items-editor`, `accent`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `office-smartart-change` (every choice or edit), `office-smartart-activate` (double-click or Enter on a tile)                                                                                                                                     |
+| `office-ui-smartart-text-pane`                        | `nodes` (`{ id, text, level, marker?, style?, canMoveUp?, canMoveDown?, canRemove?, canAddChild? }`), `selected`, `labels`, `closable`, `tools`, `disabled`, `appendDisabled`, `notes` (the host applies every request)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `office-smartart-text-change` `{ id, text }`, `office-smartart-node-add` / `-promote` / `-demote` / `-remove` / `-select` `{ id }`, `office-smartart-text-pane-close`, and with `tools` `-append`, `-move`, `-add-child`, `-style`                |
+| `office-ui-chart-picker`                              | `types`, `groupings`, `groupedTypes`, `labels`, `drawPreview`, `value` `{ type, grouping, title, data? }`, `change-only`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `office-chart-change` (every edit, detail is the value)                                                                                                                                                                                           |
+| `office-ui-chart-data-sheet`                          | `data` `{ categories, series: [{ name, values }] }`, `labels`, `highlight`, `disabled`, `locale`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `office-chart-data-change` `{ edits, data }` (the host maps the edits onto its model)                                                                                                                                                             |
+| `office-ui-chart-format-pane`                         | `source` (`ChartFormatSource`) or `chartSpace`, `target`, `theme`, `translateLabel`, `locale`, `disabled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `office-chart-format-edit` `{ target, field, value, intent }`, `office-chart-format-target` `{ target }`, `office-chart-format-close`                                                                                                             |
 | `office-ui-icon`                                      | `name`, `label`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | none                                                                                                                                                                                                                                              |
 
 The local profile behind `office-ui-account` is stored on the device only, under one suite-wide
@@ -248,6 +332,17 @@ activate it (controls inside open shadow roots of shared elements, such as ribbo
 steps back; disabled controls are dimmed and never run.
 
 Elements with intent events read their event name and test-id prefix from static class fields (`requestEvent`, `testIdPrefix`), so a product can register a subclass under its own tag that keeps its published contract.
+
+`office-ui-dialog` keeps focus inside the dialog while it is open. Tab and Shift+Tab cycle through
+the body's controls in order, including the focusable controls inside the shadow root of a composite
+element slotted into the body (a picker such as `office-ui-chart-picker` is not itself focusable), and
+the close button; focus returns to the previous element on close.
+
+Chart and SmartArt editing elements (`office-ui-chart-format-pane`, `office-ui-chart-data-sheet`,
+`office-ui-chart-picker`, `office-ui-smartart-picker`, `office-ui-smartart-text-pane`) take the document
+data as properties and report each change as an event; they never write a model. Their events, the
+Chart Design galleries and the translations are described in `src/ui/src/chart/README.md` and
+`src/ui/src/smartart/README.md`.
 
 Setting a property never emits an event; only user activation does. Controls honour
 `prefers-color-scheme`, `forced-colors: active` (system colours and a visible focus ring) and
@@ -352,10 +447,22 @@ event detail (`approximatedGeometries`, `approximatedFills`, `flattened3d`); not
 ## Scope
 
 Only what every Office product needs lives here. Product-specific ribbon content (PowerPoint
-slides, transitions, animations; Word styles and review) lives in the product's own subpath (`src/ui/src/<product>/`), not in the shared entries. The
-`pptx-ui-*` tags are thin subclasses of the `office-ui-*` elements; `docs/ooxml-ui-plan.md` in the
-repository keeps the decisions that still apply (layout, style rules, the tag aliases and the
-token map).
+slides, transitions, animations; Word styles and review) lives in the product's own subpath
+(`src/ui/src/<product>/`), not in the shared entries. Most `pptx-ui-*` tags are thin subclasses of the
+`office-ui-*` elements; the chart and SmartArt dialogs (`pptx-ui-insert-chart-dialog`,
+`pptx-ui-insert-smartart-dialog`) are PowerPoint's own elements built from the shared pickers, and
+`pptx-ui-chart-format-pane` is the one subclass of a shared chart element. The aliases are listed in
+`src/ui/src/pptx/web-components/README.md`. `docs/ooxml-ui-plan.md` in the repository keeps the
+decisions that still apply (layout, style rules, the tag aliases and the token map).
+
+### PowerPoint headless controllers
+
+PowerPoint's framework-free state (undo history, autosave, autosave recovery and the collaboration
+session) lives in `src/ui/src/pptx/render/controller/` as headless
+controllers: plain objects with `getSnapshot()`, `subscribe()` and typed actions, which each binding
+adapts with one generic store adapter. The convention is documented in the header of
+`src/ui/src/pptx/render/controller/controller.ts`; the rule for when logic belongs there or in core is
+Rule 2 of `viewers/pptx/AGENTS.md`.
 
 ## Development
 
@@ -397,6 +504,10 @@ content and native media controls without editing overlays.
 
 [Core and UI source](https://github.com/ChristopherVR/ooxml) |
 [Shared UI decisions](https://github.com/ChristopherVR/ooxml/blob/main/docs/ooxml-ui-plan.md)
+
+## Privacy and network use
+
+The elements render and edit locally. The PowerPoint elements (`ooxml-ui/pptx`) download fonts that are neither installed nor embedded from Google Fonts by default, fetch linked pictures and media while "Allow external content" is on, and use public signaling and STUN servers for serverless Share; each has an option to turn it off (`googleFonts`, `allowExternalContent`, `signaling`), described in [font loading](https://github.com/ChristopherVR/ooxml/blob/main/docs/font-loading.md). The Word, Excel and Visio elements make no network request unless the host sets their `googleFonts` property or the reader turns on File > Options > Trust Center > "Download fonts that are not installed or embedded" (off by default; the same font requests as PowerPoint), and Teams talks only to the servers you configure (plus Google's public STUN server for calls unless `iceServers` is set). Nothing collects analytics or telemetry. See [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
 
 ## License
 

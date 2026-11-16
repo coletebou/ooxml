@@ -71,43 +71,54 @@
 				</div>
 			}
 			@if (currentPage() === 'home' || currentPage() === 'open') {
-				<pptx-ui-search
-					data-pptx-search-surface
-					class="search"
-					style="display: block; width: min(540px, 100%); margin-top: 32px"
-					data-pptx-search-input
-					[attr.placeholder]="'pptx.backstage.searchPlaceholder' | translate"
-					[attr.aria-label]="'pptx.backstage.searchPlaceholder' | translate"
-					[value]="query()"
-					(input)="query.set($any($event.target).value)"
-				/>
-				@if (currentPage() === 'open') {
-					<button class="primary" type="button" (click)="run(openFile)">
-						{{ 'pptx.backstage.browseDevice' | translate }}
-					</button>
-				}
-				<h2>{{ 'pptx.backstage.recentHeading' | translate }}</h2>
-				<div class="recent">
-					<header>
-						<span>{{ 'pptx.backstage.columnName' | translate }}</span
-						><span>{{ 'pptx.backstage.columnModified' | translate }}</span
-						><span>{{ 'pptx.backstage.columnSize' | translate }}</span>
-					</header>
-					@for (file of visibleRecent(); track file.key) {
-						<button type="button" (click)="openRecent(file.key)">
-							<span class="name"
-								><b>P</b
-								><span
-									><strong>{{ file.name }}</strong
-									><small>{{ file.location }}</small></span
-								></span
-							><span>{{ date(file.timestamp) }}</span
-							><span>{{ size(file.size) }}</span>
+				<pptx-ui-open-places
+					class="open-places"
+					[providers]="placeProviders()"
+					[accept]="openAccept"
+					[labels]="placeLabels()"
+					[locale]="locale()"
+					[selected]="placeId() ?? 'device'"
+					(office-open-place-change)="placeId.set($any($event).detail.place)"
+					(office-cloud-file-open)="openCloudFile($any($event).detail.file)"
+				>
+					<pptx-ui-search
+						data-pptx-search-surface
+						class="search"
+						style="display: block; width: min(540px, 100%); margin-top: 32px"
+						data-pptx-search-input
+						[attr.placeholder]="'pptx.backstage.searchPlaceholder' | translate"
+						[attr.aria-label]="'pptx.backstage.searchPlaceholder' | translate"
+						[value]="query()"
+						(input)="query.set($any($event.target).value)"
+					/>
+					@if (currentPage() === 'open') {
+						<button class="primary" type="button" (click)="run(openFile)">
+							{{ 'pptx.backstage.browseDevice' | translate }}
 						</button>
-					} @empty {
-						<p>{{ 'pptx.backstage.noRecent' | translate }}</p>
 					}
-				</div>
+					<h2>{{ 'pptx.backstage.recentHeading' | translate }}</h2>
+					<div class="recent">
+						<header>
+							<span>{{ 'pptx.backstage.columnName' | translate }}</span
+							><span>{{ 'pptx.backstage.columnModified' | translate }}</span
+							><span>{{ 'pptx.backstage.columnSize' | translate }}</span>
+						</header>
+						@for (file of visibleRecent(); track file.key) {
+							<button type="button" (click)="openRecent(file.key)">
+								<span class="name"
+									><b>P</b
+									><span
+										><strong>{{ file.name }}</strong
+										><small>{{ file.location }}</small></span
+									></span
+								><span>{{ date(file.timestamp) }}</span
+								><span>{{ size(file.size) }}</span>
+							</button>
+						} @empty {
+							<p>{{ 'pptx.backstage.noRecent' | translate }}</p>
+						}
+					</div>
+				</pptx-ui-open-places>
 			}
 			@if (actions().length) {
 				<div class="actions">

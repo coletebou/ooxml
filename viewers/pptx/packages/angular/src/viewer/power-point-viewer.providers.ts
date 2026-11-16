@@ -28,6 +28,7 @@ import { AutosaveService } from './autosave.service';
 import { ChartFormatPaneService } from './chart-format-pane.service';
 import { ChartPartSelectionService } from './chart-part-selection.service';
 import { CollaborationService } from './collaboration.service';
+import { CommentsPanelStateService } from './comments-panel-state.service';
 import { CustomFontsService } from './custom-fonts.service';
 import { EditorStateService } from './editor-state.service';
 import { EmbeddedFontsService } from './embedded-fonts.service';
@@ -35,6 +36,7 @@ import { ExportService } from './export.service';
 import { FieldContextService } from './field-context.service';
 import { GoogleWebfontsService } from './google-webfonts.service';
 import { IsMobileService } from './is-mobile';
+import { ListConversionScopeService } from './list-conversion-scope.service';
 import { LoadContentService } from './load-content.service';
 import { LoadNoticesService } from './load-notices.service';
 import { OutlineAuthoringService } from './outline-authoring.service';
@@ -66,6 +68,7 @@ import { ViewerPresentationModeService } from './viewer-presentation-mode.servic
 import { ViewerRegionService } from './viewer-region.service';
 import { ViewerThemeGalleryService } from './viewer-theme-gallery.service';
 import { ViewerTouchGesturesService } from './viewer-touch-gestures.service';
+import { ViewerViewportNavigationService } from './viewer-viewport-navigation.service';
 import { ViewerZoomService } from './viewer-zoom.service';
 import { ZoomTargetService } from './zoom-target.service';
 
@@ -97,6 +100,7 @@ export const POWER_POINT_VIEWER_PROVIDERS = [
 	FieldContextService,
 	RecentColorsService,
 	RibbonAddInsService,
+	ListConversionScopeService,
 	ZoomTargetService,
 	AiPanelStore,
 	ViewerDialogsService,
@@ -120,8 +124,10 @@ export const POWER_POINT_VIEWER_PROVIDERS = [
 	ViewerThemeGalleryService,
 	ViewerDeckStyleService,
 	ViewerTouchGesturesService,
+	ViewerViewportNavigationService,
 	ViewerZoomService,
 	OutlineAuthoringService,
 	PictureCropService,
 	ReviewCommentsNavigationService,
+	CommentsPanelStateService,
 ] as const;

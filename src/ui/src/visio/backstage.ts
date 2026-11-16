@@ -1,4 +1,6 @@
+import { VISIO_TEMPLATES } from 'ooxml-core/visio/ui';
 import type { OfficeBackstageItem } from '../controls';
+import { pdfOptionsPanel } from './viewer-pdf-options';
 
 /** Visio's File (backstage) pages, in Visio's order. Save and Close act without a page. */
 export const BACKSTAGE_ITEMS = [
@@ -82,52 +84,45 @@ function page(doc: Document, id: BackstagePage, title: string, ...content: Node[
 }
 
 /**
- * Share with people: a live session (Yjs) between tabs and windows of this browser. The room name
- * is all a second window needs; nothing is uploaded.
+ * File > Share: whether the drawing is shared, who is in the session, and "Share with people",
+ * which opens the Share dialog every product uses (start, join, invitation link, Stop). Excel's
+ * page is the same.
  */
 function share(doc: Document): HTMLElement {
 	const panel = el(doc, 'section', 'share-panel');
 	panel.setAttribute('aria-labelledby', 'share-title');
 	const title = el(doc, 'h2', '', 'Share with people');
 	title.id = 'share-title';
-	const field = el(doc, 'label', 'share-field');
-	const room = el(doc, 'input', 'share-room');
-	room.type = 'text';
-	room.maxLength = 64;
-	room.autocomplete = 'off';
-	room.spellcheck = false;
-	field.append(el(doc, 'span', '', 'Session name'), room);
-	const buttons = el(doc, 'div', 'share-buttons');
-	const start = el(doc, 'button', 'share-start', 'Start sharing');
-	start.type = 'button';
-	start.dataset.share = 'start';
-	const stop = el(doc, 'button', 'share-stop', 'Stop sharing');
-	stop.type = 'button';
-	stop.dataset.share = 'stop';
-	stop.hidden = true;
-	buttons.append(start, stop);
 	const status = el(doc, 'p', 'share-status');
 	status.setAttribute('role', 'status');
 	const people = doc.createElement('office-ui-presence');
 	people.className = 'share-people';
 	people.setAttribute('label', 'People in this session');
+	const buttons = el(doc, 'div', 'share-buttons');
+	const open = el(doc, 'button', 'share-start', 'Share with people');
+	open.type = 'button';
+	open.dataset.share = 'open';
+	const stop = el(doc, 'button', 'share-stop', 'Stop sharing');
+	stop.type = 'button';
+	stop.dataset.share = 'stop';
+	stop.hidden = true;
+	buttons.append(open, stop);
 	panel.append(
 		title,
 		el(
 			doc,
 			'p',
 			'',
-			'Edit this drawing together with other windows of this browser. Open the same session name in another window to join.',
+			'Edit this drawing together with other people. Everyone who joins the same session sees changes as they are made.',
 		),
-		field,
-		buttons,
 		status,
 		people,
+		buttons,
 		el(
 			doc,
 			'p',
 			'backstage-muted',
-			'The whole drawing is shared; when two people change it at once, the last change wins. Nothing leaves this device.',
+			'The whole drawing is shared; when two people change it at once, the last change wins.',
 		),
 	);
 	return panel;
@@ -142,7 +137,8 @@ function account(doc: Document): HTMLElement {
 		el(doc, 'p', '', 'Visio viewer (beta). No sign-in or subscription is used.'),
 		el(doc, 'p', 'backstage-muted', LOCAL),
 	);
-	profile.append(product);
+	// Linked storage: the viewer fills it from `fileProviders`; without providers it is empty.
+	profile.append(doc.createElement('office-ui-connected-services'), product);
 	return profile;
 }
 
@@ -168,6 +164,7 @@ export function createBackstage(doc: Document): HTMLElement {
 	] as const) {
 		const value = el(doc, 'dd');
 		value.dataset.info = key;
+		if (key === 'page') value.dataset.userText = '';
 		facts.append(el(doc, 'dt', '', label), value);
 	}
 	const notes = el(doc, 'div', 'backstage-notes');
@@ -179,16 +176,39 @@ export function createBackstage(doc: Document): HTMLElement {
 	);
 	const file = el(doc, 'h2', 'backstage-file');
 	file.dataset.info = 'name';
+	// A document's own names are not wording: the translator leaves them alone.
+	file.dataset.userText = '';
 
 	const templates = el(doc, 'div', 'backstage-templates');
 	const slot = doc.createElement('slot');
 	slot.name = 'templates';
-	templates.append(action(doc, 'new-blank', 'Blank drawing', 'Start an empty drawing.'), slot);
+	for (const template of VISIO_TEMPLATES)
+		templates.append(
+			action(
+				doc,
+				template.id === 'blank' ? 'new-blank' : `new-template:${template.id}`,
+				template.name,
+				template.description,
+			),
+		);
+	templates.append(slot);
 	const input = el(doc, 'input', 'backstage-file-input');
 	input.type = 'file';
-	input.accept = '.vsdx,.vsd';
+	input.accept = '.vsdx,.vsdm,.vstx,.vstm,.vsd';
 	input.hidden = true;
 	input.setAttribute('aria-label', 'Choose a Visio drawing');
+	// File > Open places: the shared switcher; it shows only its children without providers.
+	const places = doc.createElement('office-ui-open-places');
+	places.append(
+		action(
+			doc,
+			'open',
+			'Browse',
+			'Open a .vsdx drawing or a legacy .vsd preview from this device.',
+		),
+		input,
+		el(doc, 'p', 'backstage-muted', `Recent drawings are not tracked. ${LOCAL}`),
+	);
 	const preview = doc.createElement('office-ui-print-preview');
 	preview.className = 'backstage-print-preview';
 	preview.setAttribute('label', 'Print preview of the current page');
@@ -204,19 +224,7 @@ export function createBackstage(doc: Document): HTMLElement {
 			notes,
 		),
 		page(doc, 'new', 'New', templates),
-		page(
-			doc,
-			'open',
-			'Open',
-			action(
-				doc,
-				'open',
-				'Browse',
-				'Open a .vsdx drawing or a legacy .vsd preview from this device.',
-			),
-			input,
-			el(doc, 'p', 'backstage-muted', `Recent drawings are not tracked. ${LOCAL}`),
-		),
+		page(doc, 'open', 'Open', places),
 		page(
 			doc,
 			'save-as',
@@ -268,8 +276,9 @@ export function createBackstage(doc: Document): HTMLElement {
 				doc,
 				'export-pdf',
 				'Create PDF/XPS Document',
-				'A PDF with one picture page per foreground page, at the page size. Text is not selectable; XPS is not offered.',
+				'A vector PDF with one page per chosen foreground page at the page size and selectable text. Gradients are shadings and shadows are hard-edged offsets; glow is approximated; blur, soft edges and reflections are not drawn. Text uses standard fonts unless the host supplies fonts to embed. A page that cannot be drawn as vectors becomes a picture, and the report below says which. XPS is not offered.',
 			),
+			pdfOptionsPanel(doc),
 			el(doc, 'h2', 'backstage-subheading', 'Change File Type'),
 			action(doc, 'download', 'Visio Drawing (*.vsdx)', 'A copy of the drawing with your edits.'),
 			action(
@@ -278,7 +287,12 @@ export function createBackstage(doc: Document): HTMLElement {
 				'SVG (*.svg)',
 				'The current page as an approximate vector picture.',
 			),
-			action(doc, 'export-pdf', 'PDF (*.pdf)', 'Every foreground page as a picture page.'),
+			action(
+				doc,
+				'export-pdf',
+				'PDF (*.pdf)',
+				'Every foreground page as vector shapes and selectable text.',
+			),
 			action(doc, 'export-png', 'PNG picture (*.png)', 'The current page at 150 dpi.'),
 			el(
 				doc,

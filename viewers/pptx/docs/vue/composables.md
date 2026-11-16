@@ -24,21 +24,21 @@ These composables describe how the viewer is wired. They are importable (see bel
 specific composition order and shared inputs; treat this table as conceptual reference, not an API
 contract.
 
-| Composable                  | Concern                                                                          |
-| --------------------------- | -------------------------------------------------------------------------------- |
-| `useLoadContent`            | Parses the PPTX buffer on load via `PptxHandler`.                                |
-| `useEditorHistory`          | Undo/redo snapshot stack, aware of the template (master/layout) element layer.   |
-| `useEditorOperations`       | Element create/update/delete/duplicate primitives.                               |
-| `useElementDrag`            | Move / resize / rotate / adjust, plus snap & alignment guides.                   |
-| `useElementInsertion`       | Shape / image / text box / table / chart insertion.                              |
-| `useSlideOperations`        | Add / delete / duplicate / reorder slides.                                       |
-| `useAutosave`               | Debounced autosave timer + status (see [Props > Autosave](/vue/props#autosave)). |
-| `usePresentationModeWiring` | Slideshow navigation wiring into the component.                                  |
-| `useExportWiring`           | PNG / PDF / GIF / WebM export + print, wired into the component.                 |
-| `useCollaborationWiring`    | Share/Broadcast dialog + prop-driven Yjs session lifecycle.                      |
-| `useRibbonProps`            | Composes the full Office-ribbon `RibbonProps` contract.                          |
-| `useEditorKeyboard`         | Config-driven keyboard-shortcut registry + dispatch.                             |
-| `useIsMobile`               | Device/viewport classification (mobile/tablet/orientation).                      |
+| Composable                  | Concern                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `useLoadContent`            | Parses the PPTX buffer on load via `PptxHandler`.                              |
+| `useEditorHistory`          | Undo/redo snapshot stack, aware of the template (master/layout) element layer. |
+| `useEditorOperations`       | Element create/update/delete/duplicate primitives.                             |
+| `useElementDrag`            | Move / resize / rotate / adjust, plus snap & alignment guides.                 |
+| `useElementInsertion`       | Shape / image / text box / table / chart insertion.                            |
+| `useSlideOperations`        | Add / delete / duplicate / reorder slides.                                     |
+| `useAutosave`               | Autosave interval + status (see [Props > Autosave](/vue/props#autosave)).      |
+| `usePresentationModeWiring` | Slideshow navigation wiring into the component.                                |
+| `useExportWiring`           | PNG / PDF / GIF / WebM export + print, wired into the component.               |
+| `useCollaborationWiring`    | Share/Broadcast dialog + prop-driven Yjs session lifecycle.                    |
+| `useRibbonProps`            | Composes the full Office-ribbon `RibbonProps` contract.                        |
+| `useEditorKeyboard`         | Config-driven keyboard-shortcut registry + dispatch.                           |
+| `useIsMobile`               | Device/viewport classification (mobile/tablet/orientation).                    |
 
 There are dozens more (dialogs, comments, sections, SmartArt editing, table editing, presentation
 sub-composables, mobile chrome, etc.). See the
@@ -154,6 +154,134 @@ history.undo(); // reverts both, most recent first
 The operations returned by `useEditorOperations` handle this for you; only call `pushHistory`
 manually when you mutate `slides` yourself.
 :::
+
+### Slide thumbnail rail
+
+`SlidesPane` (exported from the package root and `pptx-vue-viewer/viewer`) is the rail of slide
+thumbnails that `PowerPointViewer` shows beside the canvas. It lists every slide (grouped under
+section headers when the deck has sections) and highlights the active one. It never changes the
+deck itself: clicking a thumbnail emits `select`, and with `canEdit` the footer, the context menus,
+Enter and drag-to-reorder emit commands you map onto `useSlideOperations` and
+`useSectionOperations` (also exported from `/viewer`), so they share your undo history and
+collaboration sync. Pass the deck props from `useLoadContent` so the thumbnails resolve slide
+numbers, header/footer fields and table styles as the canvas does.
+
+```vue
+<script setup lang="ts">
+import {
+	SlideCanvas,
+	SlidesPane,
+	useEditorHistory,
+	useLoadContent,
+	useSectionOperations,
+	useSlideOperations,
+} from 'pptx-vue-viewer/viewer';
+import { ref } from 'vue';
+import 'pptx-vue-viewer/styles';
+
+const props = defineProps<{ bytes: ArrayBuffer | null }>();
+const deck = useLoadContent(() => props.bytes);
+const { slides, templateElementsBySlideId } = deck;
+const active = ref(0);
+const history = useEditorHistory(slides);
+const slideOps = useSlideOperations({
+	slides,
+	activeSlideIndex: active,
+	pushHistory: history.pushHistory,
+	templateElementsBySlideId,
+});
+const sectionOps = useSectionOperations({
+	sections: deck.sections,
+	slides,
+	activeSlideIndex: active,
+	pushHistory: history.pushHistory,
+});
+</script>
+
+<template>
+	<div style="display: flex; height: 600px">
+		<SlidesPane
+			:slides="slides"
+			:template-elements-by-slide-id="templateElementsBySlideId"
+			:active-slide-index="active"
+			:canvas-size="deck.canvasSize.value"
+			:media-data-urls="deck.mediaDataUrls.value"
+			:section-groups="sectionOps.slidesBySection.value"
+			:header-footer="deck.headerFooter.value"
+			:custom-properties="deck.customProperties.value"
+			:first-slide-number="deck.firstSlideNumber.value"
+			:theme="deck.theme.value"
+			:table-style-map="deck.tableStyleMap.value"
+			can-edit
+			@select="active = $event"
+			@add-slide="slideOps.addSlide()"
+			@add-slide-after="slideOps.addSlide"
+			@move-slide="slideOps.moveSlide"
+			@duplicate-slide="slideOps.duplicateSlide"
+			@delete-slide="slideOps.deleteSlide"
+			@add-section="sectionOps.addSection"
+			@rename-section="sectionOps.renameSection"
+			@delete-section="sectionOps.deleteSection"
+			@move-section-up="sectionOps.moveSectionUp"
+			@move-section-down="sectionOps.moveSectionDown"
+			@toggle-section-collapse="sectionOps.toggleSectionCollapse"
+		/>
+		<div style="flex: 1; min-width: 0; position: relative">
+			<SlideCanvas
+				:slide="slides[active]"
+				:canvas-size="deck.canvasSize.value"
+				:media-data-urls="deck.mediaDataUrls.value"
+				:template-elements="templateElementsBySlideId[slides[active]?.id ?? '']"
+			/>
+		</div>
+	</div>
+</template>
+```
+
+A multi-slide command arrives as one `duplicate-slide`, `delete-slide` or `toggle-slide-hidden`
+event per selected slide, highest index first, so each copy lands right after its source. The
+"Layout" entry of a slide's context menu emits `select` for that slide, then
+`open-layout-gallery` with `{ slideIndex, x, y }` (the click point) for a Layout gallery of your
+own. Without `canEdit` the rail only navigates and shows no "Add Slide" footer. `SlidesPane`
+needs the full `pptx-vue-viewer/styles` stylesheet.
+
+### Single slide thumbnail
+
+`SlideThumbnail` (exported, with its `SlideThumbnailProps` type, from the package root and
+`pptx-vue-viewer/viewer`) draws one slide the way `SlidesPane` draws it, for a host that keeps its
+own thumbnail strip. It renders from the slide model, so it follows unsaved edits, and it is static:
+no selection, editing, pointer handlers, focus stops or element ids. A slide with a transition
+other than Cut shows the transition's name in a small badge in its top-right corner, as the
+thumbnail does in every binding (Vue's slides pane draws no badge). Its props are `slide`,
+`templateElements` (the slide's layout and master elements, drawn beneath its own; default none),
+`canvasSize` and `previewWidth` (pixels; default the rail thumbnail width; the height follows the
+deck's aspect ratio), plus the deck props `SlidesPane` already takes: `mediaDataUrls`,
+`headerFooter`, `customProperties`, `firstSlideNumber`, `locale`, `theme` and `tableStyleMap`.
+Feed both from the same `useLoadContent` values:
+
+```vue
+<template>
+	<ul class="my-strip">
+		<li v-for="slide in slides" :key="slide.id" style="width: 120px">
+			<SlideThumbnail
+				:slide="slide"
+				:template-elements="templateElementsBySlideId[slide.id]"
+				:canvas-size="deck.canvasSize.value"
+				:preview-width="120"
+				:media-data-urls="deck.mediaDataUrls.value"
+				:header-footer="deck.headerFooter.value"
+				:custom-properties="deck.customProperties.value"
+				:first-slide-number="deck.firstSlideNumber.value"
+				:theme="deck.theme.value"
+				:table-style-map="deck.tableStyleMap.value"
+			/>
+		</li>
+	</ul>
+</template>
+```
+
+The thumbnail fills its container's width and is as tall as `previewWidth` at the deck's aspect
+ratio, so give the container that width. It needs the same `pptx-vue-viewer/styles` stylesheet.
 
 ### `useCollaboration`
 

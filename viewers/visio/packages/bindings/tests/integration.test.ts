@@ -145,6 +145,9 @@ const mounts: Record<string, NativeMount> = {
 					get storage() {
 						return props().storage;
 					},
+					get fileProviders() {
+						return props().fileProviders;
+					},
 					get customization() {
 						return props().customization;
 					},
@@ -268,6 +271,18 @@ describe('native adapters against the real shared custom element', () => {
 			await mounted.destroy();
 			await expect(mounted.handle.createBlankDrawing()).rejects.toThrow(/not mounted|destroyed/);
 			expect(create).toHaveBeenCalledOnce();
+			host.remove();
+		});
+		it(`${framework}: forwards openCloudFile and rejects after disposal`, async () => {
+			const host = document.createElement('div');
+			document.body.append(host);
+			const mounted = await mountNative(host, { document: demoDocument });
+			const open = vi.spyOn(mounted.handle.element, 'openCloudFile').mockResolvedValue();
+			const file = { fileName: 'Plan.vsdx' } as never;
+			await act(async () => mounted.handle.openCloudFile(file));
+			expect(open).toHaveBeenCalledExactlyOnceWith(file);
+			await mounted.destroy();
+			await expect(mounted.handle.openCloudFile(file)).rejects.toThrow(/not mounted|destroyed/);
 			host.remove();
 		});
 		it(`${framework}: forwards clipboard handles and rejects after disposal`, async () => {
@@ -444,6 +459,33 @@ describe('native adapters against the real shared custom element', () => {
 				expect(command.defaultPrevented).toBe(true);
 				await mounted.update({ document: null, storage: null, events });
 				expect(element.storage).toBeNull();
+			} finally {
+				await mounted.destroy();
+				host.remove();
+			}
+		});
+		it(`${framework}: forwards file providers and clears them`, async () => {
+			const host = document.createElement('div');
+			document.body.append(host);
+			const provider = {
+				id: 'cloud',
+				label: 'Cloud',
+				account: () => null,
+				signIn: async () => ({ name: 'A' }),
+				list: async () => ({ entries: [] }),
+				open: async () => {
+					throw new Error('unused');
+				},
+			};
+			const mounted = await mountNative(host, { document: null, fileProviders: [provider] });
+			const element = mounted.handle.element;
+			try {
+				expect(element.fileProviders).toEqual([provider]);
+				const places = element.shadowRoot!.querySelector('office-ui-open-places')!;
+				expect(places.shadowRoot!.querySelectorAll('[role="tab"]')).toHaveLength(2);
+				await mounted.update({ document: null, fileProviders: [] });
+				expect(element.fileProviders).toEqual([]);
+				expect(places.shadowRoot!.querySelectorAll('[role="tab"]')).toHaveLength(0);
 			} finally {
 				await mounted.destroy();
 				host.remove();

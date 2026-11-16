@@ -29,6 +29,7 @@ import {
 	extractVmlFlip,
 } from './vml-style-parser';
 import { extractVmlText } from './vml-text-parser';
+import { isFiniteNumber } from '../../../units/finite';
 
 // ── Re-exports from sub-modules (backward compatibility) ─────────────
 
@@ -95,8 +96,8 @@ export function parseVmlElement(
 		if (coordsize.length > 0) {
 			const parts = coordsize.split(/[\s,]+/);
 			if (parts.length >= 2) {
-				coordW = parseInt(parts[0], 10) || bounds.width;
-				coordH = parseInt(parts[1], 10) || bounds.height;
+				coordW = parseInt(parts[0] ?? '', 10) || bounds.width;
+				coordH = parseInt(parts[1] ?? '', 10) || bounds.height;
 			}
 		}
 
@@ -124,7 +125,7 @@ export function parseVmlElement(
 				if (arcsize.endsWith('%')) {
 					pct = parseFloat(arcsize) / 100;
 				}
-				if (Number.isFinite(pct)) {
+				if (isFiniteNumber(pct)) {
 					shapeAdjustments = { adj: Math.round(pct * 50000) };
 				}
 			}
@@ -207,12 +208,15 @@ function parseVmlGroup(node: XmlObject, idPrefix: string, index: number): GroupP
 
 		const coordOrigin = String(node['@_coordorigin'] || '0,0');
 		const coordSize = String(node['@_coordsize'] || '');
-		const [originX, originY] = coordOrigin.split(/[\s,]+/).map((s) => parseFloat(s) || 0);
+		// A missing coordinate reads as NaN, as the arithmetic on `undefined` did.
+		const [originX = NaN, originY = NaN] = coordOrigin
+			.split(/[\s,]+/)
+			.map((s) => parseFloat(s) || 0);
 
 		let childScaleX = 1;
 		let childScaleY = 1;
 		if (coordSize.length > 0) {
-			const [csW, csH] = coordSize.split(/[\s,]+/).map((s) => parseFloat(s) || 0);
+			const [csW = 0, csH = 0] = coordSize.split(/[\s,]+/).map((s) => parseFloat(s) || 0);
 			if (csW > 0) {
 				childScaleX = bounds.width / csW;
 			}

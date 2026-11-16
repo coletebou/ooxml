@@ -20,15 +20,17 @@ import {
 } from '@angular/core';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import type {
+	GestureKind,
 	InlineListController,
+	InteractionBox,
 	InlineListSeed,
 	InlineTextEditSnapshot,
 	InlineTextFormatProperty,
 	CanvasSize,
 	ConnectorEndpointKind,
-	ElementInteraction,
 	RulerUnit,
 	ShapeAdjustmentDragState,
+	SlideFindHighlights,
 	Tick,
 	ViewportFitPadding,
 } from 'ooxml-ui/pptx';
@@ -40,21 +42,31 @@ import {
 	collectConnectorSiteCandidates,
 	createInlineListSeed,
 	deviceStrokeStageStyle,
-	inlineListBodyText,
 	editorNudgeDelta,
 	findConnectorSiteNear,
 	getConnectorEndpointHandles,
 	getResizeHandleHitAreaStyle,
+	inlineListBodyText,
 	isTemplateElement,
 	mapInlineEditorChord,
 	mapInlineTextFormatKey,
+	markInsertedParagraph,
+	placeCaretAt,
+	readEditableText,
+	readListActivationSelection,
 	resolveConnectorEndpointUpdate,
-	setPendingCaretPoint,
-	takePendingCaretPoint,
-	withConnectorEndpointUpdate,
+	resolveGroupDoubleClickTarget,
+	resolveGroupPressTarget,
+	resolveStageEdgeBleeds,
 	RULER_FONT_SIZE,
 	RULER_THICKNESS,
+	seedPlainInlineText,
+	setPendingCaretPoint,
+	spaceBeforeCaretRange,
+	stageKeepsElementIds,
+	takePendingCaretPoint,
 	visibleTemplateElements as filterVisibleTemplateElements,
+	withConnectorEndpointUpdate,
 } from 'ooxml-ui/pptx';
 import type { AiCanvasHighlight, AiChangeBatch } from 'ooxml-ui/pptx/ai';
 import { resolveContextMenuElementId } from 'ooxml-ui/pptx/render/context-menu-target';
@@ -72,28 +84,24 @@ import { hasTextProperties } from 'pptx-viewer-core';
 import { ActiveXControlsOverlayComponent } from './activex-controls-overlay.component';
 import { AiChangeOverlayComponent } from './ai/ai-change-overlay.component';
 import { AiFocusHighlightOverlayComponent } from './ai/ai-focus-highlight-overlay.component';
+import { CanvasFindHighlights } from './canvas-find-highlights';
 import { CanvasFitService } from './canvas-fit.service';
 import { ChartQuickActionsOverlayComponent } from './chart-quick-actions-overlay.component';
 import { CollaborationService } from './collaboration.service';
 import { CropOverlayComponent } from './crop-overlay.component';
-import { applyMove, applyResize, marqueeHitIds } from './drag-resize';
+import { applyResize, marqueeHitIds } from './drag-resize';
 import type { Box, ResizeHandle } from './drag-resize';
+import { ElementBoundaryDirective, ElementRenderErrors } from './element-boundary.directive';
 import { ElementRendererComponent } from './element-renderer.component';
 import type { StyleMap } from './element-style';
 import { FieldContextService } from './field-context.service';
-import {
-	enteredGroupBox,
-	placeTextareaCaretAt,
-	renderedTextOffsetAt,
-	resolveGroupDoubleClickTarget,
-	resolveGroupPressTarget,
-	withGroupMembers,
-} from './group-drill-canvas';
+import { enteredGroupBox, withGroupMembers } from './group-drill-canvas';
 import { InkDrawingService } from './ink-drawing.service';
 import {
 	resolveCommitTextAutoFitHeight,
 	resolveCommitTextNormAutofitShrink,
 } from './inline-edit-autofit-commit';
+import { inlineEditorStyle } from './inline-editor-style';
 import { InlineListEditorComponent } from './inline-list-editor.component';
 import { PictureCropService } from './picture-crop.service';
 import { RotateHandlePlacementDirective } from './rotate-handle-placement.directive';
@@ -114,10 +122,11 @@ import {
 } from './shape-adjust-handle';
 import type { AdjustHandleBox } from './shape-adjust-handle';
 import { getSlideBackgroundStyle } from './slide-background';
+import { createSlideCanvasGestures } from './slide-canvas-gestures';
 import { affordanceElements, isViewportBackgroundPressTarget } from './slide-canvas-helpers';
 import { SLIDE_CONTEXT } from './slide-context';
 import type { SlideContext } from './slide-context';
-import { computeGridSpacingPx, computeSnap, snapToGridStep } from './snap-guides';
+import { computeGridSpacingPx } from './snap-guides';
 import type { SnapGuide } from './snap-guides';
 import type { TableCellCommit } from './table-renderer.component';
 import { isElementInteractive } from './template-mode';
@@ -130,8 +139,6 @@ const DRAG_THRESHOLD = 3;
 const HANDLE_SCREEN_PX_FINE = 24;
 /** Handle size in screen pixels (coarse pointer: touch); larger hit target. */
 const HANDLE_SCREEN_PX_COARSE = 24;
-/** Snap distance (screen pixels) for alignment guides. */
-const SNAP_SCREEN_PX = 6;
 /** Max delay (ms) between two taps to count as a double-tap on touch. */
 const DOUBLE_TAP_MS = 300;
 
@@ -144,28 +151,6 @@ const IS_COARSE_POINTER: boolean =
 
 /** Resize/rotate handle size in screen pixels for the current pointer kind. */
 const HANDLE_SCREEN_PX = IS_COARSE_POINTER ? HANDLE_SCREEN_PX_COARSE : HANDLE_SCREEN_PX_FINE;
-
-interface DragState {
-	id: string;
-	mode: 'move' | 'resize' | 'rotate';
-	handle: ResizeHandle | null;
-	startBox: Box;
-	startX: number;
-	startY: number;
-	started: boolean;
-	/** Rotation-gesture state (stage coords + degrees). */
-	centerX?: number;
-	centerY?: number;
-	startAngle?: number;
-	startRotation?: number;
-}
-
-/** Which lock governs each drag mode, for the mid-gesture lock re-check. */
-const DRAG_MODE_INTERACTION: Readonly<Record<DragState['mode'], ElementInteraction>> = {
-	move: 'move',
-	resize: 'resize',
-	rotate: 'rotate',
-};
 
 /** Best-effort plain text of a text-bearing element for inline editing. */
 function plainText(el: PptxElement): string {
@@ -196,7 +181,10 @@ function plainText(el: PptxElement): string {
 	host: { 'data-pptx-scope': '' },
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	providers: [
+		CanvasFindHighlights,
 		CanvasFitService,
+		// Element render errors on this canvas report the slide it paints.
+		ElementRenderErrors,
 		InkDrawingService,
 		RulerGuidesService,
 		// Expose which slide this canvas renders to leaf renderers (chart /
@@ -205,6 +193,7 @@ function plainText(el: PptxElement): string {
 		{ provide: SLIDE_CONTEXT, useExisting: forwardRef(() => SlideCanvasComponent) },
 	],
 	imports: [
+		ElementBoundaryDirective,
 		NgStyle,
 		ElementRendererComponent,
 		TranslatePipe,
@@ -311,17 +300,33 @@ export class SlideCanvasComponent implements SlideContext {
 	 */
 	readonly interactive = input<boolean>(true);
 	/**
-	 * When true (default), this canvas's elements carry `data-element-id`.
-	 *
-	 * The miniature surfaces that paint EVERY slide at once (thumbnail rail,
-	 * mobile slide sheet, slide sorter, presenter navigator, layout gallery, diff
-	 * strip) pass `false`: they otherwise put one node per element PER SLIDE into
-	 * the document, so a `[data-element-id]` query resolved a slide that is not
-	 * on screen. It is deliberately separate from {@link interactive}, because
-	 * the presentation stage is not interactive and still needs its ids (the
-	 * morph engine generates keyframe CSS that selects on them).
+	 * Overrides whether this canvas's elements carry `data-element-id`. Leave it
+	 * unset: the shared `stageKeepsElementIds` rule decides from
+	 * {@link interactive}, {@link presenting} and {@link preserveElementIds}, so
+	 * only the editing canvas, the live show stage and the show's transition
+	 * layers keep the markers. Every static copy (rail, sorter, presenter
+	 * previews, reading view, thumbnails) drops them without a flag of its own,
+	 * so a `[data-element-id]` query resolves the canvas the user acts on.
 	 */
-	readonly exposeElementIds = input<boolean>(true);
+	readonly exposeElementIds = input<boolean | undefined>(undefined);
+	/**
+	 * True for a transition layer the show addresses by element id: Morph's
+	 * keyframe CSS selects by it, and the show applies build states to every
+	 * `[data-element-id]` under its stage, the transition layers included. Such a
+	 * layer is neither interactive nor the presenting stage, so without this it
+	 * would drop its markers.
+	 */
+	readonly preserveElementIds = input<boolean>(false);
+	/** Whether this canvas's elements carry `data-element-id` (see {@link exposeElementIds}). */
+	readonly keepsElementIds = computed(
+		() =>
+			this.exposeElementIds() ??
+			stageKeepsElementIds({
+				interactive: this.interactive(),
+				presenting: this.presenting(),
+				preserveElementIds: this.preserveElementIds(),
+			}),
+	);
 	/**
 	 * True only for the live presentation stage: slide-content media autoplays.
 	 * Left false for thumbnails, the sorter and the editor canvas so their media
@@ -335,6 +340,8 @@ export class SlideCanvasComponent implements SlideContext {
 	readonly presenting = input<boolean>(false);
 	/** Ids of currently-selected elements (drawn with a selection outline). */
 	readonly selectedIds = input<readonly string[]>([]);
+	/** The Find bar's matches, marked in the elements' text (`findTextHighlightsByElement`). */
+	readonly findHighlights = input<SlideFindHighlights | undefined>(undefined);
 	/** Id of the element currently being text-edited inline (or null). */
 	readonly editingId = input<string | null>(null);
 	/**
@@ -430,7 +437,7 @@ export class SlideCanvasComponent implements SlideContext {
 	 * live preview so peers see typing before the edit commits.
 	 */
 	readonly textInput = output<{ id: string; text: string; snapshot?: InlineTextEditSnapshot }>();
-	/** Emitted when an inline edit is cancelled (Escape). */
+	/** Emitted when an inline edit is cancelled. */
 	readonly textCancel = output<void>();
 	/** Emitted on Ctrl/Cmd+B/I/U while inline-editing (parity with React/Vue). */
 	readonly textFormat = output<{ id: string; updates: Partial<TextStyle> }>();
@@ -450,7 +457,7 @@ export class SlideCanvasComponent implements SlideContext {
 
 	hasActivePointerInteraction(): boolean {
 		return Boolean(
-			this.drag ||
+			this.gestures.isActive() ||
 			this.adjustDrag ||
 			this.marquee ||
 			this.connectorEndpointDrag() ||
@@ -458,7 +465,26 @@ export class SlideCanvasComponent implements SlideContext {
 		);
 	}
 
-	private drag: DragState | null = null;
+	/** Move / resize / rotate, on the shared gesture controller (see slide-canvas-gestures). */
+	private readonly gestures = createSlideCanvasGestures({
+		scale: () => this.effectiveScale(),
+		stage: () => this.stageRef()?.nativeElement,
+		elementBox: (id, kind) => this.gestureStartBox(id, kind),
+		canInteract: (id, kind) => canInteractWithElement(this.elementById(id), kind),
+		snapOthers: (id) =>
+			this.allElements()
+				.filter((el) => el.id !== id)
+				.map((el) => ({ x: el.x, y: el.y, width: el.width, height: el.height })),
+		snapToShape: () => this.snapToShape(),
+		snapToGrid: () => this.snapToGrid(),
+		gridSize: () => this.gridSpacingPx(),
+		rulerGuides: () => (this.snapToGuides() ? this.rulerGuidesSvc.rulerGuides() : null),
+		setSnapGuides: (guides) => this.snapGuides.set(guides),
+		start: (id, kind) => this.transformStart.emit({ id, label: this.gestureLabel(kind) }),
+		update: (id, box) => this.transformUpdate.emit({ id, box }),
+		rotate: (id, rotation) => this.rotateUpdate.emit({ id, rotation }),
+		end: (ids) => this.transformEnd.emit({ ids }),
+	});
 	/** Live shape-adjustment gesture (amber diamond), or null when idle. */
 	private adjustDrag: ShapeAdjustmentDragState | null = null;
 
@@ -490,7 +516,7 @@ export class SlideCanvasComponent implements SlideContext {
 	/** Per-instance user-created ruler-guide controller. */
 	protected readonly rulerGuidesSvc = inject(RulerGuidesService);
 
-	private readonly textEditor = viewChild<ElementRef<HTMLTextAreaElement>>('textEditor');
+	private readonly textEditor = viewChild<ElementRef<HTMLDivElement>>('textEditor');
 	protected readonly collaboration = inject(CollaborationService, { optional: true });
 	protected readonly inlineCollaborationPatcher = computed(() =>
 		this.slide()?.elements.some((element) => element.id === this.editingId())
@@ -518,7 +544,7 @@ export class SlideCanvasComponent implements SlideContext {
 	 */
 	private readonly effectiveScale = computed(() => this.canvasFit.fitScale() * this.zoom());
 
-	/** The editing id we've already initialised the textarea for, to avoid re-seeding its value mid-edit. */
+	/** The editing id the inline editor was seeded for, so its runs are not re-seeded mid-edit. */
 	private seededEditId: string | null = null;
 	/** Last-tap timestamp + element id, for synthetic double-tap detection on touch. */
 	private lastTap: { id: string; time: number } | null = null;
@@ -527,11 +553,11 @@ export class SlideCanvasComponent implements SlideContext {
 	 * unless the press turns into a drag (shared `group-drill`).
 	 */
 	private pendingClickTextEdit: { id: string; clientX: number; clientY: number } | null = null;
-	/** Where a click-to-edit landed in the element's text, read from its rendered node (see `renderedTextOffsetAt`). */
-	private pendingEditOffset: { id: string; offset: number } | null = null;
 	private lastGuideCommandId = 0;
 
 	constructor() {
+		inject(CanvasFindHighlights, { self: true }).bind(this.findHighlights);
+		inject(ElementRenderErrors, { self: true }).slideId = () => this.slide()?.id;
 		effect(() => {
 			const id = this.editable() ? this.editingId() : null;
 			if (id === this.listSessionId && this.inlineListSeed()) {
@@ -545,26 +571,24 @@ export class SlideCanvasComponent implements SlideContext {
 						includePlain: Boolean(this.inlineCollaborationPatcher()?.isActive()),
 					})
 				: undefined;
-			const textarea = this.textEditor()?.nativeElement;
+			const editor = this.textEditor()?.nativeElement;
 			const body =
 				element && hasTextProperties(element) ? inlineListBodyText(element.textSegments) : '';
-			if (previousId === id && seed && textarea && textarea.value !== body) {
+			if (previousId === id && seed && editor && readEditableText(editor) !== body) {
 				this.textCancel.emit();
 				return;
 			}
 			this.listActivationSelection.set(
-				previousId === id && seed && textarea?.value === body
-					? { start: textarea.selectionStart, end: textarea.selectionEnd }
-					: undefined,
+				previousId === id && seed && editor ? readListActivationSelection(editor, body) : undefined,
 			);
 			this.inlineListSeed.set(seed);
 		});
 		// Seed + focus the inline editor exactly once when it first appears for a
-		// given element. The textarea is UNCONTROLLED (no `[value]` binding): if
-		// Angular rewrote `value` on every change-detection pass the caret would
-		// jump to position 0 and typed text would reverse. We therefore set the
-		// initial text and select it only on first appearance, and never touch
-		// `value` again while the user types.
+		// given element. The editor is UNCONTROLLED (no content binding): if
+		// Angular rewrote its content on every change-detection pass the caret
+		// would jump to the start and typed text would reverse. We therefore seed
+		// the runs only on first appearance and never touch them while the user
+		// types.
 		effect(() => {
 			const editor = this.textEditor();
 			const box = this.editingBox();
@@ -578,20 +602,21 @@ export class SlideCanvasComponent implements SlideContext {
 				return;
 			}
 			this.seededEditId = box.id;
-			editor.nativeElement.value = box.text;
-			editor.nativeElement.focus();
+			const root = editor.nativeElement;
+			root.replaceChildren();
+			// The same styled runs the other DOM bindings seed, in the block style
+			// view mode paints with (`plainEditorStyle`), so the text keeps its face.
+			seedPlainInlineText(
+				root,
+				hasTextProperties(box.element) ? box.element.textSegments : undefined,
+				box.text,
+				hasTextProperties(box.element) ? box.element.textStyle : undefined,
+			);
+			root.focus();
 			// Never select-all. The caret goes where the click that opened the
 			// editor landed (PowerPoint; the shared one-shot pending caret point),
-			// else at the end so typing appends, matching React/Vue inline editors
-			// (and the shared inline-edit e2e spec).
-			const pending = this.pendingEditOffset;
-			this.pendingEditOffset = null;
-			const point = takePendingCaretPoint();
-			if (pending && pending.id === box.id && pending.offset <= box.text.length) {
-				editor.nativeElement.setSelectionRange(pending.offset, pending.offset);
-			} else {
-				placeTextareaCaretAt(editor.nativeElement, point);
-			}
+			// else at the end so typing appends, as in every other binding.
+			placeCaretAt(root, takePendingCaretPoint());
 		});
 
 		// Wire the fit-scale measurement accessors (viewport element, autoFit,
@@ -640,14 +665,14 @@ export class SlideCanvasComponent implements SlideContext {
 
 		// Observe the viewport so the slide re-fits on container resize / rotation.
 		const destroyRef = inject(DestroyRef);
+		destroyRef.onDestroy(() => this.gestures.dispose());
 		afterNextRender(() => {
-			this.canvasFit.recompute();
 			const el = this.viewportRef()?.nativeElement;
-			if (typeof ResizeObserver !== 'undefined' && el) {
-				const observer = new ResizeObserver(() => this.canvasFit.recompute());
-				observer.observe(el);
-				destroyRef.onDestroy(() => observer.disconnect());
+			if (!el) {
+				this.canvasFit.recompute();
+				return;
 			}
+			destroyRef.onDestroy(this.canvasFit.observe(el));
 		});
 
 		// Wire the ink-drawing controller's accessors + emitters (the stage
@@ -703,6 +728,19 @@ export class SlideCanvasComponent implements SlideContext {
 		...this.visibleTemplateElements(),
 		...this.elements(),
 	]);
+
+	/**
+	 * Boxes that grow under an abutting opaque box to close the anti-aliasing
+	 * seam (issue #141); the selection keeps its exact box while it is edited.
+	 */
+	readonly edgeBleeds = computed(() => {
+		const selected = this.selectedIds();
+		return resolveStageEdgeBleeds(
+			this.visibleTemplateElements(),
+			this.slide(),
+			selected.length > 0 ? new Set(selected) : undefined,
+		);
+	});
 
 	/**
 	 * OOXML field-substitution context for the slide being rendered. Built from
@@ -916,7 +954,7 @@ export class SlideCanvasComponent implements SlideContext {
 			return;
 		}
 		// A press that reaches the stage started OUTSIDE the inline text editor
-		// (the textarea stops its own pointerdown). Flush the edit synchronously by
+		// (the editor stops its own pointerdown). Flush the edit synchronously by
 		// blurring it: this routes through commitText → textCommit now, instead of
 		// relying on the native blur firing before pointerup clears selection, which
 		// is unreliable on touch.
@@ -1017,15 +1055,7 @@ export class SlideCanvasComponent implements SlideContext {
 		if (!canInteractWithElement(el, 'move')) {
 			return;
 		}
-		this.drag = {
-			id,
-			mode: 'move',
-			handle: null,
-			startBox: { x: el.x, y: el.y, width: el.width, height: el.height },
-			startX: event.clientX,
-			startY: event.clientY,
-			started: false,
-		};
+		this.gestures.begin('move', id, event);
 	}
 
 	/**
@@ -1052,6 +1082,12 @@ export class SlideCanvasComponent implements SlideContext {
 	}
 
 	/** Box + current plain text for the element under inline edit, or null. */
+	/** The plain inline editor's style: painted like view mode (see `inlineEditorStyle`). */
+	readonly plainEditorStyle = computed<StyleMap>(() => {
+		const box = this.editingBox();
+		return box ? inlineEditorStyle(box.element) : {};
+	});
+
 	readonly editingBox = computed(() => {
 		const id = this.editingId();
 		if (!id || !this.editable()) {
@@ -1075,7 +1111,7 @@ export class SlideCanvasComponent implements SlideContext {
 	/**
 	 * May inline text editing begin on this element? Honours the authored
 	 * `a:spLocks/@noTextEdit`, which Angular ignored entirely while the other four
-	 * bindings enforced it: a locked caption opened an editable textarea here.
+	 * bindings enforced it: a locked caption opened an editable text box here.
 	 */
 	private canTextEdit(id: string): boolean {
 		const element = this.elementById(id);
@@ -1127,7 +1163,7 @@ export class SlideCanvasComponent implements SlideContext {
 		if (event.isComposing) {
 			return;
 		}
-		const editor = event.target as HTMLTextAreaElement;
+		const editor = event.target as HTMLElement;
 		// Inline formatting shortcuts (Ctrl/Cmd + B/I/U), matching React/Vue.
 		const property = mapInlineTextFormatKey(event);
 		if (property) {
@@ -1137,48 +1173,21 @@ export class SlideCanvasComponent implements SlideContext {
 			return;
 		}
 		const chord = mapInlineEditorChord(event);
-		if (event.key === 'Escape') {
-			event.preventDefault();
-			this.editCancelled = true;
-			editor.blur();
-		} else if (chord) {
+		if (chord) {
 			// Before the plain Enter rules: Ctrl/Cmd+Shift+Enter is a `commit` too and
 			// must not reach the Shift+Enter line break. Ctrl/Cmd+D is only cancelled:
 			// the viewer keymap stands down mid-edit, so nothing else stops the
 			// browser opening its bookmark dialog over the deck.
 			event.preventDefault();
+			event.stopPropagation();
 			if (chord === 'commit') {
 				editor.blur();
 			}
-		} else if (event.key === 'Enter' && !event.shiftKey) {
-			event.preventDefault();
-			editor.blur();
-		} else if (event.key === 'Enter' && event.shiftKey) {
-			this.trimTrailingSpaceBeforeCaret(editor);
+		} else if (event.key === 'Enter') {
+			// Enter starts a new paragraph (Shift+Enter a line break), as in
+			// PowerPoint and every other binding; Escape or Ctrl/Cmd+Enter ends the edit.
+			spaceBeforeCaretRange(editor.ownerDocument)?.deleteContents();
 		}
-	}
-
-	/**
-	 * When the caret sits at a soft word-wrap boundary (no explicit line break,
-	 * just CSS wrapping), the space separating the two words is still part of
-	 * the text and lands right before the caret. Inserting a line break there
-	 * leaves the new line preceded by a stray space: e.g. "fox jumps" wrapped as
-	 * "fox " / "jumps" becomes lines "fox " and "jumps" instead of "fox" and
-	 * "jumps". That extra, invisible trailing character then counts toward the
-	 * line's measured width, occasionally forcing an unwanted extra wrapped
-	 * line. Since a space immediately before a line break is never visually
-	 * meaningful, drop it before the browser inserts the native line break.
-	 */
-	private trimTrailingSpaceBeforeCaret(editor: HTMLTextAreaElement): void {
-		const { selectionStart, selectionEnd, value } = editor;
-		if (selectionStart === null || selectionStart !== selectionEnd || selectionStart === 0) {
-			return;
-		}
-		if (value.charAt(selectionStart - 1) !== ' ') {
-			return;
-		}
-		editor.value = value.slice(0, selectionStart - 1) + value.slice(selectionStart);
-		editor.setSelectionRange(selectionStart - 1, selectionStart - 1);
 	}
 
 	/** Toggle bold/italic/underline for the element under inline edit. */
@@ -1195,23 +1204,32 @@ export class SlideCanvasComponent implements SlideContext {
 
 	/** Mirror each keystroke out for the collaboration live preview. */
 	onTextInput(event: Event, id: string): void {
-		this.textInput.emit({ id, text: (event.target as HTMLTextAreaElement).value });
+		const editor = event.target as HTMLElement;
+		// Enter split a seeded run: mark the new paragraph (shared with the DOM bindings).
+		if ((event as InputEvent).inputType === 'insertParagraph') {
+			markInsertedParagraph(editor.ownerDocument, editor);
+		}
+		this.textInput.emit({ id, text: readEditableText(editor) });
 	}
 
 	commitText(event: Event, id: string): void {
 		if (this.inlineListSeed()) {
 			return;
-		} // The explicit list activation replaces this textarea.
+		} // The explicit list activation replaces this editor.
 		if (this.editCancelled) {
 			this.editCancelled = false;
 			this.textCancel.emit();
 			return;
 		}
-		const editor = event.target as HTMLTextAreaElement;
-		const text = this.viewerOpts ? this.viewerOpts.autoCorrect(editor.value) : editor.value;
+		const editor = event.target as HTMLElement;
+		const previous = (
+			this.lookupElements().find((e) => e.id === id) as { text?: string } | undefined
+		)?.text;
+		const typed = readEditableText(editor);
+		const text = this.viewerOpts ? this.viewerOpts.autoCorrect(typed, previous) : typed;
 		// `a:spAutoFit` ("Resize shape to fit text"): grow/shrink the shape to
 		// the text's natural content height after a real edit. `editor` is the
-		// live, still-mounted textarea (this handler runs off its own `blur`), so
+		// live, still-mounted editor (this handler runs off its own `blur`), so
 		// no separate DOM lookup is needed here.
 		const height = resolveCommitTextAutoFitHeight(this.lookupElements(), id, text, editor);
 		// `a:normAutofit` ("Shrink text on overflow"): recompute the font
@@ -1254,45 +1272,50 @@ export class SlideCanvasComponent implements SlideContext {
 		if (!box || !canInteractWithElement(this.singleSelectedElement(), 'resize')) {
 			return;
 		}
-		this.drag = {
-			id: box.id,
-			mode: 'resize',
-			handle,
-			startBox: { x: box.x, y: box.y, width: box.width, height: box.height },
-			startX: event.clientX,
-			startY: event.clientY,
-			started: false,
-		};
+		this.gestures.begin('resize', box.id, event, handle);
 	}
 
 	onRotatePointerDown(event: PointerEvent): void {
 		event.stopPropagation();
 		(event.target as Element | null)?.setPointerCapture?.(event.pointerId);
 		const box = this.singleSelected();
-		const stage = this.stageRef()?.nativeElement;
-		const el = this.singleSelectedElement();
-		if (!box || !stage || !canInteractWithElement(el, 'rotate')) {
+		if (
+			!box ||
+			!this.stageRef() ||
+			!canInteractWithElement(this.singleSelectedElement(), 'rotate')
+		) {
 			return;
 		}
-		const zoom = this.effectiveScale() || 1;
-		const rect = stage.getBoundingClientRect();
-		const centerX = box.x + box.width / 2;
-		const centerY = box.y + box.height / 2;
-		const px = (event.clientX - rect.left) / zoom;
-		const py = (event.clientY - rect.top) / zoom;
-		this.drag = {
-			id: box.id,
-			mode: 'rotate',
-			handle: null,
-			startBox: box,
-			startX: event.clientX,
-			startY: event.clientY,
-			started: false,
-			centerX,
-			centerY,
-			startAngle: Math.atan2(py - centerY, px - centerX),
-			startRotation: el?.rotation ?? 0,
-		};
+		this.gestures.begin('rotate', box.id, event);
+	}
+
+	/**
+	 * The box a gesture starts from: the element's own box for a move, the single
+	 * selection's for a resize (axis-aligned, as the canvas has always resized)
+	 * and, for a rotate, that box with the element's authored rotation.
+	 */
+	private gestureStartBox(id: string, kind: GestureKind): InteractionBox | undefined {
+		if (kind === 'move') {
+			const el = this.elementById(id);
+			return el ? { x: el.x, y: el.y, width: el.width, height: el.height } : undefined;
+		}
+		const box = this.singleSelected();
+		if (!box || box.id !== id) {
+			return undefined;
+		}
+		const frame = { x: box.x, y: box.y, width: box.width, height: box.height };
+		return kind === 'rotate'
+			? { ...frame, rotation: this.singleSelectedElement()?.rotation ?? 0 }
+			: frame;
+	}
+
+	/** The undo label for a gesture that just left its dead zone. */
+	private gestureLabel(kind: GestureKind): string {
+		return kind === 'move'
+			? this.translate.instant('pptx.undoAction.move')
+			: kind === 'resize'
+				? this.translate.instant('pptx.undoAction.resize')
+				: this.translate.instant('pptx.undoAction.rotate');
 	}
 
 	/**
@@ -1443,117 +1466,7 @@ export class SlideCanvasComponent implements SlideContext {
 				width: Math.abs(curX - marquee.startX),
 				height: Math.abs(curY - marquee.startY),
 			});
-			return;
 		}
-
-		const drag = this.drag;
-		if (!drag) {
-			return;
-		}
-		// Belt-and-braces lock gate: the pointer-down paths already refuse to arm a
-		// gesture a lock forbids, but a lock added mid-gesture (a collaborator, an
-		// AI edit) must not keep writing transforms for the rest of the drag.
-		if (!canInteractWithElement(this.elementById(drag.id), DRAG_MODE_INTERACTION[drag.mode])) {
-			this.drag = null;
-			return;
-		}
-		const zoom = this.effectiveScale() || 1;
-
-		if (!drag.started) {
-			if (
-				Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD &&
-				Math.abs(event.clientY - drag.startY) < DRAG_THRESHOLD
-			) {
-				return;
-			}
-			drag.started = true;
-			const label =
-				drag.mode === 'move'
-					? this.translate.instant('pptx.undoAction.move')
-					: drag.mode === 'resize'
-						? this.translate.instant('pptx.undoAction.resize')
-						: this.translate.instant('pptx.undoAction.rotate');
-			this.transformStart.emit({ id: drag.id, label });
-		}
-
-		if (drag.mode === 'rotate') {
-			const stage = this.stageRef()?.nativeElement;
-			if (
-				!stage ||
-				drag.centerX === undefined ||
-				drag.centerY === undefined ||
-				drag.startAngle === undefined ||
-				drag.startRotation === undefined
-			) {
-				return;
-			}
-			const rect = stage.getBoundingClientRect();
-			const px = (event.clientX - rect.left) / zoom;
-			const py = (event.clientY - rect.top) / zoom;
-			const angle = Math.atan2(py - drag.centerY, px - drag.centerX);
-			const deltaDeg = ((angle - drag.startAngle) * 180) / Math.PI;
-			const rotation = (((drag.startRotation + deltaDeg) % 360) + 360) % 360;
-			this.rotateUpdate.emit({ id: drag.id, rotation: Math.round(rotation) });
-			return;
-		}
-
-		const dx = (event.clientX - drag.startX) / zoom;
-		const dy = (event.clientY - drag.startY) / zoom;
-		let box =
-			drag.mode === 'move' || drag.handle === null
-				? applyMove(drag.startBox, dx, dy)
-				: applyResize(drag.startBox, drag.handle, dx, dy);
-
-		// Snap a move to nearby element edges/centres and show alignment guides.
-		if (drag.mode === 'move') {
-			const others = this.allElements()
-				.filter((el) => el.id !== drag.id)
-				.map((el) => ({ x: el.x, y: el.y, width: el.width, height: el.height }));
-			if (this.snapToShape()) {
-				const snap = computeSnap(box, others, SNAP_SCREEN_PX / zoom);
-				box = { ...box, x: snap.x, y: snap.y };
-				this.snapGuides.set(snap.guides);
-			} else {
-				this.snapGuides.set([]);
-			}
-
-			// Grid snap: applied after element-edge snap so grid takes precedence.
-			if (this.snapToGrid()) {
-				const step = this.gridSpacingPx();
-				box = {
-					...box,
-					x: snapToGridStep(box.x, step),
-					y: snapToGridStep(box.y, step),
-				};
-			}
-
-			// Guide snap: snap the moving element to the nearest user guide.
-			if (this.snapToGuides()) {
-				const guides = this.rulerGuidesSvc.rulerGuides();
-				const thr = SNAP_SCREEN_PX / zoom;
-				let gx = box.x;
-				let gy = box.y;
-				for (const g of guides) {
-					if (g.axis === 'x') {
-						for (const candidate of [gx, gx + box.width / 2, gx + box.width]) {
-							if (Math.abs(candidate - g.pos) <= thr) {
-								gx = g.pos - (candidate - gx);
-								break;
-							}
-						}
-					} else {
-						for (const candidate of [gy, gy + box.height / 2, gy + box.height]) {
-							if (Math.abs(candidate - g.pos) <= thr) {
-								gy = g.pos - (candidate - gy);
-								break;
-							}
-						}
-					}
-				}
-				box = { ...box, x: gx, y: gy };
-			}
-		}
-		this.transformUpdate.emit({ id: drag.id, box });
 	}
 
 	@HostListener('document:pointerup')
@@ -1624,33 +1537,15 @@ export class SlideCanvasComponent implements SlideContext {
 			this.adjustDrag = null;
 			return;
 		}
-		const drag = this.drag;
-		this.drag = null;
-		this.snapGuides.set([]);
 		// A plain click (no drag) on the already-selected group member opens its
 		// text, caret at the click point (see onStagePointerDown).
 		const clickEdit = this.pendingClickTextEdit;
 		this.pendingClickTextEdit = null;
-		if (clickEdit && !drag?.started && this.editingId() !== clickEdit.id) {
-			// Read the caret's place from the rendered text now, while the member is
-			// still drawn (the plain textarea's own layout can't place it).
-			const node = this.stageRef()?.nativeElement.querySelector(
-				`[data-element-id="${CSS.escape(clickEdit.id)}"]`,
-			);
-			const text = (this.elementById(clickEdit.id) as { text?: string } | undefined)?.text ?? '';
-			const offset = node
-				? renderedTextOffsetAt(node, text, clickEdit.clientX, clickEdit.clientY)
-				: null;
-			this.pendingEditOffset = offset === null ? null : { id: clickEdit.id, offset };
+		if (clickEdit && !this.gestures.moved() && this.editingId() !== clickEdit.id) {
+			// The editor is laid out like the rendered text, so the click point
+			// places the caret directly (shared pending caret point).
 			setPendingCaretPoint(clickEdit);
 			this.textEditStart.emit({ id: clickEdit.id });
-		}
-		// A gesture that actually moved/resized a shape must let the parent reroute
-		// the connectors bound to it, otherwise every connector keeps pointing at
-		// where its shape used to be. Rotation leaves the box (and so every
-		// connection site's anchor) alone, so it is not worth a model write.
-		if (drag?.started && drag.mode !== 'rotate') {
-			this.transformEnd.emit({ ids: [drag.id] });
 		}
 	}
 

@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import type { VueWrapper } from '@vue/test-utils';
+import { ribbonTabButtons } from 'ooxml-ui/pptx';
 import type {
 	ViewerCustomization,
 	ViewerRegionContext,
@@ -107,18 +108,17 @@ describe('powerPointViewer host regions', () => {
 		});
 		await mounted.get('button[aria-label="Settings"]').trigger('click');
 		await flushPromises();
-		const element = document.body.querySelector<HTMLElement & { context?: unknown }>(
-			'host-options-view',
-		);
-		const read = () => (element?.context as ViewerSettingsRegionContext).options;
+		const element = document.body.querySelector<
+			HTMLElement & { context?: ViewerSettingsRegionContext }
+		>('host-options-view');
+		expect(element?.context).toBeDefined();
+		const context = () => element!.context!;
+		const read = () => context().options;
 		const before = read().general.showStartScreen;
-		(element?.context as ViewerSettingsRegionContext).setOption(
-			'general.enableCustomFontUpload',
-			true,
-		);
+		context().setOption('general.enableCustomFontUpload', true);
 		await flushPromises();
 		expect(read().general.enableCustomFontUpload).toBe(false);
-		(element?.context as ViewerSettingsRegionContext).setOption('general.showStartScreen', !before);
+		context().setOption('general.showStartScreen', !before);
 		await flushPromises();
 		expect(read().general.showStartScreen).toBe(!before);
 	});
@@ -130,8 +130,10 @@ describe('powerPointViewer host regions', () => {
 		mounted = await mountViewer({
 			backstage: { extraPages: [{ id: 'reports', label: 'Reports', render: renderer }] },
 		});
-		const fileTab = mounted.findAll('[role="tab"]').find((tab) => tab.text().trim() === 'File');
-		await fileTab!.trigger('click');
+		const fileTab = ribbonTabButtons(mounted.element).find(
+			(tab) => tab.textContent?.trim() === 'File',
+		);
+		fileTab!.click();
 		await flushPromises();
 		const navItem = mounted
 			.findAll('[data-pptx-backstage-nav-item]')

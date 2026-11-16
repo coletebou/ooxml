@@ -1,4 +1,10 @@
-import type { DocumentStorage } from 'ooxml-ui/pptx';
+import type {
+	DocumentStorage,
+	GoogleFontsOption,
+	PdfExportSettings,
+	PptxLoadLimits,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
 import type {
 	AutosaveRecord,
 	CompatibilityWarningToast,
@@ -12,8 +18,10 @@ import type {
 import {
 	autosaveStatusKind,
 	clampZoomScale,
+	gateViewerEdits,
 	createCustomizationController,
 	prepareElementForInsertion,
+	resolveReportedViewerMode,
 	slideSpaceElement,
 } from 'ooxml-ui/pptx';
 import type {
@@ -47,6 +55,7 @@ import type { PresentationSetupResult } from './usePresentationSetup';
 import { useRecoveryDetection } from './useRecoveryDetection';
 import type { UseRecoveryDetectionResult } from './useRecoveryDetection';
 import { useReportOnChange } from './useReportOnChange';
+import { useSaveRevision } from './useSaveRevision';
 import type { ViewerState } from './useViewerState';
 import type { UseZoomViewportResult } from './useZoomViewport';
 import type { ViewerDialogsResult } from './viewer-dialog-types';
@@ -56,7 +65,7 @@ import type { ViewerDialogsResult } from './viewer-dialog-types';
 // ---------------------------------------------------------------------------
 
 export interface UseViewerIntegrationInput {
-	transformCommittedText?: (text: string) => string;
+	transformCommittedText?: (text: string, previous?: string) => string;
 	state: ViewerState;
 	zoom: UseZoomViewportResult;
 	history: EditorHistoryResult;
@@ -93,6 +102,10 @@ export interface UseViewerIntegrationInput {
 	allowExternalImages?: boolean;
 	/** Host `initialSlide` prop: the slide shown after each load; forwarded to `useContentLifecycle`. */
 	initialSlide?: number;
+	/** Host `googleFonts` prop: the Google Fonts fallback policy; forwarded to `useFontInjection`. */
+	googleFonts?: GoogleFontsOption;
+	/** Host `limits` prop: the load limits; forwarded to `useContentLifecycle`. */
+	limits?: PptxLoadLimits;
 	/** Forwarded to `useContentLifecycle` -> `useLoadContent`: see `useReadOnlyRecommendationState`. */
 	setReadOnlyRecommendation: Dispatch<SetStateAction<ReadOnlyRecommendation>>;
 	/** Forwarded to `useContentLifecycle` -> `useLoadContent`: see `useReadOnlyRecommendationState`. */
@@ -100,6 +113,11 @@ export interface UseViewerIntegrationInput {
 	/** Forwarded to `useContentLifecycle` -> `useLoadContent`: see `useCompatibilityToastsState`. */
 	setCompatToasts: Dispatch<SetStateAction<CompatibilityWarningToast[]>>;
 	canEdit: boolean;
+	/**
+	 * Drop the crash-recovery copy once the host acknowledged the current revision (honours
+	 * Options > Save > "keep the last AutoRecover version"). Default: keep it.
+	 */
+	discardRecoveryOnHostSave?: () => void;
 	/** Additional insertion gate for a headless host's loaded read-only recommendation. */
 	canInsertElement?: boolean;
 	/**
@@ -120,6 +138,10 @@ export interface UseViewerIntegrationInput {
 	 * matching field on `UseExportHandlersInput`.
 	 */
 	imageResolutionScale?: number;
+	/** File > Options > Advanced > Save as PDF (vector pages or pictures, hidden slides). */
+	pdfExportSettings?: PdfExportSettings;
+	/** The host's `onPdfExportReport`: what a vector PDF export approximated. */
+	onPdfExportReport?: ((result: VectorPdfExportResult) => void) | undefined;
 	mode: ViewerState['mode'];
 	slides: PptxSlide[];
 	activeSlide: PptxSlide | undefined;
@@ -170,6 +192,8 @@ export interface ViewerIntegrationResult {
 	handleEnterPresenterView: AnnotationHandlersResult['handleEnterPresenterView'];
 	handleEnterRehearsalMode: AnnotationHandlersResult['handleEnterRehearsalMode'];
 	autosaveStatus: AutosaveStatus;
+	/** The values a save is built from, read fresh (File > Save compares them before and after). */
+	getChangeSources: () => readonly unknown[];
 	/** The crash-recovery prompt (shared descriptor) plus its accept/decline actions. */
 	recovery: UseRecoveryDetectionResult;
 	isEncryptedDialogOpen: boolean;
@@ -210,6 +234,8 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		autosaveIntervalMs,
 		allowExternalImages,
 		initialSlide,
+		googleFonts,
+		limits,
 		setReadOnlyRecommendation,
 		setModifyVerifier,
 		setCompatToasts,
@@ -218,6 +244,7 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		promptKeepInkAnnotations,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
 		mode,
 		slides,
 		activeSlide,
@@ -272,37 +299,38 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		updateElementById: editorOps.ops.updateElementById,
 		markDirty: history.markDirty,
 		livePatcher: state.livePatcher,
+		gestureRef: state.gestureControllerRef,
 	});
 
 	// ── Content lifecycle (load, font, serialize, autosave) ───────
 	const [isEncryptedDialogOpen, setIsEncryptedDialogOpen] = useState(false);
 	const [loadVersion, setLoadVersion] = useState(0);
-	const { handlerRef, serializeSlides, serializeForRecovery, autosaveStatus } = useContentLifecycle(
-		{
-			content,
-			filePath,
-			storage,
-			autosaveEnabled,
-			autosaveIntervalMs,
-			onAutosave,
-			// The File > Fonts toggle, finally reaching a save call.
-			embedFonts: dialogs.embedFontsEnabled,
-			slides,
-			state,
-			history,
-			ops: editorOps.ops,
-			transformCommittedText: input.transformCommittedText,
-			actionSoundHandlerRef,
-			setIsEncryptedDialogOpen,
-			password: dialogs.presentationPassword ?? undefined,
-			onContentApplied: () => setLoadVersion((v) => v + 1),
-			allowExternalImages,
-			initialSlide,
-			setReadOnlyRecommendation,
-			setModifyVerifier,
-			setCompatToasts,
-		},
-	);
+	const { handlerRef, serializeSlides, autosaveStatus, getChangeSources } = useContentLifecycle({
+		content,
+		filePath,
+		storage,
+		autosaveEnabled,
+		autosaveIntervalMs,
+		onAutosave,
+		// The File > Fonts toggle, finally reaching a save call.
+		embedFonts: dialogs.embedFontsEnabled,
+		slides,
+		state,
+		history,
+		ops: editorOps.ops,
+		transformCommittedText: input.transformCommittedText,
+		actionSoundHandlerRef,
+		setIsEncryptedDialogOpen,
+		password: dialogs.presentationPassword ?? undefined,
+		onContentApplied: () => setLoadVersion((v) => v + 1),
+		allowExternalImages,
+		initialSlide,
+		googleFonts,
+		limits,
+		setReadOnlyRecommendation,
+		setModifyVerifier,
+		setCompatToasts,
+	});
 
 	// ── I/O handlers (export, print, theme, properties) ───────────
 	const { exportHandlers, printHandlers, themeHandlers, propertyHandlers } = useIOHandlers({
@@ -318,13 +346,19 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		zoom,
 		handlerRef,
 		serializeSlides,
-		serializeForRecovery,
 		setContent,
-		onContentChange,
 		onPropertiesChange,
 		onNotesUpdate,
+		allowExternalImages,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
+		// File > Export > PDF: its options dialog mounts in the viewer root; the approximation
+		// notice joins the compatibility toast stack, replacing an earlier PDF notice.
+		pdfExportContainerRef: state.containerRef,
+		notifyPdfExport: (toast) =>
+			setCompatToasts((prev) => [toast, ...prev.filter((entry) => entry.id !== toast.id)]),
+		onPdfExportReport: input.onPdfExportReport,
 	});
 
 	// ── Mode switching with annotation awareness ──────────────────
@@ -369,6 +403,18 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		input.customizationApi ??
 		(fallbackCustomizationRef.current ??= createCustomizationController().api);
 
+	// Revision-aware acknowledgement of a Save the host persists itself (shared controller).
+	const saveRevision = useSaveRevision({
+		getSources: getChangeSources,
+		// Not `getContent`: that one announces `onContentChange`; a host save is not an edit feed.
+		serialize: async () => (await serializeSlides()) ?? new Uint8Array(0),
+		markClean: () => {
+			history.markSaved();
+			state.setIsDirty(false);
+		},
+		discardRecovery: input.discardRecoveryOnHostSave ?? (() => undefined),
+	});
+
 	// The public handle, also handed to host region renderers as `context.viewer`
 	// through a stable proxy, so a re-render never counts as a context change.
 	const latestHandleRef = useRef<PowerPointViewerHandle | null>(null);
@@ -382,166 +428,172 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 	useImperativeHandle(
 		ref,
 		() =>
-			(latestHandleRef.current = {
-				...customizationApi,
-				async getContent() {
-					const data = await serializeSlides();
-					if (data && onContentChange) {
-						onContentChange(data);
-					}
-					return data ?? new Uint8Array(0);
+			(latestHandleRef.current = gateViewerEdits(
+				{
+					...customizationApi,
+					async getContent() {
+						const data = await serializeSlides();
+						if (data && onContentChange) {
+							onContentChange(data);
+						}
+						return data ?? new Uint8Array(0);
+					},
+					goTo(index: number) {
+						if (index >= 0 && index < slides.length) {
+							state.setActiveSlideIndex(index);
+						}
+					},
+					goPrev() {
+						const next = activeSlideIndex - 1;
+						if (next >= 0) {
+							state.setActiveSlideIndex(next);
+						}
+					},
+					goNext() {
+						const next = activeSlideIndex + 1;
+						if (next < slides.length) {
+							state.setActiveSlideIndex(next);
+						}
+					},
+					undo() {
+						history.handleUndo();
+					},
+					redo() {
+						history.handleRedo();
+					},
+					canUndo() {
+						return history.canUndo;
+					},
+					canRedo() {
+						return history.canRedo;
+					},
+					getZoom() {
+						return zoom.scale;
+					},
+					setZoom(level: number) {
+						zoom.setScale(clampZoomScale(level));
+					},
+					zoomIn() {
+						zoom.handleZoomIn();
+					},
+					zoomOut() {
+						zoom.handleZoomOut();
+					},
+					zoomReset() {
+						zoom.handleResetZoom();
+					},
+					getMode() {
+						return resolveReportedViewerMode(mode, canEdit);
+					},
+					setMode(newMode) {
+						state.setMode(newMode);
+					},
+					getActiveSlideIndex() {
+						return activeSlideIndex;
+					},
+					getSlideCount() {
+						return slides.length;
+					},
+					isDirty() {
+						return state.isDirty;
+					},
+					getSaveRevision: () => saveRevision.getRevision(),
+					getSaveSnapshot: () => saveRevision.snapshot(),
+					acknowledgeSave: (revision: number) => saveRevision.acknowledge(revision),
+					getSelectedElementIds() {
+						return state.effectiveSelectedIds;
+					},
+					selectElements(ids: string[]) {
+						state.setSelectedElementIds(ids);
+						state.setSelectedElementId(ids[0] ?? null);
+					},
+					clearSelection() {
+						state.setSelectedElementIds([]);
+						state.setSelectedElementId(null);
+					},
+					// -- Active slide (alias) --
+					setActiveSlideIndex(index: number) {
+						if (index >= 0 && index < slides.length) {
+							state.setActiveSlideIndex(index);
+						}
+					},
+					// -- Slide access --
+					getSlides() {
+						return slides;
+					},
+					getSlide(index: number) {
+						return slides[index];
+					},
+					getActiveSlide() {
+						return slides[activeSlideIndex];
+					},
+					// -- Slide manipulation --
+					addSlide(afterIndex?: number) {
+						if (afterIndex === undefined) {
+							editorOps.slideOps.handleAddSlide();
+						} else {
+							editorOps.slideOps.handleAddSlideAfter(afterIndex);
+						}
+					},
+					deleteSlides(indexes: number[]) {
+						editorOps.slideOps.handleDeleteSlides(indexes);
+					},
+					duplicateSlides(indexes: number[]) {
+						editorOps.slideOps.handleDuplicateSlides(indexes);
+					},
+					moveSlide(fromIndex: number, toIndex: number) {
+						editorOps.slideOps.handleMoveSlide(fromIndex, toIndex);
+					},
+					toggleHideSlides(indexes: number[]) {
+						editorOps.slideOps.handleToggleHideSlides(indexes);
+					},
+					// -- Element access --
+					getElements(slideIndex?: number) {
+						const idx = slideIndex ?? activeSlideIndex;
+						const s = slides[idx];
+						return s?.elements ?? [];
+					},
+					getElementById(elementId: string, slideIndex?: number) {
+						const idx = slideIndex ?? activeSlideIndex;
+						const s = slides[idx];
+						// A group member too (selected by drilling into its group), in slide
+						// space like the editor shows it.
+						return s ? (slideSpaceElement(s.elements, elementId) ?? undefined) : undefined;
+					},
+					// -- Element manipulation --
+					addElement(element: PptxElement) {
+						const inserted = prepareElementForInsertion(element, {
+							canEdit: canEdit && canInsertElement,
+							mode,
+							hasActiveSlide: !loading && !error && Boolean(activeSlide),
+							editTemplateMode: state.editTemplateMode,
+						});
+						if (!inserted) {
+							return undefined;
+						}
+						editorOps.canvasHandlers.handleInlineEditCommit();
+						editorOps.insertHandlers.addElement(inserted);
+						editorOps.ops.applySelection(inserted.id, [inserted.id]);
+						return inserted.id;
+					},
+					updateElements,
+					updateElement(elementId: string, updates: Partial<PptxElement>) {
+						editorOps.ops.updateElementById(elementId, updates);
+					},
+					deleteElements(elementIds: string[]) {
+						state.setSelectedElementIds(elementIds);
+						state.setSelectedElementId(elementIds[0] ?? null);
+						editorOps.manipulation.handleDelete();
+					},
+					duplicateElement(elementId: string) {
+						state.setSelectedElementIds([elementId]);
+						state.setSelectedElementId(elementId);
+						editorOps.manipulation.handleDuplicate();
+						return state.selectedElementIds[0];
+					},
 				},
-				goTo(index: number) {
-					if (index >= 0 && index < slides.length) {
-						state.setActiveSlideIndex(index);
-					}
-				},
-				goPrev() {
-					const next = activeSlideIndex - 1;
-					if (next >= 0) {
-						state.setActiveSlideIndex(next);
-					}
-				},
-				goNext() {
-					const next = activeSlideIndex + 1;
-					if (next < slides.length) {
-						state.setActiveSlideIndex(next);
-					}
-				},
-				undo() {
-					history.handleUndo();
-				},
-				redo() {
-					history.handleRedo();
-				},
-				canUndo() {
-					return history.canUndo;
-				},
-				canRedo() {
-					return history.canRedo;
-				},
-				getZoom() {
-					return zoom.scale;
-				},
-				setZoom(level: number) {
-					zoom.setScale(clampZoomScale(level));
-				},
-				zoomIn() {
-					zoom.handleZoomIn();
-				},
-				zoomOut() {
-					zoom.handleZoomOut();
-				},
-				zoomReset() {
-					zoom.handleResetZoom();
-				},
-				getMode() {
-					return mode;
-				},
-				setMode(newMode) {
-					state.setMode(newMode);
-				},
-				getActiveSlideIndex() {
-					return activeSlideIndex;
-				},
-				getSlideCount() {
-					return slides.length;
-				},
-				isDirty() {
-					return state.isDirty;
-				},
-				getSelectedElementIds() {
-					return state.effectiveSelectedIds;
-				},
-				selectElements(ids: string[]) {
-					state.setSelectedElementIds(ids);
-					state.setSelectedElementId(ids[0] ?? null);
-				},
-				clearSelection() {
-					state.setSelectedElementIds([]);
-					state.setSelectedElementId(null);
-				},
-				// -- Active slide (alias) --
-				setActiveSlideIndex(index: number) {
-					if (index >= 0 && index < slides.length) {
-						state.setActiveSlideIndex(index);
-					}
-				},
-				// -- Slide access --
-				getSlides() {
-					return slides;
-				},
-				getSlide(index: number) {
-					return slides[index];
-				},
-				getActiveSlide() {
-					return slides[activeSlideIndex];
-				},
-				// -- Slide manipulation --
-				addSlide(afterIndex?: number) {
-					if (afterIndex === undefined) {
-						editorOps.slideOps.handleAddSlide();
-					} else {
-						editorOps.slideOps.handleAddSlideAfter(afterIndex);
-					}
-				},
-				deleteSlides(indexes: number[]) {
-					editorOps.slideOps.handleDeleteSlides(indexes);
-				},
-				duplicateSlides(indexes: number[]) {
-					editorOps.slideOps.handleDuplicateSlides(indexes);
-				},
-				moveSlide(fromIndex: number, toIndex: number) {
-					editorOps.slideOps.handleMoveSlide(fromIndex, toIndex);
-				},
-				toggleHideSlides(indexes: number[]) {
-					editorOps.slideOps.handleToggleHideSlides(indexes);
-				},
-				// -- Element access --
-				getElements(slideIndex?: number) {
-					const idx = slideIndex ?? activeSlideIndex;
-					const s = slides[idx];
-					return s?.elements ?? [];
-				},
-				getElementById(elementId: string, slideIndex?: number) {
-					const idx = slideIndex ?? activeSlideIndex;
-					const s = slides[idx];
-					// A group member too (selected by drilling into its group), in slide
-					// space like the editor shows it.
-					return s ? (slideSpaceElement(s.elements, elementId) ?? undefined) : undefined;
-				},
-				// -- Element manipulation --
-				addElement(element: PptxElement) {
-					const inserted = prepareElementForInsertion(element, {
-						canEdit: canEdit && canInsertElement,
-						mode,
-						hasActiveSlide: !loading && !error && Boolean(activeSlide),
-						editTemplateMode: state.editTemplateMode,
-					});
-					if (!inserted) {
-						return undefined;
-					}
-					editorOps.canvasHandlers.handleInlineEditCommit();
-					editorOps.insertHandlers.addElement(inserted);
-					editorOps.ops.applySelection(inserted.id, [inserted.id]);
-					return inserted.id;
-				},
-				updateElements,
-				updateElement(elementId: string, updates: Partial<PptxElement>) {
-					editorOps.ops.updateElementById(elementId, updates);
-				},
-				deleteElements(elementIds: string[]) {
-					state.setSelectedElementIds(elementIds);
-					state.setSelectedElementId(elementIds[0] ?? null);
-					editorOps.manipulation.handleDelete();
-				},
-				duplicateElement(elementId: string) {
-					state.setSelectedElementIds([elementId]);
-					state.setSelectedElementId(elementId);
-					editorOps.manipulation.handleDuplicate();
-					return state.selectedElementIds[0];
-				},
-			}),
+				() => canEdit,
+			)),
 		[
 			updateElements,
 			serializeSlides,
@@ -642,6 +694,7 @@ export function useViewerIntegration(input: UseViewerIntegrationInput): ViewerIn
 		handleEnterPresenterView,
 		handleEnterRehearsalMode,
 		autosaveStatus,
+		getChangeSources,
 		recovery,
 		isEncryptedDialogOpen,
 		setIsEncryptedDialogOpen,

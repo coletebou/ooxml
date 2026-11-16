@@ -34,15 +34,32 @@ Modulzuständigkeiten stehen in der [Architektur](/de/architecture).
 
 Jedes Binding akzeptiert dieselben Eigenschaften und meldet dieselben Ereignisse (der Vertrag sind `ViewerProperties` und `ViewerEvents` in `ooxml-ui/visio`; die [Bindings](/bindings) listen die nativen Formen auf).
 
-| Oberfläche    | Vertrag                                                                                                                                                                |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Eigenschaften | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `ribbonAddIns`, `collaboration`                                                                             |
-| Ereignisse    | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change` |
+| Oberfläche    | Vertrag                                                                                                                                                                                |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Eigenschaften | `document`, `pageIndex`, `zoom`, `showToolbar`, `canEdit`, `readOnly`, `ribbonAddIns`, `collaboration`, `storage`, `fileProviders`, `customization`                                    |
+| Ereignisse    | `document-load`, `document-change`, `document-error`, `page-change`, `zoom-change`, `shape-select`, `selection-change`, `office-ribbon-add-in`, `collaboration-change`, `file-command` |
 
 - `canEdit` (boolean) ist die Bearbeitungsberechtigung. Der vollständige Viewer ist standardmäßig bearbeitbar, und `canEdit: false` macht ihn schreibgeschützt; die [Bausteine](/building-blocks) sind schreibgeschützt, bis der Host `true` übergibt. Eine Zeichnung ohne Paket-Bytes (ein als `document` übergebenes Modell, eine ältere `.vsd`) ist unabhängig von `canEdit` schreibgeschützt.
 - `document-change` liefert `{ document, dirty, kind }`. `kind` ist `edit`, `undo` oder `redo` für Änderungen dieses Fensters, `remote`, wenn die Änderung eines Mitwirkenden angewendet wurde, und `save` nach `markClean()`.
 - `markClean()` (auf `viewer.controller` und auf den Bausteinen) erklärt den aktuellen Inhalt für gespeichert. Ein Host, der `exportVsdx()` selbst speichert, ruft es danach auf: `edit.dirty` wird `false`, ein `document-change` der Art `save` wird ausgelöst, und spätere Bearbeitungen und Rückgängig-Schritte werden ab diesem Punkt gemessen. Bei einer Zeichnung, die nicht zurückgespeichert werden kann, bewirkt es nichts.
 - `collaboration` (`VisioCollaborationOptions | null`) teilt die geöffnete Zeichnung in einem Raum, solange sie gesetzt ist. `collaboration-change` liefert einen `CollaborationState`, wenn das Teilen beginnt oder endet und sich Status, Synchronisierung oder Teilnehmer ändern. Am Element (`viewer.element` eines Handles) liest `collaborationState` den aktuellen Zustand, und `reconnectCollaboration()` und `stopCollaboration()` wirken darauf. Siehe [Zusammenarbeit](/de/collaboration).
+
+## Nur am Element verfügbare Member {#element-only-members}
+
+Diese Member von `<visio-viewer>` gehören nicht zum gemeinsamen Bindungsvertrag (siehe [Bindings](/bindings)); verwenden Sie sie direkt am Element.
+
+| Member                         | Typ                              | Beschreibung                                                                                                                                                                   |
+| ------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `googleFonts`                  | `GoogleFontsOption \| undefined` | Webfont-Ersatz für nicht installierte Zeichnungsschriften: `false` (aus), `{ baseUrl }` (ein CSS2-Spiegel) oder nicht gesetzt für die Entscheidung im Trust Center des Lesers. |
+| `pdfFonts`                     | `readonly PdfFontFile[]`         | Vom Host bereitgestellte TrueType-Dateien, die Datei > Exportieren > PDF als Teilmengen einbettet. Es wird nichts mitgeliefert.                                                |
+| `createFromTemplate(template)` | `Promise<void>`                  | Erstellt eine Zeichnung aus einer Vorlage von Datei > Neu (Leere Zeichnung, Flussdiagramme, Organigramm).                                                                      |
+| `openBackstage(page?)`         | `void`                           | Öffnet Visios Backstage-Ansicht „Datei“ auf einer Seite (standardmäßig Info).                                                                                                  |
+| `closeBackstage()`             | `void`                           | Verlässt die Backstage-Ansicht „Datei“ und kehrt zur Zeichnung zurück.                                                                                                         |
+| `startPresentation()`          | `void`                           | Startet den Präsentationsmodus auf der aktuellen Vordergrundseite (F5).                                                                                                        |
+| `exitPresentation()`           | `void`                           | Beendet den Präsentationsmodus; Seite, Zoom und Auswahl bleiben unverändert.                                                                                                   |
+| `presenting`                   | `boolean` (nur lesen)            | True, solange der Präsentationsmodus aktiv ist.                                                                                                                                |
+| `fileName`                     | `string` (nur lesen)             | Name der zuletzt geöffneten lokalen Datei, leer bei Bytes, Modellen und geschlossenen Zeichnungen.                                                                             |
+| `renderWarnings`               | `readonly string[]` (nur lesen)  | Warnungen, die das letzte Seitenrendering gemeldet hat.                                                                                                                        |
 
 ## Formen auswählen {#select-shapes}
 
@@ -246,6 +263,78 @@ const customization = {
 
 `edit: false` ist eine eigene Schreibsperre neben dem schreibgeschützten Schalter des Hosts und einer Zusammenarbeitsrolle `viewer`: Keine hebt eine andere auf. Capabilities sind eine UI-Richtlinie, kein Dokumentschutz. Das Ersetzen von Bereichen (Optionsdialog, Bereiche) wird für Visio noch nicht angeboten. Alle Produkte im Überblick: [Einbettungsleitfaden](https://github.com/ChristopherVR/ooxml/blob/main/docs/embedding.md).
 
+## Auf die Übernahme des Formtexts warten {#awaited-text-commit}
+
+`commitTextEdit(): Promise<TextEditOutcome>` übernimmt den Text, der gerade in eine Form auf der
+eingebundenen Zeichenfläche getippt wird, damit ein Speichern des Hosts ihn exportiert. Der Aufruf
+wird erst aufgelöst, wenn die Bearbeitung des Entwurfs abgeschlossen ist. Ein Commit, den ein
+Verlassen des Feldes oder Esc bereits gestartet hat, wird abgewartet und nicht wiederholt. Der
+Ablauf steht unter [Speichern während der Text einer Form bearbeitet wird](building-blocks.md#saving-while-editing-text).
+
+Verfügbarkeit:
+
+| Oberfläche                                                                                     | Aufruf                        |
+| ---------------------------------------------------------------------------------------------- | ----------------------------- |
+| `ViewerController` (die React-Prop `handle` erhält ihn, und `viewer.controller` eines Handles) | `controller.commitTextEdit()` |
+| Ergebnis von React `useViewerBuildingBlocks`                                                   | `commitTextEdit()`            |
+| Ergebnis von Vue `useViewerBuildingBlocks`                                                     | `commitTextEdit()`            |
+| Ergebnis von Solid und Svelte `createViewerBuildingBlocks`                                     | `commitTextEdit()`            |
+| Angular `createViewerBuildingBlocks` (der Dienst `ViewerBuildingBlocks`)                       | `commitTextEdit()`            |
+| Ergebnis von Vanilla `createViewerBuildingBlocks`                                              | `commitTextEdit()`            |
+
+Die Zeichenfläche registriert ihren Committer bei `ViewerController.registerTextCommitter`; Hosts
+rufen es nicht auf. `ViewerController.destroyed` ist nach `destroy()` `true`.
+
+Die Typen werden zusammen mit `TextEditCommitter` von `ooxml-ui/visio` exportiert:
+
+```ts
+interface TextEditIdentity {
+	readonly sourceGeneration: number;
+	readonly documentGeneration: number;
+	readonly pageId?: string;
+	readonly shapeId?: string;
+}
+
+type TextEditOutcome =
+	| (TextEditIdentity & { readonly status: 'committed'; readonly text: string })
+	| (TextEditIdentity & { readonly status: 'unchanged'; readonly reason: 'no-draft' | 'same-text' })
+	| (TextEditIdentity & {
+			readonly status: 'refused';
+			readonly reason: 'read-only' | 'rejected';
+			readonly message: string;
+			readonly text: string;
+	  })
+	| (TextEditIdentity & {
+			readonly status: 'cancelled';
+			readonly reason: 'stale-document' | 'superseded' | 'destroyed';
+			readonly text?: string;
+	  });
+```
+
+`sourceGeneration` ist die Generation der geladenen Quelle (die des Entwurfs, falls es einen gab),
+`documentGeneration` die Generation des akzeptierten Dokuments zum Zeitpunkt der Entscheidung.
+`pageId` und `shapeId` sind vorhanden, wenn ein Entwurf existierte.
+
+| `status`    | `reason`         | Felder               | Wann es auftritt                                                                                                                                                                                                            |
+| ----------- | ---------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `committed` |                  | `text`               | Der Entwurf wurde als eine rückgängig machbare Bearbeitung über den üblichen Bearbeitungsweg übernommen, Prüfung und Rückgängig/Wiederholen bleiben unverändert.                                                            |
+| `unchanged` | `no-draft`       |                      | Es war kein Entwurf offen oder keine Zeichenfläche eingebunden.                                                                                                                                                             |
+| `unchanged` | `same-text`      |                      | Der Entwurf ist gleich dem Text der Form.                                                                                                                                                                                   |
+| `refused`   | `read-only`      | `message`, `text`    | Die Zeichnung ist beim Commit schreibgeschützt oder wurde während eines offenen Entwurfs schreibgeschützt. `message` lautet „The drawing is read-only.“.                                                                    |
+| `refused`   | `rejected`       | `message`, `text`    | Die Bearbeitung ist bei der Prüfung gescheitert. `message` ist die Meldung des Editors, `text` behält den Entwurf zur Wiederherstellung.                                                                                    |
+| `cancelled` | `stale-document` | `text`               | Die geladene Quelle hat sich geändert, während der Entwurf offen war oder die Bearbeitung lief. Ein Entwurf, den ein Laden verworfen hat, wird einmal mit seiner alten `sourceGeneration` zurückgegeben und nie übernommen. |
+| `cancelled` | `superseded`     | `text`               | Eine andere Bearbeitung hat diese während ihrer Ausführung ersetzt.                                                                                                                                                         |
+| `cancelled` | `destroyed`      | `text` (mit Entwurf) | Der Controller wurde zerstört: Ein Aufruf auf einem zerstörten Controller liefert dies ohne `text`, ein laufender Entwurf wird mit seinem `text` abgebrochen.                                                               |
+
+Nur bei `status` `committed` oder `unchanged` speichern:
+
+```ts
+const outcome = await controller.commitTextEdit();
+if (outcome.status === 'refused') showError(outcome.message, outcome.text);
+else if (outcome.status === 'cancelled') showError(`Not saved: ${outcome.reason}`, outcome.text);
+else save(controller.exportVsdx().bytes);
+```
+
 ## Statischer SVG-Export {#static-svg-export}
 
 `exportPageSvg(model, pageIndex, { maxBytes })` und das `exportSvg()` jedes
@@ -261,8 +350,7 @@ Vorabprüfungen können Inhalte ablehnen, deren spätere Serialisierung kleiner
 wäre. Schriften werden nicht eingebettet, und Text und Layout bleiben
 näherungsweise. Die physischen Seitenabmessungen bleiben erhalten; nachgelagerte
 Rasterisierer müssen ihre Ausgabeabmessungen und Pixelfläche begrenzen, bevor
-sie eine Bildfläche anlegen. PDF, Bitmap-Export und Drucklayout bleiben
-unimplementiert.
+sie eine Bildfläche anlegen. Diese Funktion schreibt nur SVG; Datei > Exportieren im Viewer schreibt Bildseiten als PNG und PDF. Das Drucklayout bleibt unimplementiert.
 
 Optionale sekundäre Pixeltests unter Linux laufen nach dem Build mit
 `node scripts/test-svg-rasterization.mjs`, mit dem System-Python 3,
@@ -323,8 +411,8 @@ auch bei seitenübergreifender Ergebnisnavigation. Die nativen Ereignisse
 Framework-Callbacks verfügbar. „Alle ersetzen“ erhält die Auswahl; das Ersetzen
 des aktuellen Vorkommens springt zum nächsten. Ein Ersetzen durch denselben Text
 erhält die exakten Quellbytes und fügt dem Verlauf nichts hinzu, navigiert aber
-weiterhin. Nicht unterstützter passender Rich Text, Text mit Feldern, mit
-Masterverknüpfung, geschützter oder abhängiger Text lehnt den gesamten Stapel
+weiterhin. Nicht unterstützter passender Rich Text, Text mit Feldern,
+geschützter oder abhängiger Text lehnt den gesamten Stapel
 ab. Der Entwurf zeigt den Fehler an und bleibt bearbeitbar. Das Schließen der
 Steuerelemente oder ein Wechsel der Absicht bricht die ausstehende Operation ab.
 
@@ -350,8 +438,8 @@ privat erhalten; Bearbeitung, Rückgängig/Wiederholen und VSDX-Export sind für
 Legacy-Quellen deaktiviert. Frühere Binärversionen, Gruppen und Master,
 komplexe Geometrie, Schablonen, Vorlagen und makroaktivierte Formate bleiben
 nicht unterstützt. Die Zuweisung eines Modells mit `document` liefert keine
-bearbeitbaren Paketbytes. Die Kern-Validierung lehnt Formen mit
-Masterverknüpfung, Rich Text, Felder, signierte Pakete und makroaktivierte
+bearbeitbaren Paketbytes. Die Kern-Validierung lehnt nicht unterstützten
+Rich Text, Felder, signierte Pakete und makroaktivierte
 Inhalte ab. XML- und Paketbearbeitungen laufen in einem isolierten Worker;
 Framework-Wrapper implementieren keine Formatlogik. Nur-Text-Bearbeitungen
 verweigern betroffene oder unbekannte textabhängige Formel-Caches, statt sie
@@ -372,7 +460,7 @@ Geometrieoperationen gelten eigene Zulassungsregeln. Die Nachweise zum nativen
 Wiederöffnen decken bestimmte aufgezeichnete Fälle ab und stehen im
 [Verifikationsprotokoll](/verification); sie belegen keine allgemeine Treue.
 
-## Experimentelle Formatierung und Anordnung {#experimental-formatting-and-arrangement}
+## Formatierung und Anordnung {#experimental-formatting-and-arrangement}
 
 Das Menüband Start und `applyEdits()` teilen sich die Befehle `format-text`,
 `format-shape` und `reorder-shape`. Die Textformatierung umfasst gespeicherte
@@ -436,7 +524,7 @@ außerhalb seines Zulassungsbereichs. Diese Aktionen teilen sich Verlauf,
 Beibehaltung der Auswahl und VSDX-Download bzw. -Wiederöffnen mit anderen
 Bearbeitungen.
 
-## Experimentelles Duplizieren {#experimental-duplication}
+## Duplizieren {#experimental-duplication}
 
 `duplicateSelection(): Promise<void>` am Controller und an jedem eingehängten
 bzw. nativen Handle dupliziert zugelassene ausgewählte Formen der aktuellen
@@ -508,7 +596,7 @@ ab. Der DOM-freie Kern exportiert `captureVisioClipboard`,
 `serializeVisioClipboard`, `deserializeVisioClipboard`, die Bearbeitung
 `paste-shapes` und den Befehlsbauer `visioPasteCommand(page, clipboard, offset?)`.
 
-## Experimentelle Geometriebearbeitung {#experimental-geometry-editing}
+## Geometriebearbeitung {#experimental-geometry-editing}
 
 Die gemeinsamen Geometrie-Steuerelemente bieten Rechteck erstellen, Verschieben,
 Größe ändern und sicheres Löschen. Jedes native bzw. eingehängte Framework-Handle

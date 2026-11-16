@@ -1,5 +1,6 @@
 import { NgStyle } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import type { DoCheck } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 import { TranslateService } from '@ngx-translate/core';
 import {
@@ -8,8 +9,13 @@ import {
 	getBackgroundAnimationState,
 	isElementHidden,
 	inlineElementPointerEvents,
+	probeElementRenderFault,
 } from 'ooxml-ui/pptx';
-import type { ElementAnimationState, FieldSubstitutionContext } from 'ooxml-ui/pptx';
+import type {
+	AbuttingEdgeBleed,
+	ElementAnimationState,
+	FieldSubstitutionContext,
+} from 'ooxml-ui/pptx';
 import type { PptxElement, PptxTableData, ShapeStyle } from 'pptx-viewer-core';
 
 import { AnimationPlaybackService } from './animation-playback.service';
@@ -17,6 +23,7 @@ import { resolveBevelLightingFilter } from './bevel-lighting-filter';
 import type { BevelLightingFilterDef } from './bevel-lighting-filter';
 import { ConnectorRendererComponent } from './connector-renderer.component';
 import type { Rect } from './connector-routing';
+import { ElementBoundaryDirective } from './element-boundary.directive';
 import { getReflectionOverlay, getSoftEdgeFilterDef } from './element-effect-defs';
 import type { ReflectionOverlay, SoftEdgeFilterDef } from './element-effect-defs';
 import { ElementRendererGraphicsComponent } from './element-renderer-graphics.component';
@@ -34,6 +41,8 @@ import type { StyleMap } from './element-style';
 import { ImageRendererComponent } from './image-renderer.component';
 import { ReflectionMirrorContentComponent } from './reflection-mirror-content.component';
 import { Rendering3DService } from './rendering-3d.service';
+import { resolveSilhouetteFilter } from './silhouette-filter';
+import type { SilhouetteFilterDef } from './silhouette-filter';
 import type { TableCellCommit } from './table-renderer.component';
 
 export { shouldPreventHyperlinkNavigation } from './hyperlink-confirm';
@@ -54,6 +63,7 @@ export { shouldPreventHyperlinkNavigation } from './hyperlink-confirm';
 	host: { class: 'contents' },
 	imports: [
 		NgStyle,
+		ElementBoundaryDirective,
 		ConnectorRendererComponent,
 		ElementRendererGraphicsComponent,
 		ElementRendererShapeComponent,
@@ -62,10 +72,17 @@ export { shouldPreventHyperlinkNavigation } from './hyperlink-confirm';
 	],
 	templateUrl: './element-renderer.component.html',
 })
-export class ElementRendererComponent {
+export class ElementRendererComponent implements DoCheck {
 	readonly element = input.required<PptxElement>();
+
+	/** Test-only fault hook (inert unless a test page sets it), inside this element's boundary. */
+	ngDoCheck(): void {
+		probeElementRenderFault(this.element());
+	}
 	readonly mediaDataUrls = input<Map<string, string>>(new Map());
 	readonly zIndex = input<number>(0);
+	/** Grow under an abutting opaque box (shared `resolveAbuttingEdgeBleeds`). */
+	readonly edgeBleed = input<AbuttingEdgeBleed | undefined>(undefined);
 
 	/**
 	 * Host opt-in to the Three.js SmartArt renderer. Optional so renderers used
@@ -94,6 +111,8 @@ export class ElementRendererComponent {
 	 * so they don't pollute the contract selectors, mirroring React.
 	 */
 	readonly interactive = input<boolean>(true);
+	/** Whether this element is part of the current selection (media control bar). */
+	readonly selected = input<boolean>(false);
 
 	/**
 	 * Emit the `data-pptx-element` marker even though `interactive` is false:
@@ -184,7 +203,7 @@ export class ElementRendererComponent {
 
 	/**
 	 * The element currently open in the element-level inline text editor
-	 * (the `<textarea data-inline-editor>` overlay in `slide-canvas.component`),
+	 * (the `[data-inline-editor]` overlay in `slide-canvas.component`),
 	 * or `null`. Mirrors React's `ElementBody.renderBody`, which swaps its
 	 * static text render out for the inline editor rather than layering the
 	 * two: without this the element's normal text painted UNDERNEATH the
@@ -212,6 +231,11 @@ export class ElementRendererComponent {
 	/** `a:sp3d` bevel lighting `<filter>` descriptor; see `bevel-lighting-filter.ts`. */
 	readonly bevelLightingFilter = computed<BevelLightingFilterDef | undefined>(() =>
 		resolveBevelLightingFilter(this.element(), this.sanitizer),
+	);
+
+	/** Silhouette shadow / glow `<filter>` of a non-rectangular shape. */
+	readonly silhouetteFilter = computed<SilhouetteFilterDef | undefined>(() =>
+		resolveSilhouetteFilter(this.element(), this.sanitizer),
 	);
 
 	/**
@@ -264,6 +288,7 @@ export class ElementRendererComponent {
 			state?.animatesFill,
 			state?.animatesStroke,
 			this.editTemplateMode(),
+			this.edgeBleed(),
 		);
 	});
 	readonly children = computed<PptxElement[]>(() => {

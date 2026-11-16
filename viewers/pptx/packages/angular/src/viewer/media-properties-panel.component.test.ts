@@ -25,8 +25,10 @@ describe('mediaPropertiesPanelComponent trim-end field', () => {
 			path.join(__dirname, 'media-properties-panel.component.ts'),
 			'utf8',
 		);
-		expect(source).toMatch(/trimEndAbsoluteMs = computed\(\(\) =>\s*mediaTrimEndAbsoluteMs\(/);
-		expect(source).toMatch(/trimEndMs: mediaTrimEndMsFromAbsoluteMs\(/);
+		// The shared trim fields show the absolute end and convert it back
+		// (`media-trim-fields.ts`), bounded by the clip's duration.
+		expect(source).toContain('[sections]="trimSections"');
+		expect(source).toContain('[target]="trimTarget()"');
 		expect(source).not.toContain('[value]="media().trimEndMs ?? 0"');
 	});
 
@@ -36,5 +38,17 @@ describe('mediaPropertiesPanelComponent trim-end field', () => {
 
 	it('stores 5000 (p14:trim/@end) when the user types an absolute end of 15000 on a 20s clip', () => {
 		expect(mediaTrimEndMsFromAbsoluteMs(20000, 15000)).toBe(5000);
+	});
+});
+
+describe('mediaPropertiesPanelComponent playback options', () => {
+	it('draws the shared playback descriptors with the generic renderer', () => {
+		const source = readFileSync(
+			path.join(__dirname, 'media-properties-panel.component.ts'),
+			'utf8',
+		);
+		expect(source).toContain('[sections]="playbackSections"');
+		expect(source).toContain('[disabled]="!canEdit()"');
+		expect(source).not.toContain('booleanPatch(');
 	});
 });

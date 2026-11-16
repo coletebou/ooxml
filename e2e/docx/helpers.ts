@@ -5,7 +5,7 @@ import type { EditorView } from 'prosemirror-view';
 const editor = (page: Page) => page.locator('docx-editor');
 const landingVisible = (page: Page) => page.locator('#landing').isVisible();
 /** Waits until the demo script has wired the landing page's buttons. */
-const demoReady = (page: Page) =>
+export const demoReady = (page: Page) =>
 	page.locator('html[data-demo-ready="true"]').waitFor({ state: 'attached' });
 
 /** Opens the demo in `framework` and loads the sample document from the landing page. */
@@ -54,6 +54,23 @@ export async function saveCopyAsDocx(page: Page) {
 
 export const fileNameLabel = (page: Page) => editor(page).locator('.dve-titlebar .file .name');
 export const saveStateLabel = (page: Page) => editor(page).locator('.dve-titlebar .file .status');
+
+/**
+ * Opens `bytes` in the running editor and waits until the editor has swapped the document in. The
+ * title takes the new name only once loading finishes; until then the previous document (which
+ * may hold the same kind of object) is still on screen, and clicking it selects an object that the
+ * load then replaces.
+ */
+export async function reopenDocument(page: Page, name: string, bytes: Uint8Array | Buffer) {
+	await (
+		await fileInput(page)
+	).setInputFiles({
+		name,
+		mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		buffer: Buffer.from(bytes),
+	});
+	await expect(fileNameLabel(page)).toHaveText(name);
+}
 
 /** Switches the ribbon tab row's Editing/Viewing mode. */
 export async function setReadOnly(page: Page, readOnly: boolean) {

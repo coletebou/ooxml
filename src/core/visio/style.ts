@@ -4,12 +4,28 @@ import { legacyFillGradient } from './legacy-fill-gradient';
 import { cachedFillPattern } from './fill-pattern';
 import { clampUnitInterval } from '../color/color-primitives';
 import { themeLinearGradient } from './theme-gradient';
-import { themeLineWeight, reportThemeEffects, themeSolidLinePattern } from './theme-line';
+import { themeEffects } from './theme-effects';
+import { themeFontFamily } from './theme-font';
+import {
+	themeLineWeight,
+	reportThemeEffects,
+	themeSolidLinePattern,
+	themeArrow,
+} from './theme-line';
 import { lineCap } from './line-style';
 import { linePattern } from './line-pattern';
 import { sourcePaint } from './source-paint';
 import { shapeShadow } from './shadow';
 import { shapeEffects } from './effects';
+import {
+	hasUndrawnBevel,
+	shapeBevel,
+	shapeContour,
+	shapeExtrusion,
+	shapeRotation3d,
+} from './bevel-3d';
+import { isUndrawnBevelMaterial } from './bevel-shading';
+import { themeSolid } from './theme-solid';
 import { themeColor, type ThemeResources } from './theme-resolve';
 import { textBackground } from './text-background';
 import { characterExtras } from './text-character';
@@ -146,16 +162,47 @@ export function shapeStyle(
 	if (lineGradient && (number(cells, 'BeginArrow', 0) || number(cells, 'EndArrow', 0)))
 		report('unsupported-gradient-arrows', 'Arrow markers retain the solid line fallback color.');
 	reportThemeEffects(cells, resources, report);
+	const themedEffects = themeEffects(cells, resources);
 	const shadow = shapeShadow(
 		cells,
 		(name, fallback) => color(cells, name, fallback, resources, report),
 		report,
+		themedEffects,
 	);
 	const effects = shapeEffects(
 		cells,
 		(name, fallback) => color(cells, name, fallback, resources, report),
 		report,
+		themedEffects,
 	);
+	const themedSolid = themeSolid(
+		cells,
+		resources,
+		color(cells, 'FillForegnd', '#ffffff', resources, () => {}),
+	);
+	const bevel = shapeBevel(cells, themedSolid);
+	const solidColor = (name: string, fallback: string) =>
+		color(cells, name, fallback, resources, report);
+	const extrusion = shapeExtrusion(cells, !!bevel, solidColor);
+	const contour = shapeContour(cells, !!bevel, themedSolid, solidColor);
+	const rotation3d = shapeRotation3d(cells);
+	if ((bevel && (bevel.width > 0 || bevel.height > 0)) || rotation3d || extrusion || contour)
+		report(
+			'approximated-3d',
+			"Bevel, 3-D rotation, perspective, extrusion and contour are approximations: a shaded height profile, a projection and flat-shaded side faces, not Visio's renderer.",
+		);
+	if (bevel && isUndrawnBevelMaterial(bevel.material ?? 0))
+		report(
+			'unsupported-bevel',
+			'Bevel material 8 (an opaque white surface in Visio 16) is drawn as the default material.',
+		);
+	if (hasUndrawnBevel(cells))
+		report(
+			'unsupported-bevel',
+			'Bottom bevels are not drawn (Visio 16 shows no change on the front of a shape).',
+		);
+	const themedBegin = themeArrow(cells, resources, 'Begin');
+	const themedEnd = themeArrow(cells, resources, 'End');
 	const cap = lineCap(cells, resources, report);
 	// The geometry reader reports a bad value; here it is only shown to the user.
 	const rounding = number(cells, 'Rounding', 0, () => {});
@@ -180,13 +227,17 @@ export function shapeStyle(
 				? 1
 				: opacity(number(cells, 'FillForegndTrans', 0, report)),
 		lineOpacity: lineGradient ? 1 : opacity(number(cells, 'LineColorTrans', 0, report)),
-		startArrow: number(cells, 'BeginArrow', 0, report),
-		endArrow: number(cells, 'EndArrow', 0, report),
-		startArrowSize: number(cells, 'BeginArrowSize', 2, report),
-		endArrowSize: number(cells, 'EndArrowSize', 2, report),
+		startArrow: themedBegin?.code ?? number(cells, 'BeginArrow', 0, report),
+		endArrow: themedEnd?.code ?? number(cells, 'EndArrow', 0, report),
+		startArrowSize: themedBegin?.size ?? number(cells, 'BeginArrowSize', 2, report),
+		endArrowSize: themedEnd?.size ?? number(cells, 'EndArrowSize', 2, report),
 		...(rounding > 0 && rounding <= 100 ? { rounding } : {}),
 		...(shadow ? { shadow } : {}),
 		...effects,
+		...(bevel ? { bevel } : {}),
+		...(extrusion ? { extrusion } : {}),
+		...(contour ? { contour } : {}),
+		...(rotation3d ? { rotation3d } : {}),
 	};
 }
 const literalFont = (value: string | undefined, resources: Resources): string | undefined =>
@@ -197,7 +248,7 @@ const literalFont = (value: string | undefined, resources: Resources): string | 
 /**
  * A `Themed` font where no font theme is selected (FontSchemeIndex 0 on the shape, or inherited
  * from a page that has none) is the font of the verified No Style root, as for root paint
- * (MS-VSDX 2.4.4.58). Theme font schemes themselves are not resolved.
+ * (MS-VSDX 2.4.4.58). A selected font scheme resolves through `theme-font.ts`.
  */
 function rootFont(themeCells: Cells, resources: Resources): string | undefined {
 	const index = (cells: Cells | undefined) => {
@@ -222,7 +273,9 @@ function fontOf(
 	const value = cells.get('Font')?.value;
 	const family =
 		literalFont(value, resources) ??
-		(value === 'Themed' ? rootFont(themeCells, resources) : undefined);
+		(value === 'Themed'
+			? (themeFontFamily(themeCells, resources) ?? rootFont(themeCells, resources))
+			: undefined);
 	return { family: family ?? 'Arial', assumed: !family };
 }
 const assumedFonts = new WeakSet<VisioText>();
@@ -270,6 +323,7 @@ export function shapeText(
 	let currentCells = defaultCells;
 	const runs: VisioTextRun[] = [];
 	const paragraphMarkers: ParagraphMarker[] = [];
+	const tabMarkers: ParagraphMarker[] = [];
 	const fields: VisioTextField[] = [];
 	let textOffset = 0,
 		terminalDirectText = false;
@@ -291,6 +345,8 @@ export function shapeText(
 				const element = part as Element;
 				if (element.localName === 'cp')
 					currentCells = characters.get(element.getAttribute('IX') ?? '0') ?? defaultCells;
+				else if (element.localName === 'tp')
+					tabMarkers.push({ offset: textOffset, index: element.getAttribute('IX') ?? '0' });
 				else if (element.localName === 'pp')
 					paragraphMarkers.push({ offset: textOffset, index: element.getAttribute('IX') ?? '0' });
 				else if (element.localName === 'fld') {
@@ -335,6 +391,7 @@ export function shapeText(
 		report,
 		runs,
 		consumeParagraph,
+		tabMarkers,
 	);
 	// Paragraph offsets use the stored final marker; logical runs exclude it.
 	// A field's cached text is content, never a structural paragraph terminator.

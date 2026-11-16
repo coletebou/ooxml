@@ -79,6 +79,19 @@ function warpedText(overrides: Partial<PptxElement> = {}): PptxElement {
 	} as PptxElement;
 }
 
+/** Far wider than its box at the default font size, so it must wrap. */
+const LONG_PARAGRAPH =
+	'The quick brown fox jumps over the lazy dog and then keeps on running far away';
+
+/** Distinct unwarped baselines (`y`) among the glyphs: one per wrapped row. */
+function glyphRowCount(root: ParentNode): number {
+	return new Set(
+		[...root.querySelectorAll('svg > text, svg > g[data-glyph-slices] > text')].map((t) =>
+			t.getAttribute('y'),
+		),
+	).size;
+}
+
 function mountWarped(element: PptxElement): SVGSVGElement | null {
 	const target = document.createElement('div');
 	document.body.appendChild(target);
@@ -106,9 +119,49 @@ describe('wordArtText (Svelte)', () => {
 		expect(svg?.querySelector('textPath')).not.toBeNull();
 	});
 
+	it('paints textPath runs with SVG fill (a CSS color leaves SVG text black)', () => {
+		const svg = mountWarped(warpedText());
+		const style = svg?.querySelector('textPath tspan')?.getAttribute('style') ?? '';
+		expect(style).toMatch(/fill:\s*(#ff0000|rgb\(255,\s*0,\s*0\))/iu);
+	});
+
+	it('paints a non-outline envelope glyph with SVG fill', () => {
+		const svg = mountWarped(
+			warpedText({ textStyle: { textWarpPreset: 'textPlain', color: '#ff0000' } }),
+		);
+		const style = svg?.querySelector('svg > text')?.getAttribute('style') ?? '';
+		expect(style).toMatch(/fill:\s*(#ff0000|rgb\(255,\s*0,\s*0\))/iu);
+	});
+
 	it('renders nothing for a non-warped preset', () => {
-		const svg = mountWarped(warpedText({ textStyle: { textWarpPreset: 'textPlain' } }));
+		const svg = mountWarped(warpedText({ textStyle: { textWarpPreset: 'textNoShape' } }));
 		expect(svg).toBeNull();
+	});
+
+	it('renders textPlain through the glyph envelope, one glyph per character', () => {
+		const svg = mountWarped(warpedText({ textStyle: { textWarpPreset: 'textPlain' } }));
+		expect(svg?.querySelector('textPath')).toBeNull();
+		const glyphTexts = (svg ? logicalGlyphElements(svg) : []).map(representativeTextEl);
+		expect(glyphTexts.map((t) => t.textContent).join('')).toBe('Hello');
+	});
+
+	it('wraps a long textPlain paragraph into several rows, but keeps a single word on one', () => {
+		const long = mountWarped(
+			warpedText({ text: LONG_PARAGRAPH, textStyle: { textWarpPreset: 'textPlain' } }),
+		);
+		expect(long ? glyphRowCount(long) : 0).toBeGreaterThan(1);
+		cleanup?.();
+		// A word far wider than its small square box stays whole on one row.
+		const word = mountWarped(
+			warpedText({
+				text: 'schedule',
+				width: 40,
+				height: 40,
+				textStyle: { textWarpPreset: 'textPlain' },
+			}),
+		);
+		expect(word ? glyphRowCount(word) : 0).toBe(1);
+		expect(word ? logicalGlyphElements(word) : []).toHaveLength('schedule'.length);
 	});
 
 	it('renders one <text> per glyph (true two-curve envelope) for textInflate, not a shared textPath', () => {
@@ -187,18 +240,18 @@ describe('wordArtText (Svelte)', () => {
 		expect(bareGlyphs.length + glyphGroups.length).toBe('MMM'.length);
 	});
 
-	it('keeps using a textPath for a former "simple" preset', () => {
+	it('renders the per-glyph envelope for a former "simple" preset', () => {
 		const svg = mountWarped(warpedText({ textStyle: { textWarpPreset: 'textSlantUp' } }));
-		expect(svg?.querySelector('textPath')).not.toBeNull();
+		expect(svg?.querySelector('textPath')).toBeNull();
+		expect(svg?.querySelectorAll(':scope > text').length).toBeGreaterThan(0);
 	});
 
-	it('renders warped <path> outlines (not <text>) once the font is registered in the outline cache', () => {
+	it('repaints mounted glyphs as warped <path> outlines once the outline font is ready', async () => {
 		const embedded: PptxEmbeddedFont = {
 			name: 'WarpOutlineSvelteTestFont',
 			dataUrl: '',
 			rawFontData: buildTestFont(),
 		};
-		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
 		const svg = mountWarped(
 			warpedText({
 				textStyle: {
@@ -208,6 +261,12 @@ describe('wordArtText (Svelte)', () => {
 				},
 			}),
 		);
+		// The font arrives after the glyphs mounted (a deferred parser load or a
+		// webfont fetch): the cache notification alone must repaint them.
+		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
+		await glyphOutlineFontCache.preload();
+		await Promise.resolve();
+		flushSync();
 		const paths = svg?.querySelectorAll('path') ?? [];
 		expect(paths).toHaveLength('Hello'.length);
 		expect(svg?.querySelector('text')).toBeNull();
@@ -215,5 +274,24 @@ describe('wordArtText (Svelte)', () => {
 			expect(p.getAttribute('d')?.startsWith('M')).toBeTruthy();
 			expect(p.getAttribute('fill')).toBe('#123456');
 		}
+	});
+
+	it('puts the lines of an Arch Up block on ellipses 1.2 em apart, the last on the base ellipse', () => {
+		const svg = mountWarped(
+			warpedText({
+				textStyle: { textWarpPreset: 'textArchUp', fontSize: 20 },
+				textSegments: [
+					{ text: 'Top', style: {} },
+					{ text: '', style: {}, isParagraphBreak: true },
+					{ text: 'Bottom', style: {} },
+				],
+			}),
+		);
+		const radii = [...svg!.querySelectorAll('defs path')].map((path) =>
+			Number(/A ([\d.]+),/u.exec(path.getAttribute('d') ?? '')?.[1]),
+		);
+		expect(radii).toHaveLength(2);
+		expect(radii[1]).toBe(150);
+		expect(radii[0]).toBeCloseTo(174, 5);
 	});
 });

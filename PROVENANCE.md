@@ -1,5 +1,173 @@
 # Provenance
 
+## Provider-neutral storage sessions (2026-11-04)
+
+Source repository: ChristopherVR/ooxml, commit `194529b06`. The serialized session and
+abortable merge runner from `src/core/embedding/onedrive/{session,merge}.ts` moved into
+`src/core/embedding/{storage-session,storage-merge}.ts`. Provider-owned identity/revision
+types, conflict classification, cloning and validation hooks replace OneDrive assumptions.
+The public OneDrive session remains as an adapter over this shared implementation.
+
+## Shared OneDrive connection (2026-11-04)
+
+Source repository: ChristopherVR/ooxml, unpublished local checkpoint `eae89e8c4`. The modules
+`src/ui/src/pptx/onedrive/{client,requests,types}.ts` moved into
+`src/core/embedding/onedrive/`, with strict TypeScript settings and a dedicated
+`ooxml-core/embedding/onedrive` package subpath. The PowerPoint UI path is a compatibility
+facade. The core implementation generalizes file identities and native type admission to DOCX,
+XLSX, PPTX and VSDX; adds identity-based reads, separate cloud copies and explicit sharing;
+and adds sessions that retain baseline/local/remote versions for conflict recovery.
+Test-local Graph transports replace the draft's mock service and demo before publication.
+No Office parsing or document merging was extracted into the connection.
+
+## Further shared Office capabilities (2026-10-28)
+
+Source repository: ChristopherVR/ooxml. Baseline `b36e9472a`, unless a later
+extraction commit is named below. Product adapters and public compatibility paths remain.
+
+- `core/chart/manual-layout.ts` derives inner/outer axis-band handling from
+  `ui/src/pptx/render/chart-view-model-layout.ts`; point-label offset application derives
+  from `chart-manual-layout.ts` at `40d9bf320`. The shared painter and Excel summary now
+  carry authored layouts; measured PowerPoint bands remain host inputs.
+- `core/chart/line-path.ts` moves `ui/src/pptx/render/chart-line-path.ts` at `9c46c08fa`,
+  with strict index assertions. Shared cartesian/XY painting consumes smoothing and
+  authored stroke choices. The PowerPoint file re-exports the neutral functions.
+- `core/chart/{date-axis,date-format}.ts` extracts calendar serial conversion, stepping
+  and date-format tokens from `ui/src/pptx/render/{chart-date-axis,chart-date-format}.ts`
+  at `3166b4d6e`. Product axis descriptors remain adapters; Excel supplies its date system.
+- `core/chart/data-table-layout.ts` extracts metrics from
+  `ui/src/pptx/render/chart-data-table-metrics.ts` at `6cdd0e7e1`. The neutral table
+  view and SVG painter are new strict code based on the PowerPoint behavior.
+- `core/drawingml/custom-geometry.ts` is new strict DOM admission using the already shared
+  guide evaluator. The PowerPoint object-tree parser remains an adapter. Guide and path
+  coordinate spaces are separate. `drawingml/path-data.ts` moves SVG projection from
+  `ui/src/smartart/smartart-geometry.ts`; the UI delegates to it. Word retains original
+  custom geometry XML through size and formatting edits.
+- `core/geometry/picture-crop.ts` extracts numeric rectangle/inset conversions from
+  `ui/src/pptx/render/picture-crop/crop-geometry.ts`. DrawingML crop read/write and Excel
+  model, edit, paint and source-preserving save adapters are new strict code. Product
+  pointer behavior and minimum frame sizes remain UI policy.
+- `core/drawingml/{node-view,gradient-read}.ts` merge the `a:gradFill` readers of
+  `drawingml/drawing-fill.ts` and `pptx/core/core/builders/PptxGradientStyleCodec.ts` (this
+  repository, at `494897493`) into one reader over a node view; the pptx object-tree view is
+  `pptx/core/color/object-drawing-view.ts`. The codec keeps its presentation rules and the
+  writer; both readers were compared over the committed decks before the old code was removed.
+- `core/drawingml/effect-read.ts` moves the CT_EffectList field tables and reader out of
+  `drawingml/drawing-effects.ts` onto the node view (this repository, at `1b3fc3922`);
+  `pptx/core/core/builders/effect-style-from-model.ts` replaces the attribute parsing of
+  `PptxShapeEffectStyleExtractor`, `effect-style-extractor-reflection.ts` and the list effects of
+  `PptxEffectDagExtractor`. `core/drawingml/{effect-dag-model,effect-dag}.ts` are new strict code
+  from ECMA-376 Part 1, 20.1.8 (CT_EffectContainer and EG_Effect); they replace the top-level-only
+  readers of `pptx/core/core/builders/effect-dag-specific-helpers.ts` (duotone stays).
+- `core/drawingml/picture-effects.ts` is a new ordered DOM codec for grayscale,
+  luminance and alpha, retaining opaque source operations. Its percentage and transfer
+  helpers replace equivalent PowerPoint runtime and `render/image-effects.ts` formulas.
+  `ui/src/picture-effects.ts` is shared SVG filter construction; Excel is its first
+  product consumer. Source-backed Excel picture writes now patch identity and relationship
+  fields as well as crop/effects, retaining unrelated drawing content.
+- `core/chart/funnel-geometry.ts` extracts centred flat bar geometry from PowerPoint
+  `render/chart-funnel-sunburst.ts` at `c4644066f`. The neutral funnel painter and ChartEx
+  summary admission are new strict code; the PowerPoint wrapper retains its formatting API.
+- `core/chart/box-distribution.ts` extracts quartiles, whisker fences and mean calculations
+  from PowerPoint `render/chart-box-whisker.ts` at `c13e2e00f`, reusing existing box statistics.
+  The neutral painter and multi-series ChartEx summary preserve observation identities.
+- `core/drawingml/picture-fill.ts` extends the former shared picture-fill parser with crop,
+  ordered effects and unsupported rendering diagnostics. `drawingml/image-content-type.ts`
+  extracts Word's media MIME inference from `docx/drawing.ts`. Cached diagram `dsp:pic`
+  admission, relationship mapping and `ui/src/smartart/smartart-picture.ts` paint servers are
+  new code using the shared picture APIs and PowerPoint picture behavior as reference.
+  Word and Excel supply package-owned media resolution; external references remain preserved
+  source data rather than automatically loaded images.
+- `core/drawingml/{read-3d-values,scene3d-coordinate,scene3d-presets}.ts` extracts
+  semantic scene/extrusion reads, integer-vector conversion and preset validation from
+  PowerPoint `text-body-scene3d.ts`, `text-body-sp3d.ts`, `scene3d-coordinate.ts` and
+  `text-body-scene3d-presets.ts` at `b36e9472a`. `DrawingScene3D` replaces the identical
+  PowerPoint interface from `src/core/pptx/core/types/three-d.ts` at `b36e9472a`, moved
+  to `core/drawingml/text-3d-model.ts`, through a type alias. Neutral source-backed body
+  reader/writer codecs are new strict code; PowerPoint keeps its compatibility object-tree writers. Theme colours,
+  raw source spelling and extensions remain intact on admitted edits. Shared SmartArt reports
+  these fields as approximated rather than claiming 3D text rendering.
+- `ui/src/form/color-input/live-color-{input,leaves}.ts` and adjacent tests move generic
+  preview bookkeeping from `ui/src/pptx/render/`. PowerPoint paths are compatibility
+  facades; Excel's Format Cells fill draft is the second consumer.
+- `ui/src/fonts/{catalog,availability,custom-fonts}.ts` extracts grouping, browser checks
+  and registration from PowerPoint `font-catalog.ts`, `font-availability.ts` and
+  `custom-fonts.ts`. Product defaults, translated labels and placeholder rules stay in
+  the adapter. Owned FontFace scopes add disposal without changing existing upload lifetime.
+- `ui/src/dialog/dialog-session.ts` extracts submit/dismiss lifecycle from Excel
+  `dialogs/frame.ts` and Word `zoom-dialog.ts`. The existing dialog primitive retains
+  focus management; product adapters retain content and focus restoration.
+- `ui/src/recovery-scheduler.ts` extracts timer/write ownership from PowerPoint
+  `render/controller/autosave-controller.ts` and Visio `viewer-autorecover.ts`.
+  Product payload, cadence, dirty state, encryption and storage remain adapters.
+- PowerPoint `hyperlink-security.ts` now consumes existing `core/opc/safe-href.ts`.
+  Explicit additional protocol/relative-path options preserve its supported host policy;
+  shared defaults remain unchanged and PowerPoint action URLs stay product-owned.
+
+## Shared font selection and Word script layout (2026-10-28)
+
+Source: ChristopherVR/ooxml at `b36e9472a`.
+
+- `src/core/text/{font-substitution,font-substitution-map,font-style-name,panose}.ts`
+  and the adjacent substitution tests come from
+  `src/core/pptx/core/utils/font-substitution.ts` and its tests. The old module is a
+  compatibility facade. Changes: strict indexing, case-insensitive own-key lookup,
+  and sanitised CSS font names. Ordered fallback chains are retained.
+- `text/metric-font-family.ts` extracts the independent pagination policy from
+  `src/core/docx/layout/fonts.ts`, whose public adapter and metric fallback order remain.
+- `text/script-fonts.ts` extracts font-slot resolution and script decisions from
+  `src/ui/src/pptx/render/text-script-fonts.ts`; the UI retains span decoration only.
+  It reuses the existing Unicode detector, coalesces equal adjacent font choices,
+  and reports UTF-16 offsets. Word's new layout adapter consumes the shared segmenter
+  for literal text, inherited script fonts and theme slots. Generated fields,
+  hidden text, symbols and object source mappings keep their existing handling.
+
+## Shared chart appearance conversions (2026-10-26)
+
+Source: ChristopherVR/ooxml at `b0f3279ac`, `src/ui/src/chart/format-pane-intent.ts`.
+
+- `chartDrawingColorFromHex` and `chartDrawingGradientFrom` in
+  `src/core/chart/edit/format-values.ts` derive from the pane's `drawingColorFromHex`
+  and `drawingGradientFrom`; the UI names now delegate to core. Changes: invalid
+  transparency, stops and angles are refused, authored radial rectangles/focal points
+  and linear scaling are retained, and the same conversions serve product save adapters.
+- The new resolved appearance contracts and line, effect, 3-D and text conversion
+  helpers are new strict code using the existing PowerPoint Format pane contracts
+  as the field/unit checklist. They do not import UI or allocate image bytes.
+- Shared pane source/intent adapters reuse the existing effect, text, 3-D and line
+  descriptors across Word, Excel and Visio. The ordinary shared DOM controls remain
+  unchanged; Excel retains its native gradient controls and switches pattern edits
+  onto the shared pane instead of maintaining another pattern editor.
+
+## Shared DrawingML outlines, effects and format schemes (2026-10-26)
+
+Source: ChristopherVR/ooxml at `27cc953db`. New strict DOM codecs, with the existing
+PowerPoint implementations used as the semantic checklist; no source module was moved.
+
+- `src/core/drawingml/drawing-fill.ts` and `write-line.ts` extend the existing neutral
+  outline codec with the authored compound/alignment, joins, arrow ends and custom dash
+  fields handled by `src/core/pptx/core/utils/drawing-line-dash.ts` and
+  `src/core/pptx/core/types/theme.ts`. Custom dash integer bounds follow the former;
+  malformed stops, unknown attributes and namespaced extensions remain source data.
+- New `effect-model.ts` and `drawing-effects.ts` model the ordinary effect-list choices
+  described by PowerPoint's theme effects, retaining raw unsupported choices. The existing
+  `drawing-shadow.ts` SVG projection now reads this model instead of parsing a second shadow
+  representation; its pixel conversion and affine-shadow refusal remain unchanged.
+- New `format-scheme.ts` reads and writes the authored style matrix represented by
+  PowerPoint's `PptxThemeFormatScheme` without its resolved-colour fields. It composes
+  placeholder-colour transforms without flattening theme tokens. The existing neutral
+  theme reader/writer now consume it, and `patch-color.ts` retains transform extension XML
+  while editing existing outline, effect and matrix colours.
+- New regression tests compare style matrices in committed Word, Excel and PowerPoint
+  fixtures and cover source-preserving edits. These are XML/model comparisons, not native
+  rendering or new Office application acceptance measurements.
+- New `write-pattern-picture.ts` authors pattern colours and host-owned picture relationship
+  references; source-backed edits preserve crop, tiling, blip effects and extensions.
+  Picture data and package relationships stay with the host. Outlines refuse picture fills.
+  The historical Excel chart fingerprint helper projects the older outline fields so its
+  frozen hashes keep their original meaning; independent real-chart save tests compare every
+  native outline and an injected custom outline, including all newly modelled properties.
+
 ## Shared move, resize and touch interaction
 
 Source: ChristopherVR/ooxml, commit `3874d8d63`, `src/ui/src/pptx/render/element-interaction.ts` and its tests. Move/resize transforms, local-axis projection, handle metadata and box centres move to `src/core/geometry/element-transform.ts`, with their behavior tests. The PowerPoint path remains a compatibility export; the 12-unit default remains unchanged and Excel passes its existing 8-unit minimum explicitly. Core no longer imports a PowerPoint constant for these calculations.
@@ -59,9 +227,9 @@ Every module moved into this repository is recorded here: source repository and 
 
 ## pptx area (2026-10-01)
 
-| Package | Module                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Source                                                                                                                                            | Source commit                         | Changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pptx`  | All of `packages/core/src` (`core/`, `converter/`, `cli/`, `signature-node/`, `index.ts`, `__tests__/` and its fixtures) and the core scripts: `gen-test-fixture`, `generate-*`, `perf-*` plus the generators that import or write core files (`make-font-advance-table.ps1`, `gen-smartart-gallery-baseline`, `measure-smartart-engine-vs-legacy`, `update-smartart-allowlist`, `dump-smartart-fixture`, `debug-pyra`, `make-saltless-verifier-fixture`) | `pptx-viewer/packages/core/src`, `pptx-viewer/packages/core/scripts`, `pptx-viewer/scripts`, `pptx-viewer/e2e/fixtures` (decks used by the tests) | `17d75540e` (origin/main when copied) | Copied to `src/core/pptx` and `scripts/pptx`. `src/core/color` and `src/core/geometry` modules that already live in the `color` and `geometry` areas were deleted and their importers repointed at `../../color/*.js` / `../../geometry/*.js` (100 files removed: the duplicated sources and their exact-duplicate tests, which already exist in those areas); `EMU_PER_*` constants now come from `units`. Test fixtures that read `e2e/fixtures` of the viewer now read the snapshot in `src/core/pptx/__tests__/fixtures/e2e` (decks, `.ppt`, small media); `openxml-coverage.test.ts` resolves evidence paths relative to the area. Everything else is unchanged and compiled with relaxed TS flags (`tsconfig.pptx.json`); the XML model is still `fast-xml-parser` object trees. |
+| Package | Module                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Source                                                                                                                                            | Source commit                         | Changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pptx`  | All of `packages/core/src` (`core/`, `converter/`, `cli/`, `signature-node/`, `index.ts`, `__tests__/` and its fixtures) and the core scripts: `gen-test-fixture`, `generate-*`, `perf-*` plus the generators that import or write core files (`make-font-advance-table.ps1`, `gen-smartart-gallery-baseline`, `measure-smartart-engine-vs-legacy`, `update-smartart-allowlist`, `dump-smartart-fixture`, `debug-pyra`, `make-saltless-verifier-fixture`) | `pptx-viewer/packages/core/src`, `pptx-viewer/packages/core/scripts`, `pptx-viewer/scripts`, `pptx-viewer/e2e/fixtures` (decks used by the tests) | `17d75540e` (origin/main when copied) | Copied to `src/core/pptx` and `src/core/scripts/pptx`. `src/core/color` and `src/core/geometry` modules that already live in the `color` and `geometry` areas were deleted and their importers repointed at `../../color/*.js` / `../../geometry/*.js` (100 files removed: the duplicated sources and their exact-duplicate tests, which already exist in those areas); `EMU_PER_*` constants now come from `units`. Test fixtures that read `e2e/fixtures` of the viewer now read the snapshot in `src/core/pptx/__tests__/fixtures/e2e` (decks, `.ppt`, small media); `openxml-coverage.test.ts` resolves evidence paths relative to the area. Everything else is unchanged and compiled with relaxed TS flags (`tsconfig.pptx.json`); the XML model is still `fast-xml-parser` object trees. |
 
 Notices that cover the moved code: `NOTICE` (MTX decompression is the external `mtx-decompressor` package, MPL-2.0) and `THIRD-PARTY-LICENSES` (runtime dependencies). The `font-advance-widths*.generated.ts` tables are glyph advance measurements taken from Microsoft PowerPoint through COM automation (numeric facts, no font data is embedded).
 
@@ -169,6 +337,7 @@ Logic that is DOM-free and useful to both products was extracted and generalised
 | `assets.ts`                                                                                                                                   | `collaboration-assets.ts`                                                                                                                                                                                                                                                                         | The pptx field table and `pptx:assets` map name became an `AssetSpec` (`createAssetSync`), so pptx documents stay wire-compatible.                                                                                                                                                                                                                                 |
 | `external-provider.ts`                                                                                                                        | `collaboration-external-session.ts` (`observeExternalCollaborationSession`); per-binding y-websocket/y-webrtc wiring                                                                                                                                                                              | `adaptYjsProvider` is new (wraps y-websocket/y-webrtc as a `SyncProvider`).                                                                                                                                                                                                                                                                                        |
 | `ordering.ts`                                                                                                                                 | `docx-viewer .../collaboration.ts`, `collaboration-protocol.ts`, `presence.ts` (version/sequence/duplicate rules, bounded caches, `freezeBatch`) and `collaboration-authority.ts` (request idempotency)                                                                                           | ProseMirror removed: the same decisions as pure functions and small classes (`classifyVersion`, `IdempotencyCache`, `SequenceTracker`, `BoundedMap`, `freezeDeep`). The step-rebasing authority itself stays in docx-viewer.                                                                                                                                       |
+| `share.ts`                                                                                                                                    | `ooxml` `src/ui/src/pptx/render/share-session.ts` (invitation parsing and links, at ad5171def2)                                                                                                                                                                                                   | Generalised to the shared `CollaborationOptions`: a neutral `ShareTarget`, `suggestRoomId`, start and join options for Word, Excel and Visio. PowerPoint's `share-session.ts` now delegates its link parsing and writing here.                                                                                                                                     |
 | `codec.ts`, `emitter.ts`, `provider.ts`, `transport-provider.ts`, `memory-transport.ts`, `websocket-transport.ts`, `session.ts`, `binding.ts` | New                                                                                                                                                                                                                                                                                               | No source: the two viewers had no shared session, transport abstraction, in-memory transport or update validation. `transport-provider.ts` implements the y-websocket wire protocol (sync step 1/2/update, awareness, query-awareness) over a `Transport`. `binding.ts` encodes the seeding/adoption rules from pptx-viewer `collaboration-external-readiness.ts`. |
 
 ## `visio` area (2026-10-02)
@@ -2429,3 +2598,473 @@ Source: ChristopherVR/ooxml, `origin/main` at `3588b3349` before these commits (
 - `src/ui/src/embedding/region-host.ts` (`HostRegionHost`) is `ViewerRegionHost` of `customization-regions.ts` made generic over the context, with the region attribute, callback keys and log label as options; `ViewerRegionHost` is now a subclass with PowerPoint's `data-pptx-region` attribute and settings callbacks.
 
 New code (not moved): the pure helpers `isCapabilityEnabled`, `disabledCapabilities`, `capabilityHiddenActions`, `mergeHiddenActions` and `acceptedHostBackstagePages`; `createHostBackstagePages`, `withHostMenuItems` and `syncHostMenuChildren` in `src/ui/src/embedding/`; and the Word, Excel and Visio bindings of the contract (`src/core/docx/ui/customization.ts`, `src/core/xlsx/ui/customization.ts`, `src/core/visio/ui/customization.ts` and their `src/ui/src/<product>` appliers).
+
+## `chart/edit`: neutral chart edit operations (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move plus new code).
+
+- `src/core/chart/edit/paint.ts` lifts the colour and fill primitives of the xlsx edit layer: `sameChartColor` and `recolorGradient` of `src/core/xlsx/edit/chart-colors.ts` (now `sameDrawingColor` and `recolorPaletteGradient`), and the alpha-transform copying, transparency reading and transparency setting repeated in `chart-element-fill.ts`, `chart-series-fill.ts`, `chart-series-transparency.ts` and `chart-series-gradient.ts`. Unchanged behaviour; the xlsx files now call these, and `sameChartColor` stays exported as an alias.
+- `src/core/chart/edit/gradient.ts` is `chartGradientFillEdit` and `chartGradientStopTransparency` of `src/core/xlsx/edit/chart-series-gradient.ts`. What changed: the stop colour is of a caller-chosen type converted by a `toColor` callback (xlsx passes its `Color` to DrawingML conversion, so its error order is unchanged); the xlsx functions are thin wrappers.
+- `src/core/chart/edit/type-axes.ts` `defaultChartAxes` is `axes()` of `src/core/xlsx/write/chart-space.ts`, with the ids as a parameter and no scaling object shared between the two axes; `title.ts` `chartTitleRichXml` and `newChartTitle` are `titleRichXml` and `chartTitle` of `src/core/xlsx/write/chart-title.ts`. The xlsx writer imports them; its output is unchanged.
+- `src/core/chart/edit/type-schema.ts` restates the group content models of `src/core/pptx/core/utils/chart-container-content-model.ts` in neutral model field names; `type.ts` follows the type-change semantics of `PptxHandlerRuntimeSaveDataSerialization.ts` and `chart-container-schema.ts` (keep allowed children, add required ones, demote `clustered`, drop orphaned axes). New code over the neutral model; nothing was copied from the object-tree writers.
+- The other operations (`series.ts`, `legend-labels.ts`, `axes.ts`, `fill.ts`, `style.ts`) are new code using `src/core/pptx/core/builders/sdk/chart-operations.ts` as the checklist of PowerPoint's operations and their semantics.
+
+## `drawingml` rich text model and `diagram/text` (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move).
+
+- `src/core/drawingml/text-model.ts`, `read-run-properties.ts`, `read-paragraph-properties.ts`, `read-text-body.ts`, `write-run-properties.ts`, `write-paragraph-properties.ts`, `write-text-body.ts` and `write-text-xml.ts` are new code: the neutral body, list style, paragraph and run model with a DOM reader and writer. Their semantics (tolerant booleans, `lvl` clamped to 0-8, both percentage forms, `a:buNone` as an explicit opinion, an authored `baseline="0"` kept) follow `src/core/pptx/core/utils/text-run-properties-parser.ts`, `paragraph-properties-parser.ts` and `body-properties-parser.ts`, which stay in pptx on the object tree; no code was copied. Values keep file units (EMU, points, degrees, fractions) instead of pixels.
+- `src/core/diagram/text/node-text-reconciliation.ts` (and its test) is `src/core/pptx/core/core/runtime/smartart-text-reconciliation.ts` moved and made generic over the run style; it also carries the neutral `endProperties` when two paragraphs merge. The pptx module is a facade.
+- `src/core/diagram/text/node-text-paragraphs.ts` is `smartArtParagraphsText` and `firstParagraphRuns` from `src/core/pptx/core/core/runtime/smartart-text-paragraphs.ts`, generic; the pptx functions forward to it (the object-tree parser and builder stay in pptx).
+- `src/core/diagram/text/node-text-projection.ts` is the structure of `projectSmartArtNodeText` from `src/core/pptx/core/utils/smartart-node-text-projection.ts` (segments, paragraph metadata, `dgm:bulletEnabled` synthesis, paragraph breaks), parameterised by a styler. The pptx module keeps its `TextStyle` styler over its own parsers and calls the shared projection.
+- `src/core/diagram/text/node-text-neutral.ts` (DOM reader into the node paragraphs and the neutral styler) is new code.
+
+## Shared chart data sheet (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move).
+
+- `src/core/text/tsv.ts` is `src/core/xlsx/edit/clipboard-text.ts` moved unchanged (a module
+  comment added) so the chart data sheet reads Excel's clipboard text without importing the
+  `xlsx` area; `xlsx/edit/clipboard-text.ts` now re-exports it.
+- `src/ui/src/chart/data-sheet.ts` (`office-ui-chart-data-sheet`) replaces the five per-binding
+  PowerPoint chart data grids (`react/.../inspector/ChartDataGrid.tsx`,
+  `vue/.../inspector/ChartDataGrid.vue`, `svelte/.../inspector/ChartDataGrid.svelte`,
+  `vanilla/.../inspector/chart-data-grid.ts` and the grid of
+  `angular/src/viewer/chart-data-editor.component.ts`). What changed: one Lit element instead of
+  five templates; the highlight, add/remove, accessible names and refuse-a-non-number policy are
+  kept; keyboard navigation, tab-separated paste and locale number parsing are new. The vanilla
+  grid's ragged-series padding moved to `src/core/pptx/core/utils/chart-data-sheet.ts`.
+
+New code (not moved): `src/core/chart/data-sheet.ts`, `src/core/text/locale-number.ts`,
+`src/core/pptx/core/utils/chart-data-sheet.ts` and the `pptx-ui-chart-data-sheet` alias
+(`src/ui/src/pptx/web-components/chart-data-sheet.ts`).
+
+## PowerPoint headless controllers: history, editor keys, AI bridge and panel (2026-10-23)
+
+Source: ChristopherVR/ooxml, commit `3b2ecd9a6` (an in-repo move from the five PowerPoint bindings under `viewers/pptx/packages/{react,vue,svelte,angular,vanilla}/src` into `src/ui/src/pptx`).
+
+- `src/ui/src/pptx/render/controller/` is new: the controller convention (`PptxController`, `createControllerStore`) and `createEditorHistoryController`, built on the core `EditorHistory`. It replaces React's own stack in `hooks/useEditorHistory.ts` (whose 120-entry cap and `recordExplicitSlideUpdate` array handling now record into the controller), Vue's tick-wrapped `EditorHistory` in `composables/useEditorHistory.ts` (120), Svelte's `EditorHistoryState` wrapper (100, recreated the stack on a depth change; it now trims), Angular's `NotifyingEditorHistory` (100) and vanilla's direct `EditorHistory` (100). The one default is `DEFAULT_EDITOR_HISTORY_DEPTH` (100) in `src/core/pptx/editor/render/editor-history.ts`, also the File > Options default.
+- `src/ui/src/pptx/render/editor-key-dispatch.ts` (`dispatchEditorKey`, `EditorKeyHandlers`) is the action-to-callback switch of React `hooks/useKeyboardShortcuts.ts`, Vue `composables/useKeyboardShortcuts.ts` (whose by-name dispatch it follows), Svelte and vanilla `editor/editor-keyboard.ts` and Angular `viewer-keyboard.service.ts`, plus the F5 / Shift+F5 check React and Angular ran first. What changed: one handler interface keyed by the keymap's action names; `passThrough` replaces the paging early return of Svelte and vanilla.
+- `src/ui/src/pptx/ai/bridge-factory.ts` (`createPptxAiBridge`, `PptxAiBridgePort`) is the bridge body of `create{Svelte,Angular,Vanilla}AiBridge` (`ai/ai-bridge.ts`) and React and Vue `useAiBridge.ts`. What changed: the deck title is the file name, else the trimmed first text (React, Vue and Angular took untrimmed text of any element); core, app and custom document properties are committed as one unit and cannot be cleared to undefined by an AI edit (Svelte and vanilla behaviour); `onCorePropertiesChanged` and `afterDeckUpdate` run only when something changed.
+- `src/ui/src/pptx/ai/panel-controller.ts` (`createPptxAiPanelController`) is React `hooks/ai/useAiPanelController.ts`, Vue `composables/ai/useAiPanelController.ts`, Angular `ai/ai-panel-store.ts`, Svelte `ai/ai-panel-controller.svelte.ts` and vanilla `ai/ai-panel-controller.ts`, which agreed; it follows the controller convention. The bindings keep their public shapes and adapt it with `useController` (React, Vue), `controllerState` (Svelte), `controllerSignal` (Angular) or `subscribe` (vanilla).
+
+## Shared framework binding kit `ooxml-ui/bindings` (2026-10-23)
+
+Source: ChristopherVR/ooxml, `origin/main` at `3b2ecd9a6` before these commits (an in-repo move).
+
+- `src/ui/src/bindings/tracker.ts` (`createPropTracker`) and `equality.ts` (`shallowEqual`, `sameList`) merge the identical copies in `viewers/docx/packages/bindings/src/forwarding.ts` and `viewers/xlsx/packages/bindings/src/forwarding.ts` (`createPropTracker`, `sameThemeColors`, `sameList`). What changed: the tracker can be seeded and reports what it last sent; `sameThemeColors` is the generic `shallowEqual`.
+- `src/ui/src/bindings/src-loader.ts` (`createSrcLoader`, `nameFromUrl`) is moved unchanged from the Excel `forwarding.ts`.
+- `src/ui/src/bindings/handle.ts` (`deferredHandle`, `installHandle`) generalises the Excel `deferredHandle` (`viewers/xlsx/packages/bindings/src/index.ts`) and the Visio `viewerHandle` (`viewers/visio/packages/bindings/src/common.ts`): one spec of handle members (`get`, `call`, `async`, `optional-call`, `{ fallback }`) replaces the hand-written delegates; both products keep their old function as a thin wrapper.
+- `src/ui/src/bindings/contract.ts` and `bind-element.ts` generalise `pickEditorProps`, `eventOptions` and the listener tables of `mountEditor` in the Word and Excel `index.ts`: a product contract lists props with a forwarding policy, events with their handler option and arguments, and the handle. The React, Vue and Solid factories (`react.ts`, `vue.ts`, `solid.ts`) are the shared shape of the Word and Excel `react.tsx`, `vue.ts` and `solid.ts` adapters and the Visio `react.ts` and `vue.ts`.
+- `src/ui/src/teams/app/bind.ts` gains `bindTeams`, `pickTeamsProps`, `TeamsElementProps` and `TeamsBinding` from `viewers/teams/packages/web-component/src/bind.ts` (deleted; its test moved to `bind.test.ts` beside it). What changed: they and `applyTeamsProps` / `listenTeamsEvents` are built on `TEAMS_CONTRACT` and the kit; behaviour is unchanged.
+
+## Shared Insert SmartArt and Insert Chart dialogs, SmartArt gallery catalogue (2026-10-23)
+
+Source: ChristopherVR/ooxml, `origin/main` at `3b2ecd9a6` (an in-repo move).
+
+- `src/core/diagram/catalogue.ts` holds the SmartArt insert presets and categories from `src/ui/src/pptx/render/smart-art-presets.ts` and the colour-scheme and style catalogues of `render/ribbon-galleries/smartart-gallery-patch.ts` (with the section titles and `labelParams` of `smartart-colors-gallery.ts` and the named-layout categories of `smartart-layouts-gallery.ts`). What changed: English names only, typed on the `diagram` types; each preset gained a tile `family`, each category an English description. The pptx modules keep their exports and add the pptx dictionary keys.
+- `src/ui/src/smartart/tiles.ts` joins `render/ribbon-galleries/smartart-layout-tiles.ts` and `smartart-gallery-tiles.ts` unchanged in output; both pptx files now re-export it.
+- `src/ui/src/pptx/dom/smartart-insert-preview.ts` is the vanilla binding's `ui/ribbon/tabs/insert/smartart-gallery-preview.ts`, taking a target size instead of a fixed 64px tile.
+
+New code (not moved): `office-ui-smartart-picker` and `src/ui/src/smartart/galleries.ts`; `pptx-ui-insert-chart-dialog`, `pptx-ui-insert-smartart-dialog` and `insert-dialog-frame.ts`; `render/insert-chart-preview.ts`. The per-binding Insert SmartArt dialogs they replace were deleted.
+
+## `diagram` drawing-shape view and edit operations (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move).
+
+- `src/core/diagram/drawing-view.ts` (`DiagramShapeView`) is the resolved-shape part of `PptxSmartArtDrawingShape` from `src/core/pptx/core/types/smart-art.ts`, unchanged in fields; the pptx interface now extends it and keeps its 3D, rich-text segment and custom-geometry slots.
+- `src/core/diagram/drawing-resolve.ts` is new code generalising `parseDrawingShape` of `src/core/pptx/core/core/runtime/PptxHandlerRuntimeSmartArtParsing.ts` and the helpers of `smartart-drawing-shape-style.ts` and `smartart-drawing-shape-font-ref.ts` over the DOM reader and an injected colour resolver. `pptx/__tests__/integration/smartart-drawing-shape-neutral-parity.test.ts` pins agreement.
+- `src/core/diagram/edit/` is `src/core/pptx/core/utils/smartart-editing-node-ops.ts` (split into `node-ops.ts`, `node-order.ts` and `shape-match.ts`), `smartart-editing-node-style.ts` (and its test), `smartart-editing-reflow.ts` (split into `reflow.ts` and `reflow-category.ts`) and `smartart-editing-reflow-layouts-{directional,geometric,stacked}.ts`, made generic over the neutral data model and `DiagramShapeView`. The two copies of the drawing-shape matcher became one (`shape-match.ts`); the model id generator is injected (pptx passes its font GUID generator). `addDiagramNodeBefore` and `addDiagramNodeAbove` are new. The pptx modules are facades with the historical names.
+- `src/core/diagram/write/data.ts` is `src/core/pptx/core/core/runtime/smartart-fabrication-data.ts` moved and made generic over the neutral node model, with the model id generator injected and the exports renamed for the `diagram` namespace (`writeFabricatedDiagramData`, `buildDiagramNodeGuidMap`, `escapeDiagramXml`, ...). The pptx module is a facade that passes its GUID generator; its output is byte-identical (checked under a seeded random source over the committed decks).
+
+## Built-in SmartArt definitions in `diagram/builtin`, Word SmartArt editing (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move, plus new code).
+
+- `src/core/diagram/builtin/{catalog,data,types}.ts` are `src/core/pptx/core/utils/smartart-builtin-layouts/{catalog,data,types}.ts` moved unchanged (the generator `src/core/scripts/pptx/gen-smartart-builtin-layouts.mjs` now writes there). `diagram/builtin/layouts.ts` holds `listBuiltinSmartArtLayouts`, `findBuiltinSmartArtLayout`, `loadBuiltinSmartArtLayoutXml` and `defaultBuiltinSmartArtLayoutId` moved unchanged from that module's `index.ts`, which keeps the parse into the pptx model and re-exports them. New: `builtinLayoutIdForPreset` (Insert SmartArt preset to built-in layout). The folder is the separate `ooxml-core/diagram/builtin` entry so the main `diagram` entry does not carry the 350 KB of definitions.
+- `src/core/diagram/builtin/definitions.ts` holds two more Microsoft definitions, `colors/accent1_2` (`dgm:colorsDef`) and `quickstyle/simple1` (`dgm:styleDef`), copied byte for byte (XML declaration removed) from the parts desktop Word 365 (16.0) wrote for a SmartArt it inserted through COM (`InlineShapes.AddSmartArt`, Basic Block List). They are needed because Word lays a diagram out from the definitions in the package and does not substitute its own copy for a known `uniqueId` (a stub `colorsDef` with only the `uniqueId` produced uncoloured shapes; docs/agnostic-core-plan.md). The basis for including them is the one recorded for the layout definitions above ("Built-in SmartArt layout definitions (2026-10-07)"), with the same residual risk; if Microsoft objects, remove the file and author the definitions in the repository's own words.
+- `src/core/docx/__fixtures__/smartart-word.docx` was produced by desktop Word 365 through COM (insert Basic Block List, type five node texts, save); it is Word's own output, unchanged except that the author name in `docProps/core.xml` and `app.xml` was replaced with `Author`. `e2e/docx/support/smartart-word.docx` is a copy.
+
+New code (not moved): `src/core/diagram/write/data-edit.ts` (`writeEditedDiagramData`), `src/core/docx/diagram-edit.ts`, `diagram-nodes.ts`, `diagram-save.ts`, `src/core/scripts/docx-acceptance-build.ts` and `docx-word-acceptance.ps1`.
+
+## Shared chart Format pane (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move plus new code).
+
+- `src/core/chart/edit/target.ts` is `chartFormatTargetKey` and `parseChartFormatTargetKey` of `src/core/pptx/core/utils/chart-element-format-keys.ts` with the `PptxChartFormatTarget` union, unchanged; the pptx module and type now re-export and alias them. `target-paint.ts`, `group-options.ts` and `intent.ts` are new code over the existing operations.
+- `src/ui/src/chart/format-pane-{types,common,fill-line,fill-kinds,effects,3d,text,options,axis,model}.ts` are `src/ui/src/pptx/render/chart-format/chart-format-pane-{types,common,fill-line,fill-kinds,effects,3d,text,options,axis,model}.ts`. What changed: they read a neutral view (`format-pane-view.ts`, the shape of PowerPoint's `ChartElementFormatView` and the option fields they used from `PptxChartData`) through a `ChartFormatSource` instead of `PptxChartData`; choices a source cannot write are left out by support flags; caption keys are `chartFormat.*` (PowerPoint maps them back to `pptx.chartFormat.*`); effects, 3-D and text sections show only when the view has them. `format-pane-targets.ts` holds the captions of `chart-format-targets.ts` (target listing stays in pptx).
+- `src/ui/src/chart/format-pane.ts` and `format-pane-fields.ts` replace the imperative `src/ui/src/pptx/web-components/chart-format-pane.ts` and `chart-format-pane-fields.ts` with a Lit `OfficeElement` (`office-ui-chart-format-pane`); same DOM hooks (`data-chart-format-*`), control tags chosen by the subclass. `pptx-ui-chart-format-pane` is now a subclass; `format-pane.css` is `chart-format-pane-styles.ts` on `--office-*` tokens (the pptx styles stay as the subclass's overrides).
+- `format-pane-space.ts` (the `ChartSpace` source), `format-pane-intent.ts` (field to `ChartEditIntent`) and `src/ui/src/pptx/render/chart-format/chart-format-source.ts` are new code.
+
+## PowerPoint headless controllers: autosave, recovery and collaboration session (2026-10-23)
+
+Source: ChristopherVR/ooxml, commit `3b2ecd9a6` (an in-repo move from the five PowerPoint bindings under `viewers/pptx/packages/{react,vue,svelte,angular,vanilla}/src` into `src/ui/src/pptx`).
+
+- `src/ui/src/pptx/render/controller/autosave-controller.ts` (`createAutosaveController`, `PptxAutosaveStatus`) replaces the five engines: React `hooks/useAutosave.ts` and Angular `autosave.service.ts` (interval polls), Vue `composables/useAutosave.ts`, Svelte `state/autosave.svelte.ts` and vanilla `autosave/autosave-controller.ts` (capped debounces). What changed: one engine (a snapshot one AutoRecover interval after the first unsaved edit, none while unchanged, an edit made mid-write kept for the next interval, hover previews deferred) and one status type, the React/Angular `{ state }` union; the string bindings render its `state`. React's unused `useAutosave-helpers.ts` and `useRecoveryDetection-helpers.ts` were deleted.
+- `src/ui/src/pptx/render/controller/autosave-recovery-controller.ts` (`createAutosaveRecoveryController`) replaces React `hooks/useRecoveryDetection.ts`, Vue `composables/useAutosaveRecovery.ts`, Svelte `state/autosave-recovery.svelte.ts`, Angular `autosave-recovery.service.ts` and the probe and restore half of vanilla `autosave/autosave-controller.ts` / `autosave-session.ts`. What changed: Svelte's per-load probe key and stale-answer guard and its acknowledge-then-load-then-roll-back restore are now everyone's.
+- `src/ui/src/pptx/render/collaboration-provider.ts` (`createCollabProvider`) is Vue `composables/collaboration-provider.ts`, Svelte `collab/collaboration-provider.ts` and vanilla `collab/collaboration-provider.ts` (identical but for comments), plus the provider construction of React `hooks/collaboration/useYjsProvider.ts` and Angular `collaboration-providers.ts`. What changed: the binding passes its own lazy `yjs` / `y-*` loaders; WebRTC options omit unset keys.
+- `src/ui/src/pptx/render/collaboration-yjs-session.ts` (`createYjsFactories`, `openCollaborationYSession`) is vanilla `collab/collaboration-session.ts`, Svelte `collab/collaboration-session.ts` and the Y.Doc and factory code of Vue `useCollaboration.ts` and Angular `collaboration-providers.ts` / `collaboration-session-connect.ts`.
+- `src/ui/src/pptx/render/controller/collaboration-session-controller.ts` (`createCollaborationSessionController`) is the room lifecycle of vanilla `collab/collaboration-controller.ts` with `collab/collaboration-connection.ts`, Vue `useCollaboration.ts`, Svelte `collab/collaboration.svelte.ts` with `collab/collaboration-status.ts`, Angular `collaboration.service.ts` with `collaboration-connection.ts` and React `useYjsProvider.ts`. What changed: every failure (invalid room, mixed content, connect timeout, open error) stops the session and reports `error`; a borrowed session's presence lease is taken once.
+
+## PowerPoint inspector field descriptors (2026-10-23)
+
+Source: ChristopherVR/ooxml, commit `3b2ecd9a6` (an in-repo move from the five PowerPoint bindings under `viewers/pptx/packages/{react,vue,svelte,angular,vanilla}/src` into `src/ui/src/pptx/render/inspector`).
+
+- `src/ui/src/pptx/render/inspector/inspector-field-model.ts` is new: the field descriptor model (`InspectorSectionDescriptor`, `resolveInspectorSections`, `inspectorFieldPatch`, `inspectorTogglePatch`) that each binding's one generic renderer draws (React `InspectorFields.tsx`, Vue `InspectorFields.vue`, Svelte `InspectorFields.svelte`, Angular `inspector-fields.component.ts`, vanilla `ui/inspector/inspector-fields.ts`).
+- `shape-effect-fields.ts`, `shape-effect-fields-more.ts` and `shape-effect-sections.ts` (`SHAPE_EFFECT_SECTIONS`) replace React `components/inspector/fill-stroke-effect-configs.ts`, `fill-stroke-visual-configs.ts`, `bevel-type-options.ts` and `EffectField.tsx`, Vue `EffectsShadowSection.vue` and `EffectsGlowReflectionSection.vue`, the hand-written sections of Svelte `EffectsPanel.svelte` and Angular `effects-panel.component.ts`, and the effect rows of vanilla `shape-effects-controls.ts`. What changed: one field set for every binding (the union: outer shadow with angle, distance and X/Y offsets, inner shadow, glow, soft edge, reflection with rotation, blur, top bevel); reads and clamps go through the shared `effects-helpers.ts` state readers and the new `outerShadowStyle` / `innerShadowStyle` / `glowStyle` / `reflectionStyle` builders; every label is a dictionary key (React showed English literals); bevel width and height are edited in points (React showed EMU); vanilla's reflection checkbox wrote a 0-1 start opacity to a 0-100 field and now uses the shared toggle.
+- `src/ui/src/pptx/render/inspector/shape-line-fields.ts` (`SHAPE_LINE_SECTIONS`: width, transparency, dash, compound, join, cap) replaces the hand-written line rows of React `StrokeEffectsSection.tsx` (with `getCompoundLinePreviewStyle` and the line re-exports of `fill-stroke-options.ts`), Vue `StrokePanel.vue` (width, dash), Svelte `FillStrokeSection.svelte` (stroke transparency, with `strokeOpacityOf` / `setStrokeOpacityPatch` of `editor/editor-format-mutations.ts`), Angular `line-format-panel.component.ts` (dash, compound, join, cap) and vanilla `fill-section.ts` (width, transparency). What changed: every binding offers all six options; React's compound-line preview buttons are a drop-down like the other bindings'; the line colour pickers stay per binding.
+- `src/ui/src/pptx/render/inspector/element-geometry-fields.ts` (`ELEMENT_GEOMETRY_SECTIONS`: X, Y, W, H, rotation) replaces the position grids of React `ElementInspectorBody.tsx` (with `POS_FIELDS` of `inspector-pane-constants.ts` and the rotation box of `TransformPanel`), Vue `ArrangePanel.vue`, Svelte `PositionSection.svelte`, Angular `inspector-panel.component.ts` (now `onGeometryPatch`, still through `setPosition` / `resize`) and vanilla `position-section.ts` (still through `setGeometry`). What changed: one label set (`pptx.inspector.x` ... `pptx.inspector.rotation`), whole-px display everywhere, an emptied box writes nothing (Svelte committed 0), and Vue's fields follow `canEdit` like the lock button beside them.
+- `src/ui/src/pptx/render/inspector/text-box-fields.ts` (`TEXT_BOX_SECTIONS`: vertical alignment, text direction, autofit, wrap, columns; all `a:bodyPr` keys) replaces React's autofit checkbox in `TextPropertiesHelpers.tsx`, Vue's vertical-alignment buttons in `TextPanel.vue`, the matching rows of Svelte `TextSection.svelte` and vanilla `text-section.ts`, and the vertical-anchor and direction selects of Angular `text-advanced-panel.component.ts`. What changed: every binding offers the five options; Angular's direction choices are translated (they showed English labels under the animation "Direction" caption); React's on/off autofit becomes the three-way mode the others offer.
+- `src/ui/src/pptx/render/inspector/text-effect-fields.ts` (`TEXT_EFFECT_SECTIONS`: text shadow, glow and reflection, the text's own `a:effectLst`) is the field set of React `components/inspector/TextEffectsPanel.tsx` and `TextReflectionSection.tsx` and the hand-written panel of Vue `TextEffectsPanel.vue` (with the defaults of its `composables/useTextEffects.ts`, removed), as one descriptor list. Vue, Angular (the new `text-effects-panel.component.ts`) and vanilla `text-effects-controls.ts` (its shadow, glow and reflection rows) draw it; React and Svelte `TextEffectsSection.svelte` keep their own controls for now. What changed: nothing in the values React and Vue wrote (same defaults, bounds and labels); every typed number is clamped to the offered range (React and Vue left the shadow offsets unclamped); Angular gains the three effects it lacked; vanilla's shadow checkbox wrote `true` into the numeric `textShadowOpacity` and its glow had no toggle, only a colour and a radius box, and both now use the shared toggles and fields.
+
+## Chart embedded workbook writer `chart/workbook` (2026-10-23)
+
+Source: ChristopherVR/ooxml, commit `3b2ecd9a6` (an in-repo move out of the PowerPoint area).
+
+- `src/core/chart/workbook/cellref.ts` is `src/core/pptx/core/utils/chart-xlsx-cellref.ts`, moved unchanged apart from strict index checks; the old path re-exports it.
+- `src/core/chart/workbook/writer.ts` (`writeChartWorkbookUpdates`, `ChartWorkbookWrite`), `sheet-cells.ts` and `validation.ts` are `pptx/core/utils/chart-xlsx-writer.ts`, `chart-xlsx-sheet-cells.ts` and `chart-xlsx-write-validation.ts` (with its test), ported from the `fast-xml-parser` object tree to the shared DOM (`xml` area) and the shared zip limits (`opc/zip-limits`). What changed: worksheet relationship targets resolve through `opc/resolvePartPath`; prefixed SpreadsheetML cells are written with their own prefix instead of being refused; writing a value drops the cell's formula and a blank numeric point empties its cell. `chart-xlsx-writer.ts` keeps `collectChartWorkbookWrite` (object tree) and re-exports the writer; `ole-sheet-xlsx-editor.ts` writes its cell through the DOM `applyCellWritesToWorksheet`.
+- `src/core/chart/workbook/package-save.ts` (`saveChartWorkbookUpdates`) is the resolution and degrade-to-warning policy of `pptx/core/core/runtime/chart-external-workbook-save.ts`, which now only maps the pptx relationship and slide context onto it. Messages and codes are unchanged.
+
+New code (not moved): `chart/workbook/layout.ts`, `space-writes.ts`, `create.ts`, `chart/edit/data-sheet.ts` and `chart/edit/new-chart.ts`.
+
+## Shared Chart Design galleries (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (an in-repo move plus new code).
+
+- `src/core/chart/quick-layouts.ts` is `src/ui/src/pptx/render/ribbon-galleries/chart-quick-layout-catalog.ts` (deleted) with the `ChartLayoutSketch` type of `chart-gallery-tiles.ts`, unchanged in data; `findChartQuickLayout` and the "Axis Title" constant are new.
+- `src/core/chart/style-presets.ts` is the preset table of `src/ui/src/pptx/render/chart-quick-action-styles.ts`. What changed: English labels replace the pptx i18n keys (the pptx module derives its keys from the ids), palettes read from `chart/style-palette`; `sameChartColors` and `chartStylePresetOfColors` are new. `chart-quick-action-styles.ts` keeps its exports and the `PptxChartData` mapping.
+- `src/ui/src/chart/gallery-tiles.ts` is `src/ui/src/pptx/render/ribbon-galleries/chart-gallery-tiles.ts`, unchanged in output (the sketch type now comes from core). `chart-color-palette-catalog.ts`, a re-export of `ooxml-core/chart`, was deleted.
+- New code: `src/core/chart/edit/quick-layout.ts` (`applyChartQuickLayout` over `ChartSpace`), `applyChartStylePreset` in `chart/edit/style.ts`, the `style`, `stylePreset`, `colorPalette` and `quickLayout` intents, `src/ui/src/chart/design-galleries.ts` (shared section data both the pptx gallery modules and Excel's Chart Design tab read), `src/core/xlsx/edit/chart-design.ts` (Excel's patches) and `ChartObject.quickLayout`. `src/ui/src/xlsx/commands/chart-design.ts` is `commands/chart-colors.ts` renamed and rebuilt on the shared section data.
+
+## Neutral ChartEx model, parser, writer and edit operations (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (new code, with the pptx ChartEx readers and update as the checklist).
+
+- `src/core/chart/ex/` (`model.ts`, `parse*.ts`, `write*.ts`) is new code: a strict DOM model of `cx:chartSpace`. The fields follow what `src/core/pptx/core/utils/chart-cx-parser.ts`, `chart-cx-axis-parser.ts`, `chart-cx-data-labels.ts`, `chart-cx-histogram.ts`, `chart-cx-waterfall.ts`, `chart-cx-box-whisker.ts`, `chart-cx-treemap.ts` and `chart-cx-region-map.ts` read, extended to the rest of the chartex schema; nothing was moved and the pptx readers stay. `write-shape.ts` gained `shapePropertiesInnerXml` (split out of `shapePropertiesXml`) so `cx:spPr` goes through the same writer.
+- `src/core/chart/render/summary-from-chartex.ts` keeps its output and now reads `ChartExSpace` instead of walking the DOM itself (`chartExSummaryFromModel` added).
+- `src/core/chart/edit/chartex.ts` and `chartex-data.ts` are new code following `src/core/pptx/core/core/runtime/chart-cx-update.ts`, `chart-cx-update-series.ts` and `chart-cx-update-data.ts` (what PowerPoint writes for each edit); `retextChartTextBody` is the former private `retextBody` of `chart/edit/title.ts`, exported.
+- `src/core/pptx/core/utils/chart-ex-neutral-save.ts` is new code, the ChartEx counterpart of `chart-neutral-save.ts` and `chart-neutral-save-plan.ts`.
+
+## PowerPoint canvas gestures and group press target (2026-10-23)
+
+Source: ChristopherVR/ooxml, commit `3b2ecd9a6` (an in-repo move from the PowerPoint bindings under `viewers/pptx/packages/{react,angular,vue,svelte,vanilla}/src` into `src/ui/src/pptx/render`).
+
+- `src/ui/src/pptx/render/editor-gesture-frames.ts` is the per-frame maths split out of `editor-gestures.ts` (`createGestureController`), extended with what the React and Angular canvases did on their own: a minimum size, grid-snapped resize edges (`snapBoxToGrid`, React's per-edge snap), a multi-selection snap exclusion, and a binding-supplied move snap. Its test carries the cases of React `hooks/pointer-move-handlers.test.ts` (`computeResizeGeometry`, now deleted with the function). `editor-gestures.ts` gained `getMinSize`, `getSnapExcludeIds`, `snapMove`, `canContinue` (Angular's mid-gesture lock re-check), a kind-aware `getElementBox` and an optional `pointerId` (a `mousedown` start).
+- React's move and resize (`hooks/pointer-move-handlers.ts` drag and resize branches, `hooks/pointer-up-handlers.ts` drag and resize commits) now run on it through `hooks/canvas-gestures.ts`; the rotate knob of `components/elements/ResizeHandles.tsx` moved to `rotate-knob-gesture.ts` on the same controller.
+- `src/ui/src/pptx/render/span-snap-move.ts` (`snapMoveToSpanGuides`) is the move snap of Angular `viewer/slide-canvas.component.ts` (`onPointerMove`: span-guide shape snap, grid, ruler guides), unchanged. Angular's move, resize and rotate state machine in that component now runs on the shared controller through `viewer/slide-canvas-gestures.ts`.
+- `src/ui/src/pptx/render/group-press-target.ts` (`groupDrillChain`, `resolveGroupPressTarget`, `resolveGroupDoubleClickTarget`) is Angular `viewer/group-drill-canvas.ts`'s functions of those names with their tests, now called by all five bindings in place of their own copies of the same sequence (React `useCanvasInteractions.ts`, Vue `useCanvasPointer.ts`, Svelte `editor-controller.svelte.ts`, vanilla `editor-stage-interactions.ts`). What changed: only a single selection drills (React, Svelte and vanilla read the primary id, so a press on a group that was the primary of a multi-selection selected the member under the pointer).
+
+## PowerPoint slide show step (2026-10-23)
+
+Source: ChristopherVR/ooxml, commit `3b2ecd9a6` (an in-repo move from the five PowerPoint bindings into `src/ui/src/pptx/render`).
+
+- `src/ui/src/pptx/render/presentation-show-step.ts` (`resolveShowForward`, `resolveShowBackward`) is the forward and backward decision each binding made in its own copy: Angular `viewer/presentation-show-navigator.ts` (`navigate`), Svelte `presentation/presentation-controller.svelte.ts` (`advance`, `retreat`, `previousSlide`), Vue `composables/usePresentationNavigation.ts` (`next`, `prev`, `advanceFromClick`), vanilla `viewer-controls.ts` (`next`, `prev` while presenting) and React `hooks/presentation-mode/useSlideNavigation.ts` (`movePresentationSlide`, with `isClickAdvanceBlocked` and its tests deleted). The bindings keep their own index, end screen, transition overlay and timers and perform the step it returns. What changed: a back press at the start of the show no longer marks the next entered slide as already built (Angular and Vue set that flag before finding there was nowhere to go).
+
+## Shared SmartArt editing for Word and Excel (2026-10-23)
+
+Source: ChristopherVR/ooxml at `3b2ecd9a6` (in-repo moves out of the Word SmartArt code of wave6-13, plus new code).
+
+- `src/core/diagram/edit/node-edit.ts` holds the command type, the operation dispatch and the node clean-up of `src/core/docx/diagram-edit.ts` (`DocxDiagramEdit` is now an alias of `DiagramNodeEdit`; `applyDiagramNodeEdit` and `createDiagramNodes` are the former private `applyOperation`/`cleanNodes` and the node loop of `createDocxDiagram`), and `diagramNodeOutline` is `diagramOutline` of `src/ui/src/docx/smartart-commands.ts` over the shared node type. `DocxDiagramNode` is an alias of the new `DiagramHostNode`.
+- `src/core/diagram/edit/node-tree.ts` is `src/core/docx/diagram-nodes.ts` unchanged apart from the node type; the docx module re-exports it.
+- `src/core/diagram/write/inserted.ts` (`writeInsertedDiagramData`) is the body of `insertedDiagramDataXml` in `src/core/docx/diagram-save.ts`, which now calls it.
+- `src/core/diagram/approximate.ts` (`approximateDiagramDrawingFromNodes`) is `src/core/docx/ui/smartart-approximate.ts` over a neutral input; the docx module wraps it.
+- New code: `src/core/diagram/edit/design-commands.ts` (the SmartArt Design command list Word and Excel build their tabs from), the Excel SmartArt editing and save path (`src/core/xlsx/edit/smart-art.ts`, `src/core/xlsx/write/smart-art.ts`) and the Excel probe and acceptance scripts under `src/core/scripts/xlsx/`.
+
+## Shared chart title run alignment (2026-10-26)
+
+- Source repository: `ChristopherVR/ooxml`, commit `27cc953db6d5e919c1a413d5fdcfb39a82b566eb`.
+- Source module: `src/core/pptx/core/utils/chart-title-run-alignment.ts` and its colocated tests.
+- Destination: `src/core/text/realign-runs.ts` and `realign-runs.test.ts`.
+- Changes: remove PowerPoint title types, accept generic styled text runs, compile strict, retain
+  compatibility exports at the old path, and use the shared policy from neutral chart-title edits.
+  An empty run list returns an empty result instead of inventing a styled run.
+
+## Shared value-from-cells labels (2026-10-26)
+
+Source: `ChristopherVR/ooxml`, commit `27cc953db6d5e919c1a413d5fdcfb39a82b566eb`,
+`src/core/pptx/core/utils/chart-data-labels-range.ts`. The neutral
+`src/core/chart/edit/label-range.ts` applies the existing chart15 range/visibility semantics through
+shared XML nodes, preserving sibling extensions. It adds strict types, bounded sparse-cache reads,
+immutable chart operations and targeted-series selection. PowerPoint maps its existing fields onto
+this implementation. Regression tests live beside the neutral operation.
+
+## Shared SmartArt formatting definitions (2026-10-26)
+
+Source: ChristopherVR/ooxml at `27cc953db`,
+`src/core/pptx/core/core/runtime/smartart-fabrication-styles.ts`.
+
+- Moved the complete quick-style and colour definition fabrication to
+  `src/core/diagram/write/fabricated-styles.ts`. Only imports changed: neutral diagram types and
+  the existing shared data writer's XML constants replace PowerPoint aliases. The original module
+  is a compatibility facade, retaining its exports and historical unique identifiers.
+- New code: the source-backed formatting patcher in `diagram/edit/format.ts`, the generated 2D
+  drawing writer in `diagram/write/drawing.ts`, and the Word/Excel format commands and save adapters.
+  Ordinary PowerPoint 2D preset shape properties use the shared drawing writer; its legacy custom
+  geometry, presentation-point association and 3D adapters remain in PowerPoint.
+
+## Shared workbook drawing theme colours (2026-10-26)
+
+Source: ChristopherVR/ooxml at `26af3ba4c`,
+`src/ui/src/xlsx/grid/smartart.ts`, `smartArtSchemeColors` and its alias map.
+
+- Moved the palette-to-DrawingML slot mapping to `src/core/xlsx/drawing-theme.ts` as
+  `drawingSchemeColors`, using the existing `PALETTE_SLOTS` ordering. The UI retains
+  `smartArtSchemeColors` as a compatibility alias. Generated cache saving uses the same mapping.
+- New host cache generation and association code lives in `diagram/write/cache.ts`,
+  `docx/diagram-cache.ts` and `xlsx/write/smart-art-cache.ts`; no source caches are claimed lossless.
+
+## Classic chart neutral paint projection (2026-10-26)
+
+Source: ChristopherVR/ooxml at `6c87cb6f2`,
+`src/core/pptx/core/utils/chart-from-neutral-analysis.ts` (`treeLine`) and
+`src/core/pptx/core/utils/chart-series-tree-fields.ts` (series paint and line reads).
+
+- Replaced object-tree line and series paint reads with the new compatibility projection in
+  `chart-from-neutral-paint.ts`, using the existing neutral DrawingML color resolver, fill and
+  line models. Source relationship and extension readers remain in PowerPoint.
+- New code: the saved-part refresh method on the classic chart parsing runtime, and axis
+  identity matching that preserves resolved style context without mutating old snapshots.
+
+## Shared ChartEx formatting projection (2026-10-27)
+
+Source: ChristopherVR/ooxml at `a2605bfef`,
+`src/ui/src/chart/format-pane-chartex.ts` and the existing shared chart appearance operations.
+
+- The UI's style-source adaptation now delegates to `src/core/chart/edit/chartex-style.ts`.
+  This is a new strict, style-only projection onto the existing `ChartSpace` edit engine, with
+  changes copied back into ChartEx style holders. Data, axis semantics and family layouts stay
+  in the ChartEx model. The UI retains only its capability filtering and theme adapter.
+- New neutral axis/group/point-label operations and PowerPoint save planners reuse this bridge.
+  No second DrawingML formatting implementation or product storage model was introduced.
+
+## Resize aspect geometry (2026-10-28)
+
+Source: ChristopherVR/ooxml at `a4707a6e694d26e32af0375ee06d600541a1236a`,
+`src/ui/src/pptx/render/editor-geometry.ts` and its adjacent test. Moved
+`isCornerHandle` and `lockResizeAspect` with their tests to
+`src/core/geometry/resize-aspect.ts` and `resize-aspect.test.ts`.
+The earlier PowerPoint export remains a compatibility re-export. The implementation
+now imports strict, format-neutral geometry types and the existing shared minimum
+size (12, identical to PowerPoint's default). Arithmetic and anchoring are unchanged.
+Test handle literals are narrowed for strict TypeScript. Apache-2.0 license retained.
+
+## Visio resize planning shared by leaves and groups (2026-10-28)
+
+Source: ChristopherVR/ooxml at `60cf8dd9c`,
+`src/core/visio/edit-resize-anchor.ts`. Extracted the bounded dependency closure,
+numeric comparison and canonical transform-cell checks into
+`src/core/visio/edit-resize-plan.ts`. The shared write descriptor now optionally
+identifies a member sheet, allowing the same anchored transaction to project and
+validate flat local group members before mutating any source cells. The existing
+leaf writer and regression tests remain in place. Apache-2.0 license retained.
+
+Browser fixture and inspection helpers moved from
+`e2e/visio/selection-resize.spec.ts` at the same commit into
+`e2e/visio/selection-resize-fixture.ts`; fixtures now include explicit grouping
+transforms, and inspection includes child geometry for group-resize coverage.
+
+## Shared region maps and picture rendering (2026-10-29)
+
+Source: `ChristopherVR/ooxml`, commit `bf7be3e5c`.
+
+| Source                                                 | Shared destination                                            | Adaptation                                                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/ui/src/pptx/render/chart-region-map-alias.ts`     | `src/core/chart/region-map/alias.ts`                          | Strict, format-neutral region aliases                                                                  |
+| `src/ui/src/pptx/render/chart-region-map-data.ts`      | `src/core/chart/region-map/data.ts`                           | Strict value projection; skip missing values                                                           |
+| `src/ui/src/pptx/render/chart-map-projection.ts`       | `src/core/chart/region-map/world-regions.ts`, `projection.ts` | Extract hand-authored approximate regions and parameterize bounds/projection over the supplied regions |
+| `src/ui/src/pptx/render/chart-region-map-colors.ts`    | `src/core/chart/region-map/colors.ts`                         | Extract pure colour scale and normalization; product legend adapter remains                            |
+| `src/core/pptx/core/types/chart.ts`                    | `src/core/chart/region-map/types.ts`                          | Neutral region-map options and value-colour positions; retain compatibility interfaces                 |
+| `src/ui/src/pptx/render/image-effect-filter-values.ts` | `src/core/drawingml/picture-transfer.ts`                      | Strict shared numeric transfer functions                                                               |
+| `src/core/pptx/core/core/runtime/image-a14-effects.ts` | `src/core/drawingml/picture-artistic.ts`                      | Shared artistic-effect metadata table                                                                  |
+| `src/ui/src/pptx/render/image-effects.ts`              | `src/ui/src/picture-artistic-filters.ts`                      | Shared SVG artistic preview construction, explicitly approximate                                       |
+| `src/ui/src/pptx/render/image-native-size.ts`          | `src/ui/src/image-native-size.ts`                             | Reusable native image-size cache                                                                       |
+| `src/ui/src/pptx/render/render-cache.ts`               | `src/ui/src/render-cache.ts`                                  | Reusable bounded rendering cache                                                                       |
+| `src/ui/src/pptx/render/image-tiling.ts`               | `src/core/geometry/picture-tile.ts`                           | Shared tile alignment and layout arithmetic                                                            |
+
+The former PowerPoint entry points delegate to the shared implementations. New code adds
+source-preserving picture codecs, shared picture layout/painting, bounded compressed geographic
+cache decoding, Robinson projection, neutral map painting and host adapters. Native comparison
+corrected crop-independent tile periods and source-backed map paint. Provider geographic caches
+used for local comparison are not committed; decoder regression fixtures use synthetic polygons.
+Apache-2.0 source licensing is retained.
+
+The approximate country outlines the shared painter draws for a region map without a provider
+cache (`src/core/chart/region-map/world-regions.ts`, `WORLD_REGIONS`, 22 regions, about 4.9 KB) are
+hand-drawn coarse polygons of 6 to 16 integer points each on a 1000 x 500 grid, with a label anchor
+per region. They were written in this project's PowerPoint viewer (`chart-map.tsx` of its React
+binding, then `chart-map-projection.ts`, first committed in `da3d65636b`, moved here in
+`ba4cd0dc64` and `53531e817f`). They are not derived or simplified from a geographic dataset, no
+third-party geodata is bundled, and they carry the repository's Apache-2.0 licence. They are
+labelled approximate wherever they are drawn.
+
+SmartArt picture association, role metadata, generated image relationships and host cache writers
+are new implementations built on the existing shared diagram engine. Visio ChartEx admission and
+editing reuse the existing embedded workbook and ChartEx transaction APIs; they do not copy a
+second chart parser or editor. Native capture and comparison scripts are new test infrastructure.
+
+## Shared validated raster inspection (2026-10-29)
+
+Source: `ChristopherVR/ooxml`, commit `bf7be3e5c` (the source modules are unchanged at the extraction checkpoint).
+`src/core/visio/media.ts` supplies PNG/JPEG/GIF header inspection now in
+`src/core/drawingml/raster-image.ts`; `src/core/visio/package-common.ts` supplies CRC32 now in
+`src/core/digest/crc32.ts`. Visio retains its public error messages and size-limit wrapper.
+PowerPoint now reuses the validated dimensions for synchronous cropped/tiled SmartArt image
+serialization. The extraction preserves existing validation behavior and adds focused shared
+regressions. Unknown image formats retain the existing product fallback.
+
+## Core 3-D chart painter (2026-10-30)
+
+Source: `ChristopherVR/ooxml`, `src/ui/src/pptx/render/chart-3d-projection.ts` and
+`chart-3d-shading.ts` (this repository, before this change). `resolveChart3DProjection` and the
+per-face shading table moved to `src/core/chart/render/chart-3d-projection.ts` and
+`chart-3d-shading.ts` (input type widened to a neutral `Chart3DViewInput`; face shading keeps
+non-hex paints); the PowerPoint modules re-export them and keep the normal-based shading of
+`c:shape` bars. The camera, prism meshes, depth-ordered SVG scene, walls, bar, line, area, pie and
+surface generators (`chart-3d-camera|mesh|scene|layout|marks|walls|pie|surface|svg.ts`) are new
+implementations; the PowerPoint WebGL meshes were not copied.
+
+## Legacy .doc conversion fixtures (2026-10-30)
+
+Source: `ChristopherVR/ole2`, branch `doc-model`, commit `e6b3fed`, folder `test/fixtures/doc/`.
+`src/core/docx/load/__fixtures__/legacy-doc/` holds `formatting-lists`, `formatting-rich`,
+`formatting-styles`, `header-field`, `objects`, `structure-headers`, `structure-notes`,
+`structure-sections`, `structure-table-merged`, `structure-table-nested`, `structure-table-simple`
+and `structure-textbox` (all `.doc`), the two inputs of `objects` (`objects-input-a.png`,
+`objects-input-b.jpg`) and the generator scripts that wrote them in desktop Word
+(`generate-formatting-fixtures.ps1`, `generate-structure-fixtures.ps1`,
+`generate-objects-fixture.ps1`, `generate-doc-fixtures.ps1`). Files are unchanged copies; they are
+original synthetic content owned by that repository under Apache-2.0. The converter that reads
+them (`src/core/docx/load/legacy-doc/`) is a new implementation over ole2's `readDocModel`.
+
+## Visio org chart masters (2026-10-30)
+
+Source: Microsoft Visio 16 built-in content, `Visio Content/1033/ORGCH_M.VSTX` (the Organization
+Chart template), read through XML in the package. `src/core/visio/ui/org-chart-stencil-data.ts`
+(generated by `scripts/gen-visio-org-stencil.mjs`) embeds a stencil package holding five of its
+masters (Executive Belt, Manager Belt, Position Belt, Assistant Belt and Dynamic connector, with their
+UniqueID and BaseID), the photo placeholder image they own and the style sheets they use (Normal,
+Org Normal, Connector and the default styles). Accepted on the built-in content basis (see the
+built-in SmartArt definitions decision). Changed: only the stencil package is new (pages, thumbnail,
+windows, the other ten masters and the theme are left out), and the root group of the four Belt
+masters carries `DisplayMode` 2, the value Visio's Normal style gives it. The code that adds,
+instances and edits them is new: `edit-master-media.ts`, `edit-connector-org.ts`,
+`ui/org-chart*.ts`.
+
+## Excel threaded comment writers (2026-10-31)
+
+Source: `ChristopherVR/ooxml`, `src/core/xlsx/write/comments.ts`, commit `e6448a5ff`.
+The deterministic GUID helper moved unchanged to `write/comment-ids.ts`; the person registry
+moved to `write/comment-persons.ts` and now preserves source account XML and distinct identities
+with the same display name. Both paths are relative to `src/core/xlsx`. The threaded-message
+writer and mention-offset adapter are new implementations; the latter reuses the existing
+shared `src/core/text/text-diff.ts` algorithm.
+
+## Spec-exact preset geometry (2026-11-06)
+
+Source: none copied. `src/core/geometry/preset-shape-definitions-exact-*.ts` rewrite presets
+whose hand-written entries disagreed with PowerPoint 16 (star4-star10, pentagon, heptagon,
+decagon, dodecagon, math operators, tabs, braces, brackets, moon, heart, cloud, lightningBolt,
+wave, doubleWave, arc, pie, chord, blockArc, pieWedge, noSmoking, halfFrame, five block arrows,
+smileyFace, can, cube, bevel, diagStripe, nonIsoscelesTrapezoid, three flowchart shapes). The
+formulas follow the ECMA-376 `presetShapeDefinitions` layout as published in ISO/IEC 29500-1
+and were checked against PowerPoint's own `Slide.Export` raster at a non-square aspect with
+default and adjusted values. `ooxml-arc.ts` now treats `arcTo` angles as visual angles
+(ECMA-376 section 20.1.9.3) and converts them in the path's own space.
+
+## Shared webfont fallback (2026-11-07)
+
+Source: this repository, no external code. PowerPoint's Google Fonts fallback moved out of
+`src/ui/src/pptx/render/` so Word, Excel and Visio use the same code:
+
+| From                                                                                   | To                                                 | What changed                                                                              |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `src/ui/src/pptx/render/google-fonts-catalogue.ts`                                     | `src/core/text/webfonts/google-fonts-catalogue.ts` | Moved unchanged; `viewers/pptx/scripts/update-google-fonts-catalogue.mjs` writes it there |
+| `src/ui/src/pptx/render/google-fonts-lookup.ts`                                        | `src/core/text/webfonts/google-fonts-lookup.ts`    | Moved unchanged                                                                           |
+| `src/ui/src/pptx/render/google-webfonts-metric-clones.ts`                              | `src/core/text/webfonts/metric-clones.ts`          | Moved unchanged                                                                           |
+| `src/ui/src/pptx/render/font-weight-names.ts` (and test)                               | `src/core/text/webfonts/font-weight-names.ts`      | Strict-mode guards for possibly missing tokens                                            |
+| `src/ui/src/pptx/render/google-webfonts.ts` (pure part)                                | `src/core/text/webfonts/google-fonts-request.ts`   | The product chooses what an unset option means and the warning's label                    |
+| `src/ui/src/pptx/render/deck-webfont-readiness.ts` (faces)                             | `src/core/text/webfonts/webfont-faces.ts`          | Faces from format-neutral runs instead of slides                                          |
+| `src/ui/src/pptx/render/google-webfonts.ts`, `google-webfonts-link.ts`, readiness wait | `src/ui/src/fonts/webfonts.ts`                     | Installed check, managed `<link>` and bounded wait, format-neutral                        |
+
+The PowerPoint files keep their exports as re-exports. No font binaries were copied or added.
+
+## PowerPoint colour codec and theme reader on the shared DrawingML area (2026-11-16)
+
+Source: this repository, no external code. Step 3 of `docs/agnostic-core-plan.md`: the pptx colour
+codec and theme part reader now resolve through `drawingml`.
+
+| From                                                                  | To                                             | What changed                                                                                                                                                    |
+| --------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/pptx/core/constants-colors.ts`                              | `src/core/drawingml/preset-colors.ts`          | Moved with `git mv`; `PRESET_COLOR_MAP`/`SYSTEM_COLOR_MAP` became `DRAWING_PRESET_COLORS`/`DRAWING_SYSTEM_COLORS`, re-exported under the old names by pptx      |
+| `src/core/pptx/core/color/color-transforms.ts` (the 26 transforms)    | `src/core/drawingml/color-transforms.ts`       | Applies a neutral transform list; `resolveDrawingColor` uses it, so gamma and RGB channel transforms and the full preset and system tables reach every format   |
+| `PptxColorTransformCodec.parseColorChoice`, `color-utils.ts` readers  | `src/core/pptx/core/color/color-transforms.ts` | Replaced by an object-tree adapter (`resolveObjectColorChoice`) over `resolveDrawingColor`; the pptx code that resolved base colours and transforms was deleted |
+| `PptxHandlerRuntimeThemePartModel.parseThemePartXml` (scheme reading) | `drawingml/theme.ts` + `theme-part-model.ts`   | Names, colour scheme and font scheme read by `parseTheme`, mapped by `themeSchemesFromDrawingTheme`; the format scheme and raw subtrees stay on the object tree |
+
+## PowerPoint paragraph properties on the shared DrawingML codec (2026-11-16)
+
+Source: this repository, no external code. Step 3 of `docs/agnostic-core-plan.md`: the pptx
+readers and writers of the paragraph attributes, spacing, bullet group (size, font, type and the
+follow-text markers) and tab stops run on one codec shared with the DOM text reader and writer.
+
+| From                                                                                                                                                       | To                                                            | What changed                                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `drawingml/read-paragraph-properties.ts` attribute, spacing, bullet and tab readers; `parseDrawingFont`                                                    | `src/core/drawingml/text-paragraph-codec.ts`                  | Rewritten over a `DrawingTextElementView` (`text-element-view.ts`) so the DOM and the pptx object tree share them; tab stops gained the non-schema `leader`             |
+| `drawingml/write-paragraph-properties.ts` attribute, spacing, bullet and tab writers; `writeDrawingFont` attributes                                        | `src/core/drawingml/text-paragraph-codec.ts`                  | Attribute and child entries in schema order, applied by the DOM writer and the pptx object-tree writers                                                                 |
+| `pptx/core/utils/paragraph-properties-parser.ts`, `tab-stops.ts`, the bullet readers of `PptxHandlerRuntimeBulletParsing` and `PlaceholderStyles`          | `pptx/core/utils/paragraph-properties-neutral.ts` (adapter)   | The object-tree readers were deleted; the pptx functions now convert the codec's neutral values to px and the pptx `TextStyle`/`BulletInfo` fields                      |
+| `PptxHandlerRuntimeSaveParagraphHelpers` (`a:pPr` attributes, bullets, exact line spacing), `SaveSlideUtils` spacing, `placeholder-level-style-serializer` | the codec's entries through `paragraph-properties-neutral.ts` | Values encoded by the codec; a rebuilt `a:pPr` now writes its attributes in schema order (the order PowerPoint writes) instead of the old fixed `lvl algn rtl marL ...` |
+
+## PowerPoint run effects, fills, outlines, warp and cell anchors on shared readers (2026-11-16)
+
+Source: this repository, no external code. Step 3 of `docs/agnostic-core-plan.md`.
+
+| From                                                                                                                         | To                                                        | What changed                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `drawingml/drawing-fill.ts` `parseDrawingLine` field code and `drawingDashLength`                                            | `src/core/drawingml/line-read.ts`                         | `readDrawingLineFields` over a `DrawingNodeView`; the DOM reader keeps the fill and source XML |
+| `a:prstTxWarp` kept verbatim in `DrawingBodyProperties.extraXml`                                                             | `DrawingBodyProperties.textWarp` (`text-body-codec.ts`)   | Typed when lossless, written back by the DOM writer                                            |
+| `applyTextRunEffects` list-effect readers (`PptxHandlerRuntimeTextRunEffects`)                                               | the shared effect reader (`findObjectEffect`)             | Object-tree attribute reads deleted                                                            |
+| `extractTextFillVariants` gradient reader (`PptxHandlerRuntimeTableStylesAndActions`)                                        | `readDrawingGradient`                                     | Object-tree stop and angle reads deleted                                                       |
+| Text outline and underline line reads (`extractTextRunStyle`)                                                                | `readDrawingLineFields`                                   | Object-tree attribute reads deleted                                                            |
+| `applyBodyProperties` warp and linked text box reads, the save text writer's warp node                                       | `text-body-codec.ts` through `body-properties-neutral.ts` | Codec values and entries                                                                       |
+| `applyCellAlignmentStyle` (`table-cell-text-style-helpers`), `extractDrawingShapeTextStyle` (`smartart-drawing-shape-style`) | the paragraph, run and body codecs                        | Object-tree attribute reads deleted                                                            |
+
+## PowerPoint body properties on the shared DrawingML codec (2026-11-16)
+
+Source: this repository, no external code. Step 3 of `docs/agnostic-core-plan.md`: the pptx
+reader and writer of the `a:bodyPr` attributes and autofit choice run on one codec shared with
+the DOM text reader and writer.
+
+| From                                                                                                                                                                                     | To                                                     | What changed                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `drawingml/read-text-body.ts` and `write-text-body.ts` `a:bodyPr` attribute and autofit code                                                                                             | `src/core/drawingml/text-body-codec.ts`                | Rewritten over the `DrawingTextElementView`; attribute entries in schema order                                    |
+| `applyBodyProperties` attribute and autofit reading (`PptxHandlerRuntimeShapeBodyParsing`), `body-properties-parser`, the placeholder defaults (`PptxHandlerRuntimePlaceholderDefaults`) | `pptx/core/utils/body-properties-neutral.ts` (adapter) | The object-tree readers were deleted; the pptx code converts the codec's neutral values to the `TextStyle` fields |
+| The `a:bodyPr` writer of `applyTextBodyContent` (`PptxHandlerRuntimeSaveTextWriter`)                                                                                                     | the codec's entries, merged into the existing node     | Values encoded by the codec                                                                                       |
+| `pptx/core/utils/text-body-properties-parser.ts` and its test                                                                                                                            | (deleted)                                              | An unused duplicate of the runtime reader                                                                         |
+
+## PowerPoint run properties on the shared DrawingML codec (2026-11-16)
+
+Source: this repository, no external code. Step 3 of `docs/agnostic-core-plan.md`: the pptx
+readers and writer of the run property attributes, font slots, run `a:rtl` and underline
+follow-text markers run on one codec shared with the DOM text reader and writer.
+
+| From                                                                                                                                                                                                                | To                                                    | What changed                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `drawingml/read-run-properties.ts` attribute and `a:rtl` readers; `write-run-properties.ts` attribute writer                                                                                                        | `src/core/drawingml/text-run-codec.ts`                | Rewritten over the `DrawingTextElementView`; attribute entries in schema order                                    |
+| `extractTextRunStyle` attribute, font and `a:rtl` reading (`PptxHandlerRuntimeTextRunStyleExtraction`), `text-run-properties-parser` attribute and font readers, the level-style run defaults (`PlaceholderStyles`) | `pptx/core/utils/run-properties-neutral.ts` (adapter) | The object-tree readers were deleted; the pptx code converts the codec's neutral values to the `TextStyle` fields |
+| `createRunPropertiesFromTextStyle` attributes and font nodes (`PptxHandlerRuntimeSaveRunProperties`)                                                                                                                | the codec's entries                                   | Values encoded by the codec; a rebuilt `a:rPr` writes its attributes in schema order                              |
+
+## Built-in SmartArt colour and quick-style catalogue (2026-11-16)
+
+Source: desktop PowerPoint 16.0 (build 20527) through its documented COM object model, no binary inspection.
+
+- `src/core/diagram/__fixtures__/smartart-definitions/` holds `smartart-definitions.pptx` and `manifest.json`, produced by `src/core/scripts/diagram/make-smartart-definitions.ps1`: one Basic Block List SmartArt per entry of `Application.SmartArtColors` (38) and `Application.SmartArtQuickStyles` (14), each with that entry applied, saved by PowerPoint unchanged. The manifest records the id, name, category and description COM reports.
+- `src/core/diagram/builtin/style-catalog.ts` and `style-data.ts` hold the 52 `dgm:colorsDef` and `dgm:styleDef` definitions, extracted by `src/core/scripts/diagram/gen-smartart-style-definitions.mjs` from the colours and quick-style parts of that file (XML declaration and whitespace between tags removed, each stored as its own gzip member). `src/core/diagram/catalogue-native.ts` is generated from the same parts: the names and categories from the manifest, and tile traits (node fill and line colours, style-matrix indexes, camera, bevel) read from each definition. The definitions are Microsoft's, as PowerPoint embeds them in every document that uses them; they are included on the basis recorded for the layout definitions ("Built-in SmartArt layout definitions (2026-10-07)"), which the maintainer extended to the built-in colour and style definitions, with the same residual risk. If Microsoft objects, remove these files and author the definitions in the repository's own words.
+- How Office caches quick-style 3D per shape (`a:scene3d` only when the label's scene is not the front view with the three-point rig, `a:sp3d`, text 3D in `a:bodyPr`, no spatial camera) was read from the drawing parts PowerPoint wrote into the same file. The writer code (`diagram/write/drawing.ts`, `definitions.ts`) is new.
+
+## Shared SmartArt scene camera (2026-11-16)
+
+Moved within this repository, from the PowerPoint renderer in `ooxml-ui` to the core, so the Word and Excel SVG painter uses the same camera:
+
+| From                                                                            | To                                     | What changed                                                                                                                                                          |
+| ------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/ui/src/pptx/render/visual-3d-camera-presets.ts`                            | `src/core/drawingml/camera-presets.ts` | Moved with `git mv`; the pptx module re-exports `CAMERA_PRESET_MAP`, `DEFAULT_CUSTOM_REF_PX` and `CameraPresetConfig`                                                 |
+| `src/ui/src/pptx/render/smartart-3d-scene-camera.ts` (presets, resolve, matrix) | `src/core/diagram/scene-camera.ts`     | Renamed `DIAGRAM_SCENE_CAMERA_PRESETS`, `resolveDiagramSceneCamera`, `diagramSceneCameraMatrix`; adds `projectDiagramScenePoint`; pptx re-exports under the old names |

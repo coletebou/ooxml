@@ -15,6 +15,17 @@ export {
 	canonicalShapeDataValue,
 } from './edit-shape-data-commands';
 export { visioLinkedRowNames } from './edit-data';
+export {
+	visioDataConnectionFor,
+	type VisioDataConnection,
+	type VisioDataSource,
+} from './data-connections';
+export {
+	matchRefreshedRows,
+	visioRefreshReport,
+	type VisioRefreshReport,
+	type VisioRowMatch,
+} from './data-refresh';
 export { parseVsdx, getVisioPageLayers, type ParseVsdxOptions } from './parser';
 export type { VisioDocumentCache } from './document-level';
 export { readVisioStencil, type VisioStencilFile } from './stencil-file';
@@ -182,6 +193,45 @@ export {
 	type VisioShadowPreset,
 } from './edit-formatting-effects';
 export {
+	VISIO_BEVEL_PRESETS,
+	VISIO_BEVEL_TYPES_INSET,
+	VISIO_BEVEL_TYPES_SHARP,
+	VISIO_ROTATION_PRESETS,
+	visioRotation3dMatrix,
+	type VisioBevel,
+	type VisioContour,
+	type VisioExtrusion,
+	type VisioRotation3d,
+} from './bevel-3d';
+export {
+	BEVEL_BLUR_WIDTHS,
+	BEVEL_LIGHTING_TYPES,
+	bevelHeightAt,
+	bevelHeightTable,
+	bevelLight,
+	bevelMaterial,
+	bevelProfile,
+	isUndrawnBevelMaterial,
+	normalBevelLighting,
+	type BevelHeightTable,
+	type BevelLight,
+	type BevelMaterial,
+	type BevelPoint,
+} from './bevel-shading';
+export {
+	createProjection,
+	extrudePaths,
+	extrusionPathData,
+	flattenPath,
+	projectPathData,
+	projectionMatrix,
+	type Extrusion,
+	type ExtrusionFace,
+	type Point2,
+	type Projection,
+} from './solid-3d';
+export { MAX_PATH_CHARS, MAX_PATH_SEGMENTS, parsePath, type PathSegment } from './path-segments';
+export {
 	VISIO_GLOW_SIZES,
 	VISIO_GLOW_TRANSPARENCY,
 	VISIO_SOFT_EDGE_SIZES,
@@ -222,6 +272,7 @@ export {
 export { isVisioChangeShapeTarget } from './edit-change-shape-commands';
 export { VISIO_SCALE_UNITS } from './edit-page-setup-commands';
 export type { VisioPageLayoutEdit } from './edit-page-layout';
+export type { VisioEmbellishment } from './edit-page-theme-commands';
 export type { VisioSnapGlueEdit } from './edit-snap-glue';
 export {
 	VISIO_GLUE,
@@ -287,9 +338,29 @@ export {
 	isVisioDiagramPartEdit,
 	type VisioContainerStyle,
 	type VisioCalloutStyle,
+	type VisioSetContainerMembersEdit,
+	type VisioReconcileContainersEdit,
 	type VisioPartBox,
 } from './edit-diagram-parts-commands';
 export { visioShapeStructure, type VisioShapeStructure } from './shape-structure';
+export type { VisioContainerOptions } from './model';
+export type {
+	VisioSwimlaneEdit,
+	VisioCreateSwimlanesEdit,
+	VisioInsertSwimlaneEdit,
+	VisioDeleteSwimlaneEdit,
+	VisioResizeSwimlaneEdit,
+	VisioInsertSeparatorEdit,
+	VisioSwimlaneOptionsEdit,
+	VisioSwimlaneDirection,
+} from './edit-swimlane-commands';
+export {
+	VISIO_SWIMLANE_HEADER,
+	VISIO_SWIMLANE_MIN,
+	VISIO_SWIMLANE_STYLES,
+	VISIO_SWIMLANE_TITLE,
+} from './edit-swimlane-commands';
+export type { VisioSwimlaneFrameOptions, VisioSwimlaneRole } from './model';
 export {
 	VISIO_TEXT_CASES,
 	VISIO_TEXT_POSITIONS,
@@ -359,4 +430,17 @@ export {
 	type VisioTextMeasurer,
 } from './text-extent';
 export { visioFontAssumed } from './style';
+export { collectVisioWebfontRuns, type VisioWebfontRunOptions } from './webfont-runs';
 export { checkVisioAlternativeText, type VisioAccessibilityIssue } from './accessibility';
+export type {
+	VisioAction,
+	VisioActionRun,
+	VisioControl,
+	VisioScratchRow,
+	VisioTabStop,
+	VisioUserCell,
+} from './shape-sections-types';
+export type { VisioControlEdit } from './edit-control';
+export type { VisioActionEdit } from './edit-action';
+export { rewriteControlFormula } from './control-formula';
+export { visioTabStarts, VISIO_DEFAULT_TAB_SPACING, type VisioTabSegment } from './tab-stops';

@@ -1,3 +1,4 @@
+import { readPictureEffect } from '../../../../drawingml/picture-effects';
 import { XmlObject } from '../../types';
 import type { PptxImageEffects, MediaBookmark } from '../../types';
 import { xmlAttr, xmlChild } from '../../utils/xml-access';
@@ -9,26 +10,26 @@ import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRunti
 
 /** Timing data extracted from the OOXML timing tree for a single media element. */
 export interface MediaTimingData {
-	trimStartMs?: number;
-	trimEndMs?: number;
-	fullScreen?: boolean;
-	loop?: boolean;
-	posterFramePath?: string;
-	volume?: number;
-	fadeInDuration?: number;
-	fadeOutDuration?: number;
-	autoPlay?: boolean;
-	playAcrossSlides?: boolean;
-	hideWhenNotPlaying?: boolean;
-	bookmarks?: MediaBookmark[];
+	trimStartMs?: number | undefined;
+	trimEndMs?: number | undefined;
+	fullScreen?: boolean | undefined;
+	loop?: boolean | undefined;
+	posterFramePath?: string | undefined;
+	volume?: number | undefined;
+	fadeInDuration?: number | undefined;
+	fadeOutDuration?: number | undefined;
+	autoPlay?: boolean | undefined;
+	playAcrossSlides?: boolean | undefined;
+	hideWhenNotPlaying?: boolean | undefined;
+	bookmarks?: MediaBookmark[] | undefined;
 	/** Playback speed multiplier (1 = normal). From p14:media/@spd (percentage * 1000). */
-	playbackSpeed?: number;
+	playbackSpeed?: number | undefined;
 	/**
 	 * Resolved media path from `p14:media/@r:embed`. Used as a fallback source
 	 * when a media element is referenced only through the p14 extension and the
 	 * primary `mediaPath` could not be resolved.
 	 */
-	mediaEmbedPath?: string;
+	mediaEmbedPath?: string | undefined;
 }
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
@@ -79,20 +80,11 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		// a:lum: luminance modulation (@_bright, @_contrast in 1/1000ths of a percent)
 		const lumNode = blip['a:lum'] as XmlObject | undefined;
 		if (lumNode) {
+			const neutral = readPictureEffect('lum', (name) => lumNode[`@_${name}`]);
 			const lumEffect: NonNullable<PptxImageEffects['lum']> = {};
-			const lumBright = lumNode['@_bright'];
-			const lumContrast = lumNode['@_contrast'];
-			if (lumBright !== undefined) {
-				const v = parseInt(String(lumBright)) / 1000;
-				if (Number.isFinite(v)) {
-					lumEffect.bright = v;
-				}
-			}
-			if (lumContrast !== undefined) {
-				const v = parseInt(String(lumContrast)) / 1000;
-				if (Number.isFinite(v)) {
-					lumEffect.contrast = v;
-				}
+			if (neutral?.kind === 'luminance') {
+				if (neutral.brightness !== undefined) lumEffect.bright = neutral.brightness * 100;
+				if (neutral.contrast !== undefined) lumEffect.contrast = neutral.contrast * 100;
 			}
 			effects.lum = lumEffect;
 			hasAny = true;
@@ -246,7 +238,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	): NonNullable<PptxImageEffects['fillOverlay']>['resolvedGradient'] {
 		const gsLst = gradFill['a:gsLst'] as XmlObject | undefined;
 		const gsNodes = this.ensureArray(gsLst?.['a:gs']);
-		const stops: Array<{ color: string; position: number; opacity?: number }> = [];
+		const stops: Array<{ color: string; position: number; opacity?: number | undefined }> = [];
 		for (const gsNode of gsNodes) {
 			const gs = gsNode as XmlObject;
 			const color = this.parseColor(gs);

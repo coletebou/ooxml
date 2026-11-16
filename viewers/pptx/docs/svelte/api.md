@@ -48,13 +48,13 @@ snapshots; they are not reactive stores. To react to changes, use the callback p
 
 ## Zoom
 
-| Method      | Signature                 | Description                           |
-| ----------- | ------------------------- | ------------------------------------- |
-| `getZoom`   | `() => number`            | Effective zoom scale (1 = 100%).      |
-| `setZoom`   | `(level: number) => void` | Set an explicit zoom scale (clamped). |
-| `zoomIn`    | `() => void`              | Zoom in by one step.                  |
-| `zoomOut`   | `() => void`              | Zoom out by one step.                 |
-| `zoomReset` | `() => void`              | Reset zoom to 100%.                   |
+| Method      | Signature                 | Description                                        |
+| ----------- | ------------------------- | -------------------------------------------------- |
+| `getZoom`   | `() => number`            | Effective zoom scale (1 = 100%).                   |
+| `setZoom`   | `(level: number) => void` | Set an explicit zoom scale (clamped to 0.1 - 5.0). |
+| `zoomIn`    | `() => void`              | Zoom in by one step.                               |
+| `zoomOut`   | `() => void`              | Zoom out by one step.                              |
+| `zoomReset` | `() => void`              | Reset zoom to 100%.                                |
 
 ## Mode and presentation
 
@@ -80,6 +80,56 @@ viewer?.setMode('present'); // start presenting; Esc exits
 | `moveSlide`        | `(fromIndex: number, toIndex: number) => void` | Move a slide to a new position.                             |
 | `toggleHideSlides` | `(indexes: number[]) => void`                  | Toggle the hidden flag on slides.                           |
 | `isDirty`          | `() => boolean`                                | Whether the document has unsaved changes.                   |
+
+### Host-persisted Save
+
+When the host serialises the deck and stores it itself (possibly slowly), use a revision token so
+edits made while the upload is in flight stay unsaved. Nothing reloads and undo history is kept.
+
+| Method            | Signature                                                  | Description                                                                        |
+| ----------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `getSaveRevision` | `() => number`                                             | The revision of the document now. It changes after every edit.                     |
+| `getSaveSnapshot` | `() => Promise<{ revision: number; content: Uint8Array }>` | Serialise the deck for the host. The document stays dirty and no save event fires. |
+| `acknowledgeSave` | `(revision: number) => PptxSaveAcknowledgement`            | Tell the viewer the host persisted `revision`.                                     |
+
+Result types:
+
+```ts
+interface PptxSaveSnapshot {
+	readonly revision: number;
+	readonly content: Uint8Array;
+}
+
+type PptxSaveAcknowledgement =
+	| { readonly status: 'clean'; readonly revision: number }
+	| { readonly status: 'pending'; readonly revision: number; readonly currentRevision: number }
+	| { readonly status: 'stale'; readonly revision: number; readonly savedRevision: number }
+	| { readonly status: 'unknown'; readonly revision: number };
+```
+
+`acknowledgeSave` returns one of:
+
+- `{ status: 'clean' }`: `revision` is still current. The document is clean, `onDirtyChange(false)`
+  fires and the crash-recovery copy is discarded (unless Options > Save keeps the last AutoRecover
+  version).
+- `{ status: 'pending', currentRevision }`: the revision is accepted but edits were made since.
+  The document stays dirty and the recovery copy, which may hold those edits, is kept.
+- `{ status: 'stale' }`: older than a revision already acknowledged. Ignored.
+- `{ status: 'unknown' }`: not a revision this viewer issued. Ignored.
+
+Never acknowledge a failed save: the document then simply stays dirty. Undoing back to the saved
+content is an edit like any other, so the document is dirty until the next save. Unlike
+`getContent()` in Svelte and vanilla, `getSaveSnapshot()` never clears the dirty flag.
+
+```ts
+const { revision, content } = await viewer.getSaveSnapshot();
+try {
+	await host.persist(content);
+	viewer.acknowledgeSave(revision);
+} catch {
+	// not acknowledged: the document stays dirty
+}
+```
 
 ## Element access and manipulation
 
@@ -155,16 +205,16 @@ image format round-trips in PowerPoint. No automatic paste listener is installed
 
 Active when `editable` is set (see [Getting Started > Editing](/svelte/getting-started#editing)).
 
-| Method           | Signature                                                      | Description                                                          |
-| ---------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `undo`           | `() => void`                                                   | Undo the last committed edit.                                        |
-| `redo`           | `() => void`                                                   | Redo the last undone edit.                                           |
-| `canUndo`        | `() => boolean`                                                | Whether an undo step is available (snapshot; not reactive).          |
-| `canRedo`        | `() => boolean`                                                | Whether a redo step is available.                                    |
-| `deleteSelected` | `() => void`                                                   | Delete the selected element (no-op when nothing is selected).        |
-| `save`           | `(format?: PptxSaveFormat) => Promise<Uint8Array>`             | Serialise the edited slides to bytes (`'pptx' \| 'ppsx' \| 'pptm'`). |
-| `downloadAs`     | `(format: PptxSaveFormat, fileName?: string) => Promise<void>` | Save + trigger a browser download in the given format.               |
-| `downloadPptx`   | `(fileName?: string) => Promise<void>`                         | Save + download as `.pptx` (default name).                           |
+| Method           | Signature                                                      | Description                                                                   |
+| ---------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `undo`           | `() => void`                                                   | Undo the last committed edit.                                                 |
+| `redo`           | `() => void`                                                   | Redo the last undone edit.                                                    |
+| `canUndo`        | `() => boolean`                                                | Whether an undo step is available (snapshot; not reactive).                   |
+| `canRedo`        | `() => boolean`                                                | Whether a redo step is available.                                             |
+| `deleteSelected` | `() => void`                                                   | Delete the selected element (no-op when nothing is selected).                 |
+| `save`           | `(format?: PptxSaveFormat) => Promise<Uint8Array>`             | Serialise the edited slides to bytes (`'pptx' \| 'ppsx' \| 'pptm' \| 'ppt'`). |
+| `downloadAs`     | `(format: PptxSaveFormat, fileName?: string) => Promise<void>` | Save + trigger a browser download in the given format.                        |
+| `downloadPptx`   | `(fileName?: string) => Promise<void>`                         | Save + download as `.pptx` (default name).                                    |
 
 Keyboard shortcuts, active whenever editing is enabled: `Ctrl`/`Cmd+Z` undo,
 `Ctrl`/`Cmd+Shift+Z` redo, `Delete`/`Backspace` delete, `Ctrl`/`Cmd+D` duplicate, arrow keys
@@ -252,6 +302,98 @@ framework-free state helpers (`ViewerState`, `PresentationLoader`, `clampSlideIn
 custom chrome on the same primitives. These are lower-level than the component API and not
 needed for typical embedding.
 
+### Slide thumbnail rail
+
+`SlidesPane` is the rail of slide thumbnails that `PowerPointViewer` shows beside the canvas,
+for a custom shell built on `createViewerState` and `SlideCanvas` (see
+[Collaboration](/svelte/collaboration#custom-host-chrome)). It lists every slide (grouped by section
+when the deck has sections) and highlights the active one; clicking a thumbnail moves the canvas
+there without marking the deck dirty. With `canEdit`, it also adds, duplicates, deletes, hides,
+reorders and groups slides (Ctrl/Shift click selects several) through the same operations, undo
+history and collaboration sync as the full editor. `createSlidesPaneProps(state)` builds its
+props from the viewer state, as live getters; spread them as they are.
+
+```svelte
+<script lang="ts">
+	import {
+		createSlidesPaneProps,
+		createViewerState,
+		SlideCanvas,
+		SlidesPane,
+	} from 'pptx-svelte-viewer/viewer';
+
+	const state = createViewerState(viewerOptions);
+	const paneProps = createSlidesPaneProps(state, {
+		onopenlayoutgallery: ({ slideIndex, x, y }) => openMyLayoutGallery(slideIndex, x, y),
+	});
+</script>
+
+<div style="display: flex; height: 600px">
+	<SlidesPane {...paneProps} />
+	<SlideCanvas
+		slide={state.activeSlide}
+		canvasSize={state.loader.canvasSize}
+		mediaDataUrls={state.loader.mediaDataUrls}
+		scale={state.scale}
+	/>
+</div>
+```
+
+The props are flat, so a host can also drive the rail from its own state: `slides` (with layout
+and master elements merged, as the canvas draws them), `activeSlideIndex`, `canvasSize`,
+`mediaDataUrls`, `sections`, `canEdit`, the `onselectslide` / `onmoveslide` / `onaddslide` /
+`onaddslideafter` / `onduplicateslides` / `ondeleteslides` / `onhideslides` and section
+callbacks, and the `fieldContext` and `tableStyleContext` built with
+`buildSlidesPaneFieldContext` and `buildSlidesPaneTableStyleContext` from `ooxml-ui/pptx`, so
+thumbnails substitute fields (including slide numbers on a deck that does not start at 1) and
+table colours as the canvas does. The "Layout" entry of a slide's context menu makes that slide
+active and calls the optional `onopenlayoutgallery({ slideIndex, x, y })`, since these building
+blocks do not render the Layout gallery. The rail has no collapse control of its own: render it
+conditionally to hide it. `SlidesPane` is also exported from the package root, and needs
+`pptx-svelte-viewer/styles.css`.
+
+### Single slide thumbnail
+
+`SlideThumbnail` (exported, with its `SlideThumbnailProps` type, from the package root and
+`pptx-svelte-viewer/viewer`) draws one slide the way `SlidesPane` draws it, for a host that keeps
+its own thumbnail strip. It renders from the slide model, so it follows unsaved edits, and it is
+static: no selection, editing, pointer handlers, focus stops or element ids. A slide with a
+transition other than Cut shows the transition's name in a small badge in its top-right corner, as
+the thumbnail does in every binding (Svelte's slides pane draws no badge). Its props are
+`slide`, `templateElements` (layout and master elements drawn beneath the slide's own; default
+none), `canvasSize` and `previewWidth` (pixels; default the rail thumbnail width; the height
+follows the deck's aspect ratio), plus the `SlidesPane` props it shares: `mediaDataUrls`,
+`fieldContext` and `tableStyleContext`. Feed it from the same `createSlidesPaneProps` result.
+Those `slides` already carry their layout and master elements, so leave `templateElements` empty
+for them.
+
+```svelte
+<script lang="ts">
+	import { createSlidesPaneProps, createViewerState, SlideThumbnail } from 'pptx-svelte-viewer/viewer';
+
+	const state = createViewerState(viewerOptions);
+	const paneProps = createSlidesPaneProps(state);
+</script>
+
+<ul class="my-strip">
+	{#each paneProps.slides as slide (slide.id)}
+		<li style="width: 120px">
+			<SlideThumbnail
+				{slide}
+				canvasSize={paneProps.canvasSize}
+				previewWidth={120}
+				mediaDataUrls={paneProps.mediaDataUrls}
+				fieldContext={paneProps.fieldContext}
+				tableStyleContext={paneProps.tableStyleContext}
+			/>
+		</li>
+	{/each}
+</ul>
+```
+
+The thumbnail fills its container's width and is as tall as `previewWidth` at the deck's aspect
+ratio, so give the container that width. It needs the same `pptx-svelte-viewer/styles.css`.
+
 ### `pptx-svelte-viewer/internals`: slide-transition helpers
 
 The framework-agnostic logic every binding uses lives in `ooxml-ui/pptx`; the private
@@ -303,16 +445,16 @@ import {
 } from 'pptx-svelte-viewer';
 ```
 
-| Export                         | Type                                                                  | Description                                                                                                           |
-| ------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `PPTX_OPEN_ACCEPT`             | `string`                                                              | Ready-made `<input type="file" accept>` value: `.pptx,.ppsx,.pptm,.potx,.ppt,.json`.                                  |
-| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | The same list unjoined, for a drop target that wants to test extensions itself.                                       |
-| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | Cheap pre-filter for a picked or dropped file name. Extension-only; the real answer is the loader's sniff.            |
-| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | True for the binary PowerPoint 97-2003 family (`.ppt` / `.pps` / `.pot`), which the viewer reads but never writes.    |
-| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | The file-name stem, directories and any loadable extension removed (a path like `decks/report.ppt` becomes `report`). |
-| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | The name a saved copy should be offered under: `report.ppt` becomes `report.pptx`.                                    |
-| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm'`                                          | The formats the save path can produce. Binary `.ppt` is deliberately absent: output is always OpenXML.                |
+| Export                         | Type                                                                  | Description                                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `PPTX_OPEN_ACCEPT`             | `string`                                                              | Ready-made `<input type="file" accept>` value: `.pptx,.ppsx,.pptm,.potx,.ppt,.json`.                                            |
+| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | The same list unjoined, for a drop target that wants to test extensions itself.                                                 |
+| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | Cheap pre-filter for a picked or dropped file name. Extension-only; the real answer is the loader's sniff.                      |
+| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | True for the binary PowerPoint 97-2003 family (`.ppt` / `.pps` / `.pot`). `.ppt` can be saved; `.pps` and `.pot` are read-only. |
+| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | The file-name stem, directories and any loadable extension removed (a path like `decks/report.ppt` becomes `report`).           |
+| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | The name a saved copy should be offered under: `report.ppt` becomes `report.pptx`.                                              |
+| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm' \| 'ppt'`                                 | The formats the save path can produce, including the binary 97-2003 `.ppt`.                                                     |
 
-`savedPresentationFileName` is the one that matters on Save As. Output is always an OpenXML
-package, so keeping a legacy source extension would hand the user a `.ppt` whose bytes are a ZIP,
+`savedPresentationFileName` is the one that matters on Save As. Output is an OpenXML
+package unless 97-2003 `.ppt` is picked, so keeping a legacy source extension would hand the user a `.ppt` whose bytes are a ZIP,
 which PowerPoint refuses to open.

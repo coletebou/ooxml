@@ -1,3 +1,4 @@
+import { frSplitCells } from './split-cells';
 import { frOptions } from './options';
 import { frColumns } from './columns';
 import { frMultilevelList } from './multilevel-list';
@@ -5,9 +6,17 @@ import { frFontAdvanced } from './font-advanced';
 import { frLigatures } from './ligatures';
 import { frNavigation } from './navigation';
 import { frDropCap } from './drop-cap';
+import { frFindStories } from './find-stories';
+import { frPasteOptions } from './paste-options';
+import { frPicture } from './picture';
+import { frPictureWatermark } from './picture-watermark';
+import { frConvertNotes } from './convert-notes';
+import { frDocumentInspector } from './document-inspector';
 import { frLineNumbers } from './line-numbers';
 import { frObjects } from './objects';
 import { frShapes } from './shapes';
+import { frSmartArt } from './smartart';
+import { frCharts } from './charts';
 import type { LocaleStrings } from './en';
 import { frApp } from './fr-app';
 import { frTableProperties } from './table-properties';
@@ -20,11 +29,20 @@ export const fr: LocaleStrings = {
 	...frTableProperties,
 	...frLineNumbers,
 	...frDropCap,
+	...frFindStories,
+	...frPasteOptions,
+	...frPicture,
+	...frPictureWatermark,
+	...frConvertNotes,
+	...frDocumentInspector,
 	...frNavigation,
 	...frColumns,
+	...frSplitCells,
 	...frMultilevelList,
 	...frFontAdvanced,
 	...frLigatures,
 	...frObjects,
 	...frShapes,
+	...frSmartArt,
+	...frCharts,
 };

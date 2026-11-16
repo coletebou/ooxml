@@ -1,4 +1,4 @@
-import { calculateViewportFit } from 'ooxml-ui/pptx';
+import { calculateViewportFit, selectionZoomBounds, zoomToSelectionScale } from 'ooxml-ui/pptx';
 // @vitest-environment happy-dom
 /**
  * Tests for pure computation logic extracted from useZoomViewport.
@@ -45,6 +45,8 @@ describe('useZoomViewport measured fit', () => {
 		maxFitScale?: number | null;
 		notifyNode?: boolean;
 		nodeKey?: string;
+		dragPans?: boolean;
+		activeSlideId?: string;
 	}) {
 		zoom = useZoomViewport({ canvasSize, selectedElements: [], ...props });
 		const objectRef = zoom.canvasViewportRef;
@@ -165,6 +167,90 @@ describe('useZoomViewport measured fit', () => {
 		expect(observed.size).toBe(0);
 		expect(frames.size).toBe(0);
 		expect(wheel(second).defaultPrevented).toBeFalsy();
+	});
+
+	it('pans a zoomed slide with a plain drag only while dragPans is set', () => {
+		const render = (dragPans: boolean) =>
+			act(() =>
+				root.render(
+					createElement(Harness, { notifyNode: true, dragPans, fitPadding: 0, maxFitScale: null }),
+				),
+			);
+		render(true);
+		const node = zoom.canvasViewportRef.current!;
+		let scroll = 0;
+		Object.defineProperties(node, {
+			scrollWidth: { configurable: true, get: () => width * 2 },
+			scrollHeight: { configurable: true, get: () => height * 2 },
+			scrollLeft: {
+				configurable: true,
+				get: () => scroll,
+				set: (value: number) => {
+					scroll = Math.max(0, value);
+				},
+			},
+			scrollTop: { configurable: true, get: () => 0, set: () => {} },
+		});
+		vi.spyOn(node, 'setPointerCapture').mockImplementation(() => {});
+		vi.spyOn(node, 'releasePointerCapture').mockImplementation(() => {});
+		const drag = () => {
+			scroll = 100;
+			const pointer = (type: string, clientX: number) => {
+				const event = new MouseEvent(type, {
+					bubbles: true,
+					cancelable: true,
+					button: 0,
+					clientX,
+					clientY: 10,
+				});
+				Object.defineProperties(event, {
+					pointerId: { value: 1 },
+					pointerType: { value: 'mouse' },
+				});
+				node.dispatchEvent(event);
+			};
+			pointer('pointerdown', 200);
+			pointer('pointermove', 150);
+			pointer('pointerup', 150);
+			return scroll;
+		};
+		expect(drag()).toBe(150);
+		// Leaving the read-only view switches it off without re-attaching.
+		render(false);
+		expect(zoom.canvasViewportRef.current).toBe(node);
+		expect(drag()).toBe(100);
+	});
+
+	it('keeps the zoom on another slide and shows it from its top-left corner', () => {
+		const render = (activeSlideId: string) =>
+			act(() =>
+				root.render(
+					createElement(Harness, {
+						notifyNode: true,
+						activeSlideId,
+						fitPadding: 0,
+						maxFitScale: null,
+					}),
+				),
+			);
+		render('s1');
+		const node = zoom.canvasViewportRef.current!;
+		act(() => zoom.setScale(1.5));
+		node.scrollLeft = 120;
+		node.scrollTop = 80;
+
+		// The same slide again (an edit re-renders it) leaves the scroll alone.
+		render('s1');
+		expect([node.scrollLeft, node.scrollTop]).toStrictEqual([120, 80]);
+
+		render('s2');
+		expect(zoom.scale).toBe(1.5);
+		expect([node.scrollLeft, node.scrollTop]).toStrictEqual([0, 0]);
+
+		// Below fit is a zoom like any other (PowerPoint goes down to 10%).
+		act(() => zoom.setScale(0.5));
+		render('s3');
+		expect(zoom.scale).toBe(0.5);
 	});
 
 	it('still retries an initially null object ref assigned after the owner commits', () => {
@@ -343,48 +429,19 @@ interface Element {
 	height: number;
 }
 
-/** Compute selection bounds from an array of elements. */
+/** Selection bounds: the shared `selectionZoomBounds` the hook calls. */
 function computeSelectionBounds(elements: Element[]): SelectionBounds | null {
-	if (elements.length === 0) {
-		return null;
-	}
-	let minX = Number.POSITIVE_INFINITY;
-	let minY = Number.POSITIVE_INFINITY;
-	let maxX = Number.NEGATIVE_INFINITY;
-	let maxY = Number.NEGATIVE_INFINITY;
-
-	elements.forEach((element) => {
-		minX = Math.min(minX, element.x);
-		minY = Math.min(minY, element.y);
-		maxX = Math.max(maxX, element.x + Math.max(element.width, MIN_ELEMENT_SIZE));
-		maxY = Math.max(maxY, element.y + Math.max(element.height, MIN_ELEMENT_SIZE));
-	});
-
-	if (
-		!Number.isFinite(minX) ||
-		!Number.isFinite(minY) ||
-		!Number.isFinite(maxX) ||
-		!Number.isFinite(maxY)
-	) {
-		return null;
-	}
-	return { minX, minY, maxX, maxY };
+	return selectionZoomBounds(elements);
 }
 
-/** Compute the target zoom scale for zoom-to-selection. */
+/** The target zoom for zoom-to-selection: the shared `zoomToSelectionScale` the hook calls. */
 function computeZoomToSelectionScale(
 	bounds: SelectionBounds,
 	editorWidth: number,
 	editorHeight: number,
 	fitScale: number,
 ): number {
-	const boundsWidth = Math.max(bounds.maxX - bounds.minX, MIN_ELEMENT_SIZE);
-	const boundsHeight = Math.max(bounds.maxY - bounds.minY, MIN_ELEMENT_SIZE);
-	const availableWidth = Math.max(editorWidth - ZOOM_TO_SELECTION_PADDING, MIN_ELEMENT_SIZE);
-	const availableHeight = Math.max(editorHeight - ZOOM_TO_SELECTION_PADDING, MIN_ELEMENT_SIZE);
-	const targetEditorScale = Math.min(availableWidth / boundsWidth, availableHeight / boundsHeight);
-	const safeFitScale = fitScale > Number.EPSILON ? fitScale : Number.EPSILON;
-	return Math.min(Math.max(targetEditorScale / safeFitScale, MIN_ZOOM_SCALE), MAX_ZOOM_SCALE);
+	return zoomToSelectionScale(bounds, { width: editorWidth, height: editorHeight }, fitScale);
 }
 
 // ---------------------------------------------------------------------------

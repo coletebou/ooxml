@@ -1,3 +1,5 @@
+import { parseDrawingPictureFill } from '../drawingml/picture-fill';
+import { imageContentType as guessContentType } from '../drawingml/image-content-type';
 // Canonical modern DOCX implementation; legacy CFB codecs live in ole2.
 // Parses w:drawing (wp:inline / wp:anchor pictures) and legacy w:pict (VML) into InlineImage.
 // Adapted layout/EMU-conversion approach from pptx-viewer-new packages/core/src/core (DrawingML
@@ -11,6 +13,7 @@ import {
 } from './package-parts';
 import { definedProps } from './defined-props';
 import { parseWatermarkShape } from './watermark';
+import { parsePictureWatermarkShape } from './picture-watermark';
 import { isSimpleTextBox, textBoxHasBorder } from './write-text-box';
 import { parseShape } from './shape-parse';
 import { getR, isElement, type XmlElement } from './xml';
@@ -65,22 +68,6 @@ function descendantNS(
 function emuToPx(value: string | null): number {
 	const n = value ? Number(value) : NaN;
 	return Number.isFinite(n) ? Math.round(n / EMU_PER_PIXEL) : 0;
-}
-function guessContentType(partName: string): string {
-	const extension = partName.split('.').pop()?.toLowerCase();
-	const known: Record<string, string> = {
-		png: 'image/png',
-		jpg: 'image/jpeg',
-		jpeg: 'image/jpeg',
-		gif: 'image/gif',
-		bmp: 'image/bmp',
-		svg: 'image/svg+xml',
-		tif: 'image/tiff',
-		tiff: 'image/tiff',
-		emf: 'image/x-emf',
-		wmf: 'image/x-wmf',
-	};
-	return (extension && known[extension]) || 'application/octet-stream';
 }
 function resolvePicture(
 	relId: string,
@@ -153,6 +140,9 @@ function parseModernDrawing(node: XmlElement, context: DrawingContext): InlineIm
 	if (picture)
 		return {
 			...picture,
+			...(blip?.parentNode
+				? { pictureFill: parseDrawingPictureFill(blip.parentNode as XmlElement) }
+				: {}),
 			widthPx,
 			heightPx,
 			...definedProps({ altText, title, anchored }),
@@ -201,6 +191,15 @@ const WRAPS: [string, PicturePlacement['wrap']][] = [
 function parsePlacement(anchor: XmlElement): PicturePlacement {
 	const wrap = WRAPS.find(([local]) => firstNS(anchor, WP_NS, local))?.[1] ?? 'none';
 	const placement: PicturePlacement = { wrap };
+	const wrapElement = WRAPS.map(([local]) => firstNS(anchor, WP_NS, local)).find(Boolean);
+	const wrapText = wrapElement?.getAttribute('wrapText');
+	if (
+		wrapText === 'bothSides' ||
+		wrapText === 'left' ||
+		wrapText === 'right' ||
+		wrapText === 'largest'
+	)
+		placement.wrapText = wrapText;
 	if (anchor.getAttribute('behindDoc') === '1') placement.behindText = true;
 	const positionH = firstNS(anchor, WP_NS, 'positionH');
 	const relativeFrom = enumValue(
@@ -247,6 +246,10 @@ function parseVmlPicture(node: XmlElement, context: DrawingContext): InlineImage
 	const shape = descendantNS(node, VML_NS, 'shape');
 	const watermark = parseWatermarkShape(shape ?? undefined);
 	if (watermark) return watermark;
+	const pictureWatermark = parsePictureWatermarkShape(shape ?? undefined, (relId) =>
+		resolvePicture(relId, context),
+	);
+	if (pictureWatermark) return pictureWatermark;
 	const style = shape?.getAttribute('style') ?? '';
 	const width = /width:\s*([\d.]+)pt/i.exec(style);
 	const height = /height:\s*([\d.]+)pt/i.exec(style);

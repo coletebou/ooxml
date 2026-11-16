@@ -1,3 +1,8 @@
+import { needsPicturePixels } from '../../picture-pixels';
+import { pictureSvg } from '../../picture-view';
+import { imageContentType } from 'ooxml-core/drawingml';
+import { pictureEffectFilter } from '../../picture-effects';
+import { imageRectFromCrop } from 'ooxml-core/geometry';
 // Pictures, charts and SmartArt over the grid, positioned from their anchors in the quadrant of their
 // top-left cell. Pictures come from the package parts as object URLs; charts are drawn by the core
 // (`chartView` + `renderChartSvg`) from live cell values. When editing, objects can be selected,
@@ -20,6 +25,7 @@ import type { GridView } from './grid-view';
 import { paintTimeline, periodAt, timelineOf } from './timeline';
 import { paintSlicer, slicerClickResult, slicerOf, type SlicerUiState } from './slicer';
 import { paintSmartArt } from './smartart';
+import { paintFormControl, paintShape, pressFormControl } from './shapes';
 import { selectionOfPeriods } from 'ooxml-core/xlsx';
 import { applyDragDelta, applyResize, type ResizeHandleId } from 'ooxml-core/geometry';
 import { trackPointerGesture } from '../../pointer-gesture';
@@ -37,6 +43,9 @@ export class DrawingLayer {
 	#generation = 0;
 	#cancelDrag: (() => void) | undefined;
 	#slicerStates = new Map<string, SlicerUiState>();
+	/** Index of the form control drop-down whose list is open. */
+	#openDrop: number | undefined;
+	#closeDrop: (() => void) | undefined;
 
 	constructor(view: GridView) {
 		this.#view = view;
@@ -52,6 +61,11 @@ export class DrawingLayer {
 	/** Charts depend on cell values: bump after model changes so they redraw. */
 	invalidate(): void {
 		this.#cancelDrag?.();
+		this.#generation++;
+	}
+
+	/** Redraws every drawing on the next paint (text measured again) without ending a drag. */
+	redraw(): void {
 		this.#generation++;
 	}
 
@@ -103,6 +117,22 @@ export class DrawingLayer {
 					node.addEventListener('dblclick', (event) => {
 						// Pointer capture retargets dblclick to the drawing container. Keep the
 						// actual hit from pointerdown so a background click stays distinct.
+						const frame = view.sheet()?.drawings[index];
+						if (frame?.kind === 'unsupported' && frame.chartExSpace) {
+							event.stopPropagation();
+							view.ctx.selection.set({ drawing: index });
+							void view.ctx.commands.run('chart.format-area');
+							return;
+						}
+						if (frame?.kind === 'smartArt') {
+							// Excel opens the text pane on a double-click into a SmartArt graphic.
+							event.stopPropagation();
+							view.ctx.selection.set({ drawing: index });
+							const textPane = view.ctx.commands.get('smartart.textPane');
+							if (textPane && !textPane.checked?.(view.ctx))
+								void view.ctx.commands.run('smartart.textPane');
+							return;
+						}
 						const series = (event.currentTarget as ObjectNode).xgSeriesHit;
 						const part = (event.currentTarget as ObjectNode).xgChartPart;
 						if (series === undefined && part === undefined) return;
@@ -116,7 +146,8 @@ export class DrawingLayer {
 				if (node.parentNode !== parent) parent.append(node);
 				place(node, box.x, box.y, box.w, box.h);
 				const multi = drawing.kind === 'slicer' && this.#slicerState(drawing.name).multi;
-				const sig = `${drawing.kind}:${Math.round(box.w)}x${Math.round(box.h)}:${this.#generation}:${multi}`;
+				const open = this.#openDrop === index;
+				const sig = `${drawing.kind}:${Math.round(box.w)}x${Math.round(box.h)}:${this.#generation}:${multi}:${open}`;
 				if (node.xgSig !== sig) {
 					node.xgSig = sig;
 					this.#paint(node, drawing, box);
@@ -136,13 +167,60 @@ export class DrawingLayer {
 		const doc = view.doc;
 		node.replaceChildren();
 		node.className = 'xg-obj';
-		if (drawing.kind === 'image') {
+		if (
+			drawing.kind === 'image' &&
+			(needsPicturePixels(drawing.effects ?? []) ||
+				drawing.layout?.tile ||
+				Object.values(drawing.layout?.fillRect ?? {}).some((value) => value !== 0))
+		) {
+			const url = this.#url(drawing.partName, drawing.contentType);
+			if (url)
+				node.append(
+					pictureSvg(
+						doc,
+						{
+							kind: 'picture',
+							...(drawing.crop ? { crop: drawing.crop } : {}),
+							...(drawing.effects ? { effects: drawing.effects } : {}),
+							...(drawing.layout ? { layout: drawing.layout } : {}),
+						},
+						url,
+						box.w,
+						box.h,
+					),
+				);
+			node.setAttribute('role', 'img');
+		} else if (drawing.kind === 'image') {
 			const img = h(doc, 'img', '', {
 				alt: drawing.description ?? drawing.name ?? '',
 				draggable: 'false',
 			});
 			const url = this.#url(drawing.partName, drawing.contentType);
 			if (url) img.src = url;
+			const rect = imageRectFromCrop(
+				{ x: 0, y: 0, width: box.w, height: box.h },
+				{ cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0, ...drawing.crop },
+			);
+			node.style.overflow = 'hidden';
+			Object.assign(img.style, {
+				position: 'absolute',
+				left: `${rect.x}px`,
+				top: `${rect.y}px`,
+				width: `${rect.width}px`,
+				height: `${rect.height}px`,
+				maxWidth: 'none',
+			});
+			if (drawing.effects?.length) {
+				const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+				svg.setAttribute('width', '0');
+				svg.setAttribute('height', '0');
+				const defs = doc.createElementNS(svg.namespaceURI, 'defs') as SVGDefsElement;
+				svg.append(defs);
+				const effects = pictureEffectFilter(doc, defs, drawing.effects);
+				if (effects.filter) img.style.filter = effects.filter;
+				node.dataset.unappliedPictureEffects = effects.unapplied.join(', ');
+				node.append(svg);
+			}
 			node.append(img);
 			node.setAttribute('role', 'img');
 		} else if (drawing.kind === 'chart') {
@@ -156,7 +234,13 @@ export class DrawingLayer {
 		} else if (drawing.kind === 'timeline') {
 			paintTimeline(node, drawing, box.w, box.h, view.ctx, view.workbook());
 		} else if (drawing.kind === 'smartArt') {
-			paintSmartArt(view.ctx, node, drawing, view.workbook()?.theme);
+			paintSmartArt(view.ctx, node, drawing, view.workbook()?.theme, box, (part) =>
+				this.#url(part, imageContentType(part)),
+			);
+		} else if (drawing.kind === 'formControl') {
+			paintFormControl(view, node, drawing, box, this.#openDrop === Number(node.dataset.index));
+		} else if (drawing.kind === 'unsupported' && drawing.shape) {
+			paintShape(view, node, drawing.shape, box, `xs${view.sheetIndex()}_${node.dataset.index}_`);
 		} else if (drawing.chartEx) {
 			// An extended chart (waterfall, histogram) the core painter draws; the frame is read-only.
 			this.#paintChart(node, drawing.chartEx, box);
@@ -228,6 +312,18 @@ export class DrawingLayer {
 		const node = event.currentTarget as ObjectNode;
 		if (drawing.kind === 'slicer' && this.#pressSlicer(event, index, drawing)) return;
 		if (drawing.kind === 'timeline' && this.#pressTimeline(event, index, drawing, node)) return;
+		if (
+			drawing.kind === 'formControl' &&
+			pressFormControl(view, event, drawing, node, {
+				isOpen: () => this.#openDrop === index,
+				toggleOpen: (open) => this.#setOpen(open ? index : undefined),
+				refresh: () => {
+					this.invalidate();
+					this.render();
+				},
+			})
+		)
+			return;
 		const series = (event.target as Element).closest<SVGElement>('[data-chart-series]')?.dataset
 			.chartSeries;
 		node.xgSeriesHit = series === undefined ? undefined : Number(series);
@@ -239,7 +335,9 @@ export class DrawingLayer {
 		view.ctx.selection.set({ drawing: index });
 		view.ctx.grid()?.focus();
 		const session = view.ctx.session();
-		if (view.ctx.readOnly() || !session) return;
+		// A control's anchor is kept as written (its shape sits in `mc:AlternateContent`), so it is
+		// selected but not moved or resized here.
+		if (view.ctx.readOnly() || !session || drawing.kind === 'formControl') return;
 		const grip = (event.target as Element).closest<HTMLElement>('[data-grip]')?.dataset.grip as
 			| ResizeHandleId
 			| undefined;
@@ -274,6 +372,24 @@ export class DrawingLayer {
 				place(node, origin.x, origin.y, origin.w, origin.h);
 			},
 		});
+	}
+
+	/** Opens or closes a form control drop-down list; a press anywhere else closes it. */
+	#setOpen(index: number | undefined): void {
+		if (this.#openDrop === index) return;
+		this.#closeDrop?.();
+		this.#closeDrop = undefined;
+		this.#openDrop = index;
+		if (index !== undefined) {
+			const doc = this.#view.doc;
+			const close = (event: Event) => {
+				if ((event.target as Element | null)?.closest?.('.xg-formcontrol')) return;
+				this.#setOpen(undefined);
+			};
+			doc.addEventListener('pointerdown', close, true);
+			this.#closeDrop = () => doc.removeEventListener('pointerdown', close, true);
+		}
+		this.render();
 	}
 
 	/** Runs an edit from a timeline or slicer control and reports a refusal as a toast. */
@@ -413,6 +529,7 @@ export class DrawingLayer {
 
 	destroy(): void {
 		this.#cancelDrag?.();
+		this.#closeDrop?.();
 		const win = viewOf(this.#view.root);
 		for (const url of this.#urls.values()) win?.URL?.revokeObjectURL?.(url);
 		this.#urls.clear();

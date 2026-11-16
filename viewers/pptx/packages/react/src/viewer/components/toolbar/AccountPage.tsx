@@ -2,6 +2,8 @@ import {
 	AVATAR_COLOR_SWATCHES,
 	DEFAULT_VIEWER_PROFILE,
 	clearAllLocalViewerData,
+	connectedServicesLabels,
+	confirmDeleteDialog,
 	formatBackstageSize,
 	getLocalStorageUsageSummary,
 	readStoredViewerPrefs,
@@ -9,12 +11,14 @@ import {
 	saveViewerProfile,
 } from 'ooxml-ui/pptx';
 import type { LocalStorageUsageSummary, ViewerProfile } from 'ooxml-ui/pptx';
-import React, { useContext, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { LuHardDrive, LuInfo, LuLogIn, LuUser } from 'react-icons/lu';
 
+import { useTranslation } from '../../i18n/use-translation';
 import { cn } from '../../utils';
+import { useViewerCloudFiles } from '../viewer-cloud-files-context';
 import { useViewerStorage } from '../viewer-storage-context';
+import { WebConnectedServices } from '../WebControls';
 import { AccountAuthContext } from './account-auth-context';
 
 const cardClass = 'border border-border bg-card p-6 text-card-foreground';
@@ -27,6 +31,8 @@ export function AccountPage(): React.ReactElement {
 	const { t } = useTranslation();
 	const accountAuth = useContext(AccountAuthContext);
 	const storage = useViewerStorage();
+	const cloud = useViewerCloudFiles();
+	const connectedLabels = useMemo(() => connectedServicesLabels(t), [t]);
 
 	const [profile, setProfile] = useState<ViewerProfile>(
 		() => readStoredViewerPrefs().profile ?? DEFAULT_VIEWER_PROFILE,
@@ -45,16 +51,14 @@ export function AccountPage(): React.ReactElement {
 	// eslint-disable-next-line react-hooks/exhaustive-deps -- refreshUsage reads the current storage
 	useEffect(refreshUsage, [storage]);
 
-	const handleClear = () => {
-		if (!window.confirm(t('pptx.account.storage.clearConfirm'))) {
+	const handleClear = async () => {
+		if (!(await confirmDeleteDialog(t('pptx.account.storage.clearConfirm'), { t }))) {
 			return;
 		}
-		void clearAllLocalViewerData(storage).then(() => {
-			setCleared(true);
-			refreshUsage();
-			setTimeout(() => setCleared(false), 4000);
-			return undefined;
-		});
+		await clearAllLocalViewerData(storage);
+		setCleared(true);
+		refreshUsage();
+		setTimeout(() => setCleared(false), 4000);
 	};
 
 	const version =
@@ -129,7 +133,7 @@ export function AccountPage(): React.ReactElement {
 				</p>
 				<button
 					type='button'
-					onClick={handleClear}
+					onClick={() => void handleClear()}
 					className='mt-4 border border-destructive/40 px-4 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10'
 				>
 					{t('pptx.account.storage.clear')}
@@ -173,6 +177,13 @@ export function AccountPage(): React.ReactElement {
 							</button>
 						</>
 					)}
+				</section>
+			)}
+
+			{/* Connected services (only with host `fileProviders`) */}
+			{cloud.providers.length > 0 && (
+				<section className={cardClass}>
+					<WebConnectedServices providers={cloud.providers} labels={connectedLabels} />
 				</section>
 			)}
 		</div>

@@ -1,3 +1,7 @@
+import { completeDemoSignInPopup } from 'ooxml-demo-onedrive';
+
+// Test-only: `?elementRenderFault=<id>` makes that element's renderer throw (e2e).
+import '../../shared/element-render-fault';
 import type {
 	CollaborationConfig,
 	PptxViewerInstance,
@@ -17,11 +21,13 @@ import { PptxHandler } from 'pptx-viewer-core';
 
 import { installDevViewerHandle } from '../../dev-viewer-handle';
 import { currentDemoCustomization } from '../../shared/demo-customization';
+import { demoFileProviders } from '../../shared/demo-file-providers';
 import { currentDemoRootOptions } from '../../shared/demo-root-options';
 import { externalSessionRequested } from '../../shared/host-owned-collaboration';
 import { currentDemo3DFlags } from '../../shared/rendering-3d-flags';
 import { sameBrowserRoom } from '../../shared/same-browser-collaboration';
-import { buildViewerAiConfig } from './ai-config';
+import { buildViewerAi } from './ai-config';
+import { mountBuildingBlocksDemo } from './building-blocks-demo';
 import { buildRoomConfig, readRoomFromUrl, resolveAutoName } from './collab';
 import { getLanguage, onLanguageChange, t, viewerMessages } from './demo-i18n';
 import { createDropzone } from './dropzone';
@@ -51,7 +57,10 @@ const app: HTMLElement = appRoot;
 
 const themeKey = readStoredTheme();
 let viewer: PptxViewerInstance | null = null;
-const removeDevViewerHandle = installDevViewerHandle(() => viewer, import.meta.env.DEV);
+const removeDevViewerHandle = installDevViewerHandle(
+	() => viewer,
+	import.meta.env.DEV || import.meta.env.VITE_PPTX_E2E_HANDLE === '1',
+);
 import.meta.hot?.dispose(removeDevViewerHandle);
 let appliedVarKeys: string[] = [];
 
@@ -159,6 +168,7 @@ function openViewer(
 		locale: getLanguage(),
 		messages: viewerMessages,
 		editable: true,
+		fileProviders: demoFileProviders,
 		autosave: true,
 		// A demo wants snappy crash recovery, and an explicit interval is a host
 		// policy that outranks the File > Options AutoRecover cadence.
@@ -170,14 +180,19 @@ function openViewer(
 		lineChart3D,
 		areaChart3D,
 		pieChart3D,
-		ai: buildViewerAiConfig(),
+		ai: buildViewerAi(),
 		shareDefaults: { userName },
 		// `?customization=<json>` (demos/shared/demo-customization.ts), for e2e.
 		customization: currentDemoCustomization() as ViewerCustomization | undefined,
-		// `?showToolbar=0`, `?showThumbnails=0`, `?initialSlide=<n>`
+		// `?showToolbar=0`, `?showThumbnails=0`, `?initialSlide=<n>`, `?fitPadding=<px>`
 		// (demos/shared/demo-root-options.ts), for e2e.
 		...currentDemoRootOptions(),
 		onError: (message, error) => {
+			if ((viewer?.getSlideCount() ?? 0) > 0) {
+				// An error in an open deck (a failed save, say) is the viewer's notice, not a load failure.
+				console.error('pptx-vanilla-viewer error', message, error);
+				return;
+			}
 			console.error('pptx-vanilla-viewer failed to load', message, error);
 			// A deck the viewer cannot load must not be reopened on every refresh.
 			void forgetSessionDeck();
@@ -239,7 +254,13 @@ async function fetchSampleDeck(): Promise<Uint8Array | null> {
 const audienceSession = parsePresentationSessionId(window.location.hash);
 const joinRoom = readRoomFromUrl();
 const wantSample = new URLSearchParams(window.location.search).get('sample') === '1';
-if (externalSessionRequested()) {
+if (completeDemoSignInPopup()) {
+	// The MSAL sign-in popup: the response is handed back, the app does not boot here.
+} else if (new URLSearchParams(window.location.search).get('blocks') === '1') {
+	void mountBuildingBlocksDemo(app).catch((error: unknown) => {
+		app.textContent = String(error);
+	});
+} else if (externalSessionRequested()) {
 	void mountHostOwnedDemo(app).catch((error: unknown) => {
 		app.textContent = String(error);
 	});

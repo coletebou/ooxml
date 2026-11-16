@@ -162,6 +162,30 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	}
 
 	/**
+	 * The colour a slide master or layout paints from its own `p:bg`, resolved exactly as a
+	 * slide's background is: through the active master's colour map and format scheme, with
+	 * `clrMapOverride` (a layout's `p:clrMapOvr`, or `null`) taking precedence. The caller makes
+	 * the part's master active first; a master's `bgRef` on `bg1` means `dk1` under a dark
+	 * `p:clrMap`, which no other state can tell.
+	 */
+	protected extractTemplateBackgroundColor(
+		partXml: XmlObject | undefined,
+		rootTag: 'p:sldMaster' | 'p:sldLayout',
+		clrMapOverride: Record<string, string> | null,
+	): string | undefined {
+		if (!partXml) {
+			return undefined;
+		}
+		const previousOverride = this.currentSlideClrMapOverride;
+		this.currentSlideClrMapOverride = clrMapOverride;
+		try {
+			return this.extractBackgroundColor(partXml, rootTag);
+		} finally {
+			this.currentSlideClrMapOverride = previousOverride;
+		}
+	}
+
+	/**
 	 * Composite a resolved background colour with its `a:alpha` (or
 	 * `a:alphaMod`/`a:alphaOff`) opacity onto opaque white.
 	 *
@@ -454,7 +478,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (cached) {
 			return cached;
 		}
-		const xml = await this.zip.file(layoutPath)?.async('string');
+		const xml = await this.readPartText(layoutPath);
 		if (!xml) {
 			return undefined;
 		}
@@ -469,7 +493,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (cached) {
 			return cached;
 		}
-		const xml = await this.zip.file(masterPath)?.async('string');
+		const xml = await this.readPartText(masterPath);
 		if (!xml) {
 			return undefined;
 		}

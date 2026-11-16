@@ -7,7 +7,10 @@ import { cellParagraphs } from './table-cell-layout';
 import { TableFootnotes } from './table-footnotes';
 import type { ReferenceFootnotes } from './reference-footnotes';
 import type { PageCursor } from './page-cursor';
+import { MergedRowPlan } from './table-merged-rows';
 import { splitRowAtHeight, type RowLayout } from './table-layout';
+import { resolveTableAutofit } from './table-autofit';
+import { placeFloatingTable } from './flow-floating-table';
 import type { TextMeasurer } from './measure';
 import type { LayoutTable, LayoutTableRow } from './input';
 import type { LayoutTableBox, LayoutTableRowBox } from './result';
@@ -21,11 +24,18 @@ import type { LayoutTableBox, LayoutTableRowBox } from './result';
  */
 export function placeTable(
 	cursor: PageCursor,
-	table: LayoutTable,
+	source: LayoutTable,
 	measurer: TextMeasurer,
 	note: (message: string) => void,
 	resolveFootnotes?: ReferenceFootnotes,
 ): void {
+	// AutoFit columns are sized for the text column the table starts in.
+	const table = resolveTableAutofit(source, cursor.columnWidthPx, measurer, note);
+	if (
+		table.floating &&
+		placeFloatingTable(cursor, { ...table, floating: table.floating }, measurer, note)
+	)
+		return;
 	// Word only repeats the contiguous header group starting at the first row.
 	// A tblHeader flag after the first body row is ignored (ECMA-376 17.4.50).
 	const firstBodyRow = table.rows.findIndex((row) => !row.isHeader);
@@ -50,7 +60,7 @@ export function placeTable(
 				: (table.indentPx ?? 0);
 	};
 
-	const profile = nestedFrameProfile(table, table.widthPx ?? cursor.columnWidthPx);
+	const profile = nestedFrameProfile(table, table.widthPx ?? cursor.columnWidthPx, true);
 	const activeBorders =
 		profile !== undefined && (profile.leftPx > 0 || profile.rightPx > 0 || profile.bottomPx > 0);
 	if (!profile && table.rows.some((row) => row.cells.some((cell) => cell.borders)))
@@ -100,6 +110,7 @@ export function placeTable(
 
 	function flushFragment() {
 		fragmentHeight += fragmentBorders.restore(fragmentRows.at(-1));
+		alignMergedCells(fragmentRows);
 		if (!fragmentRows.length) {
 			footnotes?.holdFragment();
 			return;
@@ -317,7 +328,16 @@ export function placeTable(
 		}
 	}
 
-	for (const row of table.rows) {
+	const merged = new MergedRowPlan(table.rows);
+	for (const [index, source] of table.rows.entries()) {
+		merged.plan(
+			index,
+			(candidate) =>
+				layoutRow(candidate, cursor.columnWidthPx, measurer, () => {}, undefined, source),
+			cursor.remainingHeightPx() - fragmentHeight,
+		);
+		const row = merged.effective(source);
+		if (row !== source) nativeFragments.set(row, nativeFragments.get(source) ?? false);
 		const layout = layoutRow(row, cursor.columnWidthPx, measurer, note);
 		if (
 			layout.heightPx > cursor.remainingHeightPx() &&
@@ -348,9 +368,27 @@ export function placeTable(
 			row,
 			layout,
 			Boolean(row.cantSplit) ||
-				headerRows.includes(row) ||
+				headerRows.includes(source) ||
 				(!!footnotes && row.heightRule === 'exact'),
 		);
 	}
 	flushFragment();
+}
+
+/**
+ * A vertically merged cell aligns its content across every row it covers, not in its first row.
+ * The first row's geometry gets the merged height when the whole merge sits in this fragment (a
+ * merge broken by a page or column boundary keeps aligning within its first row).
+ */
+function alignMergedCells(rows: LayoutTableRowBox[]): void {
+	rows.forEach((row, index) => {
+		for (const geometry of row.geometry ?? []) {
+			const count = geometry.mergeRows ?? 1;
+			if (count < 2 || !geometry.verticalAlign || geometry.verticalAlign === 'top') continue;
+			const last = rows[index + count - 1];
+			if (!last || rows.slice(index, index + count).some((item) => item.repeated !== row.repeated))
+				continue;
+			geometry.alignmentHeightPx = last.yPx + last.heightPx - row.yPx;
+		}
+	});
 }

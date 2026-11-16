@@ -5,6 +5,7 @@ import {
 	mapInlineTextFormatKey,
 	placeCaretAt,
 	readEditableText,
+	spaceBeforeCaretRange,
 	takePendingCaretPoint,
 } from 'ooxml-ui/pptx';
 import type { InlineTextEditSnapshot } from 'ooxml-ui/pptx';
@@ -13,7 +14,12 @@ import { hasTextProperties } from 'pptx-viewer-core';
 import React, { useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 
 import { DEFAULT_TEXT_COLOR } from '../../constants';
-import { getTextCompensationTransform, getTextWarpStyle, renderTextSegments } from '../../utils';
+import {
+	getTextCompensationOrigin,
+	getTextCompensationTransform,
+	getTextWarpStyle,
+	renderTextSegments,
+} from '../../utils';
 import {
 	getPendingSelectionRestore,
 	restoreSegmentSelection,
@@ -114,22 +120,10 @@ export function InlineTextEditor({
 	// immediately before a paragraph break is never visually meaningful, drop it
 	// before the browser performs its native Enter/paragraph-split.
 	const trimTrailingSpaceBeforeCaret = useCallback(() => {
-		const selection = window.getSelection();
-		if (!selection || !selection.isCollapsed || selection.rangeCount === 0) {
+		const trimRange = spaceBeforeCaretRange(document);
+		if (!trimRange) {
 			return;
 		}
-		const range = selection.getRangeAt(0);
-		const { startContainer, startOffset } = range;
-		if (startContainer.nodeType !== Node.TEXT_NODE || startOffset === 0) {
-			return;
-		}
-		const text = startContainer.textContent ?? '';
-		if (text.charAt(startOffset - 1) !== ' ') {
-			return;
-		}
-		const trimRange = document.createRange();
-		trimRange.setStart(startContainer, startOffset - 1);
-		trimRange.setEnd(startContainer, startOffset);
 		if (list.connected) {
 			list.mutate(trimRange, () => trimRange.deleteContents());
 		} else {
@@ -189,7 +183,9 @@ export function InlineTextEditor({
 		...textStyle,
 		...warpStyle,
 		transform: mergedTransform,
-		transformOrigin: warpStyle?.transformOrigin || 'center',
+		transformOrigin:
+			warpStyle?.transformOrigin ||
+			(compensationTransform ? getTextCompensationOrigin(element) : 'center'),
 	};
 
 	const nextInlineStyleValue = (property: 'bold' | 'italic' | 'underline'): boolean | undefined => {
@@ -262,19 +258,14 @@ export function InlineTextEditor({
 					}
 					return;
 				}
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					list.retire();
-					onCancel();
-					return;
-				}
-				// Ctrl/Cmd+Enter leaves the edit, keeping the text. Ctrl/Cmd+D is
+				// Escape and Ctrl/Cmd+Enter leave the edit, keeping the text. Ctrl/Cmd+D is
 				// only cancelled: the viewer keymap stands down mid-edit, so nothing
 				// else stops the browser opening its bookmark dialog. Shared with
 				// the other four bindings (`mapInlineEditorChord`).
 				const chord = mapInlineEditorChord(e.nativeEvent);
 				if (chord) {
 					e.preventDefault();
+					e.stopPropagation();
 					if (chord === 'suppress' || !list.canCommit()) {
 						return;
 					}
@@ -286,8 +277,12 @@ export function InlineTextEditor({
 					trimTrailingSpaceBeforeCaret();
 				}
 			}}
-			// Prevent paste from inserting HTML: paste as plain text only
+			// The canvas's shared `attachInlineRichPaste` handles paste first (formatted runs
+			// from text/html). Where it is not attached, never insert raw HTML: plain text only.
 			onPaste={(e) => {
+				if (e.nativeEvent.defaultPrevented) {
+					return;
+				}
 				e.preventDefault();
 				const text = e.clipboardData.getData('text/plain');
 				document.execCommand('insertText', false, text);

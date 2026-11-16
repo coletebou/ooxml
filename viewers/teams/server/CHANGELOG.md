@@ -7,6 +7,57 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [1.1.2](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-server@1.1.2) - 2026-11-13
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [1.1.1](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-server@1.1.1) - 2026-11-09
+
+### Dependencies
+
+- **deps:** Bump the production-minor-and-patch group with 25 updates ([4046ca3](https://github.com/ChristopherVR/ooxml/commit/4046ca399665d485da35696889c0212cc6526f63))
+
+## [1.1.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-server@1.1.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [1.0.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-server@1.0.0) - 2026-10-29
+
+### Features
+
+- **teams:** Refuse to start the server without authentication ([d06e213](https://github.com/ChristopherVR/ooxml/commit/d06e213bf2eeba74e087204d768b12f96f31c070))
+- **teams:** Enforce authorship, moderators and protocol in the server ([2840145](https://github.com/ChristopherVR/ooxml/commit/28401455bcc11a2342f1a5bdeb9038ca6c31bc69))
+- **teams:** Validate meetings, roster, chat members and content size ([05565a0](https://github.com/ChristopherVR/ooxml/commit/05565a0dc83c0a292fa20202fa1be1b54623b7d4))
+- **teams:** Scope files, compact rooms and add metrics to the server ([9c2f821](https://github.com/ChristopherVR/ooxml/commit/9c2f821d160f158176b426b9a5a2c7bf3212c083))
+- **teams:** Release openteams 1.0 on the versioned sync protocol ([e035417](https://github.com/ChristopherVR/ooxml/commit/e035417be1285095f9bbe1b9655743dcd059b55a))
+
+### Documentation
+
+- **teams:** Document backups and hardening ([4ffdd3b](https://github.com/ChristopherVR/ooxml/commit/4ffdd3bb3ee1a5b4a5c965edbf1798352e58f352))
+
+### Styling
+
+- Format files from the stability work ([6ebb965](https://github.com/ChristopherVR/ooxml/commit/6ebb965ec54f2424db7297ff89a1fda5066ea280))
+- Format visio evidence and teams server files ([3f5e2e0](https://github.com/ChristopherVR/ooxml/commit/3f5e2e0d46da8d8ffac7d61a088b0adb815b293a))
+
+## [0.4.1](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-server@0.4.1) - 2026-10-23
+
+### Features
+
+- **server:** Add per-room sync permissions for host applications ([33643ec](https://github.com/ChristopherVR/ooxml/commit/33643ec02d475f4599f21c7ed7f6ac64cdb69acf))
+
+### Other
+
+- Bring origin/main into wave 6 ([2fedfaa](https://github.com/ChristopherVR/ooxml/commit/2fedfaae708c279044fdf86ea192315e366f80da))
+
+### Chores
+
+- **teams:** Commit the server's bin scripts as executable ([#180](https://github.com/ChristopherVR/ooxml/issues/180)) ([0491277](https://github.com/ChristopherVR/ooxml/commit/0491277232a67f83c75ea233a86af1a17bd30ee2))
+
 ## [0.4.0](https://github.com/ChristopherVR/ooxml/releases/tag/openteams-server@0.4.0) - 2026-10-21
 
 ### Features

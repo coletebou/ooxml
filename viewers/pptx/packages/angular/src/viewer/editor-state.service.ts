@@ -7,7 +7,8 @@
  * record a history snapshot before each mutation.
  *
  * Pure logic is delegated to `element-operations.ts` (immutable array
- * transforms) and `editor-history.ts` (generic snapshot stack); this service
+ * transforms) and the shared history controller (`createEditorHistoryController`,
+ * adapted with `controllerSignal`); this service
  * only wires them to Angular signals. Provide it at the component level:
  * `@Component({ providers: [EditorStateService] })`.
  */
@@ -21,7 +22,10 @@ import {
 	applyReroutedConnectors,
 	buildSlideTemplateSlide,
 	cloneElementForPaste,
+	copyElementsToSystemClipboard,
+	createEditorHistoryController,
 	groupSlidesBySection,
+	insertedLayoutCompletion,
 	isTemplateElement,
 	isTemplateElementId,
 	makeCloneId,
@@ -29,7 +33,13 @@ import {
 	slideSpaceElement,
 	templateSchemeFromTheme,
 } from 'ooxml-ui/pptx';
-import type { PasteSpecialFormat, SlideTemplateId, SlidePasteRequest } from 'ooxml-ui/pptx';
+import type {
+	CollaborationHistory,
+	PasteSpecialFormat,
+	SlideMasterHistoryStep,
+	SlideTemplateId,
+	SlidePasteRequest,
+} from 'ooxml-ui/pptx';
 import { translationsEn } from 'ooxml-ui/pptx/i18n';
 import {
 	cloneElement,
@@ -41,7 +51,9 @@ import type { PptxElement, PptxHeaderFooter, PptxSection, PptxSlide } from 'pptx
 
 import { computeAlign, computeDistribute } from './align-distribute';
 import type { AlignMode, DistributeMode } from './align-distribute';
-import { EditorHistory } from './editor-history';
+import { controllerSignal } from './controller-signal';
+import { recordLoaderTheme, restoreLoaderTheme } from './editor-history-theme';
+import type { RecordedTheme } from './editor-history-theme';
 import { createEditorSectionOperations } from './editor-section-operations';
 import {
 	bringForward,
@@ -55,6 +67,7 @@ import {
 	setElementPosition,
 	updateElementById,
 } from './element-operations';
+import { renderElementPngDataUrl } from './export-raster-tiles';
 import { canGroupSelected, canUngroupGroup } from './group-lock-guard';
 import { groupElements, ungroupElements } from './group-ops';
 import { LoadContentService } from './load-content.service';
@@ -67,41 +80,14 @@ const DUPLICATE_OFFSET = 12;
 /**
  * A complete editor snapshot recorded on the undo/redo stack: the editable
  * (template-free) deck plus the separated template store, so undoing a template
- * edit restores the template store alongside the slides.
+ * edit restores the template store alongside the slides, and the loader's theme,
+ * so undoing a theme pick puts the theme back too.
  */
-interface EditorSnapshot {
+interface EditorSnapshot extends RecordedTheme {
 	slides: readonly PptxSlide[];
 	templateElementsBySlideId: TemplateElementsBySlideId;
 	sections: readonly PptxSection[];
 	headerFooter: PptxHeaderFooter;
-}
-
-/** An undo stack that tells its owner each time an edit is recorded, undone or redone. */
-class NotifyingEditorHistory extends EditorHistory<EditorSnapshot> {
-	constructor(private readonly onCommit: () => void) {
-		super();
-	}
-
-	override record(snapshot: EditorSnapshot, label: string): void {
-		super.record(snapshot, label);
-		this.onCommit();
-	}
-
-	override undo(current: EditorSnapshot): ReturnType<EditorHistory<EditorSnapshot>['undo']> {
-		const result = super.undo(current);
-		if (result) {
-			this.onCommit();
-		}
-		return result;
-	}
-
-	override redo(current: EditorSnapshot): ReturnType<EditorHistory<EditorSnapshot>['redo']> {
-		const result = super.redo(current);
-		if (result) {
-			this.onCommit();
-		}
-		return result;
-	}
 }
 
 @Injectable()
@@ -127,14 +113,26 @@ export class EditorStateService {
 			return null;
 		}
 	})();
+	/** The shared undo/redo controller (one stack and one default depth for every binding). */
+	private readonly history = createEditorHistoryController<EditorSnapshot>();
+	private readonly historyState = controllerSignal(this.history);
 	/**
 	 * Counts committed edits (recorded, undone or redone), never loads. The viewer component
 	 * reports it to the host as `documentChange`.
 	 */
-	readonly editRevision = signal(0);
-	private readonly history = new NotifyingEditorHistory(() =>
-		this.editRevision.update((revision) => revision + 1),
-	);
+	readonly editRevision = computed(() => this.historyState().revision);
+
+	/** Shows a slide on the stage: the viewer's navigation, once it {@link bindSlideNavigation binds} it. */
+	private showSlide: (index: number) => void = () => undefined;
+
+	/**
+	 * Wire the viewer's slide navigation (called once from its constructor), so a command that adds
+	 * a slide shows it wherever it was started: the ribbon, the slide panel, the keyboard or the
+	 * quick access toolbar.
+	 */
+	bindSlideNavigation(goTo: (index: number) => void): void {
+		this.showSlide = goTo;
+	}
 
 	/**
 	 * Apply File > Options > Advanced > "Maximum number of undos" at runtime.
@@ -194,10 +192,10 @@ export class EditorStateService {
 	 */
 	readonly templateElementsBySlideId = signal<TemplateElementsBySlideId>({});
 
-	readonly canUndo = signal(false);
-	readonly canRedo = signal(false);
-	readonly undoLabel = signal<string | undefined>(undefined);
-	readonly redoLabel = signal<string | undefined>(undefined);
+	readonly canUndo = computed(() => this.historyState().canUndo);
+	readonly canRedo = computed(() => this.historyState().canRedo);
+	readonly undoLabel = computed(() => this.historyState().undoLabel);
+	readonly redoLabel = computed(() => this.historyState().redoLabel);
 
 	readonly hasSelection = computed(() => this.selectedIds().length > 0);
 
@@ -222,7 +220,6 @@ export class EditorStateService {
 		this.selectedIds.set([]);
 		this.history.clear();
 		this.dirty.set(false);
-		this.syncHistory();
 	}
 
 	/** Current editable (template-free) slides as a fresh (cloned) array. */
@@ -242,12 +239,12 @@ export class EditorStateService {
 		this.history.record(this.captureSnapshot(), label);
 		this.slides.set(newSlides.map(cloneSlide));
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	private async hydrateInsertedSlideLayout(index: number, id: string, path: string): Promise<void> {
 		const handler = this.loader?.getHandler();
-		if (!handler) {
+		const placed = this.slides()[index];
+		if (!handler || placed?.id !== id) {
 			return;
 		}
 		const updated = await handler
@@ -257,10 +254,14 @@ export class EditorStateService {
 			return;
 		}
 		const artwork = await handler.getTemplateElementsForSlide(id).catch(() => []);
-		if (this.slides()[index]?.id !== id) {
+		// An edit made to the new slide while its layout loaded stays; it takes only the artwork.
+		const completion = insertedLayoutCompletion(this.slides()[index], placed);
+		if (completion === 'none') {
 			return;
 		}
-		this.slides.set(this.slides().map((slide, i) => (i === index ? updated : slide)));
+		if (completion === 'replace') {
+			this.slides.set(this.slides().map((slide, i) => (i === index ? updated : slide)));
+		}
 		this.templateElementsBySlideId.set({ ...this.templateElementsBySlideId(), [id]: artwork });
 	}
 
@@ -284,6 +285,7 @@ export class EditorStateService {
 			templateElementsBySlideId: cloneTemplateElementsBySlideId(this.templateElementsBySlideId()),
 			sections: structuredClone(this.sections()),
 			headerFooter: structuredClone(this.headerFooter()),
+			...recordLoaderTheme(this.loader),
 		};
 	}
 
@@ -303,7 +305,6 @@ export class EditorStateService {
 		this.headerFooter.set(value);
 		this.loader?.headerFooter.set(structuredClone(value));
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/** The template (master/layout) elements separated out of a slide, by id. */
@@ -437,7 +438,6 @@ export class EditorStateService {
 	beginTransform(label: string): void {
 		this.history.record(this.captureSnapshot(), label);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/**
@@ -462,6 +462,33 @@ export class EditorStateService {
 			cropBottom?: number;
 		},
 	): void {
+		this.previewElement(slideIndex, id, box as Partial<PptxElement>);
+	}
+
+	/**
+	 * The element `id` on a slide as the deck holds it now: a template element
+	 * from the template store, a group member in slide space. What a live edit
+	 * (a colour picker drag) rebases on, rather than the element a component
+	 * was last rendered with.
+	 */
+	elementById(slideIndex: number, id: string): PptxElement | undefined {
+		const target = this.slides()[slideIndex];
+		if (!target) {
+			return undefined;
+		}
+		return isTemplateElementId(id)
+			? this.templatesForSlide(target.id).find((el) => el.id === id)
+			: (slideSpaceElement(target.elements, id) ?? undefined);
+	}
+
+	/**
+	 * Merge `patch` into an element WITHOUT recording history or marking the
+	 * deck dirty: a live frame the caller commits later as one undo step (a
+	 * gesture frame, or a shade of a colour picker drag, which shared
+	 * `createLiveColorInput` puts back before its one committed edit). Routes by
+	 * id like {@link applyTransform}.
+	 */
+	previewElement(slideIndex: number, id: string, patch: Partial<PptxElement>): void {
 		const slides = this.slides();
 		const target = slides[slideIndex];
 		if (!target) {
@@ -470,17 +497,14 @@ export class EditorStateService {
 		if (isTemplateElementId(id)) {
 			this.writeTemplatesForSlide(
 				target.id,
-				updateElementById(this.templatesForSlide(target.id), id, box as Partial<PptxElement>),
+				updateElementById(this.templatesForSlide(target.id), id, patch),
 			);
 			return;
 		}
 		this.slides.set(
 			slides.map((slide, i) =>
 				i === slideIndex
-					? {
-							...slide,
-							elements: updateElementById(slide.elements, id, box as Partial<PptxElement>),
-						}
+					? { ...slide, elements: updateElementById(slide.elements, id, patch) }
 					: slide,
 			),
 		);
@@ -593,23 +617,38 @@ export class EditorStateService {
 	// ── Undo / redo ──────────────────────────────────────────────────────────
 
 	undo(): void {
-		const result = this.history.undo(this.captureSnapshot());
+		const current = this.captureSnapshot();
+		const result = this.history.undo(current);
 		if (result) {
+			restoreLoaderTheme(this.loader, current, result.snapshot);
 			this.restoreSnapshot(result.snapshot);
 			this.dirty.set(true);
 			this.selectedIds.set([]);
-			this.syncHistory();
 		}
 	}
 
 	redo(): void {
-		const result = this.history.redo(this.captureSnapshot());
+		const current = this.captureSnapshot();
+		const result = this.history.redo(current);
 		if (result) {
+			restoreLoaderTheme(this.loader, current, result.snapshot);
 			this.restoreSnapshot(result.snapshot);
 			this.dirty.set(true);
 			this.selectedIds.set([]);
-			this.syncHistory();
 		}
+	}
+
+	/**
+	 * Drop the undo and redo steps that would bring back a state `reaches` matches, with the steps
+	 * behind them: a Slide Master view command removed a layout the package cannot get back.
+	 */
+	forgetHistory(reaches: (step: SlideMasterHistoryStep) => boolean): void {
+		this.history.forget(reaches);
+	}
+
+	/** Route Undo and Redo through a room's history while attached (returns the detach). */
+	attachCollaboration(history: CollaborationHistory | null): () => void {
+		return this.history.attachCollaboration(history);
 	}
 
 	// ── Align / distribute (multi-selection) ─────────────────────────────────
@@ -666,7 +705,6 @@ export class EditorStateService {
 			),
 		);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	// ── Group / ungroup ──────────────────────────────────────────────────────
@@ -695,7 +733,6 @@ export class EditorStateService {
 		this.slides.set(slides.map((s, i) => (i === slideIndex ? { ...s, elements } : s)));
 		this.selectedIds.set([groupId]);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/** Ungroup the single selected group back into its children. */
@@ -731,7 +768,6 @@ export class EditorStateService {
 		this.slides.set(slides.map((s, i) => (i === slideIndex ? { ...s, elements } : s)));
 		this.selectedIds.set(used);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	// ── Clipboard ──────────────────────────────────────────────────────────────
@@ -759,6 +795,11 @@ export class EditorStateService {
 		}
 		this.clipboard = picked.map(cloneElement);
 		this.hasClipboard.set(true);
+		// Other applications get a picture of the selection and its text (best effort).
+		void copyElementsToSystemClipboard({
+			elements: picked,
+			rasterize: (node) => renderElementPngDataUrl(node, 2).catch(() => null),
+		});
 	}
 
 	/** Copy then delete the selected elements. */
@@ -793,7 +834,6 @@ export class EditorStateService {
 		);
 		this.selectedIds.set(newIds);
 		this.dirty.set(true);
-		this.syncHistory();
 		// A plain paste IS "Keep Source Formatting": each clone is its own
 		// pristine source, so the Paste Options toolbar's later choices always
 		// re-derive from it, never from an already-transformed element.
@@ -835,7 +875,6 @@ export class EditorStateService {
 		);
 		this.selectedIds.set(additions.map((el) => el.id));
 		this.dirty.set(true);
-		this.syncHistory();
 		const entries = sourceClones.map((sourceClone, i) => ({ id: additions[i].id, sourceClone }));
 		this.pasteOptionsToolbar.set(entries);
 		return entries;
@@ -886,7 +925,6 @@ export class EditorStateService {
 		);
 		this.selectedIds.set([withId.id]);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	// ── Slide operations ─────────────────────────────────────────────────────
@@ -900,11 +938,10 @@ export class EditorStateService {
 		this.history.record(this.captureSnapshot(), this.t('pptx.undoAction.slideProperties'));
 		this.slides.set(slides.map((s, i) => (i === slideIndex ? { ...s, ...patch } : s)));
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/**
-	 * Insert a blank slide after `afterIndex` (records history).
+	 * Insert a blank slide after `afterIndex` and show it, as PowerPoint does (records history).
 	 *
 	 * @param layoutPath - Package path of the slide layout the new slide should
 	 *   inherit from, as offered by the Home tab's "New Slide" split button.
@@ -921,18 +958,15 @@ export class EditorStateService {
 			elements: [],
 			...(layoutPath ? { layoutPath } : {}),
 		} as PptxSlide;
+		const index = Math.min(afterIndex + 1, slides.length);
 		const next = [...slides];
-		next.splice(Math.min(afterIndex + 1, next.length), 0, blank);
+		next.splice(index, 0, blank);
 		this.slides.set(this.renumber(next));
 		this.selectedIds.set([]);
 		this.dirty.set(true);
-		this.syncHistory();
+		this.showSlide(index);
 		if (layoutPath) {
-			void this.hydrateInsertedSlideLayout(
-				Math.min(afterIndex + 1, next.length - 1),
-				id,
-				layoutPath,
-			);
+			void this.hydrateInsertedSlideLayout(index, id, layoutPath);
 		}
 	}
 
@@ -972,7 +1006,6 @@ export class EditorStateService {
 			[updated.id]: templateElements,
 		});
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/**
@@ -996,7 +1029,6 @@ export class EditorStateService {
 		this.slides.set(this.renumber(next));
 		this.selectedIds.set([]);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/** Delete a slide (keeps at least one; records history). */
@@ -1009,7 +1041,6 @@ export class EditorStateService {
 		this.slides.set(this.renumber(slides.filter((_, i) => i !== index)));
 		this.selectedIds.set([]);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/** Duplicate a slide, inserting the copy after it (records history). */
@@ -1024,7 +1055,6 @@ export class EditorStateService {
 		);
 		this.selectedIds.set([]);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	duplicateSlide(index: number): void {
@@ -1039,7 +1069,6 @@ export class EditorStateService {
 		next.splice(index + 1, 0, copy);
 		this.slides.set(this.renumber(next));
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	/** Reorder a slide from `from` to `to` (records history). */
@@ -1054,7 +1083,6 @@ export class EditorStateService {
 		next.splice(to, 0, moved);
 		this.slides.set(this.renumber(next));
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	addSection(afterSlideIndex: number): void {
@@ -1066,7 +1094,6 @@ export class EditorStateService {
 		this.sections.set(sections);
 		this.slides.set(slides);
 		this.dirty.set(true);
-		this.syncHistory();
 	}
 
 	// ── Internals ────────────────────────────────────────────────────────────
@@ -1114,14 +1141,6 @@ export class EditorStateService {
 		);
 		this.writeTemplatesForSlide(target.id, nextTemplates);
 		this.dirty.set(true);
-		this.syncHistory();
-	}
-
-	private syncHistory(): void {
-		this.canUndo.set(this.history.canUndo);
-		this.canRedo.set(this.history.canRedo);
-		this.undoLabel.set(this.history.undoLabel);
-		this.redoLabel.set(this.history.redoLabel);
 	}
 
 	private newId(): string {

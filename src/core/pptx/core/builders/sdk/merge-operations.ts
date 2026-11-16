@@ -12,6 +12,7 @@
 import type { PptxElement } from '../../types/elements';
 import type { PptxData, PptxSlide } from '../../types/presentation';
 import { cloneSlide } from '../../utils/clone-utils';
+import { at } from '../../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -24,7 +25,7 @@ export interface MergeOptions {
 	/** Which slides to take from source (0-based indices). Default: all */
 	slideIndices?: number[];
 	/** Where to insert in target (0-based). Default: end */
-	insertAt?: number;
+	insertAt?: number | undefined;
 	/** Whether to keep source theme (false = use target theme). Default: false */
 	keepSourceTheme?: boolean;
 }
@@ -238,7 +239,7 @@ export function mergePresentation(
 	}
 
 	// Clone selected slides from source
-	const clonedSlides: PptxSlide[] = validIndices.map((i) => cloneSlide(sourceData.slides[i]));
+	const clonedSlides: PptxSlide[] = validIndices.map((i) => cloneSlide(at(sourceData.slides, i)));
 
 	// Collect existing IDs in target
 	const existingSlideIds = collectSlideIds(targetData.slides);
@@ -284,7 +285,7 @@ export function mergePresentation(
 
 	// Re-number all slide numbers (1-based) to maintain consistency
 	for (let i = 0; i < targetData.slides.length; i++) {
-		targetData.slides[i].slideNumber = i + 1;
+		at(targetData.slides, i).slideNumber = i + 1;
 	}
 
 	// Optionally merge theme colors from source

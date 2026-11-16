@@ -28,22 +28,22 @@ Part of [ooxml](https://github.com/ChristopherVR/ooxml#readme): [Office](https:/
 
 - **One viewer, every framework.** A `<visio-viewer>` custom element owns the SVG renderer, ribbon, page tabs, status bar, selection, search, layers and editing controls. React, Vue, Angular, Svelte, Solid and vanilla adapters only handle lifecycle, properties and events.
 - **One document model.** Package loading, XML, the model, ShapeSheet interpretation, editing and serialization live in the `visio` area of [`ooxml-core`](https://github.com/ChristopherVR/ooxml). The viewer packages here are the UI and framework-binding layer only.
-- **Local-first.** Files stay in the browser: no uploads, telemetry, external fonts or document URL fetches. Document XML is never injected into the DOM, and the custom element parses in a dedicated worker with cancellation and a time limit.
+- **Local-first by default.** The viewer does not upload files on its own. A host may explicitly connect storage such as OneDrive; that host owns authentication and network access. Document XML is never injected into the DOM, and the custom element parses in a dedicated worker with cancellation and a time limit.
 - **Honest limits.** Unsupported features are reported, not hidden. The [capability ledger](docs/parity.md) separates implemented code, tested evidence and missing functionality, and the [verification record](docs/verification.md) holds the current evidence.
 
 ## Features and limitations
 
 A public beta: the areas below have unit, binding and browser coverage. Recorded native Visio save/reopen checks cover specific editing cases, as detailed in the [verification record](docs/verification.md). General native file compatibility and full-page visual equivalence remain unproven.
 
-|                      |                                                                                                                                                                                                                                                                               |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Editor**           | Visio-style ribbon with File backstage, Tell me and KeyTips, Shapes window, bottom page tabs, status-bar zoom slider, Pan & Zoom window, rulers, literal text search, layer visibility, shape data, undo and redo, full screen. Unavailable commands say why.                 |
-| **Editing**          | Bounded source edits: text/shape formatting, multi-selection, align/distribute, ordering, duplicate, viewer shape clipboard, plain-text replacement, create, move, resize and delete. Core validates atomic worker edits; shared history supports undo/redo.                  |
-| **File formats**     | `.vsdx`, saved as an explicit downloaded VSDX copy that never overwrites the source. Legacy binary Visio `.vsd` (v11) is read-only, previewed through the shared `ole2` codecs inside `ooxml-core`.                                                                           |
-| **Objects**          | Shapes with master inheritance, groups, background pages, paths, arcs, splines and bounded NURBS, cached line and fill styles, theme colours and gradients, arrowheads, rich text, embedded PNG/JPEG/GIF images and a narrow subset of embedded EMF primitives.               |
-| **Export and print** | Static current-page SVG export, frozen print-ready page artifacts, and File > Export picture-page PDF and PNG. No vector or text-selectable PDF; saved printer and layer print settings are not applied.                                                                      |
-| **Not supported**    | Live connector routing and glue, containers and swimlanes, general ShapeSheet recalculation, most EMF records, EMF+, WMF and OLE, VDX, stencil authoring, templates and macros (stencil files open in the Shapes window). Signed and macro-enabled packages cannot be edited. |
-| **Localization**     | The `<visio-viewer>` element observes the `lang` and `locale` attributes and ships English, German, Spanish, French and Simplified Chinese interface text. Diagram content is never translated.                                                                               |
+|                      |                                                                                                                                                                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Editor**           | Visio-style ribbon with File backstage, Tell me and KeyTips, Shapes window, bottom page tabs, status-bar zoom slider, Pan & Zoom window, rulers, literal text search, layer visibility, shape data, undo and redo, full screen. Unavailable commands say why.                                                                               |
+| **Editing**          | Bounded source edits: text/shape formatting, multi-selection, align/distribute, ordering, duplicate, viewer shape clipboard, plain-text replacement, create, move, resize and delete. Core validates atomic worker edits; shared history supports undo/redo. Inserted charts can be edited as data and formatted (Edit Data, Format Chart). |
+| **File formats**     | `.vsdx`, saved as an explicit downloaded VSDX copy that never overwrites the source. Legacy binary Visio `.vsd` (v11) is read-only, previewed through the shared `ole2` codecs inside `ooxml-core`.                                                                                                                                         |
+| **Objects**          | Shapes with master inheritance, groups, background pages, paths, arcs, splines and bounded NURBS, cached line and fill styles, theme colours and gradients, arrowheads, rich text, embedded PNG/JPEG/GIF images and a narrow subset of embedded EMF primitives.                                                                             |
+| **Export and print** | Static current-page SVG export, frozen print-ready page artifacts, and File > Export picture-page PDF and PNG. No vector or text-selectable PDF; saved printer and layer print settings are not applied.                                                                                                                                    |
+| **Not supported**    | General ShapeSheet recalculation, most EMF records, EMF+, WMF and OLE, VDX, stencil authoring and macros (stencil files open in the Shapes window). Connector routing and glue and container and swimlane edits are partial, with the limits listed in [parity](docs/parity.md). Signed and macro-enabled packages cannot be edited.        |
+| **Localization**     | The `<visio-viewer>` element observes the `lang` and `locale` attributes and ships English, German, Spanish, French and Simplified Chinese interface text. Diagram content is never translated. The Edit Data and Format Chart dialog headings, buttons and preview label are English only.                                                 |
 
 ## Getting started
 
@@ -207,7 +207,7 @@ For direct custom-element use, call `registerVisioViewer()` and create a
 
 </details>
 
-Two more shared properties: `canEdit` (editing permission, editable unless you pass `false`) and `collaboration` (shares the open drawing in a room, see [collaboration](docs/collaboration.md)); `document-change` reports kind `edit`, `undo`, `redo`, `remote` or `save`. Every handle also supports `fit()`, `replacePlainText()`, `applyEdits()`,
+More shared properties: `canEdit` (editing permission, editable unless you pass `false`), `readOnly` (a restriction of its own), `storage`, `fileProviders` (cloud places for File > Open) and `customization` (host-owned save and open, see [the viewer API](docs/api.md#host-owned-storage-and-file-commands)), and `collaboration` (shares the open drawing in a room, see [collaboration](docs/collaboration.md)); `document-change` reports kind `edit`, `undo`, `redo`, `remote` or `save`. Every handle also supports `fit()`, `replacePlainText()`, `applyEdits()`,
 `undo()`, `redo()`, `exportVsdx()`, `exportSvg()` and `createPrintSnapshot()`;
 saving or downloading exported bytes is the application's responsibility (call `controller.markClean()` once they are saved). To build your own toolbar and panes instead of the whole viewer, see the [composable building blocks](docs/building-blocks.md). See
 the [viewer API](docs/api.md) for search, layers, export and editing, and the
@@ -255,7 +255,9 @@ bun run test:docs           # VitePress docs build, ledger and theme tests
 bun run docs:build          # the VitePress docs and every demo in docs/.vitepress/dist
 bun run build               # ESM/declarations and the playground in site-dist/
 bun run check               # all non-browser checks and production build
-bun run test:browser        # Playwright Chromium workflows
+bun run build:packages      # the seven framework and core distributions
+bun run test:packages:workspace  # packed distributions against this checkout's core and ui (what CI runs)
+bun run test:browser        # Playwright Chromium workflows, then the packed-package browser check
 bun run fmt                 # oxfmt
 ```
 
@@ -276,3 +278,12 @@ The `ooxml` repository is trunk-based and uses [Conventional Commits](https://ww
 ## License
 
 [Apache License 2.0](LICENSE). See [`NOTICE`](NOTICE) for attributions.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#visio-vsdx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

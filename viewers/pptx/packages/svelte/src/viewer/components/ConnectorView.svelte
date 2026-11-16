@@ -9,9 +9,9 @@
 	import { hasShapeProperties, hasTextProperties } from 'pptx-viewer-core';
 	import {
 		buildConnectorGeometry,
+		connectorStrandScreenWidth,
 		getLineGlowFilterCss,
 		getLineShadowParams,
-		screenStrokeWidth,
 	} from 'ooxml-ui/pptx';
 
 	import { styleToString } from '../style';
@@ -126,19 +126,19 @@
 		{#each geometry.compoundOffsets as offset, idx (idx)}
 			{#if geometry.pathD}
 				<path
+					data-pptx-line=""
 					d={geometry.pathD}
 					fill="none"
 					stroke={strokeColor}
 					stroke-width={Math.max(geometry.compoundWidths[idx] ?? geometry.strokeWidth, 1)}
-					style:stroke-width={screenStrokeWidth(
-						Math.max(geometry.compoundWidths[idx] ?? geometry.strokeWidth, 1),
-					)}
+					style:stroke-width={connectorStrandScreenWidth(geometry.compoundWidths, geometry.strokeWidth, idx)}
 					stroke-opacity={geometry.strokeOpacity}
 					stroke-dasharray={geometry.dashArray}
 					stroke-linecap={geometry.strokeLinecap}
 					stroke-linejoin="round"
 					filter={idx === 0 && lineShadow ? `url(#${shadowFilterId})` : undefined}
 					style={offset !== 0 ? styleToString({ transform: `translate(0, ${offset}px)` }) : undefined}
+					style:transform={geometry.snapTransform}
 					marker-start={idx === 0 ? (geometry.startMarkerRef ?? undefined) : undefined}
 					marker-end={idx === geometry.compoundOffsets.length - 1
 						? (geometry.endMarkerRef ?? undefined)
@@ -146,18 +146,18 @@
 				/>
 			{:else}
 				<line
+					data-pptx-line=""
 					x1={geometry.x1}
 					y1={geometry.y1 + offset}
 					x2={geometry.x2}
 					y2={geometry.y2 + offset}
 					stroke={strokeColor}
 					stroke-width={Math.max(geometry.compoundWidths[idx] ?? geometry.strokeWidth, 1)}
-					style:stroke-width={screenStrokeWidth(
-						Math.max(geometry.compoundWidths[idx] ?? geometry.strokeWidth, 1),
-					)}
+					style:stroke-width={connectorStrandScreenWidth(geometry.compoundWidths, geometry.strokeWidth, idx)}
 					stroke-opacity={geometry.strokeOpacity}
 					stroke-dasharray={geometry.dashArray}
 					stroke-linecap={geometry.strokeLinecap}
+					style:transform={geometry.snapTransform}
 					filter={idx === 0 && lineShadow ? `url(#${shadowFilterId})` : undefined}
 					marker-start={idx === 0 ? (geometry.startMarkerRef ?? undefined) : undefined}
 					marker-end={idx === geometry.compoundOffsets.length - 1

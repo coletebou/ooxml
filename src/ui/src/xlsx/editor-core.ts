@@ -1,4 +1,4 @@
-import type { DocumentStorage } from 'ooxml-core/embedding';
+import type { CloudFileProvider, DocumentStorage } from 'ooxml-core/embedding';
 /**
  * The editor's state and the `EditorContext` every UI module receives: the workbook and its edit
  * session, the active sheet and selection, the command and dialog registries, and the public
@@ -12,6 +12,7 @@ import {
 	type FontView,
 	type Workbook,
 	type Worksheet,
+	workbookFontFamily,
 } from 'ooxml-core/xlsx';
 import { createCommandRegistry, editBridge, type CommandRegistry } from 'ooxml-core/xlsx/ui';
 import type { EditorContext, GridController, SelectionModel } from 'ooxml-core/xlsx/ui';
@@ -35,9 +36,12 @@ import {
 import type { CalculationMode } from './backstage';
 import type { SurfaceHostActions } from './surface-actions';
 import { CalcPreparation } from './calc-preparation';
+import { XlsxWebfonts } from './webfonts';
 import { collaborationFor, type XlsxCollaboration } from './collaboration';
 import type { EditorThemeMode, XlsxTheme } from './theme';
 import type { ExcelCustomization } from 'ooxml-core/xlsx/ui';
+import { provideContextMenuHost } from './context-menu/host-api';
+import { openWorkflow, workflowAvailable } from './host-open';
 import {
 	EMPTY_EXCEL_CUSTOMIZATION,
 	provideCustomization,
@@ -63,6 +67,7 @@ export class EditorCore {
 	readOnly = false;
 	#hostReadOnly = false;
 	#roleReadOnly = false;
+	#fileReadOnly = false;
 	#reportedHost = false;
 	/** The host's `customization` object, as given, and its resolution. */
 	customizationInput: ExcelCustomization | null = null;
@@ -73,6 +78,8 @@ export class EditorCore {
 	theme: EditorThemeMode = 'auto';
 	showToolbar = true;
 	showFormulaBar = true;
+	/** Replace and Replace All check data validation (`validateReplace`); Excel's do not. */
+	validateReplace = false;
 	themeColors: Partial<XlsxTheme> = {};
 	appliedThemeVars: string[] = [];
 	hiddenActions: string[] = [];
@@ -84,6 +91,13 @@ export class EditorCore {
 	surfaceActions: SurfaceHostActions = {};
 	/** Where File > Save and Open go instead of a download and the file picker (`storage`). */
 	storage: DocumentStorage | undefined = undefined;
+	/**
+	 * The storage of the workbook opened from a cloud place (File > Open > OneDrive): Save and
+	 * Save As go there instead of `storage`, until another workbook is shown.
+	 */
+	fileStorage: DocumentStorage | undefined = undefined;
+	/** Cloud places File > Open offers next to "This device" (`fileProviders`). */
+	fileProviders: readonly CloudFileProvider[] = [];
 	/** The validation failure of the cell edit in progress; cleared once the draft changes or ends. */
 	editError: { message: string; text: string } | null = null;
 	readonly selection: SelectionModel = createSelectionModel();
@@ -95,6 +109,8 @@ export class EditorCore {
 	readonly collab: XlsxCollaboration;
 	/** Builds the formula graph in idle time after a workbook opens. */
 	readonly calcPreparation: CalcPreparation;
+	/** The `googleFonts` webfont fallback (off unless the host sets it). */
+	readonly webfonts: XlsxWebfonts;
 	private gridController: GridController | undefined;
 	private readonly modelListeners = new Set<(change: unknown) => void>();
 	private stopSession: (() => void) | undefined;
@@ -147,6 +163,12 @@ export class EditorCore {
 		});
 		this.ctx = this.createContext();
 		provideCustomization(this.ctx, () => this.customization);
+		provideContextMenuHost(this.ctx, {
+			handler: () => this.surfaceActions.onContextMenu,
+			itemsHook: () => this.surfaceActions.onContextMenuItems,
+			available: (name) => workflowAvailable(this, name),
+			delegate: (name) => openWorkflow(this, name),
+		});
 		editBridge(this.ctx).onChange(() => {
 			const draft = editBridge(this.ctx).state();
 			if (this.editError && (!draft.editing || draft.text !== this.editError.text))
@@ -155,6 +177,11 @@ export class EditorCore {
 		});
 		this.collab = collaborationFor(this);
 		this.calcPreparation = new CalcPreparation(host, () => !!this.gridController?.isEditing());
+		this.webfonts = new XlsxWebfonts({
+			host,
+			workbook: () => this.workbook,
+			remeasure: () => this.gridController?.remeasure?.(),
+		});
 	}
 
 	private createContext(): EditorContext {
@@ -204,6 +231,7 @@ export class EditorCore {
 				return emitEvent(core.host, type, detail);
 			},
 			authorName: () => core.authorName,
+			validateReplace: () => core.validateReplace,
 			locale: () => core.locale,
 			history: () => core.collab.history() ?? core.session,
 			remoteSelections: () => core.collab.remoteSelections(),
@@ -246,6 +274,8 @@ export class EditorCore {
 		if (this.collab.suspend() && !this.collab.wanted)
 			this.shell?.toast(this.ctx.t('Sharing stopped because another workbook was opened.'));
 		this.savePassword = undefined;
+		this.fileStorage = undefined;
+		this.setFileReadOnly(false);
 		this.stopSession?.();
 		this.stopSession = undefined;
 		this.workbook = workbook;
@@ -271,6 +301,7 @@ export class EditorCore {
 		this.selection.set(initialSelection(this.activeSheet, workbook));
 		this.dirty.set(false);
 		this.notifyModel({ kind: 'load' });
+		this.webfonts.shown(workbook);
 		this.collab.resume();
 	}
 
@@ -301,6 +332,7 @@ export class EditorCore {
 		if (!sheet || (index === this.activeSheet && !force)) return;
 		if (this.gridController?.isEditing() && !this.gridController.commitEdit()) return;
 		this.activeSheet = index;
+		if (this.workbook) this.workbook.activeSheet = index;
 		this.shownSheet = sheet;
 		this.selection.set(this.sheetSelections.restore(index, this.workbook));
 		emit(this.host, 'sheet-change', { index, name: sheet.name });
@@ -318,6 +350,7 @@ export class EditorCore {
 		const moved = shown ? workbook.sheets.indexOf(shown) : -1;
 		if (moved >= 0 && shown) {
 			this.activeSheet = moved;
+			workbook.activeSheet = moved;
 			this.selection.set({ ...this.selection.get(), sheet: moved });
 			emit(this.host, 'sheet-change', { index: moved, name: shown.name });
 			return;
@@ -335,7 +368,7 @@ export class EditorCore {
 	private measureText(text: string, font: FontView): number {
 		const grid = this.gridController;
 		if (!grid) return approximateMeasure(text, font);
-		const css = `${font.italic ? 'italic ' : ''}${font.bold ? 'bold ' : ''}${font.sizePx}px "${font.family}"`;
+		const css = `${font.italic ? 'italic ' : ''}${font.bold ? 'bold ' : ''}${font.sizePx}px ${workbookFontFamily(font.family)}`;
 		return grid.measureText(text, css);
 	}
 
@@ -413,6 +446,12 @@ export class EditorCore {
 		return this.#applyReadOnly();
 	}
 
+	/** Set while the open file is read-only (a cloud file the user cannot edit); the stricter wins. */
+	setFileReadOnly(locked: boolean): boolean {
+		this.#fileReadOnly = locked;
+		return this.#applyReadOnly();
+	}
+
 	/** Set by sharing while the role is `viewer`; independent of the host's switch. */
 	setRoleReadOnly(locked: boolean): boolean {
 		this.#roleReadOnly = locked;
@@ -420,7 +459,8 @@ export class EditorCore {
 	}
 
 	#applyReadOnly(): boolean {
-		const readOnly = this.#hostReadOnly || this.#roleReadOnly || !this.customization.canEdit;
+		const readOnly =
+			this.#hostReadOnly || this.#roleReadOnly || this.#fileReadOnly || !this.customization.canEdit;
 		const changed = readOnly !== this.readOnly;
 		// A host change under a role lock leaves the effective value alone but is still reported,
 		// so a controlled parent only ever mirrors `hostReadOnly`.

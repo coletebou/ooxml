@@ -8,7 +8,7 @@ description: 组成 PowerPointViewerComponent 的全部内部服务、组件和�
 这是[服务](/zh/angular/services)页面所引用的完整列表，按职责列出组成 `PowerPointViewerComponent` 的全部内部构建模块。如需了解受语义化版本兼容承诺保障的小范围公开 API，请参见[公开服务与组件](/zh/angular/services#public-services-components)。
 
 ::: warning 内部构建模块
-以下所有内容都可以从 `pptx-angular-viewer/internals` 子路径导入。ng-packagr 将此包构建为单一编译单元，因此 `internals` 是同一产物的别名，这些符号也仍可从根入口导入。它们**不受语义化版本兼容承诺保障**：签名、行为乃至是否存在，都可能在不升级主版本的情况下变化。只有经过筛选的服务、输入、输出和[公开 API](/zh/angular/api) 无法满足需求时，才使用 `internals`。依赖它时请锁定精确版本。
+以下所有内容都可以从 `pptx-angular-viewer/internals` 子路径导入。ng-packagr 将包根入口构建为单一编译单元，因此 `internals` 是同一产物的别名，这些符号也仍可从根入口导入。它们**不受语义化版本兼容承诺保障**：签名、行为乃至是否存在，都可能在不升级主版本的情况下变化。只有经过筛选的服务、输入、输出和[公开 API](/zh/angular/api) 无法满足需求时，才使用 `internals`。依赖它时请锁定精确版本。
 
 ```ts
 import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/internals';
@@ -27,7 +27,6 @@ import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/intern
 | `FieldContextService`               | 文本渲染的字段和占位符上下文，例如日期、幻灯片编号等。              |
 | `InkDrawingService`                 | 绘图工具的自由墨迹笔画状态。                                        |
 | `RulerGuidesService`                | 编辑器画布的标尺刻度和参考线状态。                                  |
-| `SmartArt3DService`                 | 通过 `smartArt3D` 输入控制可选的 Three.js SmartArt 渲染器。         |
 | `ViewerCanvasEditingService`        | 画布编辑编排，包括元素选择、变换、文本、墨迹和表格单元格编辑。      |
 | `ViewerCollabCursorService`         | 跟踪本地指针，用于广播用户光标位置。                                |
 | `ViewerCollaborationSessionService` | 共享和广播对话框状态，以及会话连接和断开的编排。                    |
@@ -85,23 +84,23 @@ import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/intern
 | 导出项                                                                                                                                                                                       | 职责                                                                                                                                                                                      |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SmartArt3DRendererComponent`                                                                                                                                                                | 在 WebGL 中将 SmartArt 图形渲染为拉伸的三维块，通过 `smartArt3D` 按需启用。                                                                                                               |
-| `SmartArtPreviewComponent`                                                                                                                                                                   | 实时渲染 SmartArt 布局预设，用于库预览。                                                                                                                                                  |
 | `SmartArtPropertiesComponent`                                                                                                                                                                | SmartArt 专用检查器面板。                                                                                                                                                                 |
 | `SMARTART_PALETTES`, `SMARTART_DEFAULT_PALETTE`, `smartArtPaletteColour`, `resolveSmartArtPalette`, `buildChromeStyle`, `computeDrawingViewBox`, `projectDrawingShapes`, `styleShadowFilter` | 绘图形状视图模型辅助函数，包括调色板、界面、viewBox 和 `RenderedShape` 投影。这里使用 `SmartArt` / `SMARTART_` 前缀别名，因为原名称与图表调色板中的同名符号冲突，参见上面的图表内部接口。 |
 | `smart-art-inline-edit` 的导出                                                                                                                                                               | 在画布上内联编辑 SmartArt 文本和节点。                                                                                                                                                    |
 | `smart-art-insert-helpers` 的导出 (`buildSmartArtInsertElement`)                                                                                                                             | 根据选定预设和各项文本构建新的 SmartArt 元素。                                                                                                                                            |
-| `smart-art-node-style-helpers` 的导出                                                                                                                                                        | 逐节点样式解析辅助函数。                                                                                                                                                                  |
 | `smart-art-properties-helpers` 的导出                                                                                                                                                        | 为 `SmartArtPropertiesComponent` 提供支持的辅助函数。                                                                                                                                     |
 | `smart-art-renderer-helpers` 的导出                                                                                                                                                          | 为精选组件 `SmartArtRendererComponent` 提供支持的辅助函数。                                                                                                                               |
 
 ## 表格内部接口 {#table-internals}
 
-| 导出项                            | 职责                                                     |
-| --------------------------------- | -------------------------------------------------------- |
-| `table-cell-style` 的导出         | 表格单元格样式解析。                                     |
-| `table-data-helpers` 的导出       | 表格行、列和单元格数据编辑辅助函数。                     |
-| `table-properties-helpers` 的导出 | 为 `TablePropertiesComponent` 提供支持的辅助函数。       |
-| `table-renderer-helpers` 的导出   | 为精选组件 `TableRendererComponent` 提供支持的辅助函数。 |
+| 导出项                            | 职责                                                         |
+| --------------------------------- | ------------------------------------------------------------ |
+| `table-cell-style` 的导出         | 表格单元格样式解析。                                         |
+| `table-data-helpers` 的导出       | 表格行、列和单元格数据编辑辅助函数。                         |
+| `table-properties-helpers` 的导出 | 为 `TablePropertiesComponent` 提供支持的辅助函数。           |
+| `table-renderer-helpers` 的导出   | 为精选组件 `TableRendererComponent` 提供支持的辅助函数。     |
+| `table-style-context` 的导出      | `TABLE_STYLE_CONTEXT_OVERRIDE`，即某个子树的表格样式上下文。 |
+| `slides-panel-contexts` 的导出    | 缩略图栏的字段上下文和表格上下文。                           |
 
 ## 功能区（工具栏子分区） {#ribbon-toolbar-sub-sections}
 
@@ -124,7 +123,6 @@ import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/intern
 | `RibbonEditingSectionComponent`                                   | 编辑选项卡控件，提供查找和替换入口。               |
 | `RibbonFileSectionComponent`                                      | 文件选项卡：打开和保存操作。                       |
 | `RibbonFontControlsComponent`, `RibbonParagraphControlsComponent` | 跨分区复用的共享字体和段落控件组。                 |
-| `RibbonColorPopoverComponent`                                     | 跨分区复用的共享色板弹出层。                       |
 | `ribbon-text-helpers` 的导出 (`patchTextStyle`)                   | 将文本样式补丁应用到选中元素。                     |
 
 ## 放映、导航与触控内部接口 {#presentation-navigation-touch-internals}
@@ -142,7 +140,7 @@ import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/intern
 
 ### 幻灯片过渡辅助函数 {#slide-transition-helpers}
 
-框架无关的渲染器以 `ooxml-ui/pptx` 发布，宿主可以直接导入。Angular 同样通过精选的 `pptx-angular-viewer` 根入口（`viewer/index.ts`）从 `transition-helpers.ts` 重新导出这些辅助函数，而不只是 `internals`：ng-packagr 会把这个库编译成单一入口文件，因此 `pptx-angular-viewer/internals` 与根入口是完全相同的构建产物（参见 `src/internals.ts` 自身的头部注释），两者都能解析到下列同名符号。
+框架无关的渲染器以 `ooxml-ui/pptx` 发布，宿主可以直接导入。Angular 同样通过精选的 `pptx-angular-viewer` 根入口（`viewer/index.ts`）从 `transition-helpers.ts` 重新导出这些辅助函数，而不只是 `internals`：ng-packagr 会从单一入口文件编译包根入口（它唯一的次级入口 `pptx-angular-viewer/ai` 只包含 `createAiAssistant`），因此 `pptx-angular-viewer/internals` 与根入口是完全相同的构建产物（参见 `src/internals.ts` 自身的头部注释），两者都能解析到下列同名符号。
 
 | 导出项                                                                                                                            | 职责                                                                                                                                                                         |
 | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -178,6 +176,12 @@ import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/intern
 | `color-changed-image-helpers` 的导出 | 为 `ColorChangedImageComponent` 提供支持的辅助函数。       |
 | `eyedropper` 的导出                  | 使用屏幕吸管 `EyeDropper` API 的取色辅助函数。             |
 
+## AI 助手内部接口 {#ai-assistant-internals}
+
+| 导出项                    | 职责                                                                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAiAssistantHandle` | 为 `pptx-angular-viewer/ai` 次级入口的 `createAiAssistant` 提供支持。ng-packagr 单独构建该入口，它只能导入包入口。此函数只接受配置；请改为导入 `createAiAssistant`。 |
+
 ## 移动端界面内部接口 {#mobile-chrome-internals}
 
 | 导出项                         | 职责                                       |
@@ -193,7 +197,6 @@ import { AutosaveService, ViewerExportService } from 'pptx-angular-viewer/intern
 | `CustomShowsComponent`, `custom-shows-helpers` 的导出   | 创建、重命名和删除自定义放映的对话框。                         |
 | `ExportProgressModalComponent`                          | 导出 PDF、GIF 或视频时显示的进度弹窗。                         |
 | `FollowModeBarComponent`                                | “跟随演示者”模式横幅。                                         |
-| `InsertSmartArtDialogComponent`, `SmartArtInsertEvent`  | “插入 > SmartArt”图形库对话框。                                |
 | `NotesToolbarComponent`                                 | 演讲者备注面板工具栏。                                         |
 | `RemoteSelectionOverlayComponent`                       | 渲染远程用户的元素选区高亮。                                   |
 | `SelectionPaneComponent`                                | 选择窗格（排列选项卡），用于列出元素和切换其状态。             |

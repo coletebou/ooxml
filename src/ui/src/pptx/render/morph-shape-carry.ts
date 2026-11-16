@@ -1,0 +1,301 @@
+/**
+ * A resizing shape's GEOMETRY carried the way PowerPoint's Morph carries it.
+ *
+ * Every morphing element travels on a FLIP journey: it is painted at one end's
+ * box and scaled onto the other's. That is exact for a picture, but not for a
+ * vector shape, whose outline, corner radii and adjustment handles are a
+ * function of its box. Measured on PowerPoint 16 (`CreateVideo`, 60 fps, 720p,
+ * Morph by object, 2 s), PowerPoint interpolates the shape's rendered geometry
+ * in BOX-NORMALISED coordinates and maps it onto the interpolated box:
+ *
+ *  - a rounded rectangle with a 6 pt (8 px) outline growing from 60 x 60 pt to
+ *    480 x 240 pt keeps no fixed stroke width: its vertical edges read 8, 9.6,
+ *    13.1, 16.1, 18.0, 18.6, 18.0, 16.8, 14.9, 12.5, 10.2, 8.4, 7.8 px
+ *    across the morph and its horizontal ones 8 to 12.0 and back;
+ *    `W(p) * lerp(w / W0, w / W1, p)` predicts every one of those within
+ *    0.3 to 0.6 px (`H(p) * lerp(w / H0, w / H1, p)` within 0.4 px). One
+ *    solid stroke, never two crossfading;
+ *  - the same shape growing only 1.4x (300 x 120 to 420 x 180 pt) therefore
+ *    keeps its outline within 0.3 px of 8 px on every frame;
+ *  - an adjustment change (a rounded rectangle's corner 0.05 -> 0.5, an
+ *    arrow's shaft and head 0.3 -> 0.7 / 0.9) morphs as one outline whose
+ *    vertices move linearly, never a dissolve.
+ *
+ * Our journey scaled the INCOMING shape, so its geometry was the incoming
+ * one's for the whole flight: the outline was `w * W(p) / W1` (1.1 px instead
+ * of 8 at the start of the grow) and the corners the final ones, stretched.
+ *
+ * This module bakes the measured model onto the element's own nodes, in the
+ * element's LOCAL frame (the box the journey scales):
+ *
+ *  - a rounded rectangle's `border-radius` lerps between the two normalised
+ *    radii, on the journey's own two frames (linear in eased progress);
+ *  - a clipped preset's `clip-path` is re-evaluated per stop;
+ *  - the outline path (`[data-pptx-outline] path`) gets a `d` per stop and a
+ *    `transform: scale(ax, ay)` that undoes the journey's anisotropic scale on
+ *    its stroke, so the stroke is `lerp(w0 / W0, w1 / W1, p)` of the box on
+ *    each axis, as measured.
+ *
+ * Both halves of a pair get the same geometry, so a dissolving pair's ghost
+ * and incoming half stay on top of each other.
+ *
+ * @module render/morph-shape-carry
+ */
+import type { PptxElement } from 'ooxml-core/pptx';
+import { getRoundRectRadiusPx, getShapeType, hasShapeProperties } from 'ooxml-core/pptx';
+
+import { morphGeometryKey } from './morph-geometry-key';
+import {
+	bakeStops,
+	geometryAt,
+	lerp,
+	pairOutlines,
+	round,
+	sameRelativeGeometry,
+	scalePath,
+	stopProgress,
+} from './morph-shape-carry-path';
+import {
+	bakeStrandStops,
+	compoundLineOf,
+	tracedCompoundOffsets,
+} from './morph-shape-carry-strands';
+import { resolveShapeGeometry } from './shape-geometry-cascade';
+import { silhouetteFillsOverlay, usesSilhouetteEffects } from './silhouette-effects';
+import { buildSubpathFillOverlay } from './subpath-fill-overlay';
+import { outsetClipPathForStroke } from './stroke-clip-outset';
+import { buildStrokeOutline, outlineStrokeJoin, straddlingStrokeWidth } from './stroke-outline';
+
+/** Which half of a pair a carry is painted on: its box is the local frame. */
+export type MorphCarryHalf = 'from' | 'to';
+
+/** What a carry adds to one half. */
+export interface MorphShapeCarry {
+	/** Declarations for the half's container at the start (`from`) and end (`to`) of the morph. */
+	readonly startDeclarations: readonly string[];
+	readonly endDeclarations: readonly string[];
+	/** Baked `clip-path` keyframes body for the container, when the preset is clipped. */
+	readonly clipKeyframes?: string;
+	/** Baked keyframes body for the outline path, when the outline is carried. */
+	readonly outlineKeyframes?: string;
+	/**
+	 * Baked keyframes bodies for the strands of a compound outline, one per
+	 * strand in paint order (each strand is a `<path>` of the overlay).
+	 */
+	readonly outlineStrandKeyframes?: readonly string[];
+	/**
+	 * Baked keyframes body for the paths of a freeform painted as a vector in
+	 * its own path units (`[data-pptx-custom-geometry]`): the geometry per stop.
+	 */
+	readonly customKeyframes?: string;
+}
+
+const EPSILON = 0.5;
+
+/** Whether a shape paints no closed region (a connector, line or open preset). */
+function openGeometry(element: PptxElement): boolean {
+	const kind = resolveShapeGeometry(element).kind;
+	return kind === 'bare' || kind === 'strokeOnly' || kind === 'lineEdge';
+}
+
+/**
+ * Whether a pair is one shape whose geometry changes: its box, its handles,
+ * its custom path, or (for a `!!`-named pair, the only kind the matcher lets
+ * through, see `morphGeometryBreaksPair`) its preset.
+ */
+export function morphShapeCarryApplies(from: PptxElement, to: PptxElement): boolean {
+	if (
+		from.type !== 'shape' ||
+		to.type !== 'shape' ||
+		!hasShapeProperties(from) ||
+		!hasShapeProperties(to) ||
+		Boolean(from.flipHorizontal) !== Boolean(to.flipHorizontal) ||
+		Boolean(from.flipVertical) !== Boolean(to.flipVertical)
+	) {
+		return false;
+	}
+	const key = morphGeometryKey(from);
+	if (!key || !morphGeometryKey(to) || openGeometry(from) || openGeometry(to)) {
+		return false;
+	}
+	const outlines = pairOutlines(from, to);
+	if (!outlines) {
+		return false;
+	}
+	const resized =
+		Math.abs(from.width - to.width) > EPSILON || Math.abs(from.height - to.height) > EPSILON;
+	const handles =
+		JSON.stringify(from.shapeAdjustments ?? {}) !== JSON.stringify(to.shapeAdjustments ?? {});
+	return (
+		resized ||
+		handles ||
+		outlines.blended ||
+		key !== morphGeometryKey(to) ||
+		!sameRelativeGeometry(outlines.a, outlines.b, from, to)
+	);
+}
+
+/** The authored outline width of a shape, 0 when it has none. */
+function lineWidth(element: PptxElement): number {
+	return hasShapeProperties(element) ? Math.max(0, element.shapeStyle?.strokeWidth ?? 0) : 0;
+}
+
+/**
+ * Whether `element`'s outline overlay is one plain line the carry can re-path.
+ * A clipped preset adds a hairline on its outer edge (`clipEdgeBleed`); the
+ * re-path draws it on the line itself, where the line hides it.
+ */
+function carriesOutline(element: PptxElement): boolean {
+	const outline = buildStrokeOutline(element);
+	return Boolean(
+		outline &&
+		!outline.markers &&
+		outline.strands[0]?.d === undefined &&
+		outline.strands.every((strand) => strand.offset === 0),
+	);
+}
+
+/**
+ * The carry for one half of a pair, in that half's local frame, or `undefined`
+ * when the pair is not a resizing or re-handled preset shape.
+ */
+export function buildMorphShapeCarry(
+	from: PptxElement,
+	to: PptxElement,
+	half: MorphCarryHalf,
+): MorphShapeCarry | undefined {
+	if (!morphShapeCarryApplies(from, to) || !hasShapeProperties(from) || !hasShapeProperties(to)) {
+		return undefined;
+	}
+	const outlines = pairOutlines(from, to);
+	if (!outlines) {
+		return undefined;
+	}
+	const { a, b } = outlines;
+	// An outline that is not one preset's own (blended, or another preset's)
+	// is clipped to on every stop, whatever the half paints statically.
+	const reshaped = outlines.blended || morphGeometryKey(from) !== morphGeometryKey(to);
+	const local = half === 'to' ? to : from;
+	const W = Math.max(local.width, 1);
+	const H = Math.max(local.height, 1);
+	const startDeclarations: string[] = [];
+	const endDeclarations: string[] = [];
+	if (!reshaped && getShapeType(to.shapeType) === 'roundRect') {
+		const r0 = getRoundRectRadiusPx(from);
+		const r1 = getRoundRectRadiusPx(to);
+		const radius = (p: number) =>
+			`border-radius: ${round(lerp(r0 / from.width, r1 / to.width, p) * W)}px / ${round(
+				lerp(r0 / from.height, r1 / to.height, p) * H,
+			)}px`;
+		startDeclarations.push(radius(0));
+		endDeclarations.push(radius(1));
+	}
+	// The stroke, as a fraction of the box on each axis, lerps between the ends.
+	const w0 = lineWidth(from);
+	const w1 = lineWidth(to);
+	const wl = lineWidth(local);
+	const strandOffsets =
+		compoundLineOf(from) === compoundLineOf(to) ? tracedCompoundOffsets(local) : undefined;
+	const stroked = w0 > 0 && w1 > 0 && (carriesOutline(local) || strandOffsets !== undefined);
+	// The path's own scale: the journey maps local px onto the box, this maps
+	// the path's user units onto local px so its stroke lands at the measured
+	// width. `1` leaves the stroke to the journey, as before.
+	const scaleAt = (p: number): [number, number] =>
+		stroked
+			? [
+					(lerp(w0 / from.width, w1 / to.width, p) * W) / wl,
+					(lerp(w0 / from.height, w1 / to.height, p) * H) / wl,
+				]
+			: [1, 1];
+	const decision = resolveShapeGeometry(local);
+	const straddle = straddlingStrokeWidth(local);
+	// The axis whose outline share changes most decides where the stops crowd.
+	const spread = (u0: number, u1: number) => Math.max(u0 / u1, u1 / u0);
+	const progress = !stroked
+		? stopProgress(1, 1)
+		: spread(w0 / from.width, w1 / to.width) >= spread(w0 / from.height, w1 / to.height)
+			? stopProgress(w0 / from.width, w1 / to.width)
+			: stopProgress(w0 / from.height, w1 / to.height);
+	if (reshaped && decision.kind === 'borderRadius') {
+		startDeclarations.push('border-radius: 0');
+		endDeclarations.push('border-radius: 0');
+	}
+	// A shape whose shadow and glow are one filter on its container (see
+	// `silhouette-effects`) must not be clipped there: the clip would cut the
+	// effects to a strip. Its fill is the SVG overlay's path, which morphs instead.
+	const silhouette = usesSilhouetteEffects(local);
+	const clipKeyframes =
+		!silhouette && (decision.kind === 'clipPath' || reshaped)
+			? bakeStops(progress, (p) => {
+					const [ax, ay] = scaleAt(p);
+					const user = geometryAt(a, b, from, to, p, W / ax, H / ay);
+					const widened =
+						straddle > 0
+							? outsetClipPathForStroke(
+									`path('${user}')`,
+									straddle,
+									W / ax,
+									H / ay,
+									outlineStrokeJoin(local),
+								)
+							: `path('${user}')`;
+					const inner = /^path\('(.*)'\)$/su.exec(widened)?.[1] ?? user;
+					return [`clip-path: path('${scalePath(inner, ax, ay)}')`];
+				})
+			: undefined;
+	const outlineStrandKeyframes =
+		stroked && strandOffsets
+			? bakeStrandStops(progress, strandOffsets, outlineStrokeJoin(local), (p) => {
+					const [ax, ay] = scaleAt(p);
+					return {
+						d: geometryAt(a, b, from, to, p, W / ax, H / ay),
+						scale: `scale(${round(ax)}, ${round(ay)})`,
+					};
+				})
+			: undefined;
+	const outlineKeyframes =
+		stroked && !strandOffsets
+			? bakeStops(progress, (p) => {
+					const [ax, ay] = scaleAt(p);
+					return [
+						`d: path('${geometryAt(a, b, from, to, p, W / ax, H / ay)}')`,
+						'transform-origin: 0px 0px',
+						`transform: scale(${round(ax)}, ${round(ay)})`,
+					];
+				})
+			: undefined;
+	const vector = local.type === 'shape' ? local : undefined;
+	const pathUnits =
+		vector?.pathData && vector.pathWidth && vector.pathHeight
+			? [vector.pathWidth / W, vector.pathHeight / H]
+			: undefined;
+	// Its own line stays: the vector paints its fill over the outline overlay's
+	// inner half, and only its own line (at its static width) covers that.
+	const silhouetteFill =
+		silhouette &&
+		silhouetteFillsOverlay(local) &&
+		buildSubpathFillOverlay(local)?.paints.length === 1;
+	const units = pathUnits ?? (silhouetteFill ? [1, 1] : undefined);
+	const customKeyframes = units
+		? bakeStops(progress, (p) => [
+				`d: path('${scalePath(geometryAt(a, b, from, to, p, W, H), units[0] ?? 1, units[1] ?? 1)}')`,
+			])
+		: undefined;
+	if (
+		!startDeclarations.length &&
+		!clipKeyframes &&
+		!outlineKeyframes &&
+		!outlineStrandKeyframes &&
+		!(silhouetteFill && customKeyframes)
+	) {
+		return undefined;
+	}
+	return {
+		startDeclarations,
+		endDeclarations,
+		...(clipKeyframes ? { clipKeyframes } : {}),
+		...(outlineKeyframes ? { outlineKeyframes } : {}),
+		...(outlineStrandKeyframes ? { outlineStrandKeyframes } : {}),
+		...(customKeyframes ? { customKeyframes } : {}),
+	};
+}

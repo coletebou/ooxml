@@ -35,6 +35,8 @@
  * @module render/device-pixel-stroke
  */
 
+import type { DeviceBox } from './device-pixel-exact';
+
 /** One device pixel in the enclosing stage's unscaled slide pixels. */
 export const DEVICE_PX_VAR = '--pptx-device-px';
 /** `window.devicePixelRatio`, mirrored onto the root element as a plain number. */
@@ -47,15 +49,171 @@ function cssPx(width: number): string {
 }
 
 /**
+ * One device pixel as a CSS step that is never zero. `round()` with a zero step
+ * is NaN, which would invalidate the whole declaration, so a missing variable
+ * (outside a stage) and the exporters' `0px` pin both resolve to a 1/1000 px
+ * step: authored widths survive to well below anything visible.
+ */
+const STEP = `max(var(${DEVICE_PX_VAR}, 0px), 0.001px)`;
+
+/** The on-screen width {@link screenStrokeWidth} resolves a `px` literal to (CSS expression). */
+function quantizedWidth(widthExpr: string): string {
+	return `max(${STEP}, round(${widthExpr}, ${STEP}))`;
+}
+
+/**
  * The on-screen CSS width of a stroke or border authored `width` slide pixels
- * wide: never under one device pixel inside a stage, the authored width
- * anywhere else. `'0px'` for a missing, zero, negative or non-finite width.
+ * wide, the way PowerPoint paints it: a WHOLE number of device pixels, at least
+ * one. PowerPoint's own exports (measured at 1280, 1366 and 1920 px wide) draw
+ * a line `max(1, round(width_pt * px_per_pt))` pixels thick with no
+ * anti-aliased fringe: 0.25 to 1 pt at 1280 px are all 1 px, 1.5 pt is 2 px,
+ * 2 pt is 3 px; 2.25 pt at 1920 px is 5 px (ties round up). Outside a stage the
+ * authored width is used as is, or `minOutsideStage` when that is larger. `'0px'` for a missing, zero, negative or
+ * non-finite width.
  *
  * Must be written as a CSS PROPERTY (an inline `style`), not an SVG
- * presentation attribute: attributes cannot hold `var()` or `max()`. Keep the
- * plain numeric attribute next to it for consumers that read attributes.
+ * presentation attribute: attributes cannot hold `var()`, `max()` or `round()`.
+ * Keep the plain numeric attribute next to it for consumers that read
+ * attributes.
  */
-export function screenStrokeWidth(width: number | undefined): string {
+export function screenStrokeWidth(width: number | undefined, minOutsideStage = 0): string {
+	if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
+		return '0px';
+	}
+	const quantized = quantizedWidth(cssPx(width));
+	return minOutsideStage > 0
+		? `max(${quantized}, ${outsideStageFloor(minOutsideStage)})`
+		: quantized;
+}
+
+/**
+ * `min` px where no stage is publishing a device pixel (the variable is unset,
+ * or an exporter pinned it to `0px`), nothing inside a stage, where the device
+ * pixel itself is the floor. For lines that have always been at least one slide
+ * pixel wide off screen (connectors): the 1000px / 0.001px thresholds sit far
+ * outside any real device pixel.
+ */
+function outsideStageFloor(min: number): string {
+	const dp = `var(${DEVICE_PX_VAR}, 1000px)`;
+	const px = cssPx(min);
+	return `max(clamp(0px, calc(${dp} - 100px), ${px}), clamp(0px, calc((0.001px - ${dp}) * 1000), ${px}))`;
+}
+
+/**
+ * The shift (a CSS length) that puts a stroke of authored `width`, centred on
+ * `coord` (slide px, along the axis the stroke is thin in), where PowerPoint's
+ * export puts it: the stroke's near edge on the device pixel
+ * `round(coord) - floor(n / 2)` for an `n` device pixel wide stroke, so a 1 px
+ * line fills exactly one pixel row instead of straddling two. Add it as a
+ * `translate` to an axis-aligned stroke only; diagonals stay anti-aliased in
+ * PowerPoint too.
+ *
+ * `coord` is the stroke's position in the STAGE (the scaled element's own
+ * coordinate space), which is where the device-pixel step is defined.
+ */
+export function snappedStrokeShift(coord: number, width: number | undefined): string {
+	if (
+		typeof width !== 'number' ||
+		!Number.isFinite(width) ||
+		width <= 0 ||
+		!Number.isFinite(coord)
+	) {
+		return '0px';
+	}
+	const at = `${Number(coord.toFixed(4))}px`;
+	const full = quantizedWidth(cssPx(width));
+	return `calc(round(${at}, ${STEP}) - round(down, calc(${full} / 2), ${STEP}) + ${full} / 2 - ${at})`;
+}
+
+/**
+ * The `transform` that snaps an axis-aligned stroke of `width` to the device
+ * grid (see {@link snappedStrokeShift}): `axis` is the direction the stroke
+ * RUNS in, so a horizontal line (`'h'`) shifts in y only, a vertical one
+ * (`'v'`) in x only, and an outline whose edges all need it (`'box'`) in both.
+ * `x`/`y` are the stroke's position in the stage.
+ *
+ * A `'box'` given its `size` snaps the far edges too: PowerPoint rounds every
+ * edge on its own, so the right and bottom edges land on `round(x + w)` and
+ * `round(y + h)`, not at the near edge's shift plus the authored size. That is
+ * a translate to the near edge and a scale by `(w + farShift - nearShift) / w`:
+ * a fraction of a device pixel over the whole rectangle, so the stroke width
+ * stays within a fraction of a percent. Without a size only the top and left
+ * edges are snapped.
+ *
+ * `x`, `y` and `size` are the element's box as the model lays it out (whole
+ * pixels). `exact` is the box PowerPoint positions it at (see
+ * {@link exactDeviceBox}); the snap rounds THAT, so a stroke lands on the same
+ * device pixel as in PowerPoint instead of one off whenever the model's whole
+ * pixel differs from the real position.
+ */
+export function snappedStrokeTransform(
+	axis: 'h' | 'v' | 'box',
+	x: number,
+	y: number,
+	width: number | undefined,
+	size?: { width: number; height: number },
+	exact?: DeviceBox,
+	alongDashed = false,
+): string | undefined {
+	if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
+		return undefined;
+	}
+	const ex = exact?.x ?? x;
+	const ey = exact?.y ?? y;
+	// A solid line is anti-aliased along its own axis; a DASHED one starts its
+	// pattern on the snapped device pixel (a pixel centre for an odd pen), so a
+	// hairline `sysDot` comes out as the uniform half-intensity line PowerPoint paints.
+	const dx = axis === 'h' && !alongDashed ? '0px' : nearEdgeShift(x, ex, width);
+	const dy = axis === 'v' && !alongDashed ? '0px' : nearEdgeShift(y, ey, width);
+	const translate = `translate(${dx}, ${dy})`;
+	if (axis !== 'box' || !size) {
+		return translate;
+	}
+	const sx = farEdgeScale(ex, exact?.width ?? size.width, size.width, width);
+	const sy = farEdgeScale(ey, exact?.height ?? size.height, size.height, width);
+	return sx === '1' && sy === '1' ? translate : `${translate} scale(${sx}, ${sy})`;
+}
+
+/** The shift from the model's `coord` to where the stroke at `exact` snaps to. */
+function nearEdgeShift(coord: number, exact: number, width: number): string {
+	const shift = snappedStrokeShift(exact, width);
+	const offset = Number((exact - coord).toFixed(4));
+	return offset === 0 ? shift : `calc(${shift} + ${offset}px)`;
+}
+
+/**
+ * The scale that moves a box's far edge, laid out `modelExtent` from its near
+ * edge, onto the device pixel PowerPoint snaps `exact + exactExtent` to.
+ */
+function farEdgeScale(
+	exact: number,
+	exactExtent: number,
+	modelExtent: number,
+	width: number,
+): string {
+	if (
+		!Number.isFinite(exact) ||
+		!Number.isFinite(exactExtent) ||
+		!Number.isFinite(modelExtent) ||
+		modelExtent <= 0
+	) {
+		return '1';
+	}
+	const near = snappedStrokeShift(exact, width);
+	const far = snappedStrokeShift(exact + exactExtent, width);
+	return `calc((${Number(exactExtent.toFixed(4))}px + ${far} - ${near}) / ${Number(modelExtent.toFixed(4))}px)`;
+}
+
+/**
+ * The on-screen CSS width of a `border-width`: never under one device pixel
+ * inside a stage, the authored width anywhere else. Unlike
+ * {@link screenStrokeWidth} it is NOT rounded to whole device pixels: Chromium
+ * snaps a CSS border to whole pixels in the element's own (unscaled) layout
+ * space, and a width rounded to a device pixel of a scaled stage (0.94 px at a
+ * scale of 1.0667, say) lands under one layout pixel there and can drop out or
+ * move a row, where `max()` leaves the snap to the browser.
+ */
+export function screenBorderWidth(width: number | undefined): string {
 	if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
 		return '0px';
 	}
@@ -63,11 +221,11 @@ export function screenStrokeWidth(width: number | undefined): string {
 }
 
 /**
- * A CSS `border` shorthand whose width is {@link screenStrokeWidth}; a missing
+ * A CSS `border` shorthand whose width is {@link screenBorderWidth}; a missing
  * `style` is `solid`.
  */
 export function screenBorder(width: number, style: string | undefined, color: string): string {
-	return `${screenStrokeWidth(width)} ${style ?? 'solid'} ${color}`;
+	return `${screenBorderWidth(width)} ${style ?? 'solid'} ${color}`;
 }
 
 interface DevicePixelRatioWindow {

@@ -9,7 +9,34 @@ import {
 	resolveShapeLockContainer,
 } from './shape-lock-containers';
 
+/** What an element's actions need from the part being saved to write their relationships. */
+export interface ActionRelationshipContext {
+	readonly resolveHyperlinkRelationshipId: (
+		target: string,
+		forceExternal?: boolean,
+	) => string | undefined;
+	/** The part's relationships, `Id` to `Target`. */
+	readonly getSlideRelationshipMap: () => Map<string, string>;
+	/** The `Target`, from the part being saved, of the deck's slide at `index` (a slide jump). */
+	readonly slideTargetAt?: ((index: number) => string | undefined) | undefined;
+}
+
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
+	/**
+	 * Report a slide jump whose index names no slide of the deck being saved.
+	 * It is not written: PowerPoint does not open a file with a slide jump that
+	 * has no slide relationship.
+	 */
+	protected reportMissingSlideJumpTarget(elementId: string | undefined, index: number): void {
+		this.compatibilityService?.reportWarning({
+			code: 'SAVE_SLIDE_JUMP_TARGET_MISSING',
+			message: `A slide jump to slide index ${index} has no such slide in the saved deck; the link was not written.`,
+			severity: 'warning',
+			scope: 'element',
+			...(elementId ? { elementId } : {}),
+		});
+	}
+
 	/**
 	 * Write or remove a single `a:hlinkClick` / `a:hlinkHover` node on
 	 * a `p:cNvPr` parent.
@@ -18,15 +45,39 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		cNvPr: XmlObject,
 		nodeName: string,
 		action: PptxAction | undefined,
-		resolveHyperlinkRelationshipId: (target: string, forceExternal?: boolean) => string | undefined,
+		links: ActionRelationshipContext,
+		elementId?: string,
 	): void {
 		if (!action) {
 			delete cNvPr[nodeName];
 			return;
 		}
 		const node: XmlObject = {};
+		// Where the action points: its address, or for a slide jump made in the editor (no address
+		// yet) the slide at its index.
+		const slideJumpIndex =
+			/^ppaction:\/\/hlinksldjump\b/iu.test(action.action ?? '') &&
+			typeof action.targetSlideIndex === 'number'
+				? action.targetSlideIndex
+				: undefined;
+		const url =
+			action.url?.trim() ||
+			(slideJumpIndex !== undefined ? links.slideTargetAt?.(slideJumpIndex) : undefined);
+		if (!url && slideJumpIndex !== undefined && links.slideTargetAt) {
+			// `r:id=""` on a slide jump makes PowerPoint refuse the file (unlike the
+			// relationship-less actions below), so the action is left out and reported.
+			this.reportMissingSlideJumpTarget(elementId, slideJumpIndex);
+			delete cNvPr[nodeName];
+			return;
+		}
 		let rId = action.rId;
-		if (!rId && action.url) {
+		// A relationship kept from load stands only while it still points there: an address edited
+		// since, or an element moved from another slide, carries an `rId` that names another target
+		// or none on this part.
+		if (rId && url && links.getSlideRelationshipMap().get(rId) !== url) {
+			rId = undefined;
+		}
+		if (!rId && url) {
 			// `ppaction://program` / `ppaction://hlinkfile` / `ppaction://hlinkpres`
 			// are ALWAYS an external destination (a run-program command, an
 			// external file, or another presentation), never a same-package
@@ -37,7 +88,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			const forceExternal = /^ppaction:\/\/(program|hlinkfile|hlinkpres)\b/iu.test(
 				action.action ?? '',
 			);
-			rId = resolveHyperlinkRelationshipId(action.url, forceExternal) ?? undefined;
+			rId = links.resolveHyperlinkRelationshipId(url, forceExternal) ?? undefined;
 		}
 		// `r:id` is present on every real-PowerPoint (COM-verified) `a:hlinkClick`/
 		// `a:hlinkHover`, even one with no backing relationship at all
@@ -133,7 +184,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 	protected serializeElementActions(
 		shape: XmlObject,
 		el: PptxElement,
-		resolveHyperlinkRelationshipId: (target: string, forceExternal?: boolean) => string | undefined,
+		links: ActionRelationshipContext,
 	): void {
 		const key = this.getTreeBucketKeyForElementType(el.type);
 		const cNvPr = this.getCnvPrNode(shape, key);
@@ -146,8 +197,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const actionHover =
 			'actionHover' in el ? (el.actionHover as PptxAction | undefined) : undefined;
 
-		this.serializeSingleAction(cNvPr, 'a:hlinkClick', actionClick, resolveHyperlinkRelationshipId);
-		this.serializeSingleAction(cNvPr, 'a:hlinkHover', actionHover, resolveHyperlinkRelationshipId);
+		this.serializeSingleAction(cNvPr, 'a:hlinkClick', actionClick, links, el.id);
+		this.serializeSingleAction(cNvPr, 'a:hlinkHover', actionHover, links, el.id);
 
 		// "Mark as decorative" (issue G16): piggybacks on this call site so the
 		// existing p:cNvPr resolution above is reused rather than requiring a

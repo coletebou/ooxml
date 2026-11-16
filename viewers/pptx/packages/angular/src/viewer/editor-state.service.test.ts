@@ -1,4 +1,4 @@
-import { Injector, runInInjectionContext } from '@angular/core';
+import { Injector, runInInjectionContext, signal } from '@angular/core';
 import { buildInlineTextCommitPatch, SLIDE_TEMPLATES } from 'ooxml-ui/pptx';
 import type { ChartPptxElement, PptxElement, PptxSlide } from 'pptx-viewer-core';
 import { createChartElement } from 'pptx-viewer-core';
@@ -37,6 +37,90 @@ function service(): EditorStateService {
 	return svc;
 }
 
+describe('undo of Home > Layout and of New Slide from a layout', () => {
+	const L1 = 'ppt/slideLayouts/slideLayout1.xml';
+	const L2 = 'ppt/slideLayouts/slideLayout2.xml';
+	const L3 = 'ppt/slideLayouts/slideLayout3.xml';
+
+	/** The loader signals every undo snapshot reads (the theme and each master's theme part). */
+	function themeSignals() {
+		return {
+			theme: signal(undefined),
+			themeColorMap: signal(undefined),
+			slideMasters: signal([]),
+			themeOptions: signal([]),
+		};
+	}
+
+	/** The core contract: the slide at `index` is replaced in the array it is given, and returned. */
+	function inPlaceService() {
+		const svc = new EditorStateService();
+		svc.setSlides([{ ...slide('s1', []), layoutPath: L1 }]);
+		const handler = {
+			applyLayoutToSlide: vi.fn(async (index: number, layoutPath: string, slides: PptxSlide[]) => {
+				const updated = { ...slides[index]!, layoutPath, layoutName: 'Remapped' };
+				slides[index] = updated;
+				return updated;
+			}),
+			getTemplateElementsForSlide: vi.fn().mockResolvedValue([]),
+		};
+		const headerFooter = signal({});
+		Object.assign(svc, { loader: { getHandler: () => handler, headerFooter, ...themeSignals() } });
+		return svc;
+	}
+
+	it('one Undo takes back one layout pick', async () => {
+		const svc = inPlaceService();
+		await svc.applyLayout(0, L2);
+		await svc.applyLayout(0, L3);
+		svc.undo();
+		expect(svc.slides()[0]?.layoutPath).toBe(L2);
+		svc.undo();
+		expect(svc.slides()[0]?.layoutPath).toBe(L1);
+		expect(svc.canUndo()).toBeFalsy();
+	});
+
+	it('keeps an edit made to the new slide while its layout loads', async () => {
+		const svc = new EditorStateService();
+		svc.setSlides([{ ...slide('s1', []), layoutPath: L1 }]);
+		let layoutArrives: () => void = () => {};
+		const handler = {
+			applyLayoutToSlide: vi.fn(async (index: number, layoutPath: string, slides: PptxSlide[]) => {
+				await new Promise<void>((resolve) => {
+					layoutArrives = resolve;
+				});
+				return { ...slides[index]!, layoutPath, layoutName: 'Remapped' };
+			}),
+			getTemplateElementsForSlide: vi.fn().mockResolvedValue([element('layout-art')]),
+		};
+		Object.assign(svc, {
+			loader: { getHandler: () => handler, headerFooter: signal({}), ...themeSignals() },
+		});
+
+		svc.addSlide(0, L2);
+		await vi.waitFor(() => expect(handler.applyLayoutToSlide).toHaveBeenCalledOnce());
+		svc.slides.set(
+			svc
+				.slides()
+				.map((each, index) => (index === 1 ? { ...each, elements: [element('typed')] } : each)),
+		);
+		layoutArrives();
+		const inserted = () => svc.slides()[1]!;
+		await vi.waitFor(() => expect(svc.templateElementsBySlideId()[inserted().id]).toHaveLength(1));
+		expect(inserted().elements.map((item) => item.id)).toStrictEqual(['typed']);
+		expect(inserted().layoutName).toBeUndefined();
+	});
+
+	it('one Undo takes back a new slide from a layout', async () => {
+		const svc = inPlaceService();
+		svc.addSlide(0, L2);
+		await vi.waitFor(() => expect(svc.slides()[1]?.layoutName).toBe('Remapped'));
+		svc.undo();
+		expect(svc.slides().map((each) => each.id)).toStrictEqual(['s1']);
+		expect(svc.canUndo()).toBeFalsy();
+	});
+});
+
 describe('layout artwork hydration', () => {
 	it('hydrates a newly inserted slide before any save or reload', async () => {
 		const svc = service();
@@ -49,7 +133,15 @@ describe('layout artwork hydration', () => {
 			})),
 			getTemplateElementsForSlide: vi.fn().mockResolvedValue(artwork),
 		};
-		Object.assign(svc, { loader: { getHandler: () => handler } });
+		// The undo snapshot records the loader's theme and masters, so the stub has them (none loaded).
+		Object.assign(svc, {
+			loader: {
+				getHandler: () => handler,
+				theme: () => undefined,
+				themeColorMap: () => undefined,
+				slideMasters: () => [],
+			},
+		});
 
 		svc.addSlide(0, 'layout-new');
 		const insertedId = svc.slides()[1].id;
@@ -69,7 +161,15 @@ describe('layout artwork hydration', () => {
 			applyLayoutToSlide: vi.fn().mockResolvedValue(updated),
 			getTemplateElementsForSlide: vi.fn().mockResolvedValue(artwork),
 		};
-		Object.assign(svc, { loader: { getHandler: () => handler } });
+		// The undo snapshot records the loader's theme and masters, so the stub has them (none loaded).
+		Object.assign(svc, {
+			loader: {
+				getHandler: () => handler,
+				theme: () => undefined,
+				themeColorMap: () => undefined,
+				slideMasters: () => [],
+			},
+		});
 		svc.templateElementsBySlideId.set({ s1: [element('layout-old-art')] });
 
 		await svc.applyLayout(0, 'layout-new');
@@ -92,7 +192,15 @@ describe('layout artwork hydration', () => {
 					}),
 			),
 		};
-		Object.assign(svc, { loader: { getHandler: () => handler } });
+		// The undo snapshot records the loader's theme and masters, so the stub has them (none loaded).
+		Object.assign(svc, {
+			loader: {
+				getHandler: () => handler,
+				theme: () => undefined,
+				themeColorMap: () => undefined,
+				slideMasters: () => [],
+			},
+		});
 		const applying = svc.applyLayout(0, 'layout-new');
 		await vi.waitFor(() => expect(handler.getTemplateElementsForSlide).toHaveBeenCalledWith('s1'));
 		svc.slides.set([slide('replacement', [])]);
@@ -115,7 +223,9 @@ describe('editorStateService align', () => {
 				canvasSize: () => ({ width: 960, height: 540 }),
 				headerFooter: () => ({}),
 				theme: () => undefined,
+				themeColorMap: () => undefined,
 				getHandler: () => null,
+				slideMasters: () => [],
 			},
 		});
 		svc.setSlides([slide('s1', [element('a', 30, 20), element('b', 300, 200)])]);
@@ -469,6 +579,17 @@ describe('editorStateService', () => {
 		expect(svc.slides().map((s) => s.slideNumber)).toStrictEqual([1, 2, 3]);
 		svc.undo();
 		expect(svc.slides()).toHaveLength(2);
+	});
+
+	it('shows the slide it adds through the viewer navigation, wherever New Slide came from', () => {
+		const svc = deck();
+		const shown: number[] = [];
+		svc.bindSlideNavigation((index) => shown.push(index));
+		svc.addSlide(0);
+		svc.addSlide(2);
+		svc.addSlide(9);
+		expect(shown).toStrictEqual([1, 3, 4]);
+		expect(svc.slides()).toHaveLength(5);
 	});
 
 	it('inserts a template slide after the given index with elements and undo support', () => {

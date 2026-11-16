@@ -1,4 +1,4 @@
-import type { CanvasSize } from 'ooxml-ui/pptx';
+import type { CanvasSize, SlideFindHighlights } from 'ooxml-ui/pptx';
 import type { PptxChartData, PptxComment, PptxSlide } from 'pptx-viewer-core';
 
 /**
@@ -40,11 +40,22 @@ export interface SlideStageProps {
 	 * so its background would hide the whole morph behind a flat slab.
 	 */
 	transparentBackground?: boolean;
+	/**
+	 * Keep the `data-element-id` markers on an otherwise static stage.
+	 *
+	 * A static stage (neither `interactive` nor `presenting`: the rail, host
+	 * thumbnails, sorter, previews, non-Morph transition layers) drops them so
+	 * element ids stay unique to the canvas (shared `stageKeepsElementIds`). Only
+	 * the Morph transition layers set this: their keyframe CSS selects by id, and
+	 * the host hides its own stage while the overlay is mounted.
+	 */
+	preserveElementIds?: boolean;
 	ontablecellcommit?: (
 		elementId: string,
 		rowIndex: number,
 		cellIndex: number,
 		text: string,
+		end?: import('ooxml-ui/pptx').TableCellEditEnd,
 	) => void;
 	onsmartartnodecommit?: (elementId: string, nodeId: string, text: string) => void;
 	onsmartartnodefill?: (elementId: string, nodeId: string, fill: string) => void;
@@ -87,11 +98,14 @@ export interface SlideCanvasProps {
 	editingElementId?: string | null;
 	/** Forwarded to `SlideStage`; see `SlideStageProps.selectedElementIds`. */
 	selectedElementIds?: readonly string[];
+	/** The Find bar's matches, marked in the elements' text (`findTextHighlightsByElement`). */
+	findHighlights?: SlideFindHighlights;
 	ontablecellcommit?: (
 		elementId: string,
 		rowIndex: number,
 		cellIndex: number,
 		text: string,
+		end?: import('ooxml-ui/pptx').TableCellEditEnd,
 	) => void;
 	onsmartartnodecommit?: (elementId: string, nodeId: string, text: string) => void;
 	onsmartartnodefill?: (elementId: string, nodeId: string, fill: string) => void;

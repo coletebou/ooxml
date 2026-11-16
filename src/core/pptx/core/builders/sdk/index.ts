@@ -77,6 +77,18 @@ export { setChartSeriesGradient, setChartDataPointGradient } from './chart-gradi
 export { toChartGradientFill } from './chart-gradient-input';
 export { setChartGroupOptions, setChartAreaFormat } from './chart-layout-operations';
 export type { ChartGroupOptionsInput, ChartAreaFormatInput } from './chart-layout-input';
+export type {
+	ChartComboSeriesType,
+	ChartContentInput,
+	ChartDataLabelsInput,
+	ChartDisplayBlanksAs,
+	ChartFontInput,
+	ChartSeriesContentInput,
+	ChartSeriesLineInput,
+	ChartSeriesMarkerInput,
+	ChartTitleRunInput,
+} from './chart-content-input';
+export type { ChartAxisLineInput } from './chart-axis-input';
 export {
 	withChartElementFormat,
 	resetChartElementFormat,
@@ -109,6 +121,12 @@ export {
 	isChartSeriesOnSecondaryAxis,
 	withChartSeriesOnSecondaryAxis,
 } from './chart-series-axis-operations';
+export {
+	chartSeriesErrorBarsView,
+	chartSupportsErrorBars,
+	withChartSeriesErrorBars,
+} from './chart-error-bar-operations';
+export { chartSeriesTrendlinesView, withChartSeriesTrendline } from './chart-trendline-operations';
 
 // Chart drawing-overlay (c:userShapes) operations
 export {
@@ -233,6 +251,12 @@ export type {
 	FillInput,
 	StrokeInput,
 	ShadowInput,
+	InnerShadowInput,
+	GlowInput,
+	ReflectionInput,
+	LineEndInput,
+	PictureTileInput,
+	RelativeRectInput,
 	TextStyleInput,
 	TextSegmentInput,
 	TextOptions,
@@ -243,6 +267,8 @@ export type {
 	TableInput,
 	TableRowInput,
 	TableCellInput,
+	TableCellBordersInput,
+	TableCellBorderInput,
 	TableOptions,
 	ChartSeriesInput,
 	ChartGradientInput,
@@ -256,7 +282,13 @@ export type {
 	TransitionInput,
 	AnimationInput,
 	PresentationOptions,
+	PresentationAppPropertiesInput,
 	PresentationThemeInput,
+	ShapeDefaultsInput,
+	ElementFlipInput,
+	TextBodyInput,
+	LinkInput,
+	CustomPathInput,
 } from './types';
 
 export { importSlidePackage } from './import-slide-package';

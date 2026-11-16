@@ -18,6 +18,8 @@ import {
 	usedRange,
 } from '../../index';
 import { buildChart, evaluateRef } from './insert-chart-model';
+import { xlsxChartExSpace } from '../../edit/chart-ex';
+import { chartExSummaryFromModel } from '../../../chart';
 
 /** The chart types Insert Chart offers, in Office's order, with their English names. */
 export const INSERT_CHART_TYPES: ReadonlyArray<readonly [type: ChartType, label: string]> = [
@@ -143,10 +145,27 @@ export async function readEmbeddedChart(bytes: Uint8Array): Promise<EmbeddedChar
 		return undefined;
 	}
 	for (const [index, sheet] of workbook.sheets.entries()) {
-		const chart = sheet.drawings.find(
-			(drawing): drawing is ChartObject => drawing.kind === 'chart',
+		const drawingIndex = sheet.drawings.findIndex(
+			(d) => d.kind === 'chart' || (d.kind === 'unsupported' && d.chartEx),
 		);
+		const drawing = sheet.drawings[drawingIndex];
+		let chart =
+			drawing?.kind === 'chart'
+				? drawing
+				: drawing?.kind === 'unsupported'
+					? drawing.chartEx
+					: undefined;
 		if (!chart) continue;
+		if (drawing?.kind === 'unsupported') {
+			try {
+				const summary = chartExSummaryFromModel(
+					xlsxChartExSpace(workbook, index, drawingIndex),
+				).summary;
+				if (summary) chart = { ...chart, ...summary };
+			} catch {
+				/* Unavailable or unsupported sources retain their cached presentation. */
+			}
+		}
 		const used = usedRange(sheet);
 		const height = Math.min(used ? used.end.row + 1 : 0, MAX_GRID_ROWS);
 		const width = Math.min(used ? used.end.col + 1 : 0, MAX_GRID_COLS);

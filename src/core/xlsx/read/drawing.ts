@@ -1,3 +1,6 @@
+import { parsePictureLayout } from '../../drawingml/picture-layout';
+import { parsePictureEffects } from '../../drawingml/picture-effects';
+import { parsePictureCrop } from '../../drawingml/picture-crop';
 import { NS, elements, first, parseXml, relAttr, type XmlElement } from '../../xml/index';
 import type { DrawingAnchor, DrawingObject } from '../model';
 import { parseChart } from './chart';
@@ -6,6 +9,8 @@ import { readChartPaletteId, readChartStylePart } from './chart-colors';
 import type { SourceIndex } from './package';
 import { readSlicerFrame } from '../slicer/frame';
 import { SMART_ART_GRAPHIC_URI, smartArtFrame } from './smart-art';
+import { readFormControlFrame } from './form-control';
+import { readShapeNode } from './shape';
 import { att, selfContainedXml } from './xml-util';
 
 const xdr = (parent: ParentNode | null | undefined, local: string) => first(parent, local, NS.xdr);
@@ -86,6 +91,11 @@ export function parseDrawing(
 	const rels = source.rels(partName);
 	const out: DrawingObject[] = [];
 	for (const anchorEl of elements(root)) {
+		if (anchorEl.localName === 'AlternateContent') {
+			const control = readFormControlFrame(anchorEl, readAnchor);
+			if (control) out.push(control);
+			continue;
+		}
 		if (!['twoCellAnchor', 'oneCellAnchor', 'absoluteAnchor'].includes(anchorEl.localName ?? ''))
 			continue;
 		const anchor = readAnchor(anchorEl);
@@ -100,7 +110,8 @@ export function parseDrawing(
 		const cNvPr = nonVisual(content);
 		const name = att(cNvPr, 'name');
 		if (content.localName === 'pic') {
-			const blip = first(xdr(content, 'blipFill'), 'blip', NS.a);
+			const blipFill = xdr(content, 'blipFill');
+			const blip = first(blipFill, 'blip', NS.a);
 			const rel = rels.get(relAttr(blip, 'embed') ?? '');
 			const target = rel ? source.target(partName, rel) : undefined;
 			if (!target || !source.has(target)) {
@@ -110,6 +121,10 @@ export function parseDrawing(
 			const image: DrawingObject = {
 				kind: 'image',
 				anchor,
+				sourceXml: selfContainedXml(anchorEl),
+				...(blipFill ? { layout: parsePictureLayout(blipFill) } : {}),
+				...(parsePictureCrop(blipFill) ? { crop: parsePictureCrop(blipFill)! } : {}),
+				...(parsePictureEffects(blip).length ? { effects: parsePictureEffects(blip) } : {}),
 				partName: target,
 				contentType: source.contentType(target) ?? 'application/octet-stream',
 			};
@@ -132,6 +147,7 @@ export function parseDrawing(
 					if (id !== undefined) chart.colorPalette = id;
 					const style = readChartStylePart(source, target, warn);
 					if (style) chart.styleDefinition = style;
+					if (chart.editBlocked) warn(chart.editBlocked);
 					out.push(chart);
 				} catch {
 					warn(`Chart ${target} could not be read; it is kept but not shown.`);
@@ -174,7 +190,8 @@ export function parseDrawing(
 				continue;
 			}
 		}
-		out.push(unsupported(describe(content)));
+		const shape = readShapeNode(content);
+		out.push({ ...unsupported(describe(content)), ...(shape ? { shape } : {}) });
 	}
 	return out;
 }

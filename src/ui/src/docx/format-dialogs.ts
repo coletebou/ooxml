@@ -1,4 +1,5 @@
-import type { DocumentModel } from 'ooxml-core/docx';
+import type { DocumentModel, ThemeCatalog } from 'ooxml-core/docx';
+import { createChartDataDialog, createChartTypeDialog } from './chart-dialogs';
 import type { EditorView } from 'prosemirror-view';
 import { createFontDialog, type FormatDialog } from './font-dialog';
 import type { EditorLocale } from './localization';
@@ -20,9 +21,17 @@ import { createZoomDialog, type ZoomHost } from './zoom-dialog';
 import { createTablePropertiesDialog } from './table-properties-dialog';
 import { createLineNumberDialog, type LineNumberHost } from './line-number-dialog';
 import { createDropCapDialog } from './drop-cap-dialog';
+import { createConvertNotesDialog, type ConvertNotesHost } from './convert-notes-dialog';
+import { createSplitCellsDialog } from './split-cells-dialog';
+import { createPasteSpecialDialog } from './paste-special-dialog';
 import { createColumnsDialog, type ColumnsHost } from './columns-dialog';
 import { createMultilevelListDialog } from './multilevel-list-dialog';
 import { createReviewOptionsDialog } from './review-options-dialog';
+import { createRestrictEditingPane, type RestrictEditingHost } from './restrict-editing-pane';
+import {
+	createDocumentInspectorDialog,
+	type DocumentInspectorHost,
+} from './document-inspector-dialog';
 
 export type FormatDialogKind =
 	| 'font'
@@ -34,6 +43,7 @@ export type FormatDialogKind =
 	| 'zoom'
 	| 'borders'
 	| 'tableProperties'
+	| 'splitCells'
 	| 'lineNumbers'
 	| 'textBox'
 	| 'contentControl'
@@ -42,9 +52,16 @@ export type FormatDialogKind =
 	| 'pageBorders'
 	| 'watermark'
 	| 'dropCap'
+	| 'convertNotes'
 	| 'columns'
 	| 'multilevelList'
-	| 'tracking';
+	| 'tracking'
+	| 'restrictEditing'
+	| 'insertChart'
+	| 'changeChartType'
+	| 'chartData'
+	| 'pasteSpecial'
+	| 'inspectDocument';
 
 export interface FormatDialogsHost {
 	view(): EditorView | undefined;
@@ -62,6 +79,14 @@ export interface FormatDialogsHost {
 	pageBorders?: Omit<PageBordersHost, 'restoreFocus'>;
 	watermark?: Omit<WatermarkHost, 'restoreFocus'>;
 	columns?: Omit<ColumnsHost, 'restoreFocus'>;
+	/** References > Footnotes > Convert Notes. */
+	convertNotes?: Omit<ConvertNotesHost, 'restoreFocus'>;
+	/** Review > Restrict Editing: the document's protection and how to change it. */
+	restrictEditing?: Omit<RestrictEditingHost, 'view'>;
+	/** File > Info > Inspect Document: removing what the inspector finds. */
+	inspector?: Omit<DocumentInspectorHost, 'model' | 'restoreFocus'>;
+	/** The document theme, for chart previews. */
+	theme?(): ThemeCatalog | undefined;
 }
 
 /** The Font and Paragraph dialogs opened from the ribbon's group launchers. */
@@ -69,6 +94,7 @@ export class FormatDialogs {
 	private readonly dialogs: Record<FormatDialogKind, FormatDialog>;
 
 	constructor(host: FormatDialogsHost) {
+		const charts = { view: () => host.view(), theme: () => host.theme?.() };
 		this.dialogs = {
 			font: createFontDialog(
 				() => host.view(),
@@ -98,6 +124,8 @@ export class FormatDialogs {
 			}),
 			borders: createBordersDialog(() => host.view()),
 			tableProperties: createTablePropertiesDialog(() => host.view()),
+			splitCells: createSplitCellsDialog(() => host.view()),
+			pasteSpecial: createPasteSpecialDialog(() => host.view()),
 			watermark: createWatermarkDialog({
 				...(host.watermark ?? { current: () => undefined, canEdit: () => false, apply: () => {} }),
 				restoreFocus: () => focusView(host.view()),
@@ -123,6 +151,14 @@ export class FormatDialogs {
 				restoreFocus: () => focusView(host.view()),
 			}),
 			dropCap: createDropCapDialog(() => host.view()),
+			convertNotes: createConvertNotesDialog({
+				...(host.convertNotes ?? {
+					counts: () => ({ footnotes: 0, endnotes: 0 }),
+					canEdit: () => false,
+					apply: () => {},
+				}),
+				restoreFocus: () => focusView(host.view()),
+			}),
 			columns: createColumnsDialog({
 				...(host.columns ?? { section: () => undefined, canEdit: () => false, apply: () => {} }),
 				restoreFocus: () => focusView(host.view()),
@@ -132,10 +168,31 @@ export class FormatDialogs {
 				() => host.model(),
 				() => host.canDefineList?.() ?? true,
 			),
+			insertChart: createChartTypeDialog(charts, false),
+			changeChartType: createChartTypeDialog(charts, true),
+			chartData: createChartDataDialog(charts),
+			restrictEditing: createRestrictEditingPane({
+				view: () => (host.reviewView ? host.reviewView() : host.view()),
+				protection: () => host.restrictEditing?.protection(),
+				apply: (protection) => host.restrictEditing?.apply(protection),
+				user: () => host.restrictEditing?.user() ?? 'Author',
+				highlight: () => host.restrictEditing?.highlight() ?? true,
+				setHighlight: (on) => host.restrictEditing?.setHighlight(on),
+			}),
+			inspectDocument: createDocumentInspectorDialog({
+				model: () => host.model(),
+				...(host.inspector ?? { blocked: () => 'readOnly', remove: () => false }),
+				restoreFocus: () => focusView(host.view()),
+			}),
 			tracking: createReviewOptionsDialog(() =>
 				host.reviewView ? host.reviewView() : host.view(),
 			),
 		};
+	}
+
+	/** The Restrict Editing pane docks beside the page; the shell mounts it, not the frame. */
+	get restrictEditingPane(): HTMLElement {
+		return this.dialogs.restrictEditing.element;
 	}
 
 	get elements(): HTMLElement[] {

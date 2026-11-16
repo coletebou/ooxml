@@ -14,7 +14,11 @@
  */
 import { evaluateGuides } from 'ooxml-core/pptx';
 
-import type { WarpCurveSegment } from './text-warp-preset-definitions';
+import type {
+	WarpChainPart,
+	WarpCurveSegment,
+	WarpCurveXExtent,
+} from './text-warp-preset-definitions';
 import { WARP_PRESET_DEFINITIONS } from './text-warp-preset-definitions';
 
 /** OOXML angles are stored in 60,000ths of a degree. */
@@ -73,6 +77,7 @@ function sampleArc(
 	stAngDeg: number,
 	swAngDeg: number,
 	u: number,
+	xRange: readonly [number, number] = [0, BOX],
 ): number {
 	if (wR === 0 || hR === 0) {
 		return penY;
@@ -81,7 +86,7 @@ function sampleArc(
 	const swAng = angleToRadians(swAngDeg);
 	const cx = penX - wR * Math.cos(stAng);
 	const cy = penY - hR * Math.sin(stAng);
-	const targetX = u * BOX;
+	const targetX = xRange[0] + u * (xRange[1] - xRange[0]);
 	const cosVal = Math.max(-1, Math.min(1, (targetX - cx) / wR));
 
 	const sign = swAng < 0 ? -1 : 1;
@@ -115,9 +120,44 @@ function sampleArc(
 	return cy + hR * Math.sin(angle);
 }
 
-function sampleSegment(seg: WarpCurveSegment, u: number, vars: Map<string, number>): number {
+function sampleChain(
+	parts: readonly WarpChainPart[],
+	u: number,
+	vars: Map<string, number>,
+): number {
+	const x = u * BOX;
+	const last = parts.length - 1;
+	for (let i = 0; i <= last; i++) {
+		const part = parts[i];
+		if (!part) {
+			continue;
+		}
+		const x0 = vars.get(part.x0) ?? 0;
+		const x1 = vars.get(part.x1) ?? BOX;
+		if (x <= x1 || i === last) {
+			const span = x1 - x0;
+			const local = span > 0 ? Math.max(0, Math.min(1, (x - x0) / span)) : 0;
+			return sampleSegment(part.seg, local, vars);
+		}
+	}
+	return 0;
+}
+
+/**
+ * `xRange` is the box-unit span the path covers: an arc is placed at its own
+ * absolute x, so a path that only spans part of the width (the inner ellipse
+ * of a pour preset) needs it. Other segment kinds are relative to their path.
+ */
+function sampleSegment(
+	seg: WarpCurveSegment,
+	u: number,
+	vars: Map<string, number>,
+	xRange?: readonly [number, number],
+): number {
 	const g = (name: string): number => vars.get(name) ?? 0;
 	switch (seg.type) {
+		case 'chain':
+			return sampleChain(seg.parts, u, vars);
 		case 'line':
 			return sampleLine(g(seg.startY), g(seg.endY), u);
 		case 'quad':
@@ -133,6 +173,7 @@ function sampleSegment(seg: WarpCurveSegment, u: number, vars: Map<string, numbe
 				g(seg.stAng),
 				g(seg.swAng),
 				u,
+				xRange,
 			);
 		default:
 			return 0;
@@ -163,14 +204,67 @@ export function sampleWarpPresetCurve(
 	}
 	const adjustments = new Map<string, number>([
 		['adj', adj ?? def.defaultAdj],
-		['adj2', adj2 ?? 0],
+		['adj2', adj2 ?? def.defaultAdj2 ?? 0],
 	]);
 	const vars = evaluateGuides([...def.gdLst], { w: BOX, h: BOX }, adjustments);
 	const clampedU = Math.max(0, Math.min(1, u));
-	return {
-		top: sampleSegment(def.top, clampedU, vars) / BOX,
-		bottom: sampleSegment(def.bottom, clampedU, vars) / BOX,
+	const range = (extent: WarpCurveXExtent | undefined): readonly [number, number] => {
+		const [start, end] = resolveXExtent(extent, vars);
+		return [start * BOX, end * BOX];
 	};
+	return {
+		top: sampleSegment(def.top, clampedU, vars, range(def.topX)) / BOX,
+		bottom: sampleSegment(def.bottom, clampedU, vars, range(def.bottomX)) / BOX,
+	};
+}
+
+/** Where the top and bottom paths start and end, each a `[start, end]` fraction of box width. */
+export interface SampledWarpXExtent {
+	top: readonly [number, number];
+	bottom: readonly [number, number];
+}
+
+const FULL_WIDTH: readonly [number, number] = [0, 1];
+
+function resolveXExtent(
+	extent: WarpCurveXExtent | undefined,
+	vars: Map<string, number>,
+): readonly [number, number] {
+	if (!extent) {
+		return FULL_WIDTH;
+	}
+	const start = vars.get(extent.startX);
+	const end = vars.get(extent.endX);
+	if (start === undefined || end === undefined || !(end > start)) {
+		return FULL_WIDTH;
+	}
+	return [Math.max(0, start / BOX), Math.min(1, end / BOX)];
+}
+
+/**
+ * The horizontal extent of `preset`'s top and bottom paths. Every path spans
+ * the full width except where a definition says otherwise (`textPlain` away
+ * from its default `adj`). Returns `undefined` when `preset` has no
+ * transcribed definition.
+ */
+export function sampleWarpPresetXExtent(
+	preset: string,
+	adj: number | undefined,
+	adj2: number | undefined,
+): SampledWarpXExtent | undefined {
+	const def = WARP_PRESET_DEFINITIONS[preset];
+	if (!def) {
+		return undefined;
+	}
+	if (!def.topX && !def.bottomX) {
+		return { top: FULL_WIDTH, bottom: FULL_WIDTH };
+	}
+	const adjustments = new Map<string, number>([
+		['adj', adj ?? def.defaultAdj],
+		['adj2', adj2 ?? def.defaultAdj2 ?? 0],
+	]);
+	const vars = evaluateGuides([...def.gdLst], { w: BOX, h: BOX }, adjustments);
+	return { top: resolveXExtent(def.topX, vars), bottom: resolveXExtent(def.bottomX, vars) };
 }
 
 /** Preset names with a spec-transcribed definition (exported for tests/tooling). */

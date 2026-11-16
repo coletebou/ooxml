@@ -1,15 +1,31 @@
 import { XmlObject } from '../../types';
-import type {
-	PptxTheme,
-	PptxThemeColorScheme,
-	PptxThemeFontScheme,
-	PptxThemeFormatScheme,
-	PptxThemeOption,
-} from '../../types';
-import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeThemeRefResolution';
+import type { PptxTheme, PptxThemeFormatScheme, PptxThemeOption } from '../../types';
+import { PptxHandlerRuntime as PptxHandlerRuntimeBase } from './PptxHandlerRuntimeThemePartModel';
+import { colorSchemeFromMap, fontSchemeFromMap } from './theme-part-model';
+import { parseThemeColorMap } from '../../../../drawingml/theme';
+import { NS, first, parseXml, type XmlElement } from '../../../../xml/index';
+import { at } from '../../../../geometry/indexed';
 
 export function isPresentationThemePartPath(path: string): boolean {
 	return /^ppt\/theme\/(?!themeOverride)[^/]+\.xml$/iu.test(path);
+}
+
+/**
+ * The `p:clrMap` of a slide master's text (ECMA-376 Part 1, 19.3.1.6) as the alias dictionary the
+ * runtime keeps (`bg1` -> `lt1`...), read by the shared `parseThemeColorMap`: every value is an
+ * `ST_ColorSchemeIndex` token in its spec spelling, a value outside the enumeration is skipped.
+ * `undefined` when the master has no colour map (or the part does not parse).
+ */
+export function masterColorMapOf(masterXml: string): Record<string, string> | undefined {
+	let root: XmlElement;
+	try {
+		root = parseXml(masterXml, { label: 'PPTX slide master' }).documentElement;
+	} catch {
+		return undefined;
+	}
+	if (root.namespaceURI !== NS.p || root.localName !== 'sldMaster') return undefined;
+	const map: Record<string, string> = { ...parseThemeColorMap(first(root, 'clrMap', NS.p)) };
+	return Object.keys(map).length > 0 ? map : undefined;
 }
 
 export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
@@ -18,7 +34,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (!masterFiles || masterFiles.length === 0) {
 			return undefined;
 		}
-		const masterPath = masterFiles[0].name;
+		const masterPath = at(masterFiles, 0).name;
 		const relsPath = masterPath.replace(
 			/ppt\/slideMasters\/(slideMaster\d+)\.xml/,
 			'ppt/slideMasters/_rels/$1.xml.rels',
@@ -27,10 +43,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (!relsXml) {
 			return undefined;
 		}
-		const relsData = this.parser.parse(
-			// eslint-disable-next-line no-await-in-loop
-			await relsXml.async('string'),
-		) as XmlObject;
+		const relsData = await this.readPartXml(relsPath);
 		const relNodes = this.ensureArray(
 			(relsData?.Relationships as XmlObject | undefined)?.Relationship,
 		) as XmlObject[];
@@ -61,7 +74,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		const options: PptxThemeOption[] = [];
 		for (const file of themeFiles) {
 			try {
-				const xml = await file.async('string');
+				const xml = (await this.readPartText(file.name)) ?? '';
 				const data = this.parser.parse(xml) as XmlObject;
 				const root = data['a:theme'] as XmlObject | undefined;
 				const name = String(root?.['@_name'] || '').trim();
@@ -96,47 +109,17 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			return undefined;
 		}
 
-		let colorScheme: PptxThemeColorScheme | undefined;
-		if (hasColors) {
-			colorScheme = {
-				dk1: this.themeColorMap['dk1'] || '',
-				lt1: this.themeColorMap['lt1'] || '',
-				dk2: this.themeColorMap['dk2'] || '',
-				lt2: this.themeColorMap['lt2'] || '',
-				accent1: this.themeColorMap['accent1'] || '',
-				accent2: this.themeColorMap['accent2'] || '',
-				accent3: this.themeColorMap['accent3'] || '',
-				accent4: this.themeColorMap['accent4'] || '',
-				accent5: this.themeColorMap['accent5'] || '',
-				accent6: this.themeColorMap['accent6'] || '',
-				hlink: this.themeColorMap['hlink'] || '',
-				folHlink: this.themeColorMap['folHlink'] || '',
-			};
-		}
-
-		let fontScheme: PptxThemeFontScheme | undefined;
-		if (hasFonts) {
-			// #83: surface the parsed per-script overrides (`<a:font script=...>`)
-			// on the theme object so font resolution can consult them. The maps
-			// are keyed by theme path; aggregate across every parsed theme (a
-			// single-master deck has one entry) into one script -> face lookup.
-			const majorByScript = this.aggregateFontScriptOverrides(this.masterThemeMajorFontScripts);
-			const minorByScript = this.aggregateFontScriptOverrides(this.masterThemeMinorFontScripts);
-			fontScheme = {
-				majorFont: {
-					latin: this.themeFontMap['mj-lt'],
-					eastAsia: this.themeFontMap['mj-ea'],
-					complexScript: this.themeFontMap['mj-cs'],
-					...(Object.keys(majorByScript).length > 0 ? { byScript: majorByScript } : {}),
-				},
-				minorFont: {
-					latin: this.themeFontMap['mn-lt'],
-					eastAsia: this.themeFontMap['mn-ea'],
-					complexScript: this.themeFontMap['mn-cs'],
-					...(Object.keys(minorByScript).length > 0 ? { byScript: minorByScript } : {}),
-				},
-			};
-		}
+		// #83: surface the parsed per-script overrides (`<a:font script=...>`) on the theme object so
+		// font resolution can consult them. The maps are keyed by theme path; aggregate across every
+		// parsed theme (a single-master deck has one entry) into one script -> face lookup.
+		const colorScheme = hasColors ? colorSchemeFromMap(this.themeColorMap) : undefined;
+		const fontScheme = hasFonts
+			? fontSchemeFromMap(
+					this.themeFontMap,
+					this.aggregateFontScriptOverrides(this.masterThemeMajorFontScripts),
+					this.aggregateFontScriptOverrides(this.masterThemeMinorFontScripts),
+				)
+			: undefined;
 
 		return {
 			colorScheme,
@@ -166,43 +149,12 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 			return;
 		}
 
-		const aliasKeys = [
-			'bg1',
-			'tx1',
-			'bg2',
-			'tx2',
-			'accent1',
-			'accent2',
-			'accent3',
-			'accent4',
-			'accent5',
-			'accent6',
-			'hlink',
-			'folHlink',
-		];
-
 		for (const file of masterFiles) {
 			try {
 				// eslint-disable-next-line no-await-in-loop
-				const masterXml = await file.async('string');
-				const masterData = this.parser.parse(masterXml) as XmlObject;
-				const clrMap = (masterData?.['p:sldMaster'] as XmlObject | undefined)?.['p:clrMap'] as
-					| XmlObject
-					| undefined;
-				if (!clrMap) {
-					continue;
-				}
-
-				const aliasMap: Record<string, string> = {};
-				for (const aliasKey of aliasKeys) {
-					const mappedKey = String(clrMap[`@_${aliasKey}`] || '')
-						.trim()
-						.toLowerCase();
-					if (mappedKey) {
-						aliasMap[aliasKey] = mappedKey;
-					}
-				}
-				if (Object.keys(aliasMap).length > 0) {
+				const masterXml = (await this.readPartText(file.name)) ?? '';
+				const aliasMap = masterColorMapOf(masterXml);
+				if (aliasMap) {
 					this.masterClrMaps.set(file.name, aliasMap);
 				}
 			} catch (error) {
@@ -227,163 +179,12 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (!themeFile) {
 			return null;
 		}
-		const themeXml = await themeFile.async('string');
-		// Capture original XML for byte-stable passthrough on save (C-H3).
-		this.originalThemeXmlByPath.set(themePath, themeXml);
-
-		const themeData = this.parser.parse(themeXml) as XmlObject;
-		const themeRoot = themeData['a:theme'] as XmlObject | undefined;
-		const themeElements = themeRoot?.['a:themeElements'] as XmlObject | undefined;
-		const colorScheme = themeElements?.['a:clrScheme'] as XmlObject | undefined;
-		const fontScheme = themeElements?.['a:fontScheme'] as XmlObject | undefined;
-		const fmtScheme = themeElements?.['a:fmtScheme'] as XmlObject | undefined;
-
-		const themeName = String(themeRoot?.['@_name'] || '').trim();
-		if (themeName) {
-			this.masterThemeNames.set(themePath, themeName);
-		}
-		const colorSchemeName = String(colorScheme?.['@_name'] || '').trim();
-		if (colorSchemeName) {
-			this.masterThemeColorSchemeNames.set(themePath, colorSchemeName);
-		}
-		const fontSchemeName = String(fontScheme?.['@_name'] || '').trim();
-		if (fontSchemeName) {
-			this.masterThemeFontSchemeNames.set(themePath, fontSchemeName);
-		}
-
-		const defaultMap = this.getDefaultSchemeColorMap();
-		const colorMap: Record<string, string> = { ...defaultMap };
-
-		if (colorScheme) {
-			const schemeKeys = [
-				'dk1',
-				'lt1',
-				'dk2',
-				'lt2',
-				'accent1',
-				'accent2',
-				'accent3',
-				'accent4',
-				'accent5',
-				'accent6',
-				'hlink',
-				'folHlink',
-			];
-			for (const key of schemeKeys) {
-				const colorNode = colorScheme[`a:${key}`] as XmlObject | undefined;
-				const parsed = this.parseColorChoice(colorNode);
-				if (parsed) {
-					colorMap[key] = parsed;
-				}
-			}
-		}
-
-		// Aliases (`tx1`/`bg1`/`tx2`/`bg2`) are resolved LAZILY through the
-		// active master's `<p:clrMap>` at colour-lookup time (see
-		// `resolveThemeColor`). Eagerly baking them as `tx1 = dk1` etc. here
-		// would leak the default mapping even when a master remaps them
-		// (e.g. dark themes that swap `bg1 ↔ tx1`). The defaults registered
-		// via `getDefaultSchemeColorMap()` provide the final fallback when
-		// no master clrMap exists for the slide. Phase 2 Stream B / C-H4.
-
-		const majorFontNode = fontScheme?.['a:majorFont'] as XmlObject | undefined;
-		const minorFontNode = fontScheme?.['a:minorFont'] as XmlObject | undefined;
-		const majorLatin = majorFontNode?.['a:latin'] as XmlObject | undefined;
-		const minorLatin = minorFontNode?.['a:latin'] as XmlObject | undefined;
-
-		const majorFont = this.normalizeTypefaceToken(String(majorLatin?.['@_typeface'] || ''));
-		const minorFont = this.normalizeTypefaceToken(String(minorLatin?.['@_typeface'] || ''));
-
-		const fontMap: Record<string, string> = {};
-		if (majorFont) {
-			fontMap['mj-lt'] = majorFont;
-			fontMap['mj-ea'] = majorFont;
-			fontMap['mj-cs'] = majorFont;
-		}
-		if (minorFont) {
-			fontMap['mn-lt'] = minorFont;
-			fontMap['mn-ea'] = minorFont;
-			fontMap['mn-cs'] = minorFont;
-		}
-
-		// Capture EA / CS font when explicitly specified; only override when
-		// the typeface is non-empty (the common Office layout has empty
-		// `typeface=""` placeholders we should not stomp the latin fallback).
-		const majorEa = this.normalizeTypefaceToken(
-			String((majorFontNode?.['a:ea'] as XmlObject | undefined)?.['@_typeface'] || ''),
-		);
-		if (majorEa) {
-			fontMap['mj-ea'] = majorEa;
-		}
-		const majorCs = this.normalizeTypefaceToken(
-			String((majorFontNode?.['a:cs'] as XmlObject | undefined)?.['@_typeface'] || ''),
-		);
-		if (majorCs) {
-			fontMap['mj-cs'] = majorCs;
-		}
-		const minorEa = this.normalizeTypefaceToken(
-			String((minorFontNode?.['a:ea'] as XmlObject | undefined)?.['@_typeface'] || ''),
-		);
-		if (minorEa) {
-			fontMap['mn-ea'] = minorEa;
-		}
-		const minorCs = this.normalizeTypefaceToken(
-			String((minorFontNode?.['a:cs'] as XmlObject | undefined)?.['@_typeface'] || ''),
-		);
-		if (minorCs) {
-			fontMap['mn-cs'] = minorCs;
-		}
-
-		// Per-script fonts (`<a:font script="Hans|Hant|Arab|…">`) — M4.
-		const majorScripts = this.collectFontScriptOverrides(majorFontNode);
-		if (Object.keys(majorScripts).length > 0) {
-			this.masterThemeMajorFontScripts.set(themePath, majorScripts);
-		}
-		const minorScripts = this.collectFontScriptOverrides(minorFontNode);
-		if (Object.keys(minorScripts).length > 0) {
-			this.masterThemeMinorFontScripts.set(themePath, minorScripts);
-		}
-
-		// objectDefaults — M5.
-		const objectDefaultsNode = themeRoot?.['a:objectDefaults'] as XmlObject | undefined;
-		if (objectDefaultsNode) {
-			const od = {
-				spDef: objectDefaultsNode['a:spDef'] as unknown,
-				lnDef: objectDefaultsNode['a:lnDef'] as unknown,
-				txDef: objectDefaultsNode['a:txDef'] as unknown,
-			};
-			if (od.spDef !== undefined || od.lnDef !== undefined || od.txDef !== undefined) {
-				this.masterThemeObjectDefaults.set(themePath, od);
-			}
-		}
-
-		// extraClrSchemeLst, custClrLst, theme-level extLst.
-		const extraClrSchemeLst = themeRoot?.['a:extraClrSchemeLst'] as unknown;
-		if (extraClrSchemeLst !== undefined) {
-			this.masterThemeExtraClrSchemeLst.set(themePath, extraClrSchemeLst);
-		}
-		const custClrLst = themeRoot?.['a:custClrLst'] as unknown;
-		if (custClrLst !== undefined) {
-			this.masterThemeCustClrLst.set(themePath, custClrLst);
-		}
-		const themeExtLst = themeRoot?.['a:extLst'] as unknown;
-		if (themeExtLst !== undefined) {
-			this.masterThemeExtLst.set(themePath, themeExtLst);
-		}
-
-		const formatScheme = fmtScheme ? this.parseFormatScheme(fmtScheme) : undefined;
-		return { colorMap, fontMap, formatScheme };
+		const themeXml = (await this.readPartText(themePath)) ?? '';
+		const model = this.parseThemePartXml(themeXml);
+		this.cacheThemePartModel(themePath, themeXml, model);
+		return { colorMap: model.colorMap, fontMap: model.fontMap, formatScheme: model.formatScheme };
 	}
 
-	/**
-	 * Parse `<a:font script="…" typeface="…"/>` children of a major or
-	 * minor font node into a `script -> typeface` dictionary.
-	 *
-	 * fast-xml-parser collapses repeated tags into arrays, so iterate
-	 * over the array form regardless of how many siblings are present.
-	 *
-	 * Phase 4 Stream A / M4.
-	 */
 	/**
 	 * Flatten a per-theme-path script-override map (`themePath -> {script ->
 	 * typeface}`) into a single `{script -> typeface}` lookup for
@@ -404,22 +205,6 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		return aggregate;
 	}
 
-	protected collectFontScriptOverrides(fontNode: XmlObject | undefined): Record<string, string> {
-		const overrides: Record<string, string> = {};
-		if (!fontNode) {
-			return overrides;
-		}
-		const fontEntries = this.ensureArray(fontNode['a:font']) as XmlObject[];
-		for (const entry of fontEntries) {
-			const script = String(entry?.['@_script'] || '').trim();
-			const typeface = this.normalizeTypefaceToken(String(entry?.['@_typeface'] || ''));
-			if (script && typeface) {
-				overrides[script] = typeface;
-			}
-		}
-		return overrides;
-	}
-
 	/**
 	 * Resolve the theme file path referenced by a given master's `.rels`.
 	 * Returns `undefined` when the master has no theme relationship.
@@ -433,7 +218,7 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 		if (!relsXml) {
 			return undefined;
 		}
-		const relsData = this.parser.parse(await relsXml.async('string')) as XmlObject;
+		const relsData = await this.readPartXml(relsPath);
 		const relNodes = this.ensureArray(
 			(relsData?.Relationships as XmlObject | undefined)?.Relationship,
 		) as XmlObject[];
@@ -496,8 +281,8 @@ export class PptxHandlerRuntime extends PptxHandlerRuntimeBase {
 
 		const preferredThemePath = await this.resolvePrimaryThemePath();
 		const themeFile = preferredThemePath
-			? (themeFiles.find((file) => file.name === preferredThemePath) ?? themeFiles[0])
-			: themeFiles[0];
+			? (themeFiles.find((file) => file.name === preferredThemePath) ?? at(themeFiles, 0))
+			: at(themeFiles, 0);
 
 		const parsed = await this.parseThemePart(themeFile.name);
 		if (parsed) {

@@ -18,6 +18,23 @@ landed (see the parity pages). `niceScale` is still in `chart/render/chart-scale
 `chart/axis-nice.ts`, pinned equal by `xlsx/layout/chart-scale-vs-axis-nice.test.ts`. Wave 5 below is
 the open list.
 
+## Current shared Office status (2026-10-27)
+
+The [delivery ledger](office-shared-parity-delivery.md) is the active checklist. Shared DrawingML
+outlines/effect lists/format schemes and pattern/picture codecs are implemented. Word and Excel
+use the neutral SmartArt interpreter, richer painter, shared style/colour galleries and conservatively
+admitted generated drawing caches. They also edit supported ChartEx data, family options and
+shared advanced DrawingML formatting.
+PowerPoint, Word, Excel and embedded Visio charts mount the shared advanced Format pane.
+
+PowerPoint classic saves now have neutral label/paint/text/axis/structure/analysis/point families,
+with passing corpus, browser and native edit/reopen checks. ChartEx has shared factory, save,
+style/axis/label operations and compatibility projections. The remaining architecture work is
+adaptation of unsupported source details and removal of covered
+legacy paths, rather than reimplementing these shared codecs or controls. Picture media allocation,
+unsafe combo splits, painting the approximated effect DAG members, broader native typography/3D fidelity and the complete
+Office style catalogue remain explicit limits. Sections and wave notes below are dated snapshots.
+
 ## 1. State
 
 Health at the snapshot: `bun run typecheck` passed (strict and pptx projects) and the core vitest
@@ -35,14 +52,14 @@ under 30k, most of it geometry tables.
 | Theme (colour, font and format scheme)       | pptx `core/types/theme.ts` + 3 runtime files + switching utils (~2.6k); xlsx `write/theme.ts` (patches the part; `drawingml/write-theme.ts` is the neutral writer pptx and visio use). docx, xlsx `read/theme.ts` and visio `theme.ts` read `a:clrScheme`/`a:fontScheme` through `drawingml` `parseTheme`; visio keeps only its `vt:` extensions and the `fmtScheme` style selection                                                                                                             | `drawingml` (`theme*.ts`)                                               |
 | Colour transforms                            | pptx `core/color/color-transforms.ts`; `drawingml/drawing-color.ts` + `ordered-color-transforms.ts` (docx, xlsx, chart and visio `drawingPaint` resolve through it); `math/omml-color.ts`                                                                                                                                                                                                                                                                                                        | `drawingml`, primitives in `color`                                      |
 | Fill, line, effects                          | `drawingml/drawing-fill.ts`; pptx `drawing-fill-xml.ts`, `save-shape-fill-stroke.ts`, gradient and effect codecs; xlsx chart fill writers; visio fill, line and gradient modules (theme `fmtScheme` selectors keep their strict reject-on-malformed checks, so they do not use the lenient shared fill/line readers)                                                                                                                                                                             | `drawingml` (readers and writers, `a:ln` included; no effect model yet) |
-| DrawingML text body (a:bodyPr, a:pPr, a:rPr) | pptx `text-run-properties-parser.ts` (557), `paragraph-properties-parser.ts` (371), `body-properties-parser.ts`; `diagram/drawing-text.ts` (57)                                                                                                                                                                                                                                                                                                                                                  | none                                                                    |
+| DrawingML text body (a:bodyPr, a:pPr, a:rPr) | pptx `text-run-properties-parser.ts` (557), `paragraph-properties-parser.ts` (371), `body-properties-parser.ts` (object tree, pinned equal to the neutral reader by `smartart-text-neutral-parity.test.ts`); `drawingml/text-model.ts` with `read-*`/`write-*` (the full model, used by `diagram/text`); `drawingml/drawing-text.ts` (the flat summary charts use)                                                                                                                               | `drawingml` (`text-model.ts`)                                           |
 | Chart model (`c:chartSpace`)                 | pptx `core/types/chart.ts` (1574) + ~160 `chart-*` utils (object tree, own writers); xlsx `write/chart-patch.ts` and `chart-colors.ts` (patch kept parts); xlsx `read/chart.ts`, xlsx `write/chart.ts` (new parts) and docx `chart.ts` go through the shared model                                                                                                                                                                                                                               | `chart/model.ts`, `parseChartSpace`, `writeChartSpace`                  |
 | Chart rendering                              | `chart/render/` (moved from xlsx `layout/chart-*.ts`) emits SVG strings for xlsx (`chartView`) and docx (`renderChartSpaceSvg`); pptx UI `render/chart-*` still emit descriptors                                                                                                                                                                                                                                                                                                                 | `chart/render` (pptx descriptors not yet on it)                         |
 | Axis nice bounds                             | xlsx `layout/chart-scale.ts` `niceScale`; `chart/axis-nice.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                   | `chart/axis-nice.ts`                                                    |
 | Message digests and password spin            | Resolved: the pptx copies moved into `digest/` (md2, md4, md5, ripemd128/160, whirlpool, `password-hash.ts`); `modify-verifier-codec.ts` calls the synchronous spin                                                                                                                                                                                                                                                                                                                              | `digest`                                                                |
 | Document properties                          | pptx `PptxDocumentPropertiesUpdater.ts` (466, fast-xml-parser) + `app-properties-*.ts`; `opc/properties` (used by xlsx and docx)                                                                                                                                                                                                                                                                                                                                                                 | `opc/properties`                                                        |
 | Elbow connector geometry                     | Resolved: `src/ui/src/pptx/render/connector-elbow-geometry.ts` now imports `src/core/geometry/connector-elbow-geometry.ts` (`elbowWaypoints`)                                                                                                                                                                                                                                                                                                                                                    | `geometry`                                                              |
-| Locale normalisation and translator          | `src/ui/src/docx/localization.ts`, `src/core/xlsx/ui/localization.ts` (both `normalizeEditorLocale`), `src/core/xlsx/ui/locales/merge.ts`, `src/ui/src/pptx/i18n/translator.ts`; visio and teams have no i18n                                                                                                                                                                                                                                                                                    | none                                                                    |
+| Locale normalisation and translator          | `src/ui/src/docx/localization.ts`, `src/core/xlsx/ui/localization.ts` (both `normalizeEditorLocale`), `src/core/xlsx/ui/locales/merge.ts`, `src/ui/src/pptx/i18n/translator.ts`; visio and teams have no i18n                                                                                                                                                                                                                                                                                    | `i18n` (`ooxml-core/i18n`)                                              |
 | Web-control registration contract            | `src/ui/src/registry.ts` (`office-ui.web-control-contract`) and `src/ui/src/pptx/web-components/registration-contract.ts` (`pptx-viewer.web-control-contract`)                                                                                                                                                                                                                                                                                                                                   | `registry.ts`                                                           |
 | Theme token bridge                           | docx `--dve-*` via `shadcnBridge`; xlsx `--xve-*` via `office-bridge.css`; pptx `--pptx-*` via `office-token-bridge.ts`; visio `--vv-*` with no bridge; only teams uses `--office-*` directly                                                                                                                                                                                                                                                                                                    | `theme-bridge.ts`, `tokens.ts`                                          |
 | Chrome widgets                               | title bar and status bar: one shared element each (`office-ui-title-bar`, `office-ui-status-bar`), which pptx subclasses and themes through `:host`-only token bridges; comments pane: `office-ui-comments-pane` draws Word's pane and Excel's Show Comments list, the five pptx bindings still draw their own panels; backstage, ruler (shared for Word since Wave 2), find and replace, zoom, colour grid, keytips wrappers, presence: a divergent copy per product next to a shared primitive | `src/ui/src/{chrome,comments,form,menu,presence}`                       |
@@ -352,23 +369,341 @@ Implementation:
   `pptx-ui-ribbon-actions` subclass at the right end of their own tab row
   (Record, Comments, Share). Word gained a Share entry point (a cancelable
   `file-command`, the host supplies the transport). The pptx tab row itself
-  is still a per-binding look-alike of the shared ribbon tabs; replacing it
-  with `office-ui-ribbon` is the remaining unification step.
+  moved onto `office-ui-ribbon` on 2026-11-16 (section 5).
 
 ### Wave 5 (open items, status 2026-10-22)
 
 Landed since the plan was written: the shared backstage, find bar and print preview
 (`src/ui/src/chrome`), editable Word Print Layout, Excel pivot authoring and Page Layout, Excel and
-Visio collaboration. Still open:
+Visio collaboration. Still open at that historical checkpoint (see the current ledger above):
 
 - pptx binding factory; per-binding contract parity tests for all products;
   the pptx comments panels on the shared pane; the pptx tab row on
   `office-ui-ribbon`.
 - pptx chart styles, ChartEx and the chart writers onto the neutral model;
   the pptx DOM chart renderer onto `chart/render`.
-- Neutral paragraph model in `drawingml`, then SmartArt text projection and
-  editing out of pptx; the engine's ordered XML onto the shared `xml` DOM.
+- SmartArt text editing out of pptx (the neutral paragraph model in `drawingml` and the shared
+  node text projection in `diagram/text` landed 2026-10-23; Word and Excel read node paragraphs
+  read-only); the engine's ordered XML onto the shared `xml` DOM.
 - The docx Yjs mapping lives in `src/core/docx/ui/yjs-collaboration.ts`; whether it should become
   a `DocumentAdapter` over `collab` like the Excel mapping is undecided.
 - Product parity is tracked in the per-product pages, not here: Word shapes and page-story
   editing, Excel pivot filters and sheet-part collaboration, Visio connector routing and glue.
+
+## 5. Framework layers and shared chart and SmartArt editing (2026-10-23)
+
+A survey on 2026-10-23 (`origin/main` 3b2ecd9a6) found that the largest remaining duplication is not
+Office logic but the framework layer. At that survey's start, chart and SmartArt editing was
+concentrated in PowerPoint. Wave 6 and the 2026-10-26 delivery changed that; the observations in
+section 5.1 are historical and the current shared status is recorded above.
+
+### 5.1 Historical survey state
+
+Tracked, non-test source lines:
+
+| Product | Shared implementation                   | Per framework                                             |
+| ------- | --------------------------------------- | --------------------------------------------------------- |
+| pptx    | `src/ui/src/pptx` 211k                  | React 106k, Angular 96k, Vue 82k, Svelte 66k, vanilla 64k |
+| docx    | `src/ui/src/docx` 38k, `bindings` 1.3k  | 80 to 200                                                 |
+| xlsx    | `src/ui/src/xlsx` 27k, `bindings` 1.2k  | 90 to 250                                                 |
+| visio   | `src/ui/src/visio` 35k, `bindings` 1.3k | 150 to 290                                                |
+| teams   | `src/ui/src/teams` 17k, `bind.ts`       | 50 to 130                                                 |
+
+- **pptx bindings are ports of each other.** Roughly 20 to 25% of each binding (80k to 100k lines
+  in all) is framework-free logic: the state machine around each shared policy. Drift found: undo
+  depth (React and Vue 120, Svelte and vanilla 100, React keeps its own stack), two autosave engines
+  (interval in React and Angular, debounce elsewhere), React and Angular outside
+  `createGestureController`, the AI bridge copied into every binding, five keyboard dispatchers with
+  differently named handlers. Per binding, the chart and SmartArt files alone are 3.5k to 7.9k lines
+  (each has its own data editor, insert SmartArt dialog and text pane).
+- **docx, xlsx, visio and teams each wrote their own binding kit** (prop tracker, change-only
+  forwarding, deferred handle, contract mapping, near-identical Vue, React and Solid adapters).
+- **Chart and SmartArt editing was concentrated in pptx at the survey's start.** Reading went through `chart` and `diagram` for every
+  product, and docx, xlsx and visio drew charts through `chart/render`, but pptx edited
+  `PptxChartData` through `builders/sdk/chart-*` and saves through about 127 object-tree writers;
+  Excel used its own `ChartPatch`; Word and Visio did not yet edit charts. SmartArt node
+  operations, reflow, text projection and part writers lived in `src/core/pptx`; Word and Excel showed
+  the cached drawing only. Wave 6 and the later shared delivery superseded these findings.
+
+### 5.2 Target layers
+
+1. **Core** (DOM-free): model, editing operations and policies.
+2. **`ooxml-ui`** (no framework): headless controllers (`getSnapshot`, `subscribe`, typed actions),
+   imperative leaf renderers and shared Lit elements, including the chart and SmartArt editing
+   elements every product mounts.
+3. **One store adapter per framework**, written once for every controller (React
+   `useSyncExternalStore`, Vue `shallowRef`, Svelte runes, Angular signals, Solid).
+4. **Native templates** on top, so each framework keeps its idioms (slots, render props,
+   `v-model`, DI, SSR). Bindings hold templates, lifecycle, focus and portals only.
+
+The docx, xlsx, visio and teams wrappers share one contract-driven kit in `ooxml-ui/bindings`, with
+generic React, Vue and Solid factories (Angular and Svelte need their compilers, so their small
+adapters stay per product over the same kit) and one contract-parity test per product.
+
+### 5.3 Chart and SmartArt order
+
+Status at the end of Wave 6 (2026-10-23): the steps below have landed in part. The open items are the
+Wave 6 "Next" list and the "Remains" entries of [agnostic-core-plan.md](agnostic-core-plan.md) sections
+3.5 to 3.7, which define the step labels (C1 to C6, U1 to U5, S1 to S5).
+
+Charts, core: neutral edit operations over `ChartSpace` (`chart/edit`, with Excel's `ChartPatch` as
+a client), then the model gaps, then pptx save through `writeChartSpace` one feature family per
+commit behind an old-versus-new part diff over every committed deck, then `PptxChartData` as an
+adapter, then a ChartEx model, parser and writer, then Word chart editing (edited parts plus the
+embedded workbook), then Visio editing of embedded charts through the same operations.
+
+Charts, UI: a shared format-pane model and element (from `src/ui/src/pptx/render/chart-format`),
+shared chart design galleries, and one insert-chart picker (`office-ui-chart-picker`) and one data
+sheet (`office-ui-chart-data-sheet`) for every product.
+
+SmartArt: a neutral paragraph and run model in `drawingml`, then node text projection into
+`diagram`, then a neutral drawing shape and edit operations (`diagram/edit`), then part writers
+(`diagram/write`), then Word and Excel SmartArt editing, with a shared insert picker, galleries and
+text pane.
+
+### Wave 6 (landed 2026-10-23)
+
+Framework layers:
+
+- `ooxml-ui/bindings`: one contract-driven binding kit with React, Vue and Solid factories; the
+  docx, xlsx, visio and teams bindings run on it, with a contract-parity test per product.
+- pptx headless controllers (`src/ui/src/pptx/render/controller/`) with one store adapter per
+  binding: undo history (one default depth, 100), keyboard dispatch, AI bridge and panel, autosave
+  (one engine, uncommitted inline text included), recovery, collaboration provider and session,
+  canvas gestures (React and Angular moved onto `createGestureController`), group selection and
+  slide show steps. Inspector Effects, Line, Size and Position and Text Box sections are field
+  descriptors with one generic renderer per binding.
+- The per-binding chart data grids, insert SmartArt dialogs and SmartArt text panes are gone in
+  favour of shared elements.
+
+Charts: neutral edit operations and typed intents (`chart/edit`), a ChartEx model, parser, writer
+and edits (`chart/ex`), the embedded workbook writer (`chart/workbook`), one Format pane
+(`office-ui-chart-format-pane`, its own translations), one data sheet, one insert picker and shared
+Chart Design galleries. pptx saves title, legend, axis and series data edits of classic charts and
+title, legend, label and series edits of ChartEx through the neutral writers, behind save-parity
+harnesses. Excel edits over `ChartSpace` and never rewrites a part the model cannot carry. Word
+inserts, edits, formats, resizes and saves charts; Visio edits inserted charts. Word and Excel
+results are checked in desktop Office by acceptance scripts.
+
+SmartArt: a neutral DrawingML text model, node text projection, drawing view, edit operations and
+data writers in `diagram`, built-in definitions in `diagram/builtin`, and one picker, text pane and
+design command list. Word and Excel insert and edit SmartArt; desktop Word and Excel rebuild the
+layout from the data part, so an edit drops the cached drawing.
+
+The Wave 6 next list was a historical checkpoint. Labels/paint saves, Word/Excel ChartEx editing,
+SmartArt styles/colours/generated caches and shared advanced chart controls have since landed.
+Current work finishes the PowerPoint compatibility-adapter migration and its exhaustive admission,
+corpus and native checks. The presentation controllers, the Fill inspector section and the pptx
+ribbon tab row landed on 2026-11-16 (below).
+
+The Fill inspector section landed on 2026-11-16: `SHAPE_FILL_MODE_SECTIONS` and
+`SHAPE_FILL_OPTIONS_SECTIONS` (`render/inspector/shape-fill-fields.ts`) are drawn by each binding's
+generic field renderer, and `resolveShapeFillView` with the typed `shapeFillPatch` actions
+(`shape-fill-actions.ts`, stop edits in `shape-fill-stops.ts` over `ooxml-core/chart`'s stop list
+operations) drive the compound controls each binding keeps as a native template: the solid colour
+with its theme grid, the stop rows, the pattern swatches and the picture source. The bindings had
+drifted (React a five-kind select, Vue four kinds and no picture, Svelte and vanilla gradient and
+pattern checkboxes, Angular closed disclosures with no kind at all; stop opacity 0-100 in React,
+0-1 elsewhere; add-stop colour and position four ways); every binding now offers PowerPoint's six
+kinds, shows the solid colour only for a solid fill, transparency 0-100 for a filled shape, per-stop
+opacity 0-100 and a pattern swatch grid, and adds a stop halfway along the last gap. A slide
+background fill saves as `useBgFill` and draws at once (below).
+See the active delivery ledger and agnostic plan for implemented coverage and residual limits.
+
+The Alt Text and picture fields followed (2026-11-16): `ELEMENT_ALT_TEXT_SECTIONS`
+(`render/inspector/element-alt-text-fields.ts`, description and title, gated per kind by
+`element-non-visual-description.ts`), `PICTURE_ADJUSTMENT_SECTIONS` and `PICTURE_CROP_SECTIONS`
+(`picture-fields.ts`: brightness, contrast, saturation, transparency, black and white threshold,
+grayscale and the four crop insets) are drawn by the generic renderers, which gained a `text` field
+kind (a text box, or a text area when `multiline`, with a placeholder). React and Vue lost
+`ImageAdjustmentsPanel`, React `RangeSlider`, and vanilla's per-field image, crop, alt text and
+title handlers became one `patchSelectedElement` (its unused gradient and fill opacity handlers
+and gradient state went with them). Drift found: Angular showed the stored `alphaModFix` (opacity)
+as Transparency, so an opaque picture read 100%; crop insets stopped at 80% in React, Vue and
+Angular and 90% in Svelte and vanilla; Angular's crop captions were untranslated English; Svelte and
+vanilla had no Grayscale; a zero threshold wrote a bi-level effect (a white picture) everywhere but
+Svelte; vanilla committed alt text on change, the others per keystroke; Angular's Alt Text panel
+and the Vue and Angular adjustments ignored `canEdit`. Every binding now shows transparency
+inverted, as PowerPoint does, crops to the shared 90% clamp on a slider, clears an effect set back
+to zero, applies alt text as typed and disables the fields with the pane.
+
+The rest of the inspector followed the same day, one section per commit, each drawn by the
+generic renderers and checked per binding:
+
+| Section                | Shared descriptors (`render/inspector/`)                   | Drift removed                                                                                                                       |
+| ---------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Paragraph and font     | `PARAGRAPH_SPACING_SECTIONS`, `CHARACTER_SPACING_SECTIONS` | each binding showed a different subset (Vue none); all showed model units (px, hundredths of a point) where PowerPoint shows points |
+| Table                  | `TABLE_OPTIONS_SECTIONS`                                   | three option orders; band sizes, direction and cell margin each missing somewhere; "Last Row" for PowerPoint's Total Row            |
+| Picture colour effects | `PICTURE_EFFECT_SECTIONS`, `pictureDuotonePresetPatch`     | recolour only in React and Vue; duotone written on first touch in vanilla and Angular; preset labels humanised from keys            |
+| Slide Background card  | `SLIDE_BACKGROUND_SECTIONS`                                | Hide background graphics missing in three cards; a colour on a picture background was saved but never shown                         |
+| Media playback         | `MEDIA_PLAYBACK_SECTIONS`                                  | no fades in vanilla; Angular's Play Across Slides did not start the clip; switched-off flags written as `false`                     |
+| OLE card               | `OLE_OBJECT_NAME_SECTIONS`, `resolveOleSummaryRows`        | the name was trimmed per keystroke (a typed space vanished); Angular's group card was untranslated English                          |
+| Action Settings        | `ACTION_SETTINGS_SECTION`, `actionSettingsTargetOf`        | five slide pickers (number box or select, titled or not); the custom show and Return after showing missing in some bindings         |
+| Media trim             | `MEDIA_TRIM_SECTION`                                       | mm:ss text boxes in React, seconds or milliseconds elsewhere; the end bound ignored the live clip duration                          |
+| Table cell formatting  | `TABLE_CELL_SECTIONS`                                      | untranslated B I U and L C R letter buttons; one border width and margin for all sides in vanilla; diagonals only in Vue; px units  |
+| Artistic effects       | `PICTURE_ARTISTIC_SECTIONS` (a `gallery` field)            | thumbnails in React and Vue, a select elsewhere; Vue's gallery never disabled; Grayscale left the grayscale toggle on in three      |
+
+The field model resolves what depends on the deck or the clip at render time: a field's
+`optionsOf(target)` replaces its static choices (the deck's slides and custom shows, with a verbatim
+`label` beside the translation key), `maxOf(target)` its upper bound (the trim end against the live
+duration), and `previewImageOf(target)` a gallery's picture. Each generic renderer rebuilds a
+section when its resolved choices change.
+
+A slide background fill now draws at once: `getSlideBackgroundStyle` publishes the resolved
+background as `--pptx-slide-bg-*` custom properties on every stage, and `resolveComputedFill`
+paints a `useBackgroundFill` shape that carries no resolved copy with them, offset by the shape's
+position (`render/slide-background-fill.ts`; React's stage adapter passes the properties through).
+A framework-neutral spec (`slide-background-fill-live.spec.ts`) checks the five demos.
+
+Still per binding, by choice or for lack of time: the table cell text and fill colour pickers with
+their theme grids and the gradient and pattern cell fill, the table style editor (its fields
+already come from the shared table-style-editor descriptor, but it edits style definitions per
+table part rather than one value through a patch), Merge and Split, and the docked Animation and
+Transition panes. Chart and SmartArt formatting already go through the shared elements
+(`office-ui-chart-format-pane`, the SmartArt picker and text pane).
+
+### PowerPoint tab row on `office-ui-ribbon` (landed 2026-11-16)
+
+The five PowerPoint bindings draw their ribbon tab row with `pptx-ui-ribbon-tabs`, the shared
+`office-ui-ribbon` under the pptx tag (token bridge, `tab-select` and `collapse-toggle` events).
+`office-ui-ribbon` gained `items`, a tab row whose panels live elsewhere: the host owns the
+selection and hears every choice, so a click on the selected tab still peeks a collapsed ribbon.
+One descriptor, `buildRibbonTabRow` (`src/ui/src/pptx/render/ribbon-tab-row.ts`), decides the tabs
+(fixed tabs with File first, add-in tabs, then the contextual tabs such as Shape Format, Picture
+Format, Chart Design and Table Design), their labels, ScreenTips and kinds, and the selected tab;
+`hiddenActions` and Customize Ribbon filter it. Each binding builds that state from its own stores
+and routes the two events. Record, Comments and Share, and Ribbon Display Options stay native
+templates in the element's `actions` slot; the tab panels and commands are unchanged. Ribbon
+Display Options keep their own controller (`createRibbonDisplayController`), so the element's own
+collapse button is not used. Binding tests reach the tabs through `ribbonTabButtons` and
+`ribbonTab`, since they live in the element's shadow root.
+
+### Presentation controllers (landed 2026-11-16)
+
+Slide-show state is written once in `src/ui/src/pptx/render/controller/` and read by every pptx
+binding through its store adapter:
+
+- `createPresentationRehearsalController`: Rehearse Timings (per-slide and total clocks, pause,
+  recording, the 250 ms display tick, the summary). Saving goes through `applyRehearsalTimings`.
+- `createPresentationInkController`: the show's pen, highlighter, eraser and laser, per-slide
+  strokes, Ctrl+M markup visibility and the popup toolbar's auto-hide; `applyPresentationInk`
+  keeps ink as slide elements.
+- `createPresenterSessionController`: the audience window, deck hand-over, the BroadcastChannel
+  protocol on both sides, Swap Displays and the shared snapshot.
+
+Drift found between the bindings and the one behaviour chosen:
+
+- Rehearsal: slide floors of 1 s (Svelte) and 250 ms (vanilla) and none elsewhere; Svelte also set
+  "On mouse click" when saving; React, Vue and Angular counted paused time into the total, vanilla subtracted
+  a pause twice, and vanilla timed the editor instead of running a show. Now: no floor, both clocks
+  stop while paused, "On mouse click" is left as it was, and every binding runs the show.
+- Ink: Svelte cleared every slide (and disarmed) on "Erase All Ink on Slide" and erased on hover;
+  the pointer options of the context menu and keyboard toggled the tool off in React, Vue and
+  Angular, and an Angular colour pick could disarm the pen; React built its kept ink elements by
+  hand. Now: the toolbar's tool buttons toggle, every other path arms, Erase clears the current
+  slide, the eraser needs a press, and every binding keeps ink through `applyPresentationInk`.
+- Presenter window: only React and Angular noticed a popup the user closed; Svelte refused to open
+  without a deck while vanilla and the others navigated; Angular answered "audience ready" with the
+  slide captured at open; only Svelte, Vue and vanilla numbered their messages. Now: the popup is
+  polled, it is navigated with or without a deck, "ready" gets the current snapshot, and the stored
+  deck is cleared on close, unload and exit.
+
+Still per binding: the HUD, summary, toolbar and overlay templates, fullscreen requests inside the
+user gesture, and vanilla's DOM ink overlay (unit-square strokes, its own gesture tracking), which
+stores its strokes in the shared ink controller.
+
+The show toolbar's "has annotations" flag (it enables Erase All Ink on Slide) counted only the
+current slide in React and Angular and every slide in Vue, Svelte and vanilla. Every binding now
+counts every slide, like the keep-or-discard prompt on exit. The button still clears only the
+current slide, so it can be enabled on a slide that has no ink of its own.
+
+### Slide Sorter and Outline view state (landed 2026-11-16)
+
+A survey of the five bindings outside the inspector, ranked by the framework-free lines each kept
+around an already shared policy, put the Slide Sorter first (React about 380 lines with its keyboard
+hook, Vue about 190, Angular about 150, vanilla about 140, Svelte about 60) and Outline view second
+(about 60 to 110 each). Both now run once in `ooxml-ui/pptx`:
+
+- `createSlideSorterController` (`render/controller/slide-sorter-controller.ts`): selection and
+  anchor, the sorter clipboard, zoom, the right-click menu, drag reorder and the keyboard, with
+  `slideSorterView` for the drawn values. Deck operations reach the host in descending index
+  order; each binding keeps its template, the drag `dataTransfer` and its listener lifetime.
+- `createOutlineViewSession` (`render/outline-view-session.ts`): refuse on a read-only deck,
+  apply, skip a no-op, commit, and hand the caret to the row the edit names
+  (`focusOutlineRow`); the binding only chooses when to restore focus after its render.
+
+Drift found and the behaviour chosen:
+
+- Sorter: React opened the menu (and swallowed the native one) on a read-only deck; Vue and
+  vanilla reordered a read-only deck by dragging and Svelte's move buttons stayed live; Angular and
+  Svelte had no drag reorder; only vanilla undid and redid inside the sorter; React left Escape
+  unprevented. Now: the menu, drag and deck-writing keys are refused on a read-only deck, every
+  binding drags (Angular gained a `moveSlide` output), undo and redo inside the sorter run when the
+  host passes them (vanilla does today), and every handled key is prevented and stopped.
+- Outline view: three row lookups (an escaped selector in React, Vue and Angular, an attribute
+  scan in Svelte, a map of inputs in vanilla). Now one attribute scan.
+
+Non-test binding source after this work (2026-11-16, this change alone): React 104,367 to 104,066,
+Angular 92,113 to 92,093 (it gained drag reorder), Vue 80,113 to 80,014, Svelte 66,446 to 66,358,
+vanilla 65,996 to 65,927.
+
+### Comments panel, Selection Pane and the show's Erase button (landed 2026-11-16)
+
+- `createCommentsPanelController` (`render/controller/comments-panel-controller.ts`), one per
+  viewer: the new-comment draft and its mentions per slide, the comment being edited per slide,
+  one reply composer that opens empty, and add, edit (at any depth), delete, resolve and reply
+  through the binding's undoable deck commit. React's behaviour is the one chosen, because the
+  other bindings lacked features rather than differed: Vue, Angular and Svelte kept one draft for
+  the whole deck (it followed you to the next slide) and dropped it when the panel closed, had no
+  edit in place, and only React anchored a new comment to the selected element; vanilla's
+  workspace pane and inspector tab kept separate drafts. Vue provides the controller to every
+  `CommentsPanel`, Angular through `CommentsPanelStateService`, Svelte through `commentsPanelFor`;
+  a panel mounted outside a viewer lists comments read-only.
+- `createSelectionPaneController` with `selectionPaneRows` and `selectionPaneLabel`: the rename
+  box and drag reorder, and one row label (name, else text, else the translated "{type} {number}").
+  Drift: React labelled in English whatever the locale, vanilla capitalised the type id, Angular
+  showed the element id, Svelte the lower-case type numbered from the top; the rename box started
+  from the label, the id or the bare name; Angular renamed and vanilla dragged on a read-only
+  deck; Angular and Svelte could not drag. The box now closes before focus returns to the viewer
+  root, so the blur that focus move causes never commits a cancelled rename.
+- The show toolbar's state gains `hasSlideAnnotations`: Erase All Ink on Slide is enabled for ink
+  on the slide on screen only, while `hasAnnotations` keeps meaning ink anywhere in the show.
+  Vanilla's Erase (button and E) cleared every slide's ink; it now clears the slide on stage.
+
+Non-test binding source after this work (2026-11-16, from 104,367 /
+92,113 / 80,113 / 66,446 / 65,996): React 103,395, Angular 92,172, Vue 79,816, Svelte 66,438,
+vanilla 66,002. Angular, Svelte and vanilla grew where they gained comment editing and drag
+reorder; their per-binding state machines went.
+
+Angular keeps its public `CommentsService`, now unused by the viewer.
+
+### Find and Replace bar, slide rail and zoom (landed 2026-11-16)
+
+- `createFindReplaceController`: the bar's open state, its mode (Ctrl+F find, Ctrl+H find and
+  replace) and the search session. Ctrl+F and Ctrl+H toggle the bar and the other chord switches an
+  open bar's mode; opening searches the kept query again; closing drops the matches and keeps the
+  query, replacement and scopes. The building blocks' `createFindBarController` is now this
+  controller with its port. Drift: Ctrl+H after Ctrl+F closed the bar in React, Vue, Svelte and
+  vanilla; React did not search again on reopen; Angular's Ctrl+F opened a second, find-only bar
+  with its own search outside the shared session, and its Ctrl+H only opened the replace bar.
+  Angular's viewer now shows the one shared bar in both modes (`FindBarComponent` stays exported).
+- `createSlideRailController` with `slideRailMenuEntries`: the thumbnails pane's Ctrl/Shift
+  selection by slide id and its right-click menu (whole selection when right-clicked inside it,
+  that slide alone outside it, refused on a read-only deck) with command routing. Five copies of
+  this state went; the read-only gate had sat in three different places.
+- Zoom: the zoom state, gestures and per-slide scroll reset were already shared
+  (`viewer-zoom-store`, `attachViewportNavigation`, `resetViewportScroll`). React's Zoom to
+  Selection computation moved to `zoom-to-selection` (`selectionZoomBounds`,
+  `zoomToSelectionScale`, `selectionScrollTarget`). No binding offers a Zoom to Selection control
+  (React's hook action is not wired to one); adding it is a feature for all five.
+
+Non-test binding source after this work (from 104,367 / 92,113 / 80,113 / 66,446 / 65,996):
+React 103,318, Angular 92,165, Vue 79,804, Svelte 66,398, vanilla 66,019.
+
+Still per binding: the notes pane's draft. Each binding keeps the note's text and segments while
+typing, debounces or not (React, Vue and Angular's rich editor debounce; Svelte, vanilla and
+Angular's plain textarea save on change or blur), and decides when a slide switch or an echo of
+its own save reseeds the editor. A shared draft controller (load per slide id with an echo guard,
+debounced edit, flush on blur and before a slide switch, saving to the slide it was typed on) is
+the next step; the debounce-for-all decision and each binding's contentEditable caret handling
+make it a change of its own.

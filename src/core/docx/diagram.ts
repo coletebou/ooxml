@@ -2,19 +2,23 @@
 // SmartArt (DiagramML) in a Word document: the `w:drawing` whose `a:graphicData` uses the diagram
 // namespace. This module models the host side (extent, anchor/inline, relationships to the four
 // diagram parts and the cached drawing) and reads the five parts through the format-neutral
-// `diagram` area. The parts themselves are never rewritten: they stay in the package untouched.
+// `diagram` area. Unedited parts stay in the package untouched (see `diagram-save.ts` for edits).
 import {
 	DIAGRAM_RELATIONSHIP_TYPES,
 	attributeReader,
 	loadDiagram,
 	parseDiagramDataModel,
 	parseRelationshipIdAttributes,
+	GENERATED_DIAGRAM_CACHE_NOTICE,
 	type DiagramDrawing,
+	type DiagramLayoutSource,
 	type DiagramIssue,
+	type DiagramHostNode,
 	type DiagramLayoutType,
 	type DiagramRelationshipIds,
 } from '../diagram/index';
 import { parseRelationships, resolvePartPath } from '../opc/index';
+import { diagramNodesInTreeOrder } from './diagram-nodes';
 import type { Relationship } from './package-parts';
 import type { XmlElement } from './xml';
 
@@ -24,19 +28,19 @@ const DGM_NS = DIAGRAM_GRAPHIC_URI;
 
 /** A package part a diagram refers to. */
 export interface DocxDiagramPart {
+	/** Set when the cached drawing relationship belongs to the data part, not the document. */
+	ownerPart?: string;
 	/** Relationship id in the part that holds the drawing (`word/document.xml`, a header...). */
 	relId: string;
 	/** Package part name, e.g. `word/diagrams/data1.xml`. */
 	partName: string;
 }
 
-/** One content node of the diagram's data model. */
-export interface DocxDiagramNode {
-	id: string;
-	text: string;
-	/** Model id of the parent content node, when the data model has one. */
-	parentId?: string;
-}
+/**
+ * One content node of the diagram's data model: the host node every product shares
+ * (`diagram/edit/node-edit.ts`); its `paragraphs` project with `projectDiagramNodeTextNeutral`.
+ */
+export type DocxDiagramNode = DiagramHostNode;
 
 /**
  * How the diagram can be shown.
@@ -45,10 +49,15 @@ export interface DocxDiagramNode {
  * `placeholder`: no usable cached drawing; only a labelled placeholder (with the node text) can be
  * shown, because no SmartArt layout is computed.
  */
-export type DocxDiagramRendering = 'cached-drawing' | 'placeholder';
+export type DocxDiagramRendering = 'cached-drawing' | 'generated-drawing' | 'placeholder';
 
-/** A SmartArt graphic in a Word document. Part contents are read-only; the XML is preserved on save. */
+/**
+ * A SmartArt graphic in a Word document. An unedited diagram keeps its markup and parts byte for
+ * byte on save; an edited one (`diagram-edit.ts`) has its data part rewritten and its stale cached
+ * drawing dropped, and an inserted one gets new parts (`diagram-save.ts`).
+ */
 export interface DocxDiagram {
+	layoutSource?: DiagramLayoutSource;
 	/** `inline` (`wp:inline`) or `anchor` (`wp:anchor`, floating). */
 	placement: 'inline' | 'anchor';
 	/** `wp:extent` in EMU: the frame the cached drawing's coordinates are relative to. */
@@ -87,6 +96,12 @@ export interface DocxDiagram {
 	notice: string;
 	/** Problems met reading the parts; empty when everything resolved. */
 	issues: DiagramIssue[];
+	/**
+	 * Created in this session (Insert SmartArt): `parts` name the parts to create, with empty
+	 * relationship ids that the save allocates. The layout, colour and quick-style parts are
+	 * supplied as pending media; the data part is written from `nodes`.
+	 */
+	inserted?: true;
 }
 
 const emu = (element: XmlElement | undefined, name: string): number => {
@@ -96,9 +111,9 @@ const emu = (element: XmlElement | undefined, name: string): number => {
 
 const NOTICES = {
 	cached:
-		'Shown from the drawing cached in the file (the layout last saved by the producing application). Word layout is not recomputed, so the diagram can differ from Word after edits elsewhere, and its content is not editable here; the diagram parts are preserved unchanged on save.',
+		'Shown from the drawing cached in the file (the layout last saved by the producing application). Word layout is not recomputed, so the diagram can differ from Word after edits elsewhere. Unedited, the diagram parts are preserved unchanged on save; editing its nodes rewrites the data part and drops the cached drawing, which Word lays out again when it opens the file.',
 	placeholder:
-		'This file has no usable cached drawing for the diagram, and SmartArt layout is not computed here, so only a placeholder with the node text is shown. The diagram parts are preserved unchanged on save.',
+		'This diagram has no usable cached drawing (none in the file, or it was dropped by an edit here), so it is drawn with an approximate layout computed from its nodes, not the layout Word computes. Word lays the diagram out again from its data and layout parts when it opens the file.',
 } as const;
 
 const isDrawingRelationship = (diagram: DocxDiagram, relId: string): boolean =>
@@ -106,7 +121,11 @@ const isDrawingRelationship = (diagram: DocxDiagram, relId: string): boolean =>
 
 /** The notice that goes with a rendering. */
 export const diagramNotice = (rendering: DocxDiagramRendering): string =>
-	rendering === 'cached-drawing' ? NOTICES.cached : NOTICES.placeholder;
+	rendering === 'generated-drawing'
+		? GENERATED_DIAGRAM_CACHE_NOTICE
+		: rendering === 'cached-drawing'
+			? NOTICES.cached
+			: NOTICES.placeholder;
 
 /**
  * Reads the host side of a SmartArt graphic. Synchronous: resolves the relationships through the
@@ -210,10 +229,11 @@ export async function resolveDiagramParts(
 			const xml = await readText(relsPart);
 			if (!xml) return undefined;
 			try {
-				return [...parseRelationships(xml).values()].map(({ id, type, target }) => ({
+				return [...parseRelationships(xml).values()].map(({ id, type, target, mode }) => ({
 					id,
 					type,
 					target,
+					...(mode ? { mode } : {}),
 				}));
 			} catch {
 				return undefined;
@@ -228,8 +248,13 @@ export async function resolveDiagramParts(
 			!known.has(`${issue.code}|${issue.message}`),
 	);
 	diagram.issues.push(...fresh);
+	if (loaded.layoutSource) diagram.layoutSource = loaded.layoutSource;
 	if (loaded.paths.drawing && loaded.drawingRelId)
-		diagram.parts.drawing = { relId: loaded.drawingRelId, partName: loaded.paths.drawing };
+		diagram.parts.drawing = {
+			relId: loaded.drawingRelId,
+			partName: loaded.paths.drawing,
+			...(loaded.drawingOwnerPart ? { ownerPart: loaded.drawingOwnerPart } : {}),
+		};
 	if (loaded.layout) {
 		diagram.layout = {
 			uniqueId: loaded.layout.uniqueId,
@@ -239,17 +264,10 @@ export async function resolveDiagramParts(
 	}
 	if (loaded.colors?.uniqueId) diagram.colorsId = loaded.colors.uniqueId;
 	if (loaded.quickStyle?.uniqueId) diagram.quickStyleId = loaded.quickStyle.uniqueId;
-	if (loaded.data)
-		diagram.nodes = loaded.data.nodes.map((node) => ({
-			id: node.modelId,
-			text: node.text,
-			...(loaded.data?.parentById.get(node.modelId)
-				? { parentId: loaded.data.parentById.get(node.modelId) as string }
-				: {}),
-		}));
+	if (loaded.data) diagram.nodes = diagramNodesInTreeOrder(loaded.data);
 	if (loaded.drawing && loaded.drawing.shapes.length > 0) {
 		diagram.drawing = loaded.drawing;
-		diagram.rendering = 'cached-drawing';
+		diagram.rendering = loaded.generatedCache ? 'generated-drawing' : 'cached-drawing';
 	} else {
 		delete diagram.drawing;
 		diagram.rendering = 'placeholder';

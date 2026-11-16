@@ -1,4 +1,4 @@
-import type { DocumentStorage } from 'ooxml-ui/pptx';
+import type { DocumentStorage, PdfExportSettings } from 'ooxml-ui/pptx';
 import type { PptxCoreProperties, PptxSlide, PptxHandler } from 'pptx-viewer-core';
 /**
  * useIOHandlers: Composes export, print, theme, and property-handler hooks
@@ -10,7 +10,7 @@ import type { CanvasSize } from '../types';
 import type { EditorHistoryResult } from './useEditorHistory';
 import type { ElementOperations } from './useElementOperations';
 import { useExportHandlers } from './useExportHandlers';
-import type { ExportHandlersResult } from './useExportHandlers';
+import type { ExportHandlersResult, UseExportHandlersInput } from './useExportHandlers';
 import { usePrintHandlers } from './usePrintHandlers';
 import type { PrintHandlersResult } from './usePrintHandlers';
 import { usePropertyHandlers } from './usePropertyHandlers';
@@ -45,18 +45,13 @@ export interface UseIOHandlersInput {
 	 * output format, so the downloaded file carries every save option Save does.
 	 */
 	serializeSlides: SerializeSlides;
-	/**
-	 * Plaintext serialisation for bytes the viewer feeds straight back into its
-	 * own loader. "Apply theme" does exactly that, and the loader has no password
-	 * to offer, so it must never receive an encrypted package.
-	 */
-	serializeForRecovery: () => Promise<Uint8Array | null>;
 	setContent: React.Dispatch<React.SetStateAction<ArrayBuffer | Uint8Array | null>>;
-	onContentChange: ((content: Uint8Array) => void) | undefined;
 	/** The host's `onPropertiesChange` (document-properties edits). */
 	onPropertiesChange?: ((updates: Partial<PptxCoreProperties>) => void) | undefined;
 	/** The host's `onNotesUpdate` (speaker-notes edits). */
 	onNotesUpdate?: ((notes: string) => void) | undefined;
+	/** The resolved external-content switch, for decks opened for Compare. */
+	allowExternalImages?: boolean;
 	/** File > Options > Advanced > "Image Size and Quality" raster-scale multiplier. */
 	imageExportScale?: number;
 	/**
@@ -65,6 +60,12 @@ export interface UseIOHandlersInput {
 	 * matching field on `UseExportHandlersInput`.
 	 */
 	imageResolutionScale?: number;
+	/** File > Options > Advanced > Save as PDF (vector pages or pictures, hidden slides). */
+	pdfExportSettings?: PdfExportSettings;
+	/** See the matching fields on `UseExportHandlersInput`. */
+	pdfExportContainerRef?: UseExportHandlersInput['pdfExportContainerRef'];
+	notifyPdfExport?: UseExportHandlersInput['notifyPdfExport'];
+	onPdfExportReport?: UseExportHandlersInput['onPdfExportReport'];
 }
 
 // ---------------------------------------------------------------------------
@@ -96,13 +97,16 @@ export function useIOHandlers(input: UseIOHandlersInput): IOHandlersResult {
 		zoom,
 		handlerRef,
 		serializeSlides,
-		serializeForRecovery,
 		setContent,
-		onContentChange,
 		onPropertiesChange,
 		onNotesUpdate,
+		allowExternalImages,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
+		pdfExportContainerRef,
+		notifyPdfExport,
+		onPdfExportReport,
 	} = input;
 
 	const exportHandlers = useExportHandlers({
@@ -131,6 +135,10 @@ export function useIOHandlers(input: UseIOHandlersInput): IOHandlersResult {
 		slideSizeEmu: state.slideSizeEmu,
 		imageExportScale,
 		imageResolutionScale,
+		pdfExportSettings,
+		pdfExportContainerRef,
+		notifyPdfExport,
+		onPdfExportReport,
 	});
 
 	const printHandlers = usePrintHandlers({
@@ -138,15 +146,13 @@ export function useIOHandlers(input: UseIOHandlersInput): IOHandlersResult {
 		activeSlideIndex,
 		canvasStageRef: zoom.canvasStageRef,
 		setActiveSlideIndex: state.setActiveSlideIndex,
+		canvasSize,
+		templateElementsBySlideId: state.templateElementsBySlideId,
+		handoutMaster: state.handoutMaster,
 	});
 
 	const themeHandlers = useThemeHandlers({
 		handlerRef,
-		// Theme apply re-serialises and re-parses through `setContent`, so these
-		// bytes go back into our own loader: plaintext, never the protected save.
-		serializeSlides: serializeForRecovery,
-		setContent,
-		onContentChange,
 		setTheme: state.setTheme as unknown as React.Dispatch<
 			React.SetStateAction<Record<string, unknown> | null>
 		>,
@@ -154,7 +160,9 @@ export function useIOHandlers(input: UseIOHandlersInput): IOHandlersResult {
 			React.SetStateAction<Array<Record<string, unknown>>>
 		>,
 		slideMasters: state.slideMasters as unknown as Array<Record<string, unknown>>,
+		themeOptions: state.themeOptions,
 		history,
+		slides,
 		setSlides: state.setSlides,
 		templateElementsBySlideId: state.templateElementsBySlideId,
 		setTemplateElementsBySlideId: state.setTemplateElementsBySlideId,
@@ -181,6 +189,7 @@ export function useIOHandlers(input: UseIOHandlersInput): IOHandlersResult {
 		history,
 		onPropertiesChange,
 		onNotesUpdate,
+		allowExternalImages,
 	});
 
 	return { exportHandlers, printHandlers, themeHandlers, propertyHandlers };

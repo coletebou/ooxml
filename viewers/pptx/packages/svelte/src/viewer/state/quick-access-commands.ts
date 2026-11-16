@@ -9,6 +9,8 @@ import type { ViewerParityUiState } from './viewer-parity-ui.svelte';
 export interface QuickAccessCommandDeps {
 	deck: DeckApi;
 	exportingApi: ExportingApi;
+	/** File > Export > PDF as the ribbon runs it (options step, progress); the API otherwise. */
+	runPdf?(): Promise<void>;
 	parityUi: ViewerParityUiState;
 	/** Host customisation: a removed dialog / feature makes its command inert. */
 	customization?: ResolvedCustomization;
@@ -33,8 +35,9 @@ export function runQuickAccessCommand(id: string, deps: QuickAccessCommandDeps):
 			deck.setMode('present');
 		},
 		print: () => void exportingApi.print(),
-		exportPdf: () => void exportingApi.exportPdf(),
-		newSlide: () => deck.addSlide(),
+		exportPdf: () => void (deps.runPdf ? deps.runPdf() : exportingApi.exportPdf()),
+		// After the slide on screen, as the ribbon's New Slide (the API's default is the end).
+		newSlide: () => deck.addSlide(deck.getActiveSlideIndex()),
 		spellCheck: () => {
 			parityUi.preferences.spellCheck = !parityUi.preferences.spellCheck;
 		},

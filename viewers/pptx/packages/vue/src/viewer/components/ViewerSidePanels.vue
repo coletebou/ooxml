@@ -21,6 +21,7 @@ import type {
 	PptxSlide,
 } from 'pptx-viewer-core';
 import { computed } from 'vue';
+import type { Component } from 'vue';
 
 import type { AiPanelController } from '../composables/ai/useAiPanelController';
 import type { UseAccessibilityResult } from '../composables/useAccessibility';
@@ -35,7 +36,7 @@ import { useResolvedCustomization } from '../composables/useViewerCustomization'
 import AccessibilityPanel from './AccessibilityPanel.vue';
 import { AiChatPanelLazy } from './ai';
 import CommentsPanel from './CommentsPanel.vue';
-import CustomShowsPanel from './CustomShowsPanel.vue';
+import CustomShowsDialog from './CustomShowsDialog.vue';
 import FollowModeBar from './FollowModeBar.vue';
 import SelectionPane from './SelectionPane.vue';
 import SignaturesPanel from './SignaturesPanel.vue';
@@ -64,6 +65,8 @@ const props = defineProps<{
 	customShows: UseCustomShowsWiringResult;
 	/** AI assistant config; the panel is gated behind the host opting in. */
 	ai?: PptxAiConfig;
+	/** The chat panel of a `createAiAssistant` handle; the viewer's own lazy panel otherwise. */
+	aiChatPanel?: Component;
 	aiPanelOpen: boolean;
 	onCloseAiPanel: () => void;
 	aiPanel: AiPanelController;
@@ -91,9 +94,6 @@ const accessibilityPaneVisible = computed(() =>
 const signaturesAvailable = computed(() => isDialogAvailable(customization.value, 'signatures'));
 
 /** Commit a comments mutation through the history-aware wiring. */
-function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]): void {
-	props.comments.commitComments(next);
-}
 </script>
 
 <template>
@@ -126,7 +126,8 @@ function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]):
 	     so `@ai-sdk/vue` + the AI core only ship when actually used. React
 	     parity: NOT gated on isMobile; a `!isMobile` clause here made the
 	     assistant unopenable on phones. -->
-	<AiChatPanelLazy
+	<component
+		:is="aiChatPanel ?? AiChatPanelLazy"
 		v-if="ai && aiPanelOpen && (ribbonMode === 'edit' || ribbonMode === 'master')"
 		:bridge="aiBridge"
 		:config="ai"
@@ -144,13 +145,9 @@ function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]):
 	<!-- Comments (desktop right rail; mobile uses the bottom sheet) -->
 	<CommentsPanel
 		v-if="canEdit && !isMobile && comments.showComments.value"
-		:comments="comments.commentsApi.slideComments.value"
+		:comments="comments.activeComments.value"
 		:author-name="authorName"
 		:modern-comment-authors="deck.modernCommentAuthors.value"
-		@add="(p) => commit(comments.commentsApi.addComment(p.text, undefined, undefined, p.mentions))"
-		@remove="(id) => commit(comments.commentsApi.removeComment(id))"
-		@resolve="(id) => commit(comments.commentsApi.resolveComment(id))"
-		@reply="(p) => commit(comments.commentsApi.replyToComment(p.parentId, p.text, p.mentions))"
 	/>
 
 	<!-- Signed-document badge (opens the signatures panel). -->
@@ -194,16 +191,15 @@ function commit(next: Parameters<UseCommentsWiringResult['commitComments']>[0]):
 	/>
 
 	<!-- Custom shows -->
-	<CustomShowsPanel
+	<CustomShowsDialog
 		v-if="canEdit && customShows.showCustomShows.value"
+		open
 		:custom-shows="deck.customShows.value"
 		:slides="deck.slides.value"
 		:active-show-id="customShows.activeCustomShowId.value"
-		@create="customShows.onCreateCustomShow"
-		@rename="customShows.customShowOps.renameCustomShow"
-		@delete="customShows.onDeleteCustomShow"
+		@save="customShows.commitCustomShowsDialog"
 		@select="(id) => (customShows.activeCustomShowId.value = id)"
-		@toggle-slide="customShows.customShowOps.toggleSlideInShow"
-		@move-slide="customShows.customShowOps.moveSlideInShow"
+		@run="customShows.runCustomShow"
+		@close="customShows.showCustomShows.value = false"
 	/>
 </template>

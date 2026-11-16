@@ -4,7 +4,14 @@
  * The slide counter, save indicator, notes toggle, view-mode buttons and zoom
  * cluster were hand-built five times. The view owns the markup, pressed state
  * and gating; hosts own every effect (notes panel, view switching, zoom).
+ * {@link statusBarState} turns a host's own facts into the view's state and
+ * {@link dispatchStatusBarIntent} routes the view's requests, so the gating and
+ * the save rule are written once.
  */
+import { isActionHidden } from './toolbar-actions';
+import type { ToolbarActionId } from './toolbar-actions';
+import type { SaveProgressStatus } from './controller/save-progress-controller';
+import type { DeckWebfontProgress } from './deck-webfont-readiness';
 
 export type StatusBarTranslate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -28,6 +35,8 @@ export interface StatusBarViewState {
 	/** Already-translated save indicator, see {@link resolveStatusBarSave}. */
 	saveText: string;
 	saveKind?: StatusBarSaveKind;
+	/** Polite announcement of a save in progress, throttled; empty when none runs. */
+	saveAnnouncement?: string;
 	/** Omit to hide the whole zoom cluster. */
 	zoomPercent?: number;
 	showNotes?: boolean;
@@ -40,6 +49,10 @@ export interface StatusBarViewState {
 	showSlideShow?: boolean;
 	/** The pressed view button; omit when none is active. */
 	viewMode?: StatusBarViewMode;
+	/** Already-translated "Downloading fonts" text while the deck's webfonts download. */
+	fontText?: string;
+	/** The families being downloaded, for the item's tooltip. */
+	fontTitle?: string;
 	translate?: StatusBarTranslate;
 }
 
@@ -68,7 +81,11 @@ export function resolveStatusBarSave(
 	autosave: StatusBarAutosave | undefined,
 	dirty: boolean,
 	now: number = Date.now(),
-): { text: string; kind: StatusBarSaveKind } {
+	progress?: SaveProgressStatus,
+): { text: string; kind: StatusBarSaveKind; announcement?: string } {
+	if (progress) {
+		return { text: progress.text, kind: 'saving', announcement: progress.announcement };
+	}
 	if (autosave?.state === 'saving') {
 		return { text: t('pptx.autosave.saving'), kind: 'saving' };
 	}
@@ -99,4 +116,86 @@ export function statusBarViewMode(
 		return 'sorter';
 	}
 	return mode === 'edit' ? 'normal' : undefined;
+}
+
+/** What a host knows about its viewer; {@link statusBarState} derives the bar from it. */
+export interface StatusBarHostState {
+	slideCount: number;
+	/** Zero-based active slide. */
+	activeSlideIndex: number;
+	dirty: boolean;
+	/** The autosave engine's state; undefined when the host has none. */
+	autosave?: StatusBarAutosave | undefined;
+	/** Undefined when the host has no zoom. */
+	zoomPercent?: number | undefined;
+	notesExpanded?: boolean | undefined;
+	/** The pressed view, see {@link statusBarViewMode}; undefined when none is active. */
+	viewMode?: StatusBarViewMode | undefined;
+	/**
+	 * Controls the host has a handler for; each defaults to true. A control without one is
+	 * hidden (`viewModes` drops the whole Normal / Sorter / Slide Show cluster).
+	 */
+	handles?: Partial<Record<'notes' | 'viewModes' | 'sorter' | 'slideShow', boolean>>;
+	/** The host's `hiddenActions`: `zoom`, `notes` and `fullscreen` (the Slide Show button). */
+	hiddenActions?: readonly ToolbarActionId[] | undefined;
+	translate: StatusBarTranslate;
+	/** A save to the host's storage in progress, see `saveProgressStatus`. */
+	saveProgress?: SaveProgressStatus | undefined;
+	/**
+	 * The deck's webfont download (the host's `prepareDeckWebfonts` progress);
+	 * shown while it runs after the deck is already on screen.
+	 */
+	fontProgress?: DeckWebfontProgress | null | undefined;
+	/** Clock for the "Saved n minutes ago" text; defaults to now. */
+	now?: number;
+}
+
+/** The status bar's state for a host: save text, gating and translation in one place. */
+export function statusBarState(host: StatusBarHostState): StatusBarViewState {
+	const save = resolveStatusBarSave(
+		host.translate,
+		host.autosave,
+		host.dirty,
+		host.now,
+		host.saveProgress,
+	);
+	const handles = (id: keyof NonNullable<StatusBarHostState['handles']>) =>
+		host.handles?.[id] !== false;
+	const hidden = (id: ToolbarActionId) => isActionHidden(id, host.hiddenActions);
+	const zoom = hidden('zoom') ? undefined : host.zoomPercent;
+	return {
+		slideCount: host.slideCount,
+		activeSlideIndex: host.activeSlideIndex,
+		saveText: save.text,
+		saveKind: save.kind,
+		...(save.announcement ? { saveAnnouncement: save.announcement } : {}),
+		...(zoom === undefined ? {} : { zoomPercent: zoom }),
+		showNotes: handles('notes') && !hidden('notes'),
+		notesExpanded: host.notesExpanded === true,
+		showViewModes: handles('viewModes'),
+		showSorter: handles('sorter'),
+		showSlideShow: handles('slideShow') && !hidden('fullscreen'),
+		...(host.viewMode ? { viewMode: host.viewMode } : {}),
+		...(host.fontProgress
+			? {
+					fontText: host.translate('pptx.viewer.loadingFonts', {
+						loaded: host.fontProgress.loaded,
+						total: host.fontProgress.total,
+					}),
+					fontTitle: host.fontProgress.families.join(', '),
+				}
+			: {}),
+		translate: host.translate,
+	};
+}
+
+/** A host's handler per status bar control; a control without one does nothing. */
+export type StatusBarIntentHandlers = Partial<Record<StatusBarControlId, () => void>>;
+
+/** Route the bar's `status-request` event to the host's handler for its control. */
+export function dispatchStatusBarIntent(event: Event, handlers: StatusBarIntentHandlers): void {
+	const id = (event as CustomEvent<StatusBarIntent | undefined>).detail?.id;
+	if (id) {
+		handlers[id]?.();
+	}
 }

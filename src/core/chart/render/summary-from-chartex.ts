@@ -1,33 +1,19 @@
-// Builds the painter's chart summary from an Office 2016 extended chart part (`cx:chartSpace`):
-// the waterfall (`layoutId="waterfall"`), the histogram (`layoutId="clusteredColumn"`), the treemap
-// and the sunburst. Word reads the cached points of `cx:data`; Excel files carry only the formula
-// (a hidden `_xlchart.v1.N` defined name) and the host resolves it from live cells. Other extended
-// families (funnel, box and whisker...) are reported by `layoutId` and not summarised.
-import { parseDrawingFill } from '../../drawingml/drawing-fill';
+import { chartExFormatting } from './summary-ex-formatting';
+import { chartExSeriesPaint } from './summary-ex-series';
+// Builds neutral SVG summaries for supported Office 2016 extended chart parts: waterfall,
+// histogram, treemap, sunburst, funnel, box-and-whisker and region maps. Word uses cached points;
+// Excel can resolve retained formulas from live cells. A pareto line marks its histogram.
 import type { DrawingColor } from '../../drawingml/types';
-import { NS, children, first, parseXml, type XmlElement } from '../../xml/index';
+import { parseXml, type XmlElement } from '../../xml/index';
+import type { ChartExData, ChartExDimension, ChartExSeries, ChartExSpace } from '../ex/model';
+import { isChartExRoot, parseChartExSpace } from '../ex/parse';
 import type { ChartSummary, ChartSummarySeries, HistogramSummaryOptions } from './summary';
 
-const cx = (parent: XmlElement | undefined, local: string): XmlElement | undefined =>
-	first(parent, local, NS.cx);
-const text = (element: XmlElement | undefined): string => (element?.textContent ?? '').trim();
-
-/** `@val` when written, else the element's text (the schema uses both for scalar children). */
-function scalar(parent: XmlElement | undefined, local: string): string | undefined {
-	const element = cx(parent, local);
-	if (!element) return undefined;
-	return element.hasAttribute('val') ? (element.getAttribute('val') ?? '') : text(element);
-}
-
 /** The data of a series: its own `cx:data`, else the shared one named by `cx:dataId`. */
-function seriesData(root: XmlElement, series: XmlElement): XmlElement | undefined {
-	const inline = cx(series, 'data');
-	if (inline) return inline;
-	const id = cx(series, 'dataId')?.getAttribute('val');
-	const shared = children(cx(root, 'chartData') ?? root, 'data', NS.cx);
-	return id === null || id === undefined
-		? shared[0]
-		: shared.find((d) => d.getAttribute('id') === id);
+function seriesData(space: ChartExSpace, series: ChartExSeries): ChartExData | undefined {
+	if (series.data) return series.data;
+	const shared = space.chartData.data;
+	return series.dataId === undefined ? shared[0] : shared.find((data) => data.id === series.dataId);
 }
 
 interface Dimension {
@@ -35,79 +21,67 @@ interface Dimension {
 	points: string[];
 }
 
+const findDimension = (
+	data: ChartExData | undefined,
+	kind: ChartExDimension['kind'],
+	type: string,
+) => data?.dimensions.find((d) => d.kind === kind && (d.type ?? '') === type);
+
+/** The points of one level by index, trimmed, holes as `''`. */
+function levelPoints(level: ChartExDimension['levels'][number]): string[] {
+	const points: string[] = [];
+	for (const point of level.points) points[point.index ?? points.length] = point.value.trim();
+	for (let i = 0; i < Math.max(level.pointCount ?? 0, points.length); i++) points[i] ??= '';
+	return points;
+}
+
 /** One dimension's formula and its first level of cached points, holes as `''`. */
-function dimension(data: XmlElement | undefined, kind: 'strDim' | 'numDim', type: string) {
-	const all = data ? children(data, kind, NS.cx) : [];
-	const element = all.find((d) => (d.getAttribute('type') ?? '') === type) ?? undefined;
+function dimension(data: ChartExData | undefined, kind: ChartExDimension['kind'], type: string) {
+	const element = findDimension(data, kind, type);
 	if (!element) return undefined;
-	const out: Dimension = { points: [] };
-	const formula = text(cx(element, 'f'));
+	const level = element.levels[0];
+	const out: Dimension = { points: level ? levelPoints(level) : [] };
+	const formula = element.formula?.formula.trim();
 	if (formula) out.formula = formula;
-	const level = cx(element, 'lvl');
-	const count = Number(level?.getAttribute('ptCount') ?? 0);
-	for (const point of level ? children(level, 'pt', NS.cx) : []) {
-		const index = Number(point.getAttribute('idx') ?? out.points.length);
-		if (Number.isInteger(index) && index >= 0) out.points[index] = text(point);
-	}
-	for (let i = 0; i < Math.max(count, out.points.length); i++) out.points[i] ??= '';
 	return out;
 }
 
-/** Every `cx:lvl` of the category dimension, leaf first, holes as `''` (treemap and sunburst). */
-function categoryLevels(data: XmlElement | undefined): string[][] {
-	const element = data
-		? children(data, 'strDim', NS.cx).find((d) => (d.getAttribute('type') ?? '') === 'cat')
-		: undefined;
-	return (element ? children(element, 'lvl', NS.cx) : []).map((level) => {
-		const points: string[] = [];
-		const count = Number(level.getAttribute('ptCount') ?? 0);
-		for (const point of children(level, 'pt', NS.cx)) {
-			const index = Number(point.getAttribute('idx') ?? points.length);
-			if (Number.isInteger(index) && index >= 0) points[index] = text(point);
-		}
-		for (let i = 0; i < Math.max(count, points.length); i++) points[i] ??= '';
-		return points;
-	});
-}
+/** Every level of the category dimension, leaf first, holes as `''` (treemap and sunburst). */
+const categoryLevels = (data: ChartExData | undefined): string[][] =>
+	(findDimension(data, 'strDim', 'cat')?.levels ?? []).map(levelPoints);
 
-/** The title text: `cx:v` of `cx:txData`, or the runs of `cx:rich`. */
-function titleOf(chart: XmlElement | undefined): string | undefined {
-	const tx = cx(cx(chart, 'title'), 'tx');
-	const data = text(cx(cx(tx, 'txData'), 'v'));
+/** The title text: `cx:v` of `cx:txData`, or the runs of `cx:rich` (line breaks left out). */
+function titleOf(space: ChartExSpace): string | undefined {
+	const tx = space.title?.tx;
+	const data = tx?.value?.trim();
 	if (data) return data;
-	const rich = cx(tx, 'rich');
-	if (!rich) return undefined;
-	const runs = Array.from(rich.getElementsByTagNameNS(NS.a, 't')).map((t) => t.textContent ?? '');
+	if (!tx?.rich) return undefined;
+	const runs = tx.rich.paragraphs.flatMap((paragraph) =>
+		paragraph.runs.filter((run) => run.text !== '\n').map((run) => run.text),
+	);
 	return runs.join('') || undefined;
 }
 
-function seriesFill(series: XmlElement): Pick<ChartSummarySeries, 'drawingColor'> {
-	const fill = parseDrawingFill(cx(series, 'spPr'));
+function seriesFill(series: ChartExSeries): Pick<ChartSummarySeries, 'drawingColor'> {
+	const fill = series.spPr?.fill;
 	const color: DrawingColor | undefined = fill?.kind === 'solid' ? fill.color : undefined;
 	return color ? { drawingColor: color } : {};
 }
 
-function numberOf(value: string | undefined): number | undefined {
-	const parsed = Number.parseFloat(value ?? '');
-	return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function histogramOptions(layoutPr: XmlElement | undefined): HistogramSummaryOptions {
-	const binning = cx(layoutPr, 'binning');
+function histogramOptions(series: ChartExSeries): HistogramSummaryOptions {
+	const layout = series.layoutProperties;
+	const binning = layout?.binning;
 	const out: HistogramSummaryOptions = {};
-	const size = numberOf(scalar(binning, 'binSize'));
-	const count = numberOf(scalar(binning, 'binCount'));
-	if (size !== undefined) out.binSize = size;
-	if (count !== undefined && count >= 0) out.binCount = Math.trunc(count);
-	const closed = binning?.getAttribute('intervalClosed');
+	if (binning?.binSize !== undefined) out.binSize = binning.binSize;
+	if (binning?.binCount !== undefined && binning.binCount >= 0)
+		out.binCount = Math.trunc(binning.binCount);
+	const closed = binning?.intervalClosed;
 	if (closed === 'l' || closed === 'r') out.intervalClosed = closed;
 	for (const key of ['underflow', 'overflow'] as const) {
-		const raw = binning?.getAttribute(key);
-		if (raw === 'auto') out[key] = 'auto';
-		else if (raw !== null && raw !== undefined && numberOf(raw) !== undefined)
-			out[key] = numberOf(raw);
+		const value = binning?.[key];
+		if (value !== undefined) out[key] = value;
 	}
-	if (cx(layoutPr, 'aggregation')) out.aggregateByCategory = true;
+	if (layout?.aggregation) out.aggregateByCategory = true;
 	return out;
 }
 
@@ -124,93 +98,164 @@ const LEGEND_POSITIONS = ['r', 'l', 't', 'b', 'tr'];
 export function chartExSummary(source: string | XmlElement): ChartExSummary | undefined {
 	const root =
 		typeof source === 'string' ? parseXml(source, { label: 'Chart part' }).documentElement : source;
-	if (root.localName !== 'chartSpace' || root.namespaceURI !== NS.cx) return undefined;
-	const chart = cx(root, 'chart');
-	const region = cx(cx(chart, 'plotArea'), 'plotAreaRegion');
-	const all = region ? children(region, 'series', NS.cx) : [];
-	const primary = all.find((s) => s.getAttribute('layoutId') !== 'paretoLine') ?? all[0];
-	const layoutId = primary?.getAttribute('layoutId') ?? '';
-	const chartType =
-		layoutId === 'waterfall'
-			? 'waterfall'
-			: layoutId === 'clusteredColumn'
-				? 'histogram'
-				: layoutId === 'treemap' || layoutId === 'sunburst'
-					? layoutId
-					: undefined;
-	if (!primary || !chartType) return { layoutId };
-	const data = seriesData(root, primary);
+	if (!isChartExRoot(root)) return undefined;
+	return chartExSummaryFromModel(parseChartExSpace(root).chartExSpace);
+}
+
+function summarySeries(
+	space: ChartExSpace,
+	source: ChartExSeries,
+	chartType: import('./summary').ChartSummaryType,
+): ChartSummarySeries {
+	const data = seriesData(space, source);
 	const categories = dimension(data, 'strDim', 'cat');
 	const values = dimension(
 		data,
 		'numDim',
-		chartType === 'treemap' || chartType === 'sunburst' ? 'size' : 'val',
+		chartType === 'treemap' || chartType === 'sunburst'
+			? 'size'
+			: chartType === 'regionMap'
+				? 'colorVal'
+				: 'val',
 	);
-	const txData = cx(cx(primary, 'tx'), 'txData');
 	const series: ChartSummarySeries = {
 		categories: categories?.points ?? [],
 		values: (values?.points ?? []).map((p) =>
 			p !== '' && Number.isFinite(Number(p)) ? Number(p) : null,
 		),
-		...seriesFill(primary),
+		...seriesFill(source),
 	};
-	const name = text(cx(txData, 'v'));
+	if (chartType === 'funnel' || chartType === 'boxWhisker' || chartType === 'regionMap') {
+		chartExSeriesPaint(source, series, chartType === 'funnel' && source.dataLabels !== undefined);
+		if (source.hidden !== undefined) series.hidden = source.hidden;
+	}
+	if (chartType === 'boxWhisker') series.boxWhisker = source.layoutProperties ?? {};
+	if (chartType === 'regionMap') {
+		const geo = source.layoutProperties?.geography;
+		series.regionMap = {
+			...(geo as import('../region-map/types').RegionMapOptions),
+			...(geo?.geoCacheXml ? { geographyCacheXml: geo.geoCacheXml } : {}),
+			...(dimension(data, 'strDim', 'entityId')
+				? { entityIds: dimension(data, 'strDim', 'entityId')!.points }
+				: {}),
+			...(source.layoutProperties?.regionLabelLayout
+				? {
+						regionLabelLayout: source.layoutProperties.regionLabelLayout as NonNullable<
+							import('../region-map/types').RegionMapOptions['regionLabelLayout']
+						>,
+					}
+				: {}),
+			...(source.valueColorsXml ? { valueColorsXml: source.valueColorsXml } : {}),
+			...(source.valueColorPositionsXml
+				? { valueColorPositionsXml: source.valueColorPositionsXml }
+				: {}),
+		};
+	}
+	const name = source.tx?.value?.trim();
 	if (name) series.name = name;
-	const nameRef = text(cx(txData, 'f'));
+	const nameRef = source.tx?.formula?.formula.trim();
 	if (nameRef) series.nameRef = nameRef;
 	if (categories?.formula) series.categoriesRef = categories.formula;
 	if (values?.formula) series.valuesRef = values.formula;
-	const layoutPr = cx(primary, 'layoutPr');
-	const legend = cx(chart, 'legend');
-	const summary: ChartSummary = { chartType, series: [series], showLegend: legend !== undefined };
-	// An extended chart has no c:style: Office draws it with the classic default text (grey, regular),
-	// not the larger bold text of the newly authored style.
-	summary.formatting = {
-		builtInStyle: 2,
-		sourceXml: '',
-		entries: {
-			title: {
-				fontSize: 14,
-				bold: false,
-				textColor: {
-					kind: 'scheme',
-					value: 'tx1',
-					transforms: [
-						{ name: 'lumMod', value: '65000' },
-						{ name: 'lumOff', value: '35000' },
-					],
-				},
-				sourceXml: '',
-			},
-		},
+	return series;
+}
+
+/** The summary of a parsed extended chart part. */
+export function chartExSummaryFromModel(space: ChartExSpace): ChartExSummary {
+	const all = space.plotArea.series;
+	const primary = all.find((s) => s.layoutId !== 'paretoLine') ?? all[0];
+	const layoutId = primary?.layoutId ?? '';
+	const chartType =
+		layoutId === 'waterfall'
+			? 'waterfall'
+			: layoutId === 'clusteredColumn'
+				? 'histogram'
+				: layoutId === 'treemap' ||
+					  layoutId === 'sunburst' ||
+					  layoutId === 'funnel' ||
+					  layoutId === 'boxWhisker' ||
+					  layoutId === 'regionMap'
+					? layoutId
+					: undefined;
+	if (!primary || !chartType) return { layoutId };
+	const series = summarySeries(space, primary, chartType);
+	const layout = primary.layoutProperties;
+	const legend = space.legend;
+	const summary: ChartSummary = {
+		chartType,
+		series:
+			chartType === 'boxWhisker'
+				? all
+						.filter((s) => s.layoutId === 'boxWhisker')
+						.map((source) => summarySeries(space, source, chartType))
+				: [series],
+		showLegend: legend !== undefined,
 	};
-	const title = titleOf(chart);
+	if (chartType === 'boxWhisker') {
+		summary.axes = space.plotArea.axes.flatMap((axis) => {
+			const scaling = axis.scaling;
+			if (!scaling) return [];
+			const value = scaling.kind === 'val';
+			return [
+				{
+					kind: value ? ('val' as const) : ('cat' as const),
+					...(axis.id === undefined ? {} : { id: axis.id }),
+					position: value ? 'l' : 'b',
+					deleted: axis.hidden ?? false,
+					scaling: {
+						...(value && typeof scaling.min === 'number' ? { min: scaling.min } : {}),
+						...(value && typeof scaling.max === 'number' ? { max: scaling.max } : {}),
+					},
+					majorGridlines: !!axis.majorGridlines,
+					minorGridlines: !!axis.minorGridlines,
+					...(axis.majorGridlines?.spPr ? { majorGridlinesSpPr: axis.majorGridlines.spPr } : {}),
+					...(axis.minorGridlines?.spPr ? { minorGridlinesSpPr: axis.minorGridlines.spPr } : {}),
+					...(value && typeof scaling.majorUnit === 'number'
+						? { majorUnit: scaling.majorUnit }
+						: {}),
+					...(value && typeof scaling.minorUnit === 'number'
+						? { minorUnit: scaling.minorUnit }
+						: {}),
+					...(axis.spPr ? { spPr: axis.spPr } : {}),
+					...(axis.numberFormat ? { numberFormat: axis.numberFormat } : {}),
+					...(axis.tickLabels ? {} : { tickLabelPosition: 'none' }),
+				},
+			];
+		});
+	}
+	if (chartType === 'funnel') {
+		const cat = space.plotArea.axes.find((axis) => axis.scaling?.kind === 'cat')?.scaling;
+		if (cat?.kind === 'cat' && typeof cat.gapWidth === 'number')
+			summary.funnelGapWidth = cat.gapWidth;
+	}
+	summary.formatting = chartExFormatting(space);
+	const title = titleOf(space);
 	if (title) summary.title = title;
-	const position = legend?.getAttribute('pos');
+	const position = legend?.position;
 	if (position && LEGEND_POSITIONS.includes(position))
 		summary.legendPosition = position as NonNullable<ChartSummary['legendPosition']>;
 	if (chartType === 'waterfall') {
-		const subtotals = cx(layoutPr, 'subtotals');
-		const connectors = cx(layoutPr, 'visibility')?.getAttribute('connectorLines');
 		summary.waterfall = {
-			...(subtotals
-				? {
-						subtotalIndices: children(subtotals, 'idx', NS.cx)
-							.map((idx) => Number.parseInt(idx.getAttribute('val') ?? '', 10))
-							.filter((idx) => Number.isInteger(idx) && idx >= 0),
-					}
-				: {}),
-			...(connectors === '0' || connectors === 'false' ? { connectorLines: false } : {}),
+			...(layout?.subtotals ? { subtotalIndices: [...layout.subtotals] } : {}),
+			...(layout?.visibility?.connectorLines === false ? { connectorLines: false } : {}),
 		};
 	} else if (chartType === 'treemap' || chartType === 'sunburst') {
-		const layout = cx(layoutPr, 'parentLabelLayout')?.getAttribute('val');
+		const parentLayout = layout?.parentLabelLayout;
 		summary.hierarchy = {
-			levels: categoryLevels(data),
-			dataLabels: cx(primary, 'dataLabels') !== undefined,
-			...(layout === 'none' || layout === 'banner' || layout === 'overlapping'
-				? { parentLabelLayout: layout }
+			levels: categoryLevels(seriesData(space, primary)),
+			dataLabels: primary.dataLabels !== undefined,
+			...(parentLayout === 'none' || parentLayout === 'banner' || parentLayout === 'overlapping'
+				? { parentLabelLayout: parentLayout }
 				: {}),
 		};
-	} else summary.histogram = histogramOptions(layoutPr);
+	} else if (chartType === 'histogram') {
+		summary.histogram = histogramOptions(primary);
+		const owner = all.indexOf(primary);
+		const line = all.find((s) => s.layoutId === 'paretoLine' && s.ownerIndex === owner);
+		if (line) {
+			const stroke = line.spPr?.line?.fill;
+			summary.histogram.pareto = stroke?.kind === 'solid' ? { lineColor: stroke.color } : {};
+		}
+	}
 	return { layoutId, summary };
 }

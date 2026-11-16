@@ -17,9 +17,23 @@
  */
 
 import { inject, Injectable, signal } from '@angular/core';
-import type { DeckSaveIntent, DocumentSaveReason, DocumentStorage } from 'ooxml-ui/pptx';
+import type {
+	PptxSaveAcknowledgement,
+	PptxSaveSnapshot,
+	CloudDocumentHostValues,
+	CloudFileProvider,
+	CloudOpenedFile,
+	DeckSaveIntent,
+	DocumentSaveReason,
+	DocumentStorage,
+} from 'ooxml-ui/pptx';
 import {
+	createCloudDocumentController,
+	createSaveRevisionController,
+	resolveCloudDocumentView,
 	deliverSavedPresentation,
+	isCleanAfterSave,
+	savedPresentationRevision,
 	exportDeckJson,
 	openPptxFile,
 	savedPresentationFileName,
@@ -52,12 +66,31 @@ interface FileIOHost {
 	 * actually completes.
 	 */
 	readonly afterSuccessfulSave: (format: PptxSaveFormat) => void;
-	/** Host `storage` input: when set, Save / Save As go to `storage.save()`, not a download. */
+	/**
+	 * The open document's storage (the host `storage` input, or a cloud file's own): when set,
+	 * Save / Save As go to `storage.save()`, not a download.
+	 */
 	readonly storage?: () => DocumentStorage | undefined;
-	/** Host `fileName` input: the stem the saved copy is named after. */
+	/**
+	 * The host `storage` input itself, for chrome that lists recovery copies (Recent, Account);
+	 * defaults to {@link storage}.
+	 */
+	readonly hostStorage?: () => DocumentStorage | undefined;
+	/** Host `fileProviders` input: the File > Open cloud places. */
+	readonly fileProviders?: () => readonly CloudFileProvider[] | undefined;
+	/** The open document's name (host `fileName`, or a cloud file's): the saved copy's stem. */
 	readonly fileName?: () => string | undefined;
 	/** A Save / Save As failed (serialising, or the host's storage rejected). */
 	readonly onSaveError?: (error: unknown) => void;
+	/**
+	 * The values a save is built from (the ones autosave watches), read when a save starts and
+	 * when it lands: an edit in between keeps the document unsaved.
+	 */
+	readonly changeSources?: () => readonly unknown[];
+	/** A Save / Save As landed with no edit while it was in flight: the document is clean. */
+	readonly markSaved?: () => void;
+	/** The host acknowledged the current save revision: drop the crash-recovery copy. */
+	readonly discardRecovery?: () => void;
 }
 
 @Injectable()
@@ -73,6 +106,17 @@ export class ViewerFileIOService {
 	readonly contentOverride = signal<Uint8Array | ArrayBuffer | null>(null);
 
 	private host: FileIOHost | null = null;
+
+	/**
+	 * The file opened from a File > Open cloud place (shared `render/cloud-open`), mirrored into a
+	 * signal: its storage, name and edit right apply until another document is loaded.
+	 */
+	private readonly cloudDocument = createCloudDocumentController();
+	readonly cloudFile = signal<CloudOpenedFile | null>(null);
+
+	constructor() {
+		this.cloudDocument.subscribe(() => this.cloudFile.set(this.cloudDocument.getSnapshot().file));
+	}
 
 	/** Wire the host accessors (called once from the component constructor). */
 	bind(host: FileIOHost): void {
@@ -105,6 +149,38 @@ export class ViewerFileIOService {
 	 * serialises the editor's edited deck so changes persist.
 	 */
 	async getContent(): Promise<Uint8Array> {
+		const data = await this.serialize();
+		// Mirror React's imperative handle: serialising the deck also notifies the
+		// host so listeners wired to (contentChange) receive the latest bytes.
+		this.requireHost().emitContentChange(data);
+		return data;
+	}
+
+	/** Revision tracker behind {@link getSaveRevision}, {@link getSaveSnapshot} and {@link acknowledgeSave}. */
+	private readonly saveRevision = createSaveRevisionController({
+		getSources: () => this.host?.changeSources?.() ?? [],
+		serialize: () => this.serialize(),
+		markClean: () => this.host?.markSaved?.(),
+		discardRecovery: () => this.host?.discardRecovery?.(),
+	});
+
+	/** The revision of the document as it is now; changes after every edit. */
+	getSaveRevision(): number {
+		return this.saveRevision.getRevision();
+	}
+
+	/** Serialise for a host that persists the deck itself: no `contentChange`, still dirty. */
+	getSaveSnapshot(): Promise<PptxSaveSnapshot> {
+		return this.saveRevision.snapshot();
+	}
+
+	/** The host persisted `revision`: the document is clean only if it is still current. */
+	acknowledgeSave(revision: number): PptxSaveAcknowledgement {
+		return this.saveRevision.acknowledge(revision);
+	}
+
+	/** The deck as `.pptx` bytes, without notifying the host. */
+	private async serialize(): Promise<Uint8Array> {
 		const host = this.requireHost();
 		const intent = host.saveIntent();
 		const data = host.canEdit()
@@ -115,9 +191,6 @@ export class ViewerFileIOService {
 					intent,
 				)
 			: await this.loader.getContent(intent);
-		// Mirror React's imperative handle: serialising the deck also notifies the
-		// host so listeners wired to (contentChange) receive the latest bytes.
-		host.emitContentChange(data);
 		return data;
 	}
 
@@ -128,7 +201,34 @@ export class ViewerFileIOService {
 	 */
 	/** The host `storage` input, for chrome that lists recovery copies (Recent, Account). */
 	storage(): DocumentStorage | undefined {
-		return this.host?.storage?.();
+		return this.host?.hostStorage ? this.host.hostStorage() : this.host?.storage?.();
+	}
+
+	/** The host's File > Open cloud places (empty when it passed none). */
+	fileProviders(): readonly CloudFileProvider[] {
+		return this.host?.fileProviders?.() ?? [];
+	}
+
+	/**
+	 * What the viewer uses for storage, edit right, name and recovery key: the host's own, or the
+	 * open cloud file's (shared {@link resolveCloudDocumentView}).
+	 */
+	documentView(host: CloudDocumentHostValues): CloudDocumentHostValues {
+		return resolveCloudDocumentView(this.cloudFile(), host);
+	}
+
+	/**
+	 * File > Open > a cloud place: load the bytes like any open (a user load, history reset), then
+	 * let the file's storage, name and edit right apply.
+	 */
+	openCloudFile(file: CloudOpenedFile): void {
+		this.contentOverride.set(file.bytes);
+		this.cloudDocument.open(file);
+	}
+
+	/** Another document was loaded (new, device, recent or a host content change). */
+	clearCloudFile(): void {
+		this.cloudDocument.clear();
 	}
 
 	/** File > Save: `.pptx`, reported to host storage as `save`. */
@@ -151,6 +251,7 @@ export class ViewerFileIOService {
 
 	private async writeSave(format: PptxSaveFormat, reason: DocumentSaveReason): Promise<void> {
 		const host = this.requireHost();
+		const revision = savedPresentationRevision(host.changeSources?.() ?? []);
 		const intent = host.saveIntent();
 		const slides = buildSaveSlides(host.slides(), host.templateElementsBySlideId());
 		const bytes = host.canEdit()
@@ -164,6 +265,9 @@ export class ViewerFileIOService {
 			await deliverSavedPresentation({ storage, bytes, format, fileName, reason });
 		} else {
 			this.exportSvc.savePresentation(bytes, fileName, format);
+		}
+		if (host.changeSources && isCleanAfterSave(revision, host.changeSources())) {
+			host.markSaved?.();
 		}
 		host.afterSuccessfulSave(format);
 	}
@@ -228,6 +332,7 @@ export class ViewerFileIOService {
 		void (async () => {
 			const picked = await openPptxFile();
 			if (picked) {
+				this.clearCloudFile();
 				this.contentOverride.set(new Uint8Array(picked.buffer));
 			}
 		})();

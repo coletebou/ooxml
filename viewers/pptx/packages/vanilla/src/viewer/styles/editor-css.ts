@@ -313,6 +313,9 @@ export const EDITOR_CSS = `
 	margin-bottom: 8px;
 }
 .pptxv-inspector-row-label { color: var(--pptx-muted-foreground); }
+.pptxv-inspector-fields-section { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; border-bottom: 1px solid var(--pptx-border); }
+.pptxv-inspector-fields-section:last-child { border-bottom: none; }
+.pptxv-inspector-fields-title { font-size: 11px; font-weight: 600; color: var(--pptx-muted-foreground); }
 /* Fill & Stroke: one group per target (picker, theme grid, recent colours). */
 .pptxv-inspector-color-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .pptxv-inspector-color-group > .pptxv-inspector-row { margin-bottom: 0; }
@@ -354,17 +357,6 @@ export const EDITOR_CSS = `
 }
 .pptxv-smartart-layout-button:hover { background: var(--pptx-accent); color: var(--pptx-accent-foreground); }
 .pptxv-smartart-layout-button.is-active { border-color: var(--pptx-primary); background: color-mix(in srgb, var(--pptx-primary) 16%, transparent); color: var(--pptx-primary); }
-.pptxv-smartart-nodes { display: flex; max-height: 208px; flex-direction: column; gap: 5px; overflow-y: auto; }
-/* One row per node: index, text, fill, font colour, bold, italic; the
-   hierarchy actions (inspector-extras-css.ts) wrap onto a second row under
-   the text. With two columns the six controls used to scatter over four. */
-.pptxv-smartart-node { display: grid; grid-template-columns: 20px minmax(0, 1fr) repeat(4, auto); align-items: center; gap: 5px; }
-.pptxv-smartart-node > input[type='color'] { width: 22px; height: 22px; }
-.pptxv-smartart-node > button { min-width: 22px; height: 22px; padding: 0 4px; border: 1px solid var(--pptx-border); border-radius: var(--pptx-radius); background: transparent; color: var(--pptx-foreground); font: inherit; font-weight: 600; cursor: pointer; }
-.pptxv-smartart-node-index { color: var(--pptx-muted-foreground); text-align: center; }
-.pptxv-smartart-node-input { min-width: 0; height: 26px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--pptx-border); border-radius: var(--pptx-radius); background: var(--pptx-background); color: var(--pptx-foreground); font: inherit; }
-.pptxv-smartart-node-input:focus-visible { outline: 2px solid var(--pptx-ring); outline-offset: -1px; }
-
 /* Select / checkbox / range fields (text/image/table inspector sections). */
 .pptxv-field-select,
 .pptxv-field-checkbox,
@@ -389,6 +381,19 @@ export const EDITOR_CSS = `
 }
 .pptxv-field-select-input:disabled { opacity: 0.5; }
 .pptxv-field-range { flex-direction: column; align-items: stretch; }
+.pptxv-inspector-fields { display: flex; flex-direction: column; }
+.pptxv-inspector-fields-wide { grid-column: 1 / -1; }
+.pptxv-inspector-gallery { display: grid; gap: 3px; }
+.pptxv-inspector-gallery-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.pptxv-inspector-gallery-item { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--pptxv-border, var(--office-border, #d1d5db)); border-radius: 4px; background: none; color: inherit; cursor: pointer; }
+.pptxv-inspector-gallery-item.is-active { border-color: var(--pptxv-accent, var(--office-accent, #2563eb)); }
+.pptxv-inspector-gallery-preview { width: 100%; height: 32px; border-radius: 3px; background: var(--pptxv-muted, var(--office-surface, #f3f4f6)) center / cover no-repeat; }
+.pptxv-inspector-gallery-caption { width: 100%; overflow: hidden; font-size: 9px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.pptxv-duotone-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.pptxv-duotone-preset { width: 24px; height: 24px; padding: 0; border: 1px solid var(--pptx-border); border-radius: 50%; cursor: pointer; }
+.pptxv-duotone-preset:disabled { opacity: 0.5; cursor: default; }
+.pptxv-field-text { flex-direction: column; align-items: stretch; margin-bottom: 8px; }
+.pptxv-field-text .pptxv-field-input { width: 100%; height: auto; min-height: 26px; box-sizing: border-box; resize: vertical; }
 .pptxv-field-range-row { display: flex; align-items: center; gap: 8px; }
 .pptxv-field-range-row input[type='range'] { flex: 1; }
 .pptxv-field-range-readout {

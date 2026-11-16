@@ -2,7 +2,7 @@
 
 OpenTeams 是一个开源、自带服务器的团队协作空间：频道与聊天、在线状态、基于 WebRTC 的视频和屏幕共享会议，以及在对话中共享的 Office 文件。你只需为所用框架安装一个绑定，将其指向一台服务器（或不使用服务器直接开始），即可获得完整的界面，也可以通过原始 hook 构建自己的界面。
 
-::: warning 早期实现
+::: warning 测试版
 这不是 Microsoft Teams，与 Microsoft 没有任何关联。**不提供端到端加密**：运行服务器的人可以读取每一条消息和每一个文件。在依赖它之前，请先阅读[局限性](/zh/limitations)。
 :::
 
@@ -95,7 +95,7 @@ teams.destroy();
 ></teams-app>
 ```
 
-所有绑定接受相同的属性：`workspaceId`（共享房间：字母、数字、`-` 和 `_`）、`userName`、`userId`（稳定的 id；默认使用此浏览器中记住的 id）、`config`、`uploadFile`（附件的去向）、`openers`（按 Office 类型区分的处理程序），以及三个事件：就绪、打开文件（对其调用 `preventDefault()` 可自行打开文件）和配置变更（React、Solid、Svelte 和原生 JavaScript 中为 `onReady`、`onOpenFile`、`onConfigChange`；Vue 中为 `@ready`、`@open-file`、`@config-change`；Angular 中为 `(ready)`、`(openFile)`、`(configChange)`）。各绑定的详情请参阅[框架指南](/frameworks/react)。
+所有绑定接受相同的属性：`workspaceId`（共享房间：字母、数字、`-` 和 `_`）、`userName`、`userId`（稳定的 id；默认使用此浏览器中记住的 id）、`config`、`uploadFile`（附件的去向）、`openers`（按 Office 类型区分的处理程序）、`embeds`（按文件类型区分的查看器页面）、`locale`（BCP 47 标签，例如 `de`），以及三个事件：就绪、打开文件（对其调用 `preventDefault()` 可自行打开文件）和配置变更（React、Solid、Svelte 和原生 JavaScript 中为 `onReady`、`onOpenFile`、`onConfigChange`；Vue 中为 `@ready`、`@open-file`、`@config-change`；Angular 中为 `(ready)`、`(openFile)`、`(configChange)`）。各绑定的详情请参阅[框架指南](/frameworks/react)。
 
 省略 `config` 时，该元素会提供一个设置对话框（保存在此浏览器中），或以本地模式运行。
 
@@ -109,7 +109,7 @@ teams.destroy();
 [在线演示](/demos)使用的是本地模式。只要涉及多个浏览器，就需要运行一台服务器：
 
 ```bash
-npx openteams-server                    # the reference server on 127.0.0.1:8787
+npx openteams-server --insecure-dev     # 仅用于本地开发：127.0.0.1:8787
 ```
 
 然后使用 `ws://127.0.0.1:8787/sync` 和 `ws://127.0.0.1:8787/signal`（置于 TLS 之后则使用 `wss://`）。[服务器指南](/zh/server)介绍了协议、环境变量以及参考服务器不做的事情；[部署](/zh/deploy)介绍了 TLS、令牌、TURN 和 Docker。
@@ -131,7 +131,7 @@ state?.channels.map((c) => <button onClick={() => client!.select(c.id)}>{c.name}
 
 `state` 是一个不可变的 `TeamsState` 快照（连接状态、带未读计数的频道、所选频道的消息和文件、成员、输入状态、搜索结果、通话）。动作包括 `select`、`createChannel`、`send`、`startReply`、`startEdit`、`deleteMessage`、`toggleReaction`、`search`、`openCall`、`joinCall`、`leaveCall`、`toggleMic`、`toggleCamera`、`toggleScreenShare` 和 `toggleHand`。React 演示并排展示了这两种方式。
 
-## 从源码运行
+## 从源码运行 {#run-it-from-source}
 
 需要 Node 22+ 和 Bun。本文件夹是 [`ooxml`](https://github.com/ChristopherVR/ooxml) 仓库的 `viewers/teams`：先在仓库根目录运行 `bun install`，再在此处运行下面的命令。演示（根目录下的 `demos/teams/*`）和测试使用同一棵树中 `ooxml-core` 和 `ooxml-ui` 的源码。
 

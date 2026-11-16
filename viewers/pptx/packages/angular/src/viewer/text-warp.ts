@@ -4,12 +4,15 @@ import {
 	DEFAULT_FONT_FAMILY,
 	groupIntoParagraphs,
 	hasGlyphEnvelope,
+	resolveWarpRunPaint,
 	substituteFieldText,
+	warpParagraphLayouts,
 } from 'ooxml-ui/pptx';
 import type {
 	FieldSubstitutionContext,
 	WarpCategory as SharedWarpCategory,
 	WarpParagraph,
+	WarpRunPaint,
 } from 'ooxml-ui/pptx';
 /**
  * Text-warp (WordArt) descriptor resolver for the Angular viewer.
@@ -20,7 +23,7 @@ import type {
  *
  * `getTextWarp(element)` resolves an element's OOXML `prstTxWarp` preset into a
  * `TextWarpDef` that the Angular template can consume without any React/HTML
- * string injection. Every classified preset (`textNoShape`/`textPlain`/unknown
+ * string injection. Every classified preset (`textNoShape`/unknown
  * excluded) now resolves to `strategy: 'path'`: SVG `<textPath>` along a
  * curved/arc/circle/bent baseline. The `pathLines` array contains one entry
  * per paragraph with a pre-computed SVG `d` attribute; the template renders an
@@ -38,7 +41,7 @@ import type {
  * `'css'` stay in the `TextWarpDef` union for API stability; nothing produces
  * one any more.
  *
- * Presets classified as `'none'` (textNoShape, textPlain, unknown) return
+ * Presets classified as `'none'` (textNoShape, unknown) return
  * `undefined` so callers can skip extra rendering without an allowlist check.
  */
 import type { PptxElement, PptxTextWarpPreset, TextSegment } from 'pptx-viewer-core';
@@ -46,7 +49,7 @@ import { hasTextProperties } from 'pptx-viewer-core';
 
 import { buildGlyphWarpDef } from './text-warp-glyph';
 import type { TextWarpGlyphDef } from './text-warp-glyph';
-import { getWarpPath, shouldUseSvgWarp } from './warp-path-generators';
+import { shouldUseSvgWarp } from './warp-path-generators';
 
 // ── Warp category classifier ───────────────────────────────────────────
 // Re-exported from shared `render/text-warp.ts` (classifyTextWarp /
@@ -91,6 +94,14 @@ export interface WarpPathLine {
 	d: string;
 	/** The text segments that flow along this path. */
 	segments: TextSegment[];
+	/** The same segments with their shared SVG paint, one per `<tspan>`. */
+	runs: WarpPathRun[];
+}
+
+/** One `<tspan>` of a path line: its text and the shared warped-run paint. */
+export interface WarpPathRun {
+	readonly text: string;
+	readonly paint: WarpRunPaint;
 }
 
 /**
@@ -175,7 +186,7 @@ const DEFAULT_COLOR = '#000000';
 /**
  * Resolve a `PptxElement`'s text warp preset into a `TextWarpDef` descriptor,
  * or `undefined` when the element carries no warp (or the preset is `textNoShape` /
- * `textPlain` / unknown).
+ * unknown).
  *
  * @param element  Any `PptxElement`.  Elements without text properties always
  *                 return `undefined`.
@@ -184,7 +195,7 @@ const DEFAULT_COLOR = '#000000';
  *                 paragraphs are resolved to their display text, mirroring
  *                 React's warp-text-renderer.
  * @returns  A `TextWarpDef` with `strategy: 'path'` for a classified preset,
- *           or `undefined` for `textNoShape`/`textPlain`/an unknown preset.
+ *           or `undefined` for `textNoShape`/an unknown preset.
  */
 export function getTextWarp(
 	element: PptxElement,
@@ -197,7 +208,7 @@ export function getTextWarp(
 	const ts = element.textStyle;
 	const preset = ts?.textWarpPreset;
 
-	if (!preset || preset === 'textNoShape' || preset === 'textPlain') {
+	if (!preset || preset === 'textNoShape') {
 		return undefined;
 	}
 
@@ -228,7 +239,6 @@ export function getTextWarp(
 		return undefined;
 	}
 
-	const lineCount = paragraphs.length;
 	const width = element.width;
 	const height = element.height;
 	const pathIdPrefix = `ng-warp-${element.id}`;
@@ -244,10 +254,19 @@ export function getTextWarp(
 
 	const { startOffset, textAnchor } = resolveAlignment(ts?.align);
 
+	// Path and font fit scale of every paragraph (shared with the other bindings).
+	const layouts = warpParagraphLayouts(preset, width, height, paragraphs, adj1, adj2, ts);
 	const pathLines: WarpPathLine[] = paragraphs.map((para, i) => ({
 		pathId: `${pathIdPrefix}-${i}`,
-		d: getWarpPath(preset, width, height, i, lineCount, adj1, adj2),
+		d: layouts[i]?.d ?? '',
 		segments: para.segments,
+		runs: para.segments.map((seg) => {
+			const paint = resolveWarpRunPaint(seg, ts, DEFAULT_COLOR, DEFAULT_FONT_SIZE);
+			return {
+				text: seg.text,
+				paint: { ...paint, fontSizePx: paint.fontSizePx * (layouts[i]?.fitScale ?? 1) },
+			};
+		}),
 	}));
 
 	return {

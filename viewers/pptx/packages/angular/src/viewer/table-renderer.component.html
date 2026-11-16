@@ -5,7 +5,7 @@
 	(resizeColumns)="onResizeColumns($event)"
 	(resizeRow)="onResizeRow($event)"
 >
-	<div class="pptx-ng-table-wrapper">
+	<div class="pptx-ng-table-wrapper" [ngStyle]="tableFrameStyle()">
 		<!-- Load-bearing family: an unstyled cell otherwise inherits the HOST
 		     chrome's font; all five bindings declare the same shared default. -->
 		<table
@@ -37,18 +37,14 @@
 								(dblclick)="onCellDblClick($event, vm.rowIndex, vm.colIndex)"
 							>
 								@if (isEditing(vm.rowIndex, vm.colIndex)) {
-									<input
-										#cellInput
-										type="text"
-										class="pptx-ng-cell-input"
-										[value]="vm.cell.text ?? ''"
+									<div
+										#cellEditorHost
+										class="pptx-ng-cell-editor"
 										(pointerdown)="$event.stopPropagation()"
 										(mousedown)="$event.stopPropagation()"
 										(click)="$event.stopPropagation()"
 										(dblclick)="$event.stopPropagation()"
-										(blur)="commitCellEdit($event)"
-										(keydown)="onCellInputKeydown($event)"
-									/>
+									></div>
 								} @else if (vm.paragraphs.length > 0) {
 									@for (para of vm.paragraphs; track $index; let i = $index) {
 										<p class="pptx-ng-cell-para" [ngStyle]="vm.paragraphStyles?.[i] ?? null">

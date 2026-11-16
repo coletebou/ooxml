@@ -8,8 +8,8 @@
 		"ooxml-core": "*"
 	},
 	"devDependencies": {
-		"@types/node": "^26.6.5",
-		"emf-converter": "4.21.0",
-		"vite": "^8.3.4"
+		"@types/node": "^26.6.6",
+		"emf-converter": "4.28.1",
+		"vite": "^8.3.8"
 	}
 }

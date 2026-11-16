@@ -21,6 +21,7 @@ import { buildShell, type ShellApi } from './editor-shell';
 import { renderDocument } from './editor-render';
 import { registerSmartArt } from './smartart-node-view';
 import { DocxEditorApi } from './element-api';
+import { refreshDocxWebfonts } from './docx-webfonts';
 import { emit, type DocxEditorEventMap } from './events';
 import {
 	DEFAULT_FILE_NAME,
@@ -169,6 +170,7 @@ export class DocxEditorElement extends DocxEditorApi {
 		this.replaceDocument(value || createDocument());
 		this.core.shell.chrome?.setSaveState('saved');
 		if (this.isConnected) renderDocument(this.core);
+		void refreshDocxWebfonts(this.core);
 		this.core.room.resume();
 	}
 
@@ -207,6 +209,7 @@ export class DocxEditorElement extends DocxEditorApi {
 
 	disconnectedCallback() {
 		const { core } = this;
+		core.readAloud.stop();
 		core.shell.surfaceNavigation?.();
 		delete core.shell.surfaceNavigation;
 		core.shell.printStoryEditing?.();
@@ -229,9 +232,16 @@ export class DocxEditorElement extends DocxEditorApi {
 		this.assertDocumentReplaceable();
 		const generation = ++core.loadGeneration;
 		core.loading = true;
+		core.readAloud.stop();
 		core.refreshControls();
 		try {
+			// The file's fonts start downloading while it parses.
+			core.webfonts.prefetch(this.ownerDocument, input);
 			const session = await loadDocument(input);
+			if (generation !== core.loadGeneration) return;
+			// As PowerPoint does: wait (bounded) for missing fonts' webfonts while loading shows, so
+			// the first layout already breaks lines and pages with their metrics.
+			await core.webfonts.prepare(this.ownerDocument, session.model);
 			if (generation !== core.loadGeneration) return;
 			core.imageMedia.release();
 			this.replaceDocument(session.model, session, false);
@@ -254,6 +264,7 @@ export class DocxEditorElement extends DocxEditorApi {
 		this.assertDocumentReplaceable();
 		this.replaceDocument(session.model, session);
 		if (this.isConnected) renderDocument(this.core);
+		void refreshDocxWebfonts(this.core);
 		this.core.room.resume();
 	}
 
@@ -301,11 +312,13 @@ export class DocxEditorElement extends DocxEditorApi {
 	/** Swaps in a new model (and the session that produced it) and invalidates in-flight loads. */
 	private replaceDocument(model: DocumentModel, session?: LoadedDocument, bumpGeneration = true) {
 		const { core } = this;
+		core.readAloud.stop();
 		core.detachedState = undefined;
 		if (bumpGeneration) core.loadGeneration++;
 		if (bumpGeneration) core.loading = false;
 		core.loaded = session;
 		core.model = model;
+		core.endCloudFile();
 		core.inserts.reset();
 		core.formatDialogs.closeAll();
 		core.dirtyState.set(false);

@@ -19,8 +19,10 @@ import {
 	matchNamedTextTwins,
 	matchSameMedia,
 } from './morph-heuristics';
+import { morphGeometryBreaksPair } from './morph-geometry-key';
 import { getElementMorphName } from './morph-name';
 import { centreDistance, conflictingMorphNames, proximityAccepts } from './morph-predicates';
+import { matchTextTwins, morphTextFlow, splitsTextFlow } from './morph-text-flow';
 import type { MorphMatchResult, MorphPair } from './morph-types';
 
 // ---------------------------------------------------------------------------
@@ -95,6 +97,7 @@ export function getElementCreationId(element: PptxElement): string | undefined {
  *   2d. Same media part (pictures: the same image)
  *   2e. Identical twins: same type, exact size, identical paint appearance
  *   2e2. Named text twins: same pane name, same box, same words
+ *   2e3. Text twins: the same words, unique on both slides
  *   2f. Group twins: same-size groups whose child casts correspond one for one
  *   2b. Native shape id from `p:cNvPr/@id` (only when creationIds are absent)
  *   3. Type + proximity + size matching (same type within 300px, similar box)
@@ -133,6 +136,10 @@ export function matchMorphElementsFull(fromSlide: PptxSlide, toSlide: PptxSlide)
 	// stays whole and animates (or dissolves) as one unit. See `morph-flatten`.
 	const fromElements = flattenMorphElements(fromSlide.elements, toSlide.elements);
 	const toElements = flattenMorphElements(toSlide.elements, fromSlide.elements);
+	// Where each slide's paragraphs live: a text box whose paragraphs are
+	// redistributed over several boxes is not carried across, whatever identity
+	// it keeps (passes 2a and 2b). See `morph-text-flow`.
+	const textFlow = morphTextFlow(fromElements, toElements);
 
 	// Pass 1: match by !! naming convention
 	for (const fromEl of fromElements) {
@@ -178,6 +185,11 @@ export function matchMorphElementsFull(fromSlide: PptxSlide, toSlide: PptxSlide)
 				continue;
 			}
 			if (creationIdOf(toEl) === fromGuid) {
+				// Another preset (or a preset edited into a freeform) is another
+				// shape to PowerPoint, whatever its id (see `morph-geometry-key`).
+				if (splitsTextFlow(textFlow, fromEl, toEl) || morphGeometryBreaksPair(fromEl, toEl)) {
+					break;
+				}
 				pairs.push({ fromElement: fromEl, toElement: toEl });
 				usedFrom.add(fromEl.id);
 				usedTo.add(toEl.id);
@@ -195,7 +207,7 @@ export function matchMorphElementsFull(fromSlide: PptxSlide, toSlide: PptxSlide)
 	// flattening threw the grouping away. Without it the wheel deck's three
 	// centre text boxes fell through to pass 3, which refuses two text boxes that
 	// sit in the same place and say different things, and every topic-to-topic
-	// morph played them as an unmatched pair: gone by 23%, back from 42%, with an
+	// morph played them as an unmatched pair: gone by about 25%, back from about 45%, with an
 	// empty panel in between (issue #160).
 	const groupChildPairs = morphGroupChildPairs(fromSlide.elements, toSlide.elements);
 	if (groupChildPairs.size > 0) {
@@ -206,7 +218,12 @@ export function matchMorphElementsFull(fromSlide: PptxSlide, toSlide: PptxSlide)
 			}
 			const toId = groupChildPairs.get(fromEl.id);
 			const toEl = toId === undefined ? undefined : toById.get(toId);
-			if (!toEl || usedTo.has(toEl.id) || fromEl.type !== toEl.type) {
+			if (
+				!toEl ||
+				usedTo.has(toEl.id) ||
+				fromEl.type !== toEl.type ||
+				morphGeometryBreaksPair(fromEl, toEl)
+			) {
 				continue;
 			}
 			pairs.push({ fromElement: fromEl, toElement: toEl });
@@ -247,6 +264,12 @@ export function matchMorphElementsFull(fromSlide: PptxSlide, toSlide: PptxSlide)
 	// different creationId, same everything a reader can see - fell through
 	// every pass and dissolved instead of sliding with its panel.
 	pairs.push(...matchNamedTextTwins(fromElements, toElements, usedFrom, usedTo));
+
+	// Pass 2e3: text twins - the same words, said by exactly one text box on
+	// each slide, whatever the ids and names. Issue #141's deck parks a column
+	// off the left edge as "Object 3" and lands it as "Object 6"; PowerPoint
+	// glides it in, where nothing above could pair it.
+	pairs.push(...matchTextTwins(fromElements, toElements, usedFrom, usedTo));
 
 	// Pass 2f: group twins - whole GROUPS of the same box size whose child
 	// casts correspond one for one, however far apart they sit.
@@ -291,7 +314,11 @@ export function matchMorphElementsFull(fromSlide: PptxSlide, toSlide: PptxSlide)
 				if (creationIdOf(fromEl) && creationIdOf(toEl)) {
 					continue;
 				}
-				if (conflictingMorphNames(fromEl, toEl)) {
+				if (
+					conflictingMorphNames(fromEl, toEl) ||
+					splitsTextFlow(textFlow, fromEl, toEl) ||
+					morphGeometryBreaksPair(fromEl, toEl)
+				) {
 					continue;
 				}
 				pairs.push({ fromElement: fromEl, toElement: toEl });

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import {
 	LuChevronRight,
 	LuClipboardCopy,
@@ -17,6 +16,7 @@ import {
 } from 'react-icons/lu';
 
 import { useToolbarVisibility } from '../../hooks/useToolbarVisibility';
+import { useTranslation } from '../../i18n/use-translation';
 import { cn } from '../../utils';
 import { AnimationsSection } from '../toolbar/AnimationsSection';
 import { ArrangeSection } from '../toolbar/ArrangeSection';
@@ -168,6 +168,7 @@ function MobileSectionBody({
 						onAddShape={p.onAddShape}
 						onAddTable={p.onAddTable}
 						onAddChart={p.onAddChart}
+						onOpenChartDialog={p.onOpenChartDialog}
 						onAddSmartArt={p.onAddSmartArt}
 						onAddEquation={p.onAddEquation}
 						onAddActionButton={p.onAddActionButton}
@@ -299,7 +300,7 @@ function MobileSectionBody({
 						onToggleSubtitles={p.onToggleSubtitles ?? (() => {})}
 						showSubtitles={p.showSubtitles ?? false}
 						onSetMode={p.onSetMode}
-						customShowControls={p}
+						onOpenCustomShows={p.onOpenCustomShows ?? (() => {})}
 						hiddenActions={p.hiddenActions}
 					/>
 				</div>

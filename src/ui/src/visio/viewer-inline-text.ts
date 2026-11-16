@@ -1,4 +1,5 @@
 import { canEditDiagram } from './controller';
+import { visioFontStack } from './font-stack';
 import type { VisioShape } from 'ooxml-core/visio';
 import {
 	editErrorMessage,
@@ -7,6 +8,7 @@ import {
 	visioTextShape,
 } from 'ooxml-core/visio/ui';
 import type { ViewerController, ViewerState } from './controller';
+import type { TextEditOutcome } from './text-edit-outcome';
 
 interface Session {
 	pageId: string;
@@ -30,6 +32,12 @@ export class ViewerInlineText {
 	readonly input: HTMLTextAreaElement;
 	#session: Session | undefined;
 	#request = 0;
+	#inflight: Promise<TextEditOutcome> | undefined;
+	/**
+	 * A draft dropped by a source change or by the drawing turning read-only, reported once by the
+	 * next commit and never applied.
+	 */
+	#stale: { session: Session; text: string; reason: 'stale-document' | 'read-only' } | undefined;
 	constructor(
 		private readonly viewport: HTMLElement,
 		private readonly controller: ViewerController,
@@ -94,9 +102,12 @@ export class ViewerInlineText {
 			},
 			{ ...options, capture: true },
 		);
+		const unregister = this.controller.registerTextCommitter(() => this.commitDraft(false));
 		return () => {
 			events.abort();
+			unregister();
 			++this.#request;
+			this.#stale = undefined;
 			this.#close();
 			input.remove();
 		};
@@ -127,6 +138,7 @@ export class ViewerInlineText {
 			`svg.paper [data-shape-id="${CSS.escape(shape.id)}"]`,
 		);
 		const initial = shape.text?.plainText ?? '';
+		this.#stale = undefined;
 		this.#session = {
 			pageId: page.id,
 			shapeId: shape.id,
@@ -150,23 +162,79 @@ export class ViewerInlineText {
 	}
 	/** Save the draft as one edit; `focusCanvas` returns keyboard focus to the drawing. */
 	async commit(focusCanvas: boolean): Promise<void> {
-		const session = this.#session;
-		if (!session) return;
+		await this.commitDraft(focusCanvas);
+	}
+	/**
+	 * Save the draft and resolve once its edit completed. A commit already in flight (a blur, Esc
+	 * or tool change got there first) is awaited rather than repeated; with no draft the outcome is
+	 * `unchanged`. The draft is bound to the document it was typed in and never applied to another.
+	 */
+	commitDraft(focusCanvas = false): Promise<TextEditOutcome> {
+		if (!this.#session) {
+			if (this.#inflight) return this.#inflight;
+			const stale = this.#stale;
+			this.#stale = undefined;
+			return Promise.resolve(
+				!stale
+					? this.#outcome('unchanged')
+					: stale.reason === 'read-only'
+						? this.#outcome(
+								'refused',
+								{ reason: 'read-only', message: 'The drawing is read-only.', text: stale.text },
+								stale.session,
+							)
+						: this.#outcome(
+								'cancelled',
+								{ reason: 'stale-document', text: stale.text },
+								stale.session,
+							),
+			);
+		}
+		const run = this.#commit(focusCanvas);
+		this.#inflight = run;
+		void run.then(() => {
+			if (this.#inflight === run) this.#inflight = undefined;
+		});
+		return run;
+	}
+	#outcome<S extends TextEditOutcome['status']>(
+		status: S,
+		extra: Record<string, unknown> = {},
+		session?: Session,
+	): TextEditOutcome {
+		// A destroyed controller has no generations to report.
+		const alive = !this.controller.destroyed;
+		const generations = {
+			sourceGeneration: session?.generation ?? (alive ? this.controller.sourceGeneration : -1),
+			documentGeneration: alive ? this.controller.documentGeneration : -1,
+			...(session ? { pageId: session.pageId, shapeId: session.shapeId } : {}),
+		};
+		return {
+			status,
+			...(status === 'unchanged' ? { reason: 'no-draft' } : {}),
+			...generations,
+			...extra,
+		} as TextEditOutcome;
+	}
+	async #commit(focusCanvas: boolean): Promise<TextEditOutcome> {
+		const session = this.#session!;
+		const draft = this.input.value;
 		if (!this.controller.canEdit) {
 			this.#close();
-			return;
+			return this.#outcome(
+				'refused',
+				{ reason: 'read-only', message: 'The drawing is read-only.', text: draft },
+				session,
+			);
 		}
-		const draft = this.input.value;
 		this.#close();
 		if (focusCanvas) this.viewport.focus({ preventScroll: true });
 		const state = this.controller.state;
 		const page = state.document?.pages.find((item) => item.id === session.pageId);
-		if (
-			!page ||
-			this.controller.sourceGeneration !== session.generation ||
-			draft === session.initial
-		)
-			return;
+		if (!page || this.controller.sourceGeneration !== session.generation)
+			return this.#outcome('cancelled', { reason: 'stale-document', text: draft }, session);
+		if (draft === session.initial)
+			return this.#outcome('unchanged', { reason: 'same-text' }, session);
 		const request = ++this.#request;
 		try {
 			// A local shape with several formatting runs keeps them: only the changed span is
@@ -174,10 +242,20 @@ export class ViewerInlineText {
 			const shape = visioTextShape(page, session.shapeId);
 			const rich = !!shape && shape.masterId === undefined && shape.text.runs.length > 1;
 			const edit = visioTextDraftEdit(page, session.shapeId, draft, rich ? { ranges: true } : {});
-			if (edit) await this.controller.applyEdits([edit]);
+			if (!edit) return this.#outcome('unchanged', { reason: 'same-text' }, session);
+			await this.controller.applyEdits([edit]);
+			// Another source took over while the edit ran: report it as the old document's.
+			if (this.controller.sourceGeneration !== session.generation)
+				return this.#outcome('cancelled', { reason: 'stale-document', text: draft }, session);
+			return this.#outcome('committed', { text: draft }, session);
 		} catch (error) {
-			if (request === this.#request && !isEditCancellation(error))
-				this.announce(editErrorMessage(error));
+			if (isEditCancellation(error)) {
+				const reason = this.controller.destroyed ? 'destroyed' : 'superseded';
+				return this.#outcome('cancelled', { reason, text: draft }, session);
+			}
+			const message = editErrorMessage(error);
+			if (request === this.#request) this.announce(message);
+			return this.#outcome('refused', { reason: 'rejected', message, text: draft }, session);
 		}
 	}
 	/**
@@ -188,12 +266,15 @@ export class ViewerInlineText {
 		const session = this.#session;
 		if (!session) return;
 		if (!this.controller.canEdit) {
+			this.#keepDraft(session, 'read-only');
 			this.#close();
 			return;
 		}
 		const page = state.document?.pages[state.pageIndex];
 		const shape = page?.id === session.pageId ? visioTextShape(page, session.shapeId) : undefined;
 		if (this.controller.sourceGeneration !== session.generation || !state.document) {
+			// Keep what was typed so a Save racing the switch can recover it; it is never applied.
+			this.#keepDraft(session, 'stale-document');
 			this.#close();
 			return;
 		}
@@ -215,6 +296,12 @@ export class ViewerInlineText {
 			);
 			session.group?.setAttribute('data-editing-text', '');
 			this.#style(shape, state.zoom || 1);
+		} else if (!session.group?.isConnected) {
+			// The same drawing redrawn (webfonts arrived): hide the shape's own text again.
+			session.group = this.viewport.querySelector<SVGGElement>(
+				`svg.paper [data-shape-id="${CSS.escape(shape.id)}"]`,
+			);
+			session.group?.setAttribute('data-editing-text', '');
 		}
 		// Redrawing the page replaces the canvas content, the editor with it: put it back as it was.
 		if (!this.input.isConnected) {
@@ -225,6 +312,11 @@ export class ViewerInlineText {
 			this.input.setSelectionRange(selectionStart, selectionEnd);
 		}
 		this.#layout();
+	}
+	/** Remember a typed draft that is being dropped so the next commit can hand its text back. */
+	#keepDraft(session: Session, reason: 'stale-document' | 'read-only'): void {
+		if (this.input.value !== session.initial)
+			this.#stale = { session, text: this.input.value, reason };
 	}
 	#close(): void {
 		const session = this.#session;
@@ -238,7 +330,7 @@ export class ViewerInlineText {
 	#style(shape: VisioShape, zoom: number): void {
 		const text = shape.text;
 		const style = this.input.style;
-		style.fontFamily = text?.fontFamily ? `"${text.fontFamily}", var(--office-font)` : '';
+		style.fontFamily = text?.fontFamily ? visioFontStack(text.fontFamily) : '';
 		style.fontSize = `${Math.max(8, (text?.fontSize ?? 12 / 72) * 96 * zoom)}px`;
 		style.color = text?.color ?? '';
 		style.textAlign =
@@ -250,6 +342,7 @@ export class ViewerInlineText {
 		const session = this.#session;
 		if (!session) return;
 		if (!this.controller.canEdit) {
+			this.#keepDraft(session, 'read-only');
 			this.#close();
 			return;
 		}

@@ -8,7 +8,7 @@
  *     nudge, and slide-nav branch.
  *  2. `useKeyboardShortcuts`: the composable wiring: `matchShortcut` over real
  *     `KeyboardEvent`s, `handleKeyDown` dispatch + `preventDefault`, reactive
- *     guard flags, the catalog grouping, and `attach`/`autoAttach`.
+ *     guard flags, and `attach`/`autoAttach`.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { effectScope, ref } from 'vue';
@@ -16,8 +16,6 @@ import { effectScope, ref } from 'vue';
 import {
 	NUDGE_LARGE,
 	NUDGE_SMALL,
-	SHORTCUT_CATALOG,
-	groupShortcutCatalog,
 	resolveShortcutAction,
 	useKeyboardShortcuts,
 } from './useKeyboardShortcuts';
@@ -259,33 +257,6 @@ describe('resolveShortcutAction - pure dispatch logic', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Catalog grouping
-// ---------------------------------------------------------------------------
-
-describe('shortcut catalog', () => {
-	it('groups the catalog, preserving label order and dropping empty groups', () => {
-		const grouped = groupShortcutCatalog();
-		expect(grouped.map((bucket) => bucket.group)).toStrictEqual([
-			'history',
-			'clipboard',
-			'editing',
-			'navigation',
-			'general',
-		]);
-		const total = grouped.reduce((sum, bucket) => sum + bucket.shortcuts.length, 0);
-		expect(total).toBe(SHORTCUT_CATALOG.length);
-	});
-
-	it('filters out groups with no matching shortcuts', () => {
-		const grouped = groupShortcutCatalog(
-			SHORTCUT_CATALOG.filter((entry) => entry.group === 'history'),
-		);
-		expect(grouped).toHaveLength(1);
-		expect(grouped[0].group).toBe('history');
-	});
-});
-
-// ---------------------------------------------------------------------------
 // Composable wiring
 // ---------------------------------------------------------------------------
 
@@ -521,5 +492,28 @@ describe('useKeyboardShortcuts', () => {
 		// onMounted does not fire without a component instance, so the autoAttach
 		// branch is registered but inert here; disposing the scope must not throw.
 		expect(() => scope.stop()).not.toThrow();
+	});
+});
+
+describe('useKeyboardShortcuts shared dispatch', () => {
+	it('dispatches through the shared handler names and skips keys typed into fields', () => {
+		const undo = vi.fn();
+		const nudge = vi.fn();
+		const actions: ShortcutActions = { undo, nudge };
+		const keys = useKeyboardShortcuts({ hasSelection: true, actions });
+		const z = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, cancelable: true });
+		keys.handleKeyDown(z);
+		expect(undo).toHaveBeenCalledOnce();
+		expect(z.defaultPrevented).toBe(true);
+		keys.handleKeyDown(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true }));
+		expect(nudge).toHaveBeenCalledWith(0, -NUDGE_LARGE);
+
+		const input = document.createElement('input');
+		document.body.appendChild(input);
+		const typed = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true });
+		input.dispatchEvent(typed);
+		keys.handleKeyDown(typed);
+		expect(undo).toHaveBeenCalledOnce();
+		input.remove();
 	});
 });

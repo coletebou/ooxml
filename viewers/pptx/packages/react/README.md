@@ -110,7 +110,7 @@ const bytes = await viewerRef.current?.getContent(); // Uint8Array of a valid .p
 | `shareDefaults`                                                            | `{ roomId?, userName?, serverUrl? }`    | n/a      | Seed values for the Share dialog fields                                                                                                                                                                                                                                                                                                                        |
 | `smartArt3D`                                                               | `boolean`                               | `false`  | Opt-in Three.js 3D SmartArt renderer (needs the optional `three` dependency; falls back to SVG without it)                                                                                                                                                                                                                                                     |
 | `surfaceChart3D`, `barChart3D`, `lineChart3D`, `areaChart3D`, `pieChart3D` | `boolean`                               | `false`  | Independently opt in to interactive Three.js renderers for the matching 3D chart kinds; each falls back to SVG when WebGL is unavailable.                                                                                                                                                                                                                      |
-| `ai`                                                                       | `PptxAiConfig`                          | n/a      | Optional AI assistant configuration. The SDK peers load only when its panel is opened.                                                                                                                                                                                                                                                                         |
+| `ai`                                                                       | `PptxAiAssistant \| PptxAiConfig`       | n/a      | Optional AI assistant: a handle from `createAiAssistant` (`pptx-react-viewer/ai`), or a plain config. The SDK peers load only when its panel is opened. See [AI assistant](#ai-assistant).                                                                                                                                                                     |
 | `onOpenFile`                                                               | `() => void`                            | n/a      | Host override for File > Open; bypasses the built-in file picker                                                                                                                                                                                                                                                                                               |
 | `onContentChange`                                                          | `(content: Uint8Array) => void`         | n/a      | Called with freshly serialised `.pptx` bytes when the content changes                                                                                                                                                                                                                                                                                          |
 | `onDirtyChange`                                                            | `(isDirty: boolean) => void`            | n/a      | Called when dirty state changes                                                                                                                                                                                                                                                                                                                                |
@@ -128,9 +128,9 @@ const bytes = await viewerRef.current?.getContent(); // Uint8Array of a valid .p
 | `defaultThemeKey`                                                          | `string`                                | n/a      | Initial File > Options > Appearance selection when no persisted preference exists                                                                                                                                                                                                                                                                              |
 | `availableThemes`                                                          | `ThemeCatalogEntry[]`                   | n/a      | Theme choices offered by File > Options > Appearance (defaults to the built-in catalog)                                                                                                                                                                                                                                                                        |
 | `onThemeChange`                                                            | `(key: string) => void`                 | n/a      | Host hook for the appearance picker; when set, the host owns persisting the choice                                                                                                                                                                                                                                                                             |
-| `defaultLocale`                                                            | `string`                                | n/a      | Initial locale code when no persisted preference exists                                                                                                                                                                                                                                                                                                        |
-| `availableLocales`                                                         | `LocaleCatalogEntry[]`                  | n/a      | Locale choices offered by File > Options > Language (defaults to the registered i18next locales)                                                                                                                                                                                                                                                               |
-| `onLocaleChange`                                                           | `(code: string) => void`                | n/a      | Host hook for the language picker; when set, the host owns applying/persisting the switch                                                                                                                                                                                                                                                                      |
+| `defaultLocale`                                                            | `string`                                | n/a      | Initial locale code when no persisted preference exists. Ignored inside a `PptxI18nProvider`, whose `locale` is the language                                                                                                                                                                                                                                   |
+| `availableLocales`                                                         | `LocaleCatalogEntry[]`                  | n/a      | Locale choices offered by File > Options > Language (defaults to the registered i18next locales; inside a `PptxI18nProvider` no default: pass two or more with `onLocaleChange`)                                                                                                                                                                               |
+| `onLocaleChange`                                                           | `(code: string) => void`                | n/a      | Host hook for the language picker; when set, the host owns applying/persisting the switch. Inside a `PptxI18nProvider` the host always owns it, and without this callback the Language category is left out                                                                                                                                                    |
 | `accountAuth`                                                              | `AccountAuthConfig`                     | n/a      | Optional sign-in hook point for File > Account (disabled unless `enabled: true`)                                                                                                                                                                                                                                                                               |
 
 ### `PowerPointViewerHandle` (via `ref`)
@@ -265,9 +265,58 @@ import { PowerPointViewer, vermilionLightTheme } from 'pptx-react-viewer';
 
 The underlying palettes (`vermilionLightColors`, `vermilionDarkColors`) and radius (`vermilionRadius`) are exported too, so you can spread them into your own variant.
 
+## AI assistant
+
+Create the assistant with `createAiAssistant` from the `pptx-react-viewer/ai` entry. Install the `ai` and `@ai-sdk/react` peers, create an assistant once (at module scope or in `useMemo`) and pass it to the `ai` prop:
+
+```tsx
+import { PowerPointViewer } from 'pptx-react-viewer';
+import { createAiAssistant } from 'pptx-react-viewer/ai';
+
+const assistant = createAiAssistant({ connection: { kind: 'endpoint', api: '/api/ai/chat' } });
+
+<PowerPointViewer content={bytes} ai={assistant} />;
+```
+
+The panel still loads lazily, the first time the user opens it, and the main entries still reach the same lazy panel loader. The handle is opaque: only `createAiAssistant` makes one, and any other value is read as a plain config. A plain `PptxAiConfig` (`ai={{ connection }}`) keeps working through the viewer's own lazy panel and is not deprecated in this release; the handle is a preparatory, opt-in path for a later major release (see [The `/ai` entry](https://christophervr.github.io/ooxml/pptx/guide/ai-assistant#ai-entry)). The `PptxAi*` types are exported from both `pptx-react-viewer` and `pptx-react-viewer/ai`. See the [AI assistant guide](https://christophervr.github.io/ooxml/pptx/guide/ai-assistant) for connection modes, tools and the write policy.
+
 ## Localization (i18n)
 
-UI labels go through [i18next](https://www.i18next.com/) / [react-i18next](https://react.i18next.com/) with dotted keys such as `pptx.statusBar.allSaved`. Initialise an i18next instance and wrap your app in `I18nextProvider` (the demo's `demos/pptx/demo-react/i18n.ts` shows a minimal config, including a `parseMissingKeyHandler` that derives Title Case labels for any key you don't explicitly translate). `pptx-react-viewer/i18n` exports `translationsEn` (the English dictionary), `keyToLabel` (the fallback), and a `TranslationKey` type you can use to type-check a new locale dictionary (`Record<TranslationKey, string>`) at compile time. Add a new language by supplying a resource bundle under its language code. See the [Localization guide](https://christophervr.github.io/ooxml/pptx/guide/localization) for full wiring examples and how to contribute a translation upstream; the live demo's language picker is a working reference.
+UI labels go through [i18next](https://www.i18next.com/) / [react-i18next](https://react.i18next.com/) with dotted keys such as `pptx.statusBar.allSaved`, or through your own i18n library with `PptxI18nProvider` (see below). Initialise an i18next instance and wrap your app in `I18nextProvider` (the demo's `demos/pptx/demo-react/i18n.ts` shows a minimal config, including a `parseMissingKeyHandler` that derives Title Case labels for any key you don't explicitly translate). `pptx-react-viewer/i18n` exports `translationsEn` (the English dictionary), `keyToLabel` (the fallback), and a `TranslationKey` type you can use to type-check a new locale dictionary (`Record<TranslationKey, string>`) at compile time. Add a new language by supplying a resource bundle under its language code. See the [Localization guide](https://christophervr.github.io/ooxml/pptx/guide/localization) for full wiring examples and how to contribute a translation upstream; the live demo's language picker is a working reference.
+
+### Use your own i18n library
+
+To translate the viewer with Lingui, FormatJS or any other library, wrap it (or the standalone building blocks) in `PptxI18nProvider` and pass a `translate(key, params)` function plus the active `locale`:
+
+```tsx
+import { i18n } from '@lingui/core';
+import { useLingui } from '@lingui/react';
+import { LOCALE_CATALOG, PowerPointViewer, PptxI18nProvider } from 'pptx-react-viewer';
+import type { PptxTranslate } from 'pptx-react-viewer';
+
+import { dynamicActivate } from './i18n'; // loads a catalog, then calls i18n.activate(code)
+
+// Module level, so it never changes: the viewer re-translates when `locale` changes.
+const translate: PptxTranslate = (key, params) => i18n._(key, params);
+const LOCALES = LOCALE_CATALOG.filter((entry) => ['en', 'fr'].includes(entry.code));
+
+function TranslatedViewer({ content }: { content: Uint8Array }) {
+	const { i18n: active } = useLingui(); // re-renders when the language changes
+	return (
+		<PptxI18nProvider locale={active.locale} translate={translate}>
+			<PowerPointViewer
+				content={content}
+				availableLocales={LOCALES}
+				onLocaleChange={(code) => void dynamicActivate(code)}
+			/>
+		</PptxI18nProvider>
+	);
+}
+```
+
+`translate` receives the viewer's params unchanged: `defaultValue`, `count` and the values of the `{{name}}` placeholders. Use the same names in your catalog (`{name}` in ICU syntax); `count` is a plain value, so pluralise in your catalog. `{{name}}` placeholders left in the text you return are filled too, so the shipped dictionaries work as they are: `const translate: PptxTranslate = (key) => translationsFr[key];`. A miss (the key itself, an empty string, nothing, or a throw) shows the built-in English text, then the call's default text, then a label derived from the key, never a raw key. Keep `translate` stable (a module-level function or `useCallback`): the viewer re-translates whenever `translate` or `locale` changes.
+
+Inside a provider the host owns the language: the viewer never calls `changeLanguage`, ignores `defaultLocale` and never restores a stored language choice. File > Options > Language appears only with `onLocaleChange` and two or more `availableLocales`; a pick calls `onLocaleChange`, and the selection follows `locale` (`fr-CA` selects an offered `fr`). A `PowerPointViewer` reads the provider nearest above it; a provider rendered inside the viewer is ignored. `i18next` and `react-i18next` stay required peer dependencies in 4.x: install them, but inside a provider the viewer does not use them. To build without them, import from `pptx-react-viewer/no-i18next`: the same exports and types, with nothing that imports either library; outside a provider it shows the built-in English text and leaves File > Options > Language out (see [Without react-i18next](https://christophervr.github.io/ooxml/pptx/guide/localization#without-react-i18next)). `PptxI18nProvider` is React-only: the Vue and Angular bindings delegate to vue-i18n and ngx-translate, and Vanilla and Svelte take `messages` dictionaries.
 
 ## How it's built
 
@@ -301,6 +350,25 @@ The other subpaths are `i18n/fr` (`translationsFr`), `i18n/es`
 [localization guide](https://christophervr.github.io/ooxml/pptx/guide/localization)
 for registration and runtime switching. Existing English imports are unchanged.
 
+## Privacy and network use
+
+The viewer renders and saves decks in the browser and never uploads them. It contacts other servers only in these cases:
+
+- **Fonts that are neither installed nor embedded.** When a deck uses such a font and Google Fonts serves it (or a metric-compatible clone, such as Carlito for Calibri), the viewer downloads it from `fonts.googleapis.com` and `fonts.gstatic.com`, so the reader's IP address and the needed family names reach Google. This is on by default, as in PowerPoint, which downloads its cloud fonts. Turn it off with `googleFonts: false`, or send the same requests to a self-hosted mirror with `googleFonts: { baseUrl: 'https://fonts.example.com/css2' }`. Readers can also turn it off in File > Options > Trust Center ("Download fonts that are not installed or embedded (Google Fonts)"); a host value locks that toggle. With downloads off, text uses installed, embedded or substitute fonts and line breaks can differ from PowerPoint. If the download is slow, the deck waits up to 8 seconds, and it opens at once when the font server cannot be reached (offline use works). See [font loading](https://github.com/ChristopherVR/ooxml/blob/main/docs/font-loading.md).
+- **Linked pictures and media** in a deck are fetched from their URLs while the Trust Center option "Allow external content" is on (the default). `allowExternalContent: false` blocks them.
+- **Share and Broadcast**, only when started: updates go to the server you configure; with no server, peers meet through y-webrtc's public signaling server and public STUN servers.
+
+Nothing collects analytics or telemetry. The full list, including what is kept in local storage, is in [PRIVACY.md](https://github.com/ChristopherVR/ooxml/blob/main/PRIVACY.md).
+
 ## License
 
 [Apache-2.0](LICENSE). Please keep the [`NOTICE`](NOTICE) file with redistributions.
+
+## OneDrive integration
+
+Use the optional shared `ooxml-core/embedding/onedrive` connection with host-supplied Microsoft
+sign-in. See the [Office package and integration reference](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-integration.md#powerpoint-pptx)
+for this product's load/save API, native storage wiring, sharing permissions and conflict recovery.
+The [testing guide](https://github.com/ChristopherVR/ooxml/blob/main/docs/onedrive-testing.md)
+separates test-local transports from live Microsoft acceptance. No simulation service is shipped;
+OneDrive storage does not provide Microsoft Office coauthoring or automatic document merging.

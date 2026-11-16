@@ -149,7 +149,6 @@ export const translations = {
 	'pptx.hyperlinkDialog.apply': 'Aplicar',
 	'pptx.linkTooltip.followLink': 'Ctrl+Clic para seguir el enlace',
 	'pptx.linkTooltip.presentationMode': 'Activo en modo presentación',
-	'pptx.properties.title': 'Propiedades del documento',
 	'pptx.properties.titleLabel': 'Título',
 	'pptx.properties.author': 'Autor',
 	'pptx.properties.subject': 'Sujeto',
@@ -194,7 +193,6 @@ export const translations = {
 	'pptx.review.translate': 'Traducir',
 	'pptx.review.translateTooltip': 'Traducir el texto seleccionado',
 	'pptx.shortcuts.action.cancelTextEdit': 'Cancelar la edición de texto en línea / cerrar menús',
-	'pptx.shortcuts.action.clearSelection': 'Borrar selección / cerrar menús / cancelar edición',
 	'pptx.shortcuts.action.commitTextEdit': 'Confirmar la edición de texto en línea',
 	'pptx.shortcuts.action.copyElement': 'Copiar elemento seleccionado',
 	'pptx.shortcuts.action.cutElement': 'Cortar elemento seleccionado',
@@ -205,7 +203,6 @@ export const translations = {
 	'pptx.shortcuts.action.nudgeElementLarge': 'Mover ampliamente el elemento seleccionado',
 	'pptx.shortcuts.action.pasteElement': 'Pegar elemento',
 	'pptx.shortcuts.action.prevSlide': 'Diapositiva anterior (sin selección)',
-	'pptx.shortcuts.action.redoAlternate': 'Rehacer (alternativo)',
 	'pptx.shortcuts.action.selectAll': 'Seleccionar todos los elementos',
 	'pptx.shortcuts.action.zoomCanvas': 'Ampliar/reducir el lienzo',
 	'pptx.shortcuts.close': 'Cerrar',
@@ -260,6 +257,7 @@ export const translations = {
 	'pptx.hyperlink.actionOleVerb': 'Acción del objeto',
 	'pptx.hyperlink.actionRunProgram': 'Ejecutar programa',
 	'pptx.colorPicker.recentColors': 'Colores recientes',
+	'pptx.colorPicker.recentColor': 'Color reciente {{hex}}',
 	'pptx.colorPicker.customColors': 'Colores personalizados',
 	'pptx.comments.mentionPlaceholder': 'Escribe @ para mencionar a alguien',
 	'pptx.comments.mentionSuggestions': 'Personas',
@@ -320,6 +318,10 @@ export const translations = {
 		'No se pudo guardar un sonido de transición de diapositiva y se omitió.',
 	'pptx.compatibility.diagramRelationshipIdsIncomplete':
 		'A este diagrama de SmartArt le faltan algunas referencias internas, por lo que puede no mostrarse exactamente como se creó.',
+	'pptx.compatibility.embeddedFontRestricted':
+		'La licencia de una fuente incrustada no permite usarla, por lo que se muestra una fuente sustituta. Sus datos se conservan en el archivo.',
+	'pptx.compatibility.embeddedFontNotEmbeddable':
+		'Una fuente no se incrustó porque su licencia no permite incrustarla en una presentación editable.',
 	'pptx.compatibility.exportBackendUnavailable':
 		'La exportación a este formato no está disponible en el entorno actual.',
 } as const;

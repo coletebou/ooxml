@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import {
+	buildDashArray,
+	connectorSnapTransform,
+	connectorSquareCapPath,
+	connectorStrandScreenWidth,
 	getLineGlowFilterCss,
 	getLineShadowParams,
 	markerPath,
-	screenStrokeWidth,
+	svgLineCap,
 } from 'ooxml-ui/pptx';
 import type { ElementAnimationState } from 'ooxml-ui/pptx';
 import type { ConnectorArrowType, PptxElement, TextSegment, TextStyle } from 'pptx-viewer-core';
@@ -73,17 +77,18 @@ const strokeColor = computed(() =>
 );
 const strokeOpacity = computed(() => ss.value?.strokeOpacity ?? 1);
 
-const dashArray = computed<string | undefined>(() => {
-	const dash = ss.value?.strokeDash;
-	const w = Math.max(strokeWidth.value, 1);
-	if (!dash || dash === 'solid') {
-		return undefined;
-	}
-	if (dash === 'dot' || dash === 'sysDot') {
-		return `${w} ${w}`;
-	}
-	return `${w * 3} ${w}`;
-});
+// The shared dash builder: PowerPoint's own pattern per preset and `custDash`.
+const dashArray = computed<string | undefined>(() =>
+	buildDashArray(
+		ss.value?.strokeDash,
+		strokeWidth.value,
+		ss.value?.customDashSegments,
+		ss.value?.lineCap,
+	),
+);
+
+/** SVG cap of the painted strands: the line's own `cap`, flat when it declares none. */
+const strokeLinecap = computed(() => svgLineCap(ss.value?.lineCap, dashArray.value !== undefined));
 
 const w = computed(() => Math.max(props.element.width, 1));
 const h = computed(() => Math.max(props.element.height, 1));
@@ -124,10 +129,23 @@ const pathGeometry = computed(() => {
 });
 
 // Straight connector endpoints (used when !usePathRouting), mirrored by flips.
-const x1 = computed(() => (props.element.flipHorizontal ? w.value : 0));
-const y1 = computed(() => (props.element.flipVertical ? h.value : 0));
-const x2 = computed(() => (props.element.flipHorizontal ? 0 : w.value));
-const y2 = computed(() => (props.element.flipVertical ? 0 : h.value));
+// The REAL extents, not the 1px-floored SVG box: a horizontal line is 0 high,
+// and ending it at y = 1 tilted it a pixel across its whole length.
+const realW = computed(() => Math.max(props.element.width, 0));
+const realH = computed(() => Math.max(props.element.height, 0));
+const x1 = computed(() => (props.element.flipHorizontal ? realW.value : 0));
+const y1 = computed(() => (props.element.flipVertical ? realH.value : 0));
+const x2 = computed(() => (props.element.flipHorizontal ? 0 : realW.value));
+const y2 = computed(() => (props.element.flipVertical ? 0 : realH.value));
+// A single horizontal / vertical straight line is snapped to the device grid.
+const snapTransform = computed(() =>
+	connectorSnapTransform(
+		props.element,
+		!usePathRouting.value,
+		compoundOffsets.value.length,
+		strokeWidth.value,
+	),
+);
 
 // ── Pointer hit target ────────────────────────────────────────────────────────
 
@@ -147,6 +165,17 @@ const hitPathData = computed(() =>
 	usePathRouting.value && pathGeometry.value
 		? pathGeometry.value.pathData
 		: `M ${x1.value} ${y1.value} L ${x2.value} ${y2.value}`,
+);
+
+// A dashed square-cap line overshoots at its two ends only (shared `dash-square-cap`).
+const paintPathData = computed(
+	() =>
+		connectorSquareCapPath(
+			hitPathData.value,
+			ss.value,
+			strokeWidth.value,
+			compoundOffsets.value.length > 1 || !!startArrow.value || !!endArrow.value,
+		) ?? (usePathRouting.value ? pathGeometry.value?.pathData : undefined),
 );
 
 // ── Arrowheads ───────────────────────────────────────────────────────────────
@@ -260,7 +289,10 @@ function strandWidth(idx: number): number {
 
 /** Inline style of strand `idx` (shared `device-pixel-stroke`, plus its offset). */
 function strandStyle(idx: number, offset: number): CSSProperties {
-	return { strokeWidth: screenStrokeWidth(strandWidth(idx)), transform: offsetTransform(offset) };
+	return {
+		strokeWidth: connectorStrandScreenWidth(compoundWidths.value, strokeWidth.value, idx),
+		transform: offsetTransform(offset) ?? snapTransform.value,
+	};
 }
 </script>
 
@@ -347,17 +379,18 @@ function strandStyle(idx: number, offset: number): CSSProperties {
 			/>
 
 			<!-- ── Bent / curved connector: multi-segment <path> ─────────────────── -->
-			<template v-if="usePathRouting && pathGeometry">
+			<template v-if="paintPathData !== undefined">
 				<path
 					v-for="(offset, idx) in compoundOffsets"
 					:key="idx"
-					:d="pathGeometry.pathData"
+					data-pptx-line=""
+					:d="paintPathData"
 					fill="none"
 					:stroke="strokeColor"
 					:stroke-width="strandWidth(idx)"
 					:stroke-opacity="strokeOpacity"
 					:stroke-dasharray="dashArray"
-					stroke-linecap="round"
+					:stroke-linecap="strokeLinecap"
 					stroke-linejoin="round"
 					:filter="idx === 0 && lineShadow ? `url(#${shadowFilterId})` : undefined"
 					:style="strandStyle(idx, offset)"
@@ -373,6 +406,7 @@ function strandStyle(idx: number, offset: number): CSSProperties {
 				<line
 					v-for="(offset, idx) in compoundOffsets"
 					:key="idx"
+					data-pptx-line=""
 					:x1="x1"
 					:y1="y1 + offset"
 					:x2="x2"
@@ -382,7 +416,7 @@ function strandStyle(idx: number, offset: number): CSSProperties {
 					:style="strandStyle(idx, 0)"
 					:stroke-opacity="strokeOpacity"
 					:stroke-dasharray="dashArray"
-					stroke-linecap="round"
+					:stroke-linecap="strokeLinecap"
 					:filter="idx === 0 && lineShadow ? `url(#${shadowFilterId})` : undefined"
 					:marker-start="idx === 0 && startMarker ? `url(#${startMarkerId})` : undefined"
 					:marker-end="

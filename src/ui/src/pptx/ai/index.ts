@@ -16,6 +16,23 @@ export type { AiSdkModule } from './loader';
 
 export { deckDataFieldChanged } from './deck-data-diff';
 
+export { createPptxAiBridge, pptxAiDeckTitle } from './bridge-factory';
+export type { PptxAiBridgePort, PptxAiCanvasSize } from './bridge-factory';
+
+export {
+	AI_TOOL_FLASH_MS,
+	aiFixDirective,
+	createPptxAiPanelController,
+	isAiFocusPinned,
+	resolveAiEffectiveTargets,
+} from './panel-controller';
+export type {
+	PptxAiPanelController,
+	PptxAiPanelControllerDeps,
+	PptxAiPanelState,
+	PptxAiPrefill,
+} from './panel-controller';
+
 export { resolveChatTransport } from './config';
 export type {
 	PptxAiConfig,
@@ -158,3 +175,13 @@ export type { ToolActivity, ToolActivityIcon, ToolActivityTense } from './tool-s
 
 export { toolCanvasTarget } from './tool-target';
 export type { ToolCanvasTarget } from './tool-target';
+
+// The `createAiAssistant` handle registry factory; each binding creates its own registry.
+export { createAiAssistantRegistry } from '../render/controller/ai-assistant';
+export type {
+	AiAssistantRegistry,
+	AiAssistantRegistryOptions,
+	PptxAiAssistant,
+	ResolveAiAssistantOptions,
+	ResolvedAiAssistant,
+} from '../render/controller/ai-assistant';

@@ -16,6 +16,7 @@ import type { RibbonAddInTab } from '../ribbon/add-in-tabs';
 import { buildShell, type Shell } from './editor-shell';
 import { XlsxEditorApi } from './element-api';
 import { buildSurface } from './surface-shell';
+import type { CloudFileProvider } from 'ooxml-core/embedding';
 import type { XlsxEditorEventMap } from './events';
 import type { XlsxCollaborationOptions } from './collaboration-types';
 import type { EditorLocale, EditorLocaleInput, ExcelCustomization } from 'ooxml-core/xlsx/ui';
@@ -78,6 +79,7 @@ export class XlsxEditorElement extends XlsxEditorApi {
 
 	connectedCallback(): void {
 		installOfficeUiThemeFor(this);
+		this.core.webfonts.connect();
 		if (this.surfaceOnly) {
 			this.disposeSurface ??= buildSurface(this.core);
 			this.core.requestRender();
@@ -86,7 +88,8 @@ export class XlsxEditorElement extends XlsxEditorApi {
 		if (this.shell) return;
 		this.shell = buildShell(this.core);
 		this.chrome = this.shell.chrome;
-		this.openShare = () => this.shell?.backstage.open('share');
+		this.openShare = () => this.shell?.share.open();
+		this.closeBackstage = () => this.shell?.backstage.close();
 		if (this.addIns.length) this.shell.ribbon.setAddIns(this.addIns);
 		this.core.requestRender();
 	}
@@ -95,6 +98,7 @@ export class XlsxEditorElement extends XlsxEditorApi {
 		if (isXlsxEditorAttribute(name)) applyAttribute(this, name, value);
 	}
 	disconnectedCallback(): void {
+		this.core.webfonts.disconnect();
 		// Host File tab pages unmount with the editor; showing one again remounts it.
 		this.shell?.backstage.destroy();
 		if (this.disposeSurface) {
@@ -133,6 +137,19 @@ export class XlsxEditorElement extends XlsxEditorApi {
 		if (this.core.setCustomization(value ?? null)) this.shell?.backstage.applyCustomization();
 	}
 
+	/**
+	 * Cloud places (OneDrive, or a host's own) File > Open offers next to "This device". A workbook
+	 * opened from one saves back to its file through the provider's storage until another
+	 * workbook is shown. Empty (the default) keeps File > Open as it was.
+	 */
+	get fileProviders(): readonly CloudFileProvider[] {
+		return this.core.fileProviders;
+	}
+	set fileProviders(value: readonly CloudFileProvider[] | null | undefined) {
+		this.core.fileProviders = value ?? [];
+		this.shell?.backstage.applyCustomization();
+	}
+
 	/** Shown in the title bar and used by Save and Download. Default `Book1.xlsx`. */
 	get fileName(): string {
 		return this.core.fileName;
@@ -150,6 +167,18 @@ export class XlsxEditorElement extends XlsxEditorApi {
 	set authorName(value: string) {
 		this.core.authorName = value || DEFAULT_AUTHOR_NAME;
 		reflectAttribute(this, 'author-name', this.core.authorName);
+	}
+
+	/**
+	 * Check data validation when Replace and Replace All (the Find and Replace dialog and the
+	 * `workflows.find` operations) write a value, and leave cells it refuses unchanged. Default
+	 * false: like Excel, Replace does not apply data validation. A call can override it.
+	 */
+	get validateReplace(): boolean {
+		return this.core.validateReplace;
+	}
+	set validateReplace(value: boolean) {
+		this.core.validateReplace = value === true;
 	}
 
 	/** `light`, `dark` or `auto` (default, inherits the Office scope and system appearance). */

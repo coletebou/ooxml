@@ -32,41 +32,18 @@ import { getShapeType, isImageLikeElement } from 'ooxml-core/pptx';
 
 import { chartAreaEffectStyle } from './chart-format/chart-area-outer-effects';
 import { hexToRgbUnit } from './color-units';
+import { glowCssLengths, glowFilterLengths, shadowBlurToCss } from './effect-profile';
 import type { ReflectionWrapperStyle } from './reflection';
 import { getReflectionWrapperStyle } from './reflection';
+import { getSilhouetteEffects } from './silhouette-effects';
+import { escapeSvgAttr } from './svg-attr-escape';
+
+export { escapeSvgAttr };
 
 // ── Low-level colour helpers (ported from React color-core.ts) ─────────────
 
 const DEFAULT_SHADOW_COLOR = '#000000';
 const DEFAULT_GLOW_COLOR = '#ffff00';
-
-/**
- * Escape a string for safe inclusion in an SVG/XML attribute value. Applied
- * to element-derived ids before they're interpolated into hand-built
- * `<filter>` markup (some bindings inject that markup via `innerHTML`/
- * `v-html`, so an unescaped id from a crafted OOXML shape id could otherwise
- * break out of the attribute).
- *
- * This is the ONE escaper for every string-concatenated SVG in `render/`.
- * `chart-sparkline`, `svg-gradient-paint` and `image-tiling` all build markup
- * that lands in `innerHTML`, and each grew its own private copy of exactly
- * this function; the copies are the failure mode, because a hardening applied
- * to one of four escapers protects a quarter of the surface.
- *
- * `String(value)` is deliberate rather than decorative: these builders are
- * fed descriptors assembled from parsed OOXML, so a field typed `string` can
- * still arrive `undefined` from a malformed deck. Coercing yields an inert
- * `"undefined"` in the attribute instead of throwing partway through building
- * a markup string, which is what one of the private copies already did and
- * what the consolidated version must keep doing.
- */
-export function escapeSvgAttr(value: string): string {
-	return String(value)
-		.replace(/&/g, '&amp;')
-		.replace(/"/g, '&quot;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;');
-}
 
 /** Clamp a numeric value to the [0, 1] range. */
 function clampUnitInterval(value: number): number {
@@ -180,10 +157,10 @@ export function getOuterShadowCss(
 			: usesOoxmlDefaults
 				? 0
 				: 6;
-	// DrawingML `blurRad` is a radius while CSS shadows take a Gaussian
-	// standard deviation. Halving authored OOXML radii matches PowerPoint's
-	// falloff; host-authored CSS-style values retain their historical meaning.
-	const blur = usesOoxmlDefaults ? rawBlur / 2 : rawBlur;
+	// DrawingML `blurRad` is not a CSS blur length: PowerPoint paints a Gaussian
+	// of deviation 0.326 * blurRad (see effect-profile.ts), a CSS length of
+	// 0.654 * blurRad. Host-authored CSS-style values retain their meaning.
+	const blur = usesOoxmlDefaults ? shadowBlurToCss(rawBlur) : rawBlur;
 	const opacity =
 		typeof style.shadowOpacity === 'number' && Number.isFinite(style.shadowOpacity)
 			? clampUnitInterval(style.shadowOpacity)
@@ -279,7 +256,7 @@ export function getCompositeOuterShadowFilterCss(
 				: usesOoxmlDefaults
 					? 0
 					: 6;
-		const blur = usesOoxmlDefaults ? rawBlur / 2 : rawBlur;
+		const blur = usesOoxmlDefaults ? shadowBlurToCss(rawBlur) : rawBlur;
 		const opacity =
 			typeof shadow.opacity === 'number' && Number.isFinite(shadow.opacity)
 				? clampUnitInterval(shadow.opacity)
@@ -340,7 +317,10 @@ export function getInnerShadowCss(style: ShapeStyle | undefined): string | undef
 			? clampUnitInterval(style.innerShadowOpacity)
 			: 0.5;
 
-	return `inset ${Math.round(offsetX)}px ${Math.round(offsetY)}px ${Math.round(blur)}px ${colorWithOpacity(
+	// PowerPoint draws an inner shadow against the edge the offset points to (a
+	// positive x offset darkens the RIGHT inner edge); a CSS inset shadow moves
+	// the other way, so the offset is negated.
+	return `inset ${Math.round(-offsetX) + 0}px ${Math.round(-offsetY) + 0}px ${Math.round(shadowBlurToCss(blur))}px ${colorWithOpacity(
 		normalizeHexColor(style.innerShadowColor, DEFAULT_SHADOW_COLOR),
 		opacity,
 	)}`;
@@ -388,14 +368,10 @@ export function getGlowBoxShadowCss(
 	const baseOpacity = typeof opacity === 'number' ? clampUnitInterval(opacity) : 0.75;
 	const normalizedColor = normalizeHexColor(color, DEFAULT_GLOW_COLOR);
 
-	const r1 = Math.round(radius * 0.33);
-	const c1 = colorWithOpacity(normalizedColor, baseOpacity);
-	const r2 = Math.round(radius * 0.66);
-	const c2 = colorWithOpacity(normalizedColor, baseOpacity * 0.6);
-	const r3 = Math.round(radius);
-	const c3 = colorWithOpacity(normalizedColor, baseOpacity * 0.3);
-
-	return `0 0 ${r1}px ${c1}, 0 0 ${r2}px ${c2}, 0 0 ${r3}px ${c3}`;
+	// One layer: the silhouette grown and blurred the way PowerPoint's glow is.
+	const { spread, blur } = glowCssLengths(radius);
+	const glowColor = colorWithOpacity(normalizedColor, baseOpacity);
+	return `0 0 ${Math.round(blur * 10) / 10}px ${Math.round(spread * 10) / 10}px ${glowColor}`;
 }
 
 /**
@@ -409,7 +385,7 @@ export function getGlowBoxShadowCss(
  */
 export function getBoxShadowCss(
 	style: ShapeStyle | undefined,
-	options: { includeGlow?: boolean } = {},
+	options: { includeGlow?: boolean; includeOuter?: boolean; includeInner?: boolean } = {},
 	context?: ShadowRenderContext,
 ): string | undefined {
 	if (!style) {
@@ -417,17 +393,17 @@ export function getBoxShadowCss(
 	}
 	const parts: string[] = [];
 
-	const multiLayer = getMultiLayerShadowCss(style);
+	const multiLayer = options.includeOuter === false ? undefined : getMultiLayerShadowCss(style);
 	if (multiLayer) {
 		parts.push(multiLayer);
-	} else {
+	} else if (options.includeOuter !== false) {
 		const outer = getOuterShadowCss(style, context);
 		if (outer) {
 			parts.push(outer);
 		}
 	}
 
-	const inner = getInnerShadowCss(style);
+	const inner = options.includeInner === false ? undefined : getInnerShadowCss(style);
 	if (inner) {
 		parts.push(inner);
 	}
@@ -639,21 +615,30 @@ export function hasEffectDagProperties(style: ShapeStyle | undefined): boolean {
 export function getEffectFilterCss(
 	style: ShapeStyle | undefined,
 	elementId?: string,
+	options: { glow?: boolean } = {},
 ): string | undefined {
 	if (!style) {
 		return undefined;
 	}
 	const parts: string[] = [];
 
-	// Outer glow → drop-shadow
-	if (style.glowColor && style.glowColor !== 'transparent' && style.glowRadius) {
+	// Outer glow → a chain of drop-shadows. A shape paints its glow as a
+	// spread `box-shadow` instead ({@link getGlowBoxShadowCss}), which takes
+	// the exact profile; this chain is for what has no box (pictures, groups).
+	if (
+		options.glow !== false &&
+		style.glowColor &&
+		style.glowColor !== 'transparent' &&
+		style.glowRadius
+	) {
 		const glowOpacity = typeof style.glowOpacity === 'number' ? style.glowOpacity : 0.75;
-		const glowRad = Math.max(0, style.glowRadius / 2);
 		const glowCol = colorWithOpacity(
 			normalizeHexColor(style.glowColor, DEFAULT_GLOW_COLOR),
 			glowOpacity,
 		);
-		parts.push(`drop-shadow(0 0 ${glowRad}px ${glowCol})`);
+		for (const blur of glowFilterLengths(style.glowRadius)) {
+			parts.push(`drop-shadow(0 0 ${blur}px ${glowCol})`);
+		}
 	}
 
 	// Soft edges → feather only the alpha edge (SVG filter), not the whole
@@ -901,6 +886,29 @@ export function getSoftEdgeSvgFilter(
 }
 
 /**
+ * The `<filter>` markup a shape's effect filters need, as one definition: the
+ * soft-edge feather and the silhouette shadow / glow filter. A binding injects
+ * `filterMarkup` once next to the element (a hidden `<svg><defs>`); the
+ * `filter` that references them is already on the container.
+ */
+export function getShapeEffectFilterDefs(element: PptxElement): SvgFilterDefinition | undefined {
+	const softEdge = getSoftEdgeSvgFilter(getEffectStyleSource(element), element.id);
+	const silhouette = getSilhouetteEffects(element);
+	if (!softEdge && !silhouette) {
+		return undefined;
+	}
+	const base: SvgFilterDefinition = softEdge ?? {
+		id: silhouette?.filterId ?? '',
+		cssReference: silhouette?.cssReference ?? '',
+		filterMarkup: '',
+	};
+	return {
+		...base,
+		filterMarkup: `${softEdge?.filterMarkup ?? ''}${silhouette?.filterMarkup ?? ''}`,
+	};
+}
+
+/**
  * Build a self-contained, hidden `<svg>` wrapper containing a duotone
  * `<filter>` (BT.709 grayscale → linear two-colour ramp), suitable for direct
  * injection into the DOM in non-React contexts (tests, SSR, string templates).
@@ -1065,11 +1073,18 @@ export function getComputedEffectStyle(
 	const compositeShadow = shadowsCompositePixels
 		? getCompositeOuterShadowFilterCss(style, { rotation: element.rotation })
 		: undefined;
+	// A shape whose clip-path would cut its box-shadow off paints its outer
+	// shadow and glow as one silhouette filter instead (`silhouette-effects`).
+	const silhouette = shadowsCompositePixels ? undefined : getSilhouetteEffects(element);
 	const boxShadow = shadowsCompositePixels
 		? undefined
 		: getBoxShadowCss(
 				style,
-				{ includeGlow: options.includeGlowBoxShadow },
+				{
+					includeGlow: silhouette ? false : options.includeGlowBoxShadow,
+					includeOuter: !silhouette,
+					includeInner: !silhouette?.paintsInnerShadow,
+				},
 				{ rotation: element.rotation },
 			);
 	// The line-level shadow (`a:ln/a:effectLst/a:outerShdw`) is part of the same
@@ -1083,10 +1098,13 @@ export function getComputedEffectStyle(
 		result.boxShadow = shadowParts.join(', ');
 	}
 
-	const filter = getEffectFilterCss(style, element.id);
+	// A shape's glow is in its box-shadow; the filter chain is for the rest.
+	const glowInBoxShadow =
+		!shadowsCompositePixels && (options.includeGlowBoxShadow !== false || silhouette !== undefined);
+	const filter = getEffectFilterCss(style, element.id, { glow: !glowInBoxShadow });
 	// As above for `a:ln/a:effectLst/a:glow`, which is a `drop-shadow` filter.
 	const lineGlow = paintsLineEffectsItself ? undefined : getLineGlowFilterCss(style);
-	const filterParts = [compositeShadow, filter, lineGlow].filter(
+	const filterParts = [silhouette?.cssReference, compositeShadow, filter, lineGlow].filter(
 		(part): part is string => part !== undefined && part !== '',
 	);
 	if (filterParts.length > 0) {

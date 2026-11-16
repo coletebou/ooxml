@@ -16,6 +16,7 @@
  *
  * @module types/chart-element-format
  */
+import type { ChartFormatTarget, ChartFormatTargetKey } from '../../../chart/edit/target';
 import type { ChartGradientFill } from '../../../chart/gradient-definition';
 
 /**
@@ -26,22 +27,13 @@ import type { ChartGradientFill } from '../../../chart/gradient-definition';
  * `PptxChartData.series`. A data-label target without a series index covers
  * every series (the chart-level "Data Labels" entry of the element picker).
  */
-export type PptxChartFormatTarget =
-	| { kind: 'chartArea' }
-	| { kind: 'plotArea' }
-	| { kind: 'title' }
-	| { kind: 'legend' }
-	| { kind: 'axis'; axisIndex: number }
-	| { kind: 'majorGridlines'; axisIndex: number }
-	| { kind: 'minorGridlines'; axisIndex: number }
-	| { kind: 'series'; seriesIndex: number }
-	| { kind: 'dataLabels'; seriesIndex?: number };
+export type PptxChartFormatTarget = ChartFormatTarget;
 
 /**
  * A {@link PptxChartFormatTarget} as a stable string (`chartArea`, `axis:1`,
  * `series:0`, `dataLabels`, `dataLabels:2`, ...), used as the record key.
  */
-export type PptxChartFormatTargetKey = string;
+export type PptxChartFormatTargetKey = ChartFormatTargetKey;
 
 /** `a:pattFill`: a preset pattern (`ST_PresetPatternVal`) in two colours. */
 export interface PptxChartPatternFill {
@@ -112,9 +104,9 @@ export interface PptxChartElementLine {
 	/** `a:prstDash/@val` (`solid`, `dash`, `sysDot`, `lgDashDot`, ...). */
 	dash?: string;
 	/** `a:ln/@cmpd`. */
-	compound?: 'sng' | 'dbl' | 'thickThin' | 'thinThick' | 'tri';
+	compound?: 'sng' | 'dbl' | 'thickThin' | 'thinThick' | 'tri' | undefined;
 	/** `a:ln/@cap`. */
-	cap?: 'rnd' | 'sq' | 'flat';
+	cap?: 'rnd' | 'sq' | 'flat' | undefined;
 	/** `a:round` / `a:bevel` / `a:miter`. */
 	join?: 'round' | 'bevel' | 'miter';
 	/** `a:headEnd/@type`. */
@@ -219,7 +211,7 @@ export interface PptxChartTextOutline {
  * rich text runs). Each `null` removes the setting, `undefined` leaves it.
  */
 export interface PptxChartElementText {
-	fill?: PptxChartTextFill;
+	fill?: PptxChartTextFill | undefined;
 	outline?: PptxChartTextOutline;
 	/** Text shadow and glow (`a:defRPr/a:effectLst`). */
 	effects?: Pick<PptxChartElementEffects, 'shadow' | 'glow'>;
@@ -229,6 +221,10 @@ export interface PptxChartElementText {
 	direction?: 'horz' | 'vert' | 'vert270' | 'wordArtVert' | null;
 	/** Vertical alignment (`a:bodyPr/@anchor`). */
 	anchor?: 't' | 'ctr' | 'b' | null;
+	/** `true` wraps text in its box (`a:bodyPr/@wrap="square"`), `false` never wraps (`none`). */
+	wrap?: boolean | null;
+	/** Italic text (`a:defRPr/@i`, and a title's runs). */
+	italic?: boolean | undefined;
 }
 
 /**
@@ -238,7 +234,7 @@ export interface PptxChartElementText {
  * style draws it again; later edits recorded after a reset apply on top.
  */
 export interface PptxChartElementFormat {
-	fill?: PptxChartElementFill;
+	fill?: PptxChartElementFill | undefined;
 	line?: PptxChartElementLine;
 	effects?: PptxChartElementEffects;
 	threeD?: PptxChartElementThreeD;

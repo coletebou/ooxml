@@ -106,21 +106,21 @@ describe('buildDashArray', () => {
 	});
 
 	it('returns a short dash for "dot"', () => {
-		expect(buildDashArray('dot', 2)).toBe('2 4');
+		expect(buildDashArray('dot', 2)).toBe('2 6');
 	});
 
 	it('returns a short dash for "sysDot"', () => {
-		expect(buildDashArray('sysDot', 2)).toBe('2 4');
+		expect(buildDashArray('sysDot', 2)).toBe('2 2');
 	});
 
 	it('returns a long dash for other types', () => {
-		expect(buildDashArray('dash', 2)).toBe('8 4');
-		expect(buildDashArray('lgDash', 4)).toBe('28 10');
+		expect(buildDashArray('dash', 2)).toBe('8 6');
+		expect(buildDashArray('lgDash', 4)).toBe('32 12');
 	});
 
 	it('clamps minimum stroke width to 1 for the dash calculation', () => {
-		// strokeWidth of 0 gives an effective width of 1, so dot yields '1 2'
-		expect(buildDashArray('dot', 0)).toBe('1 2');
+		// strokeWidth of 0 gives an effective width of 1, so dot yields '1 3'
+		expect(buildDashArray('dot', 0)).toBe('1 3');
 	});
 });
 
@@ -167,6 +167,27 @@ describe('buildWrapperStyle', () => {
 // ---------------------------------------------------------------------------
 // buildConnectorGeometry: integration / mirrors Vue test coverage
 // ---------------------------------------------------------------------------
+
+describe('buildConnectorGeometry dash patterns', () => {
+	const dashed = (shapeStyle: Record<string, unknown>) =>
+		buildConnectorGeometry(connector({ shapeStyle: { strokeWidth: 6, ...shapeStyle } }), 0);
+
+	it('uses the measured PowerPoint dash and gap lengths', () => {
+		expect(dashed({ strokeDash: 'dash' }).dashArray).toBe('24 18');
+	});
+
+	it('folds a round cap into the dash and keeps square dashes flat', () => {
+		const round = dashed({ strokeDash: 'dash', lineCap: 'rnd' });
+		expect(round.dashArray).toBe('18 24');
+		expect(round.strokeLinecap).toBe('round');
+		expect(dashed({ strokeDash: 'dash', lineCap: 'sq' }).strokeLinecap).toBe('butt');
+	});
+
+	it("draws a dashed square-cap line with PowerPoint's overshoot at its start", () => {
+		expect(dashed({ strokeDash: 'dash', lineCap: 'sq' }).pathD).toMatch(/^M-3,/u);
+		expect(dashed({ strokeDash: 'dash', lineCap: 'flat' }).pathD).toBeUndefined();
+	});
+});
 
 describe('buildConnectorGeometry', () => {
 	it('reads stroke colour and width from shapeStyle', () => {
@@ -282,9 +303,9 @@ describe('buildConnectorGeometry', () => {
 		expect(geo.pathD).toContain('C');
 	});
 
-	it('defaults to a single strand with a round cap', () => {
+	it('defaults to a single strand with a flat cap', () => {
 		const geo = buildConnectorGeometry(connector(), 0);
-		expect(geo.strokeLinecap).toBe('round');
+		expect(geo.strokeLinecap).toBe('butt');
 		expect(geo.compoundOffsets).toStrictEqual([0]);
 		expect(geo.compoundWidths).toHaveLength(1);
 	});

@@ -7,6 +7,7 @@ import { proveLocalLine, sameLineCoordinate } from './edit-line-move';
 import type { VisioConnectorEdit, VisioConnectorRoute } from './edit-connector-commands';
 import { addConnectionPoint, deleteConnectionPoint } from './edit-connection-points';
 import type { VisioGeometryEdit } from './edit-commands';
+import { orgChartSites } from './edit-connector-org';
 import {
 	ENDS,
 	chooseSites,
@@ -24,11 +25,13 @@ import {
 	glueBox,
 	glueEnd,
 	glueSites,
+	hasConnectionPoints,
 	topShape,
 	unglueConnector,
 	proveConnector,
 	type ConnectorGlue,
 } from './edit-connector';
+import { shapeChain } from './edit-connector-world';
 import type { VisioRoutePoint } from './connector-route';
 import { connectorObstacles } from './edit-connector-obstacles';
 import {
@@ -125,7 +128,9 @@ export function rerouteConnector(
 			},
 		];
 	};
-	const chosen = chooseSites(sites('begin'), sites('end'));
+	// An org chart reporting line leaves the bottom of the manager and enters the subordinate's top.
+	const org = stencil ? orgChartSites(root, shape, glue, sites) : undefined;
+	const chosen = org ?? chooseSites(sites('begin'), sites('end'));
 	if (isStencilLine(shape)) {
 		// A line master draws one straight run; its style is the master's, not a routing choice.
 		if (options.route && options.route !== 'straight')
@@ -146,7 +151,7 @@ export function rerouteConnector(
 	const walk = (end: End) => {
 		const target = glue.ends[end];
 		return target && target.point === undefined
-			? walkShape(glueBox(root, target.target))
+			? walkShape(glueBox(root, target.target), !hasConnectionPoints(root, target.target))
 			: { point: sites(end)[0]!.point };
 	};
 	const route = options.route ?? current;
@@ -167,7 +172,11 @@ export function rerouteConnector(
 					root,
 					new Set([
 						attribute(shape, 'ID') ?? '',
-						...ENDS.map((end) => glue.ends[end]?.target ?? ''),
+						...ENDS.flatMap((end) => {
+							const target = glue.ends[end]?.target ?? '';
+							// A target inside a group: the groups around it are not in its way either.
+							return (shapeChain(root, target) ?? []).map((item) => attribute(item, 'ID') ?? '');
+						}),
 					]),
 				)
 			: [];
@@ -178,7 +187,7 @@ export function rerouteConnector(
 				shape,
 				route,
 				// Visio's own side choice first; the general router when that path is blocked.
-				stencilConnectorPath(walk('begin'), walk('end'), route, obstacles) ??
+				(org ? undefined : stencilConnectorPath(walk('begin'), walk('end'), route, obstacles)) ??
 					routeVertices(route, chosen, obstacles),
 				check,
 			)

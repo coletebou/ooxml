@@ -1,3 +1,5 @@
+import { findTextHighlightsByElement } from 'ooxml-ui/pptx';
+import type { FindResult } from 'ooxml-ui/pptx';
 import type { PptxElement } from 'pptx-viewer-core';
 /**
  * useCanvasEventHandlers: Event delegation, guide-drag state, find-result
@@ -29,14 +31,6 @@ export function isViewportBackgroundMouseDownTarget(
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-
-interface FindResult {
-	slideIndex: number;
-	elementId: string;
-	segmentIndex: number;
-	startOffset: number;
-	length: number;
-}
 
 export interface DraggingGuide {
 	id: string;
@@ -99,7 +93,7 @@ export function useCanvasEventHandlers({
 	onCanvasMouseDown?: (e: React.MouseEvent) => void;
 	/** Right-click on empty canvas (no element hit); opens the canvas context menu. */
 	onCanvasContextMenu?: (e: React.MouseEvent) => void;
-	findResults?: FindResult[];
+	findResults?: readonly FindResult[];
 	findResultIndex?: number;
 	activeSlideIndex?: number;
 	selectedElement: PptxElement | null;
@@ -107,30 +101,11 @@ export function useCanvasEventHandlers({
 	onMoveGuide?: (guideId: string, position: number) => void;
 }): CanvasEventHandlers {
 	/* ── Per-element find highlights (memoised) ───────────────────── */
-	const elementFindHighlightsMap = useMemo(() => {
-		const map = new Map<string, ElementFindHighlights>();
-		if (!findResults || findResults.length === 0 || activeSlideIndex === null) {
-			return map;
+	const elementFindHighlightsMap = useMemo((): Map<string, ElementFindHighlights> => {
+		if (!findResults || findResults.length === 0 || activeSlideIndex === undefined) {
+			return new Map();
 		}
-		for (let i = 0; i < findResults.length; i++) {
-			const r = findResults[i];
-			if (r.slideIndex !== activeSlideIndex) {
-				continue;
-			}
-			if (!map.has(r.elementId)) {
-				map.set(r.elementId, new Map());
-			}
-			const elMap = map.get(r.elementId)!;
-			if (!elMap.has(r.segmentIndex)) {
-				elMap.set(r.segmentIndex, []);
-			}
-			elMap.get(r.segmentIndex)!.push({
-				startOffset: r.startOffset,
-				length: r.length,
-				isCurrent: i === (findResultIndex ?? -1),
-			});
-		}
-		return map;
+		return findTextHighlightsByElement(findResults, findResultIndex ?? -1, activeSlideIndex);
 	}, [findResults, findResultIndex, activeSlideIndex]);
 
 	/* ── Selected element bounds for ruler ────────────────────────── */

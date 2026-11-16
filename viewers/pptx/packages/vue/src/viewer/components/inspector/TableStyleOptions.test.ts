@@ -5,10 +5,13 @@
    short assertion; merging them into one statement would hurt readability. */
 import { mount } from '@vue/test-utils';
 import type { ParsedTableStyleMap, PptxTableData } from 'pptx-viewer-core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import TableStyleOptions from './TableStyleOptions.vue';
 import { setControlValue } from './test-control-value';
+
+/** In-app dialogs load on demand; a busy CI runner needs more than waitFor's 1 s default. */
+const DIALOG_WAIT = { timeout: 5000 };
 
 function tableData(overrides: Partial<PptxTableData> = {}): PptxTableData {
 	return {
@@ -19,15 +22,21 @@ function tableData(overrides: Partial<PptxTableData> = {}): PptxTableData {
 	};
 }
 
-let originalPrompt: typeof window.prompt;
-
-beforeEach(() => {
-	originalPrompt = window.prompt;
-	window.prompt = () => null;
-});
+/** Answer the in-app dialog the component opened: type into its input, then press a button. */
+async function answerDialog(button: 'confirm' | 'cancel', value?: string): Promise<void> {
+	const dialog = await vi.waitFor(() => {
+		const found = document.querySelector('office-ui-message-dialog');
+		if (!found) throw new Error('no dialog yet');
+		return found;
+	}, DIALOG_WAIT);
+	const input = dialog.shadowRoot?.querySelector('input');
+	if (input && value !== undefined) input.value = value;
+	(dialog.shadowRoot!.querySelector(`button.${button}`) as HTMLButtonElement).click();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 afterEach(() => {
-	window.prompt = originalPrompt;
+	document.querySelectorAll('office-ui-message-dialog').forEach((node) => node.remove());
 });
 
 describe('tableStyleOptions', () => {
@@ -47,27 +56,20 @@ describe('tableStyleOptions', () => {
 		expect(patch.rows?.[1].cells[0].style?.borderColor).toBe('#B4C6E7');
 	});
 
-	it('emits firstCol/lastCol/lastRow toggle patches keyed to the shared TableInspectorChanges flags', async () => {
+	it('emits firstCol/lastCol/lastRow toggle patches from the shared table options', async () => {
 		const wrapper = mount(TableStyleOptions, {
 			props: { tableData: tableData(), canEdit: true },
 		});
 
-		const checkboxes = wrapper.findAll('pptx-ui-checkbox');
-		// TOGGLES order: bandedRows, firstRowHeader, bandedColumns, firstCol, lastCol, lastRow.
-		await setControlValue(checkboxes[3], true);
-		expect((wrapper.emitted('update') as unknown[][]).at(-1)?.[0]).toStrictEqual({
-			firstCol: true,
-		});
-
-		await setControlValue(checkboxes[4], true);
-		expect((wrapper.emitted('update') as unknown[][]).at(-1)?.[0]).toStrictEqual({ lastCol: true });
-
-		await setControlValue(checkboxes[5], true);
-		expect((wrapper.emitted('update') as unknown[][]).at(-1)?.[0]).toStrictEqual({ lastRow: true });
+		for (const flag of ['firstCol', 'lastCol', 'lastRow'] as const) {
+			await setControlValue(wrapper.find(`[data-testid="table-${flag}"]`), true);
+			expect((wrapper.emitted('update') as unknown[][]).at(-1)?.[0]).toStrictEqual({
+				[flag]: true,
+			});
+		}
 	});
 
 	it('enables "Edit style..." with no tableStyleId, and assigns a created style to the table', async () => {
-		vi.spyOn(window, 'prompt').mockReturnValue('Brand New Style');
 		const wrapper = mount(TableStyleOptions, {
 			props: { tableData: tableData(), canEdit: true, tableStyleMap: {} },
 		});
@@ -80,6 +82,7 @@ describe('tableStyleOptions', () => {
 		const createButton = wrapper.findAll('button').find((b) => b.text() === 'Create new style');
 		expect(createButton).toBeTruthy();
 		await createButton!.trigger('click');
+		await answerDialog('confirm', 'Brand New Style');
 
 		const events = wrapper.emitted('update') as unknown[][];
 		const styleMapEvents = wrapper.emitted('tableStyleMapChange') as unknown[][];

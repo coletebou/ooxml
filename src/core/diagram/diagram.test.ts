@@ -150,10 +150,11 @@ describe('drawing colour', () => {
 
 	it('is undefined for an unknown theme slot and lists transforms it does not apply', () => {
 		expect(resolveDrawingColor(colorOf('<a:schemeClr val="accent9"/>'), theme)).toBeUndefined();
-		expect(
-			resolveDrawingColor(colorOf('<a:srgbClr val="000000"><a:redMod val="50000"/></a:srgbClr>'))
-				?.unapplied,
-		).toEqual(['redMod']);
+		const red = resolveDrawingColor(
+			colorOf('<a:srgbClr val="800000"><a:redMod val="50000"/><a:fooMod val="1"/></a:srgbClr>'),
+		);
+		expect(red?.hex).toBe('#400000');
+		expect(red?.unapplied).toEqual(['fooMod']);
 	});
 });
 
@@ -275,7 +276,7 @@ describe('cached drawing', () => {
 		expect(with3d).toBeGreaterThan(0);
 	});
 
-	it('reports an empty drawing and skips pictures honestly', () => {
+	it('reports empty drawings and unreadable cached pictures honestly', () => {
 		expect(
 			parseDiagramDrawing(
 				'<dsp:drawing xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram"/>',
@@ -284,7 +285,8 @@ describe('cached drawing', () => {
 		const withPicture = parseDiagramDrawing(
 			'<dsp:drawing xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:spTree><dsp:pic/></dsp:spTree></dsp:drawing>',
 		);
-		expect(withPicture.issues[0]?.code).toBe('DIAGRAM_DRAWING_PICTURE_SKIPPED');
+		expect(withPicture.issues[0]?.code).toBe('DIAGRAM_DRAWING_PICTURE_UNREADABLE');
+		expect(withPicture.shapes).toEqual([]);
 	});
 
 	it('maps nested group shapes through the group transform', () => {
@@ -343,7 +345,11 @@ describe('resolveDiagramDrawingPart', () => {
 				'',
 				hostFor({ rId2: '../diagrams/data1.xml' }, 'drawing1.xml'),
 			),
-		).toEqual({ relId: 'rId9', path: 'ppt/diagrams/drawing1.xml' });
+		).toEqual({
+			relId: 'rId9',
+			path: 'ppt/diagrams/drawing1.xml',
+			ownerPart: 'ppt/diagrams/data1.xml',
+		});
 		expect(
 			await resolveDiagramDrawingPart(
 				'ppt/slides/slide1.xml',

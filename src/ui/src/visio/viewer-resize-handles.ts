@@ -1,13 +1,20 @@
 import { canEditDiagram } from './controller';
+import { swimlaneResizeEdits } from './viewer-swimlanes';
 import type { VisioDocument, VisioPage } from 'ooxml-core/visio';
 import {
-	visioResizeShape,
-	visioResizeDrag,
+	visioResizeSelectionFrame,
+	visioResizeSelectionDrag,
+	visioSnapResizeDrag,
 	visioSelectionIsOnPage,
 	editErrorMessage,
 	isEditCancellation,
 	type VisioResizeHandle,
 	type VisioPagePoint,
+	type VisioResizeFrame,
+	type VisioResizeSizeMatch,
+	type VisioResizeSnapOptions,
+	type VisioSnapResizeResult,
+	type VisioSnapResult,
 } from 'ooxml-core/visio/ui';
 import type { ViewerController, ViewerState } from './controller';
 import { pagePoint } from './viewer-draw-tool';
@@ -19,7 +26,8 @@ interface Drag {
 	svg: SVGSVGElement;
 	document: VisioDocument;
 	page: VisioPage;
-	shapeId: string;
+	shapeIds: string[];
+	original: VisioResizeFrame;
 	handle: VisioResizeHandle;
 	selection: ViewerState['selectedShapes'];
 	layers: ViewerState['layerVisibilityOverrides'];
@@ -29,7 +37,8 @@ interface Drag {
 	showOverlays?: () => void;
 }
 const pointOptions = { snap: false, bounded: false } as const;
-/** Eight source-backed single-selection handles; saved content is never speculatively resized. */
+/** Eight source-backed selection handles; saved content is never speculatively resized.
+ * Like Visio, corners keep the proportions and Shift keeps them on every handle. */
 export class ViewerResizeHandles {
 	#drag: Drag | undefined;
 	#frame: ReturnType<typeof createResizeFrame> | undefined;
@@ -37,8 +46,40 @@ export class ViewerResizeHandles {
 	constructor(
 		private readonly viewport: HTMLElement,
 		private readonly controller: ViewerController,
-		private readonly options: { active(): boolean; announce(message: string): void },
+		private readonly options: {
+			active(): boolean;
+			announce(message: string): void;
+			/**
+			 * Dynamic Grid and Guides for a resize: `settings` is undefined when snapping is off,
+			 * `hint` draws the alignment lines and size matches, `clear` removes them.
+			 */
+			snap?: {
+				settings(): VisioResizeSnapOptions | undefined;
+				hint(
+					page: VisioPage,
+					lines: VisioSnapResult['lines'],
+					matches: VisioResizeSizeMatch[],
+				): void;
+				clear(): void;
+			};
+		},
 	) {}
+	/**
+	 * The resize solver for a pointer position. Ctrl resizes about the centre and Shift keeps the
+	 * proportions; holding Alt leaves snapping out for this drag, as it does for a move.
+	 */
+	#solve(
+		drag: Drag,
+		point: VisioPagePoint,
+		event: PointerEvent,
+	): VisioSnapResizeResult | undefined {
+		const snap = event.altKey ? undefined : this.options.snap?.settings();
+		return visioSnapResizeDrag(drag.page, drag.shapeIds, drag.handle, drag.start, point, {
+			proportional: event.shiftKey,
+			symmetric: event.ctrlKey,
+			...(snap ? { snap } : {}),
+		});
+	}
 	#current(drag: Drag, state = this.controller.state): boolean {
 		return (
 			state.document === drag.document &&
@@ -65,28 +106,34 @@ export class ViewerResizeHandles {
 		if (
 			!page ||
 			!selection ||
-			state.selectedShapes.length !== 1 ||
-			!visioSelectionIsOnPage(selection, page.id) ||
+			!state.selectedShapes.every((item) => visioSelectionIsOnPage(item, page.id)) ||
 			!canEditDiagram(state) ||
 			state.edit.busy ||
 			state.loading ||
 			!this.options.active()
 		)
 			return;
-		const shape = visioResizeShape(page, selection.id);
-		if (!shape) return;
-		const group = Array.from(this.viewport.querySelectorAll<SVGGElement>('[data-shape-id]')).find(
-			(group) =>
-				group.dataset.shapeId === shape.id &&
-				(group.dataset.pageId ?? page.id) === page.id &&
-				group.dataset.selected === 'true',
+		const frame = visioResizeSelectionFrame(
+			page,
+			state.selectedShapes.map((item) => item.id),
 		);
+		if (!frame) return;
+		const groups = Array.from(this.viewport.querySelectorAll<SVGGElement>('[data-shape-id]'));
+		const selected = state.selectedShapes.map((item) =>
+			groups.find(
+				(group) =>
+					group.dataset.shapeId === item.id &&
+					(group.dataset.pageId ?? page.id) === page.id &&
+					group.dataset.selected === 'true',
+			),
+		);
+		const group = selected[0];
 		const svg = group?.ownerSVGElement,
 			screen = svg?.getScreenCTM?.();
-		if (!svg) return;
+		if (!svg || selected.some((group) => group?.ownerSVGElement !== svg)) return;
 		const scale = screen ? Math.hypot(screen.a, screen.b) : 96 * state.zoom;
 		if (!(scale > 0 && Number.isFinite(scale))) return;
-		this.#frame = createResizeFrame(svg, page, shape, scale);
+		this.#frame = createResizeFrame(svg, page, frame, scale, selection.id);
 	}
 	wire(): () => void {
 		const dispose = wireHandleEvents(this.viewport, {
@@ -119,8 +166,7 @@ export class ViewerResizeHandles {
 			!page ||
 			!state.document ||
 			!selection ||
-			!visioSelectionIsOnPage(selection, page.id) ||
-			state.selectedShapes.length !== 1 ||
+			!state.selectedShapes.every((item) => visioSelectionIsOnPage(item, page.id)) ||
 			event.button !== 0 ||
 			this.#drag ||
 			handle.dataset.resizeShape !== selection.id ||
@@ -132,13 +178,16 @@ export class ViewerResizeHandles {
 			return;
 		const start = pagePoint(svg, page, event, pointOptions),
 			id = handle.dataset.resizeHandle as VisioResizeHandle;
-		if (!start || !visioResizeDrag(page, selection.id, id, start, start)) return;
+		const shapeIds = state.selectedShapes.map((item) => item.id);
+		const original = visioResizeSelectionFrame(page, shapeIds);
+		if (!start || !original || !visioResizeSelectionDrag(page, shapeIds, id, start, start)) return;
 		const drag: Drag = {
 			pointer: event.pointerId,
 			svg,
 			document: state.document,
 			page,
-			shapeId: selection.id,
+			shapeIds,
+			original,
 			handle: id,
 			selection: state.selectedShapes,
 			layers: state.layerVisibilityOverrides,
@@ -164,9 +213,11 @@ export class ViewerResizeHandles {
 			return;
 		}
 		const point = pagePoint(drag.svg, drag.page, event, pointOptions);
-		const resized =
-			point && visioResizeDrag(drag.page, drag.shapeId, drag.handle, drag.start, point);
-		if (resized && this.#current(drag)) drag.frame.update(resized.frame);
+		const resized = point && this.#solve(drag, point, event);
+		if (resized && this.#current(drag)) {
+			drag.frame.update(resized.frame);
+			this.options.snap?.hint(drag.page, resized.lines, resized.sizeMatches);
+		}
 		event.preventDefault();
 		event.stopImmediatePropagation();
 	}
@@ -180,6 +231,7 @@ export class ViewerResizeHandles {
 	#release(): () => void {
 		const drag = this.#drag;
 		this.#drag = undefined;
+		this.options.snap?.clear();
 		if (!drag) return () => {};
 		if (this.viewport.hasPointerCapture?.(drag.pointer))
 			this.viewport.releasePointerCapture(drag.pointer);
@@ -194,10 +246,7 @@ export class ViewerResizeHandles {
 		const drag = this.#drag;
 		if (!drag || event.pointerId !== drag.pointer) return;
 		const point = pagePoint(drag.svg, drag.page, event, pointOptions);
-		const resized =
-			point &&
-			this.#current(drag) &&
-			visioResizeDrag(drag.page, drag.shapeId, drag.handle, drag.start, point);
+		const resized = point && this.#current(drag) && this.#solve(drag, point, event);
 		event.preventDefault();
 		event.stopImmediatePropagation();
 		const settle = this.#release();
@@ -206,18 +255,30 @@ export class ViewerResizeHandles {
 			this.render(this.controller.state);
 			return;
 		}
-		const original = drag.page.shapes.find((shape) => shape.id === drag.shapeId)!;
 		if (
-			Math.abs(resized.frame.width - original.width) < 1e-10 &&
-			Math.abs(resized.frame.height - original.height) < 1e-10
+			Math.abs(resized.frame.width - drag.original.width) < 1e-10 &&
+			Math.abs(resized.frame.height - drag.original.height) < 1e-10
 		) {
 			settle();
 			this.render(this.controller.state);
 			return;
 		}
+		// A lane resizes with the lanes after it moving and the frame following.
+		const lane = swimlaneResizeEdits(drag.page, drag.shapeIds, resized.frame);
+		if (lane === undefined) {
+			settle();
+			this.options.announce('Resize a swimlane by its own handles; the frame follows its lanes.');
+			this.render(this.controller.state);
+			return;
+		}
 		const request = ++this.#request;
 		try {
-			await this.controller.applySelectionEdits([resized.command]);
+			if (lane) await this.controller.applyEdits(lane);
+			else
+				await this.controller.applySelectionEdits(resized.commands, {
+					pageId: drag.page.id,
+					members: resized.members,
+				});
 			if (request === this.#request) this.options.announce('Shape resized.');
 		} catch (error) {
 			if (request === this.#request && !isEditCancellation(error))

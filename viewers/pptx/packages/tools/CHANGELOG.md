@@ -7,6 +7,63 @@ A release listed with no entries carried no Conventional Commit in this package'
 scope: scripts/release-plan.mjs releases whenever any published file changes, not only on
 conventional commits.
 
+## [2.10.3](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.10.3) - 2026-11-13
+
+### Documentation
+
+- Correct outdated statements across the repository ([6ea98f5](https://github.com/ChristopherVR/ooxml/commit/6ea98f59c35894f7c2dc3e1037d82b17a482a80c))
+
+## [2.10.2](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.10.2) - 2026-11-09
+
+### Dependencies
+
+- **deps:** Merge dependabot development group and jsdom 31 ([eb65de6](https://github.com/ChristopherVR/ooxml/commit/eb65de67a495cbd4d775c995d5ac25f08322fbf9))
+- **deps:** Bump the production-minor-and-patch group with 25 updates ([4046ca3](https://github.com/ChristopherVR/ooxml/commit/4046ca399665d485da35696889c0212cc6526f63))
+
+### Chores
+
+- **deps-dev:** Bump the development-minor-and-patch group with 15 updates ([f9d1598](https://github.com/ChristopherVR/ooxml/commit/f9d15981d99b0dee22754c9711ed1755ae5d666a))
+
+## [2.10.1](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.10.1) - 2026-11-06
+
+### Bug Fixes
+
+- **pptx:** Persist canvas size changes from automation ([#252](https://github.com/ChristopherVR/ooxml/issues/252)) ([e9b76d4](https://github.com/ChristopherVR/ooxml/commit/e9b76d47fcb2b3432cefda7f061fc302370320bf))
+
+### Documentation
+
+- Disclose every outbound request in PRIVACY.md ([eb1810b](https://github.com/ChristopherVR/ooxml/commit/eb1810bd3dd1ede67a8c4872f3fe5daa64472fe1))
+
+## [2.10.0](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.10.0) - 2026-11-04
+
+### Features
+
+- **embedding:** Connect office products to shared onedrive storage ([b8620c1](https://github.com/ChristopherVR/ooxml/commit/b8620c13a4903aa27fed365d113153cad76ed29f))
+
+## [2.9.1](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.9.1) - 2026-11-03
+
+### Dependencies
+
+- **deps:** Merge node type updates ([#235](https://github.com/ChristopherVR/ooxml/issues/235)) ([ab34b75](https://github.com/ChristopherVR/ooxml/commit/ab34b754d451f73e51b1aa7833de628776ac3726))
+- **deps:** Bump the production-minor-and-patch group with 22 updates ([8e60b14](https://github.com/ChristopherVR/ooxml/commit/8e60b14e1d8ee3a1cb507670caa15a611632ef26))
+- **deps:** Merge production dependency updates ([#236](https://github.com/ChristopherVR/ooxml/issues/236)) ([7eb137b](https://github.com/ChristopherVR/ooxml/commit/7eb137b03906ded043ce0e4adf83e01fcdaa44a9))
+- **deps:** Merge development dependency updates ([#237](https://github.com/ChristopherVR/ooxml/issues/237)) ([448c68d](https://github.com/ChristopherVR/ooxml/commit/448c68db3783efcd646de6258e59f28a971c2170))
+
+### Chores
+
+- **deps-dev:** Bump @types/node ([8dfb9a2](https://github.com/ChristopherVR/ooxml/commit/8dfb9a2a7b40aac3641f927de3ab7fcebc9a42ec))
+- **deps-dev:** Bump the development-minor-and-patch group with 7 updates ([e6e7a5e](https://github.com/ChristopherVR/ooxml/commit/e6e7a5e8075087159d1df4608212bea6a98b03ad))
+
+## [2.9.0](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.9.0) - 2026-10-30
+
+### Features
+
+- **pptx:** Add custom show editing operations and manage_custom_shows tool ([2dce987](https://github.com/ChristopherVR/ooxml/commit/2dce987baa2feb12c3fd319953153a9d85d76f57))
+
+### Other
+
+- Bring origin/main into the embedding work ([a3711a1](https://github.com/ChristopherVR/ooxml/commit/a3711a14049a2cd11b994e76eafec039db2dc2de))
+
 ## [2.8.9](https://github.com/ChristopherVR/ooxml/releases/tag/pptx-viewer-mcp@2.8.9) - 2026-10-22
 
 ### Documentation

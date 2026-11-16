@@ -1,10 +1,8 @@
 import type {
 	AnimationGroup,
-	GradientState,
 	InlineTextSelection,
 	SlideSizeEmu,
 	SlideSizeRescaleMode,
-	TextAdvancedChanges,
 } from 'ooxml-ui/pptx';
 import type {
 	PptxAnimationPreset,
@@ -21,7 +19,6 @@ import type {
 	PptxSlide,
 	PptxSlideMaster,
 	PptxSmartArtData,
-	PptxSmartArtNodeStyle,
 	PptxTableCellStyle,
 	PptxTableData,
 	XmlObject,
@@ -41,7 +38,9 @@ import type {
 } from 'pptx-viewer-core';
 
 import type { AnimationTimingPatch } from '../../editor/editor-animation-actions';
+import type { CommentsPanelBinding } from '../../editor/editor-comment-actions';
 import type { GeometryPatch } from '../../editor/editor-edit-ops';
+import type { LiveColorEventType, LiveColorTarget } from '../../editor/editor-live-colors';
 import type { TableCellPosition, TableStructureAction } from '../../editor/table-editor-mutations';
 import type { RegionSet } from '../region-set';
 
@@ -51,6 +50,11 @@ import type { RegionSet } from '../region-set';
  * opacity, image adjustments/crop, table-level flags + padding).
  */
 export interface InspectorHandlers {
+	/**
+	 * The viewer's Format pane controller (open sections, launch requests); the
+	 * inspector keeps a private one when absent (tests, a standalone inspector).
+	 */
+	formatPane?: import('ooxml-ui/pptx').FormatPaneController;
 	/** Select an element from the Elements (layer-order) tab. */
 	selectElement(id: string): void;
 	/** Open the full Document Properties dialog from the Properties tab. */
@@ -107,6 +111,8 @@ export interface InspectorHandlers {
 	 * when the deck has content and the new size differs from the current one).
 	 */
 	applySlideSizeRescale(size: SlideSizeEmu, mode: SlideSizeRescaleMode): void;
+	/** The viewer's shared comments panel state (drafts, edits and reply composers, per slide). */
+	commentsPanel(): CommentsPanelBinding;
 	/** Add a comment on the current slide (Comments tab). */
 	addComment(text: string, mentions?: PptxCommentMention[]): void;
 	/** Append a reply under a top-level comment (Comments tab reply form). */
@@ -138,13 +144,29 @@ export interface InspectorHandlers {
 	/**
 	 * Set the shape fill colour. Pass `ref` for a theme-swatch pick (wins on
 	 * save, so the fill follows a later theme change); omit it to clear a
-	 * previously-stored ref for a plain/custom/recent pick.
+	 * previously-stored ref for a plain/custom/recent pick. The colour also
+	 * goes into the recent colours, unless `committed` is `false`: a drag tick
+	 * through the native picker, which records only the colour it settles on
+	 * (its `change`, through {@link pushRecentColor}).
 	 */
-	setShapeFill(color: string, ref?: PptxThemeColorRef): void;
-	/** Same `ref` contract as {@link setShapeFill}, for the stroke colour. */
-	setShapeStroke(color: string, ref?: PptxThemeColorRef): void;
+	setShapeFill(color: string, ref?: PptxThemeColorRef, committed?: boolean): void;
+	/** Same `ref` and `committed` contract as {@link setShapeFill}, for the stroke colour. */
+	setShapeStroke(color: string, ref?: PptxThemeColorRef, committed?: boolean): void;
 	setShapeStrokeWidth(width: number): void;
 	setShapeStyle(patch: Partial<ShapeStyle>): void;
+	/**
+	 * One `input`, `change` or `blur` of the native fill, line or text colour
+	 * picker: a drag previews every shade and settles as ONE undo step and one
+	 * recent colour (see `LiveColorActions`).
+	 */
+	liveColor(target: LiveColorTarget, type: LiveColorEventType, hex: string): void;
+	/**
+	 * Show an effects colour drag's shape-style frame without an undo step, on the
+	 * element `target` (the selection when omitted, or one the drag has left).
+	 */
+	previewShapeStyle(patch: Partial<ShapeStyle>, target?: string): void;
+	/** The shape style of element `id` now (what an effects drag the selection left goes back on). */
+	shapeStyleOf(id: string): ShapeStyle | undefined;
 	setShapeType(shapeType: string): void;
 	/**
 	 * B6: fold a colour into the deck's "Recent colours" (`p:clrMru`) MRU list,
@@ -160,42 +182,20 @@ export interface InspectorHandlers {
 	setTextVerticalAlign(vAlign: InspectorState['vAlign']): void;
 	setTextWrap(wrap: InspectorState['textWrap']): void;
 	setAutoFitMode(mode: InspectorState['autoFitMode']): void;
-	setTextAdvanced(patch: TextAdvancedChanges): void;
 	setTextStyle(patch: Partial<TextStyle>, selection?: InlineTextSelection | null): void;
 
-	setFillOpacity(opacity: number): void;
 	setStrokeOpacity(opacity: number): void;
-	setGradientFill(state: GradientState): void;
-	addGradientStop(color: string, position: number): void;
-	removeGradientStop(index: number): void;
-	updateGradientStop(index: number, changes: Partial<GradientState['stops'][number]>): void;
 
-	setImageBrightness(value: number): void;
-	setImageContrast(value: number): void;
-	setImageSaturation(value: number): void;
-	setImageCrop(edge: 'left' | 'top' | 'right' | 'bottom', value: number): void;
+	/**
+	 * Apply a shared descriptor's element patch (Alt Text, picture adjustments,
+	 * crop insets) to the selection as one undo step.
+	 */
+	patchSelectedElement(patch: Partial<PptxElement>): void;
 	setImageEffects(patch: Partial<PptxImageEffects>): void;
 	replaceImage(): void;
 	resetImage(): void;
 	resetCrop(): void;
 	setElementAction(trigger: 'click' | 'hover', action: ElementAction): void;
-	/** Set the selected element's accessibility description (Alt Text field). */
-	setAltText(text: string): void;
-	/**
-	 * Set the selected element's accessibility title (`p:cNvPr/@title`).
-	 * Applies to a plain shape/text box/connector and every graphic-frame
-	 * kind (table/chart/smartArt/ole/media), not a picture (which has no
-	 * title field). See {@link PptxNonVisualDescription}.
-	 */
-	setTitle(text: string): void;
-	/**
-	 * Set the selected OLE element's Object Name (`p:oleObj/@name`, ECMA-376
-	 * SS13.3.4). A browser cannot run the native application an embedded OLE
-	 * object belongs to, so the object stays read-only; this name already
-	 * parses, saves, and syncs via collaboration and only lacked an editing
-	 * surface.
-	 */
-	setOleName(name: string): void;
 	/**
 	 * Patch an in-place OLE content edit (spreadsheet cell / document
 	 * paragraph / nested-deck slide title / Replace File) onto the selected
@@ -208,9 +208,6 @@ export interface InspectorHandlers {
 	setChartData(data: PptxChartData): void;
 	setMediaProperties(patch: Partial<MediaPptxElement>): void;
 
-	setTableHeaderRow(enabled: boolean): void;
-	setTableBandedRows(enabled: boolean): void;
-	setTableCellPadding(padding: number): void;
 	setTableOptions(patch: Partial<PptxTableData>, cellStyle?: Partial<PptxTableCellStyle>): void;
 	/**
 	 * Replace the selected table's whole `tableData` (inspector data grid).
@@ -232,18 +229,11 @@ export interface InspectorHandlers {
 	mergeTableCells(cells: TableCellPosition[]): void;
 	splitTableCell(cell: TableCellPosition): void;
 
-	setSmartArtNodeText(nodeId: string, text: string): void;
-	setSmartArtNodeStyle(nodeId: string, patch: Partial<PptxSmartArtNodeStyle>): void;
-	mutateSmartArtNode(
-		nodeId: string,
-		action: 'add' | 'addChild' | 'remove' | 'promote' | 'demote',
-	): void;
 	/**
 	 * Commit a whole replacement `smartArtData`, reflowed and history-integrated
-	 * like every other SmartArt mutation. Used by the text pane's Tab / Enter /
-	 * Backspace keyboard handling, which computes the next data (and, for
-	 * add/remove, the node to focus next) via the shared `smartart-node-pane-
-	 * handlers` builders before committing.
+	 * like every other SmartArt mutation. Used by the text pane
+	 * (`pptx-ui-smartart-text-pane`), which computes the next data through the
+	 * pptx SmartArt facades before emitting it.
 	 */
 	replaceSmartArtData(data: PptxSmartArtData): void;
 	setSmartArtLayout(layout: SmartArtLayoutType): void;
@@ -253,6 +243,10 @@ export interface InspectorHandlers {
 /** Selection-derived state the inspector reflects, computed by `buildInspectorState`. */
 export interface InspectorState {
 	hasSelection: boolean;
+	/** The selected element's id: what a live colour drag in the inspector belongs to. */
+	elementId?: string;
+	/** The selected element itself: what the shared element field descriptors read. */
+	selectedElement?: PptxElement;
 	isLocked: boolean;
 	/** `a:picLocks/@noCrop`: may the selected picture's crop be adjusted? */
 	croppable: boolean;
@@ -300,18 +294,9 @@ export interface InspectorState {
 	isConnector: boolean;
 	fillOpacity: number;
 	strokeOpacity: number;
-	gradientEnabled: boolean;
-	gradient: GradientState;
 	vAlign: 'top' | 'middle' | 'bottom' | 'distributed' | 'justified';
 	textWrap: 'square' | 'none';
 	autoFitMode: 'shrink' | 'normal' | 'none';
-	characterSpacing: number;
-	lineSpacing: number;
-	lineSpacingExactPt: number | null;
-	paragraphSpacingBefore: number;
-	paragraphSpacingAfter: number;
-	paragraphIndent: number;
-	paragraphMarginLeft: number;
 	textDirection:
 		| 'horizontal'
 		| 'vertical'
@@ -320,24 +305,11 @@ export interface InspectorState {
 		| 'wordArtVert'
 		| 'wordArtVertRtl'
 		| 'mongolianVert';
-	textRtl: boolean;
 	textStyle: TextStyle | undefined;
 	selectedTextRange: InlineTextSelection | null;
-	imageBrightness: number;
-	imageContrast: number;
-	imageSaturation: number;
 	imageArtisticEffect: string;
-	imageTransparency: number;
-	imageBiLevel: number;
-	imageDuotone1: string;
-	imageDuotone2: string;
-	imageColorWash?: { color: string; opacity: number };
 	actionClick?: ElementAction;
 	actionHover?: ElementAction;
-	/** The selected element's alt text (accessibility description), if any. */
-	altText: string;
-	/** The selected element's accessibility title (`p:cNvPr/@title`), if any. */
-	title: string;
 	/**
 	 * Whether the Accessibility section's own alt-text/title editor should
 	 * show for the current selection: true for a plain shape, text box,
@@ -358,21 +330,9 @@ export interface InspectorState {
 	media?: MediaPptxElement;
 	mediaPreviewUrl?: string;
 	mediaPosterUrl?: string;
-	cropLeft: number;
-	cropTop: number;
-	cropRight: number;
-	cropBottom: number;
-	tableHeaderRow: boolean;
-	tableBandedRows: boolean;
-	tableBandedColumns: boolean;
-	tableLastRow: boolean;
-	tableFirstCol: boolean;
-	tableLastCol: boolean;
-	tableRtl: boolean;
 	tableStyleId: string;
 	tableCellBackground: string;
 	tableCellBorder: string;
-	tableCellPadding: number;
 	selectedTableCell: { row: number; column: number } | null;
 	selectedTableCells: Array<{ row: number; column: number }>;
 	tableCellStyle: PptxTableCellStyle | undefined;
@@ -413,6 +373,11 @@ export interface InspectorDeckState {
 	selectedIds: readonly string[];
 	/** Primary selected element id (docked Animation panel target), if any. */
 	selectedElementId?: string;
+	/**
+	 * The primary selected element itself (it may live on a layout while
+	 * template editing), for the Format pane's sections; edits still target it.
+	 */
+	selectedElement?: PptxElement;
 	comments: readonly PptxComment[];
 	/** Authors offered by the Comments tab's `@`-mention typeahead. */
 	commentMentionAuthors: readonly PptxModernCommentAuthor[];

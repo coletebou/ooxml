@@ -5,6 +5,7 @@
  */
 import type { StrokeDashType, PptxElement, TextOrientationMatrix } from 'ooxml-core/pptx';
 
+import { capCompensatedDashArray, dashPatternUnits } from './dash-pattern';
 import { clampUnitInterval } from './fill-style';
 
 /** CSS `border-style` keyword used for stroke rendering. */
@@ -209,55 +210,23 @@ export function getCompoundLineStyle(
 }
 
 /**
- * Computes an SVG `stroke-dasharray` value for a given dash type and stroke width.
- * For custom dash types with parsed segments, segment values are expressed in
- * 1/1000 of the line width (per OOXML spec) and converted to pixel multiples.
+ * Computes an SVG `stroke-dasharray` value for a given dash type and stroke width,
+ * with PowerPoint's own dash and gap lengths (see `dash-pattern.ts`). Custom
+ * segments are 1000ths of a percent of the line width.
  * @param dashType - The OOXML dash type.
  * @param strokeWidth - Stroke width in pixels (minimum 1).
  * @param customDashSegments - Optional array of `{dash, space}` segments for custom dashes.
+ * @param lineCap - The `a:ln/@cap` token: round dashes include their caps.
  * @returns A space-separated dasharray string, or `undefined` for solid strokes.
  */
 export function getSvgStrokeDasharray(
 	dashType: StrokeDashType | undefined,
 	strokeWidth: number,
-	customDashSegments?: Array<{ dash: number; space: number }>,
+	customDashSegments?: ReadonlyArray<{ dash: number; space: number }>,
+	lineCap?: 'flat' | 'rnd' | 'sq',
 ): string | undefined {
-	if (!dashType || dashType === 'solid') {
-		return undefined;
-	}
-	const stroke = Math.max(strokeWidth, 1);
-
-	// If custom dash with parsed segments, build dasharray from actual data.
-	// Segment values are in 1/1000 of the line width, so divide by 1000
-	// to get multiples of stroke-width.
-	if (dashType === 'custom' && customDashSegments && customDashSegments.length > 0) {
-		return customDashSegments
-			.flatMap((seg) => [(seg.dash / 1000) * stroke, (seg.space / 1000) * stroke])
-			.join(' ');
-	}
-
-	switch (dashType) {
-		case 'dot':
-		case 'sysDot':
-			return `${stroke} ${stroke * 2}`;
-		case 'dash':
-		case 'sysDash':
-			return `${stroke * 4} ${stroke * 2}`;
-		case 'lgDash':
-			return `${stroke * 7} ${stroke * 2.5}`;
-		case 'dashDot':
-		case 'sysDashDot':
-			return `${stroke * 4} ${stroke * 2} ${stroke} ${stroke * 2}`;
-		case 'lgDashDot':
-			return `${stroke * 7} ${stroke * 2.5} ${stroke} ${stroke * 2.5}`;
-		case 'lgDashDotDot':
-		case 'sysDashDotDot':
-			return `${stroke * 7} ${stroke * 2.5} ${stroke} ${stroke * 2} ${stroke} ${stroke * 2}`;
-		case 'custom':
-			return `${stroke * 3} ${stroke * 2}`;
-		default:
-			return undefined;
-	}
+	const pattern = dashPatternUnits(dashType, customDashSegments);
+	return pattern ? capCompensatedDashArray(pattern, strokeWidth, lineCap) : undefined;
 }
 
 /**
@@ -322,36 +291,30 @@ export function getElementTransformWithoutRotation(element: PptxElement): string
 }
 
 /**
- * Builds a CSS transform that compensates for element flips so that text
- * inside a flipped shape renders in its natural reading direction.
- * Only includes `scaleX(-1)` / `scaleY(-1)`; rotation is not compensated.
+ * Builds the CSS transform that un-mirrors the text of a flipped shape.
+ *
+ * PowerPoint never mirrors text, and a vertical flip turns it upside down
+ * (PowerPoint 16 exports, `Slide.Export`): the text of a shape at rotation
+ * `r` reads at `r` with `flipH`, at `r + 180` with `flipV` and at `r + 180`
+ * with both (the shape's own transform is then a half turn). Inside the
+ * container's `rotate(r) scaleX(fh) scaleY(fv)` that is one horizontal
+ * mirror whenever exactly one flip is set, at any rotation: `flipV` composes
+ * to `rotate(r + 180)`, `flipH` to `rotate(r)`. The text rectangle itself
+ * flips with the shape, so the mirror pivots on its centre (see
+ * `getTextCompensationOrigin`).
  * @param element - The element whose flips are checked.
  * @returns A CSS transform string, or `undefined` if no flips are active.
  */
 export function getTextCompensationTransform(element: PptxElement): string | undefined {
 	const transforms: string[] = [];
-	const normalizedRotation = (((Number(element.rotation) || 0) % 360) + 360) % 360;
-	const swapFlipAxis =
-		normalizedRotation > 90 &&
-		normalizedRotation < 270 &&
-		element.flipHorizontal !== element.flipVertical;
-	const compensateHorizontal = swapFlipAxis ? element.flipVertical : element.flipHorizontal;
-	const compensateVertical = swapFlipAxis ? element.flipHorizontal : element.flipVertical;
-	if (compensateHorizontal) {
+	const mirrored = Boolean(element.flipHorizontal) !== Boolean(element.flipVertical);
+	if (mirrored) {
 		transforms.push('scaleX(-1)');
-	}
-	if (compensateVertical) {
-		transforms.push('scaleY(-1)');
 	}
 	const ancestorGroupTransform =
 		'textStyle' in element ? element.textStyle?.ancestorGroupTransform : undefined;
 	if (isTextOrientationMatrix(ancestorGroupTransform)) {
-		const localCompensation: TextOrientationMatrix = [
-			compensateHorizontal ? -1 : 1,
-			0,
-			0,
-			compensateVertical ? -1 : 1,
-		];
+		const localCompensation: TextOrientationMatrix = [mirrored ? -1 : 1, 0, 0, 1];
 		const visibleTransform = multiplyTextOrientationMatrices(
 			multiplyTextOrientationMatrices(ancestorGroupTransform, getElementOrientationMatrix(element)),
 			localCompensation,

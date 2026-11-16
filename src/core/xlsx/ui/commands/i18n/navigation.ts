@@ -3,6 +3,20 @@
 import type { Translations } from './types';
 
 export const NAVIGATION_STRINGS: Translations = {
+	Web: ['Web', 'Web', 'Web', '网络'],
+	'Returns XML element or attribute values selected by XPath, as a column.': [
+		'Renvoie dans une colonne les valeurs des éléments ou attributs XML sélectionnés par XPath.',
+		'Gibt die mit XPath ausgewählten XML-Element- oder Attributwerte als Spalte zurück.',
+		'Devuelve en una columna los valores de elementos o atributos XML seleccionados mediante XPath.',
+		'将 XPath 选中的 XML 元素或属性值返回为一列。',
+	],
+	'External formula services: CUBE*, WEBSERVICE, STOCKHISTORY, RTD, IMAGE, COPILOT, TRANSLATE and DETECTLANGUAGE':
+		[
+			'Services de formules externes : CUBE*, WEBSERVICE, STOCKHISTORY, RTD, IMAGE, COPILOT, TRANSLATE et DETECTLANGUAGE',
+			'Externe Formeldienste: CUBE*, WEBSERVICE, STOCKHISTORY, RTD, IMAGE, COPILOT, TRANSLATE und DETECTLANGUAGE',
+			'Servicios de fórmulas externos: CUBE*, WEBSERVICE, STOCKHISTORY, RTD, IMAGE, COPILOT, TRANSLATE y DETECTLANGUAGE',
+			'外部公式服务：CUBE*、WEBSERVICE、STOCKHISTORY、RTD、IMAGE、COPILOT、TRANSLATE 和 DETECTLANGUAGE',
+		],
 	'Sparklines (create, format and clear)': [
 		'Graphiques sparkline (création, mise en forme et suppression)',
 		'Sparklines (erstellen, formatieren und löschen)',
@@ -88,6 +102,12 @@ export const NAVIGATION_STRINGS: Translations = {
 		'Fertig. Es wurden {count} Ersetzungen vorgenommen.',
 		'Listo. Hemos realizado {count} reemplazos.',
 		'全部完成。完成 {count} 处替换。',
+	],
+	'{count} cell(s) were not replaced because the new value does not match their data validation.': [
+		'{count} cellule(s) n’ont pas été remplacées car la nouvelle valeur ne respecte pas leur validation des données.',
+		'{count} Zelle(n) wurden nicht ersetzt, da der neue Wert ihrer Datenüberprüfung nicht entspricht.',
+		'No se reemplazaron {count} celda(s) porque el nuevo valor no cumple su validación de datos.',
+		'有 {count} 个单元格未替换，因为新值不符合其数据验证。',
 	],
 	// Go To and Go To Special
 	'Go To': ['Atteindre', 'Gehe zu', 'Ir a', '定位'],
@@ -395,23 +415,48 @@ export const NAVIGATION_STRINGS: Translations = {
 	],
 	'Show Formulas': ['Afficher les formules', 'Formeln anzeigen', 'Mostrar fórmulas', '显示公式'],
 	'Manual calculation': ['Calcul manuel', 'Manuelle Berechnung', 'Cálculo manual', '手动计算'],
-	'Outline (grouping) for columns': [
-		'Plan (groupement) des colonnes',
-		'Gliederung (Gruppierung) für Spalten',
-		'Esquema (agrupación) de columnas',
-		'列的分级显示(组合)',
+	'AutoFilter drop-down: value checklist with search, Text, Number and Date filters, Top 10, Above and Below Average, colour and custom criteria':
+		[
+			'Liste déroulante de filtre automatique : liste de valeurs avec recherche, filtres textuels, numériques et chronologiques, 10 premiers, au-dessus et en dessous de la moyenne, couleur et critères personnalisés',
+			'AutoFilter-Dropdown: Werteliste mit Suche, Text-, Zahlen- und Datumsfilter, Top 10, über und unter dem Durchschnitt, Farbe und benutzerdefinierte Kriterien',
+			'Lista desplegable de Autofiltro: lista de valores con búsqueda, filtros de texto, número y fecha, 10 mejores, por encima y por debajo del promedio, color y criterios personalizados',
+			'自动筛选下拉列表：带搜索的值列表、文本、数字和日期筛选、前 10 项、高于和低于平均值、颜色和自定义条件',
+		],
+	'AutoFilter on table headers, the date-hierarchy checklist and icon filters from the menu': [
+		'Filtre automatique sur les en-têtes de tableau, liste hiérarchique des dates, filtres par icône depuis le menu',
+		'AutoFilter in Tabellenüberschriften, hierarchische Datumsliste, Symbolfilter im Menü',
+		'Autofiltro en los encabezados de tabla, lista jerárquica de fechas, filtros por icono desde el menú',
+		'表格标题上的自动筛选、日期层次列表、菜单中的图标筛选',
 	],
-	'Password protection hashes': [
-		'Hachages de protection par mot de passe',
-		'Kennwortschutz-Hashes',
-		'Hashes de protección con contraseña',
-		'密码保护哈希',
+	'Flash Fill, Subtotal and Consolidate': [
+		'Remplissage instantané, Sous-total et Consolider',
+		'Blitzvorschau, Teilergebnis und Konsolidieren',
+		'Relleno rápido, Subtotal y Consolidar',
+		'快速填充、分类汇总和合并计算',
+	],
+	'Opening .xlsb binary workbooks': [
+		'Ouverture des classeurs binaires .xlsb',
+		'Öffnen binärer .xlsb-Arbeitsmappen',
+		'Apertura de libros binarios .xlsb',
+		'打开 .xlsb 二进制工作簿',
 	],
 	'Editing threaded comment replies': [
 		'Modification des réponses aux commentaires',
 		'Bearbeiten von Antworten in Kommentarthreads',
 		'Edición de respuestas de comentarios en hilo',
 		'编辑线程批注回复',
+	],
+	'Creating @mentions': [
+		'Création de @mentions',
+		'Erstellen von @Erwähnungen',
+		'Creación de @menciones',
+		'创建 @提及',
+	],
+	'Resolving and reopening comments': [
+		'Résolution et réouverture des commentaires',
+		'Erledigen und erneutes Öffnen von Kommentaren',
+		'Resolver y reabrir comentarios',
+		'解决和重新打开批注',
 	],
 	'Macros (VBA is kept in the file but never run)': [
 		'Macros (le code VBA est conservé dans le fichier mais jamais exécuté)',
@@ -431,4 +476,11 @@ export const NAVIGATION_STRINGS: Translations = {
 		'Vista Diseño de página',
 		'页面布局视图',
 	],
+	'Formula auditing: Trace Precedents and Dependents, Remove Arrows, Evaluate Formula, Error Checking and Watch Window':
+		[
+			'Audit de formules : repérage des antécédents et dépendants, suppression des flèches, évaluation de formule, vérification des erreurs et fenêtre Espion',
+			'Formelüberwachung: Spuren zu Vorgängern und Nachfolgern, Pfeile entfernen, Formelauswertung, Fehlerüberprüfung und Überwachungsfenster',
+			'Auditoría de fórmulas: rastreo de precedentes y dependientes, quitar flechas, evaluar fórmula, comprobación de errores y ventana Inspección',
+			'公式审核:追踪引用和从属单元格、移去箭头、公式求值、错误检查和监视窗口',
+		],
 };

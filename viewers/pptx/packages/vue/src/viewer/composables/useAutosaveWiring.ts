@@ -1,9 +1,5 @@
-import {
-	resolveAutosaveActivation,
-	resolveAutosaveIntervalMs,
-	saveAutosaveSnapshot,
-} from 'ooxml-ui/pptx';
-import type { AutosaveDisabledReason, DocumentStorage } from 'ooxml-ui/pptx';
+import { resolveAutosaveActivation, resolveAutosaveIntervalMs } from 'ooxml-ui/pptx';
+import type { AutosaveDisabledReason, DocumentStorage, InlineTextDraft } from 'ooxml-ui/pptx';
 /**
  * useAutosaveWiring: the title-bar AutoSave toggle plus the debounced save
  * engine behind it.
@@ -57,7 +53,9 @@ export interface UseAutosaveWiringOptions {
 	 * (`recovery-snapshot`) serialisation, NOT `getContent`: an encrypted
 	 * snapshot cannot be reopened, because no recovery path has the password.
 	 */
-	getRecoverySnapshot: () => Promise<Uint8Array>;
+	getRecoverySnapshot: (draft?: InlineTextDraft | null) => Promise<Uint8Array>;
+	/** The element whose inline editor is open (its live draft is in the snapshot already). */
+	getInlineEditingId?: () => string | null;
 	/** Emit the serialised bytes to the host. */
 	emitAutosave: (bytes: Uint8Array) => void;
 	/** Snapshot a restorable version (version history). */
@@ -104,32 +102,32 @@ export function useAutosaveWiring(options: UseAutosaveWiringOptions): UseAutosav
 		...(options.templateElements ? { templateElements: options.templateElements } : {}),
 		...(options.paused ? { paused: options.paused } : {}),
 		enabled: autosaveActive,
-		// A computed, not a snapshot: `useAutosave` re-reads it each time the timer
+		// A computed, not a snapshot: the engine re-reads it each time the timer
 		// is armed, so a host changing the AutoRecover cadence (File > Options >
-		// Save) takes effect on the next edit instead of needing a remount.
+		// Save) takes effect without a remount.
 		intervalMs: computed(() =>
 			resolveAutosaveIntervalMs({
 				hostIntervalMs: options.intervalMs(),
 				optionsIntervalSeconds: options.optionsIntervalSeconds?.(),
 			}),
 		),
-		onSave: async () => {
-			const bytes = await options.getRecoverySnapshot();
+		filePath: options.snapshotName,
+		...(options.storage ? { storage: options.storage } : {}),
+		// The shared recovery store (IndexedDB, or the host's recovery methods).
+		// Recovery reads these bytes back with no password, so they are
+		// deliberately a plain ZIP even when the deck is protected.
+		// The open inline editor's rich draft, else the plain autosave draft.
+		serialize: (draft) => options.getRecoverySnapshot(draft),
+		...(options.getInlineEditingId ? { getInlineEditingId: options.getInlineEditingId } : {}),
+		onSaved: (bytes) => {
 			options.emitAutosave(bytes);
 			options.captureVersion('Autosave', Date.now());
-			// Also persist to the shared IndexedDB recovery store (matches
-			// React/Angular/Vanilla/Svelte's `useAutosave`), so File > Account's
-			// Storage & Privacy panel (`getLocalStorageUsageSummary`) and File >
-			// Open's "Recent" list have something real to report. Recovery reads
-			// these bytes back with no password, so they are deliberately a plain
-			// ZIP even when the deck is protected.
-			void saveAutosaveSnapshot(options.snapshotName(), bytes, options.storage?.());
 		},
 	});
 
 	// Loading a deck reassigns `slides`, which the autosave watcher counts as an
-	// edit; clear the dirty flag once loading settles so a freshly opened deck
-	// reads "Saved to this PC" in the title bar, matching React.
+	// edit; clear it once loading settles so a freshly opened deck reads "Saved
+	// to this PC" in the title bar, matching React.
 	watch(options.loading, (now, was) => {
 		if (was && !now) {
 			autosave.isDirty.value = false;

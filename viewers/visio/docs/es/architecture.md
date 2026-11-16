@@ -5,7 +5,7 @@
 - `src/core/visio` (el punto de entrada `ooxml-core/visio`): ingesta de paquetes, XML, modelo, herencia, geometría en caché, evaluación de ShapeSheet, comandos de edición, correspondencia de colaboración (`ooxml-core/visio/collab`) y diagnósticos estructurados. Aquí no hay ninguna interfaz de visor. El contrato de vista sin DOM también está en el núcleo, en `src/core/visio/ui`: `contract.ts` (propiedades y eventos), `document-history.ts` (historial de ediciones acotado y respaldado por el origen, y estado de exportación de copias VSDX; la mutación del XML y del paquete se ejecuta mediante un worker dedicado), `document-text-search.ts` (coincidencia literal acotada sobre el texto visible normalizado de las formas, con resultados inmutables por página), los tipos de opciones de colaboración y presencia, y los demás planes de edición y vista sin DOM.
 - `src/ui/src/visio` (publicado como `ooxml-ui/visio`): el visor del navegador. `controller.ts` gestiona el estado del documento y de la vista, la selección, los eventos, el comportamiento de «la última carga gana» y la edición transaccional; `viewer-element.ts` es la superficie compartida `<visio-viewer>`; `binding.ts` es el ciclo de vida mount/update/load/fit/exportSvg/destroy solo de cliente (las actualizaciones reentrantes más recientes reemplazan el resto del parche anterior); `render-svg.ts` y `render-text.ts` son la presentación SVG y los avisos de renderizado; `export-svg.ts` es la serialización estática y acotada de la página actual con el mismo renderizador SVG; `print-snapshot.ts` produce artefactos de las páginas seleccionadas, sin efectos secundarios y con presupuestos agregados (no crea marcos de impresión ni implementa políticas de impresora); los bloques de construcción son `building-blocks-*.ts`.
 - `viewers/visio/src/index.ts`: una reexportación de `ooxml-ui/visio`.
-- `viewers/visio/packages/bindings/src` (privado) y `packages/{react,vue,angular,svelte,solid,vanilla}`: ciclo de vida del framework, reenvío de eventos y propiedades, y las composiciones nativas de bloques de construcción. Ningún analizador, renderizador ni bifurcación de geometría por framework.
+- `src/ui/src/bindings` (publicado como `ooxml-ui/bindings`): el kit de binding independiente del framework que comparten docx, xlsx, visio y teams (handle diferido, selección de props, reenvío solo de cambios y las fábricas de componentes de React y Vue). `viewers/visio/packages/bindings/src` (privado) contiene el contrato de Visio (`VIEWER_CONTRACT`), el reenvío con revisiones de `mountFrameworkViewer` y cada adaptador, y `packages/{react,vue,angular,svelte,solid,vanilla}` son las distribuciones. También están las composiciones nativas de bloques de construcción. Ningún analizador, renderizador ni bifurcación de geometría por framework.
 
 ## Límites {#boundaries}
 
@@ -33,7 +33,7 @@ Las pruebas unitarias y de fixtures del núcleo establecen los casos de análisi
 
 ## Sitio web {#website}
 
-Compilación estática multipágina con Vite: inicio, guía, registro de capacidades, arquitectura y un área de pruebas independiente. Los enlaces son relativos y los recursos locales. Sin fuentes ni scripts de terceros. Sin paquete del analizador en la página de inicio.
+Sitio de documentación VitePress (`docs/`): inicio, guía, registro de capacidades, arquitectura y un área de pruebas independiente, que Vite compila desde `demos/visio/demo/`. Los enlaces son relativos y los recursos locales. Sin fuentes ni scripts de terceros. Sin paquete del analizador en la página de inicio.
 
 ## Publicación {#publication}
 

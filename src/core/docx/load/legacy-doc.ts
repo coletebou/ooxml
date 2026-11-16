@@ -1,71 +1,29 @@
-import { createDocument } from '../model';
-import type { DocumentModel, LoadedDocument, Paragraph } from '../model';
-import {
-	readOleDocParagraphs,
-	writeOleDocParagraphEdit,
-} from '@christophervr/ole2/ole-document-doc-editor';
+// Word 97-2003 binary .doc: the ole2 reader (`readDocModel`) yields the document as a block tree,
+// which is converted to a WordprocessingML package (`legacy-doc/`) and opened by the normal .docx
+// reader. The loaded document is therefore the same model a .docx gives. `save()` keeps the
+// binary .doc format (unchanged bytes, or paragraph text edits); `saveDocx()` writes the full
+// model as a .docx through the normal writer.
 import { readDocFib } from '@christophervr/ole2/ole-document-doc-fib';
+import { readDocModel } from '@christophervr/ole2/doc-model';
 import { parseOle2 } from '@christophervr/ole2/ole2-parser-read';
 import { readCompoundFileStream } from '@christophervr/ole2/ole2-stream-edit';
+import type { LoadedDocument } from '../model';
+import { loadDocx } from '../parse';
+import { binaryDocSaver } from './legacy-doc/binary-save';
+import { LegacyDocError } from './legacy-doc/error';
+import { buildDocxPackage } from './legacy-doc/package';
 
-export class LegacyDocError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = 'LegacyDocError';
-	}
-}
+export { LegacyDocError };
+
+/** The standing notice every loaded .doc carries. */
+export const LEGACY_DOC_NOTICE =
+	'This Word 97-2003 document was converted when it was opened. Save it as a Word .docx file to keep every change; the .doc format itself accepts paragraph text edits only. Revision marks, form-field data, macros, document protection and line numbering are not converted.';
 
 function toBytes(input: Uint8Array | ArrayBuffer): Uint8Array {
 	return input instanceof Uint8Array ? input.slice() : new Uint8Array(input.slice(0));
 }
 
-function paragraphText(model: DocumentModel): string[] {
-	if (model.paragraphStyles)
-		throw new LegacyDocError('Paragraph style catalogs are unsupported in legacy .doc save.');
-	if (model.blocks.some((block) => block.type !== 'paragraph')) {
-		throw new LegacyDocError(
-			'Legacy .doc save supports paragraph text only; tables are unsupported.',
-		);
-	}
-	return (model.blocks as Paragraph[]).map((p) => {
-		if (
-			Object.entries(p).some(
-				([key, value]) => !['type', 'id', 'runs'].includes(key) && value !== undefined,
-			) ||
-			p.runs.some((run) =>
-				Object.entries(run).some(([key, value]) => key !== 'text' && value !== undefined),
-			)
-		) {
-			throw new LegacyDocError(
-				'Legacy .doc save supports plain paragraph text only; formatting edits are unsupported.',
-			);
-		}
-		return p.runs.map((run) => run.text).join('');
-	});
-}
-
-function makeModel(paragraphs: string[]): DocumentModel {
-	// A .doc's styles are not modeled, so the new-document default catalogs do not apply.
-	const {
-		paragraphStyles: _paragraphStyles,
-		characterStyles: _characterStyles,
-		tableStyles: _tableStyles,
-		...model
-	} = createDocument();
-	model.blocks = paragraphs.map((text, index) => ({
-		type: 'paragraph',
-		id: `p${index + 1}`,
-		runs: [{ text }],
-	}));
-	if (model.blocks.length === 0)
-		model.blocks.push({ type: 'paragraph', id: 'p1', runs: [{ text: '' }] });
-	model.warnings.push(
-		'Legacy .doc import extracts main-body text only. Layout, tables, headers, footers, images, fields, and most formatting are not represented.',
-	);
-	return model;
-}
-
-/** Load Word 97-2003 binary .doc. This API preserves source bytes for no-op saves. */
+/** Load Word 97-2003 binary .doc. `save()` keeps the .doc format; `saveDocx()` saves the full model. */
 export async function loadLegacyDoc(input: Uint8Array | ArrayBuffer): Promise<LoadedDocument> {
 	const original = toBytes(input);
 	let streams: string[] = [];
@@ -99,44 +57,33 @@ export async function loadLegacyDoc(input: Uint8Array | ArrayBuffer): Promise<Lo
 			// Other malformed FIBs retain the existing unsupported-document diagnostic below.
 		}
 	}
-	const paragraphs = readOleDocParagraphs(original);
-	if (!paragraphs) {
+	let docModel;
+	try {
+		docModel = readDocModel(original);
+	} catch (error) {
+		throw new LegacyDocError(
+			`The legacy Word document is too large or too complex to open: ${error instanceof Error ? error.message : 'limit exceeded'}`,
+		);
+	}
+	if (!docModel) {
 		throw new LegacyDocError(
 			streams.includes('WordDocument')
 				? 'Unsupported or malformed legacy Word document.'
 				: 'OLE file does not contain a legacy Word document.',
 		);
 	}
-	const model = makeModel(paragraphs);
-	const initialPage = JSON.stringify(model.page);
-	const initial = JSON.stringify(paragraphText(model));
+	const converted = await buildDocxPackage(docModel);
+	const loaded = await loadDocx(converted.bytes);
+	loaded.model.warnings.unshift(LEGACY_DOC_NOTICE);
+	for (const warning of converted.warnings) loaded.model.warnings.push(warning);
+	for (const warning of docModel.warnings) loaded.model.warnings.push(`Legacy .doc: ${warning}`);
+	const saveBinary = binaryDocSaver(original, loaded.model);
 	return {
-		model,
-		async save(nextModel = model) {
-			if (JSON.stringify(nextModel.page) !== initialPage) {
-				throw new LegacyDocError('Changing page layout in legacy .doc files is unsupported.');
-			}
-			const updated = paragraphText(nextModel);
-			if (JSON.stringify(updated) === initial) return original.slice();
-			if (updated.length !== paragraphs.length)
-				throw new LegacyDocError(
-					'Adding or removing paragraphs in legacy .doc files is unsupported.',
-				);
-			let output = original;
-			for (let i = 0; i < updated.length; i++) {
-				if (updated[i] === paragraphs[i]) continue;
-				if (/[\r\n]/u.test(updated[i]!))
-					throw new LegacyDocError(
-						'Adding line breaks in legacy .doc paragraph text is unsupported.',
-					);
-				const result = writeOleDocParagraphEdit(output, i, updated[i]!);
-				if (result === output)
-					throw new LegacyDocError(
-						'This .doc uses structures that prevent safe paragraph text editing.',
-					);
-				output = result;
-			}
-			return output;
+		...loaded,
+		async save(model = loaded.model) {
+			return saveBinary(model);
 		},
+		saveDocx: (model = loaded.model, pendingMedia, options) =>
+			loaded.save(model, pendingMedia, options),
 	};
 }

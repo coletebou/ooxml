@@ -12,6 +12,10 @@ export interface ParagraphPlacement {
 	layout: ParagraphLayoutResult;
 	/** Spacing-before in px, with `w:contextualSpacing` suppression already resolved by the caller. */
 	spacingBeforePx: number;
+	/** Compatibility modes before 15 keep the space before of a paragraph that starts a page by `pageBreakBefore`. */
+	keepSpaceBeforePageBreak?: boolean;
+	/** Spacing-after in px when it differs from the paragraph's own (contextual spacing). */
+	spacingAfterPx?: number;
 	/**
 	 * Minimum height (including this paragraph and any `keepNext` chain after
 	 * it, as resolved by the caller) that must fit before this paragraph may
@@ -36,7 +40,12 @@ export function placeParagraph(
 	placement: ParagraphPlacement,
 	note: (message: string) => void,
 ): void {
-	const { paragraph, spacingBeforePx, requiredTogetherPx, reflow } = placement;
+	const { paragraph, requiredTogetherPx, reflow } = placement;
+	const spacingAfterPx = placement.spacingAfterPx ?? placement.layout.spacingAfterPx;
+	// Compatibility modes before 15 keep the space before of a `pageBreakBefore` paragraph.
+	const dropsSpaceBefore = () =>
+		cursor.atContinuationTop && !(paragraph.pageBreakBefore && placement.keepSpaceBeforePageBreak);
+	let spacingBeforePx = dropsSpaceBefore() ? 0 : placement.spacingBeforePx;
 	// Native modes 12/14/15 retain the empty paragraph line after a terminal column break.
 	const trailingBreakLine = (result: ParagraphLayoutResult): ParagraphLayoutResult => {
 		const last = result.lines.at(-1);
@@ -80,6 +89,7 @@ export function placeParagraph(
 	) {
 		cursor.newColumn();
 	}
+	if (dropsSpaceBefore()) spacingBeforePx = 0;
 
 	const widow = widowControlEnabled(paragraph.widowControl);
 	let lineCursor = 0;
@@ -116,7 +126,8 @@ export function placeParagraph(
 		// An empty paragraph still occupies its spacing/blank-line height.
 		cursor.place(
 			{ kind: 'paragraph', blockId: paragraph.id, yPx: 0, heightPx: 0, lines: [] },
-			spacingBeforePx + layout.spacingAfterPx,
+			spacingBeforePx + spacingAfterPx,
+			spacingBeforePx,
 		);
 		return;
 	}
@@ -165,6 +176,7 @@ export function placeParagraph(
 		if (placedCount === 0) {
 			if (!cursor.atColumnTop) {
 				cursor.newColumn();
+				if (firstSegment && dropsSpaceBefore()) spacingBeforePx = 0;
 				continue;
 			}
 			note(
@@ -201,8 +213,8 @@ export function placeParagraph(
 			...(layout.frame ? { frame: layout.frame } : {}),
 		};
 		const advance =
-			(firstSegment ? spacingBeforePx : 0) + segmentHeight + (isFinal ? layout.spacingAfterPx : 0);
-		cursor.place(box, advance);
+			(firstSegment ? spacingBeforePx : 0) + segmentHeight + (isFinal ? spacingAfterPx : 0);
+		cursor.place(box, advance, firstSegment ? spacingBeforePx : 0);
 		for (const item of committedNotes) placedNotes.add(item.id);
 		nextToken = layout.lines[lineCursor + placedCount - 1]?.nextToken ?? nextToken;
 		lineCursor += placedCount;

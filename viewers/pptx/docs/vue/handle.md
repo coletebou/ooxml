@@ -74,13 +74,14 @@ import type { PowerPointViewerExpose } from 'pptx-vue-viewer';
 | Method      | Signature                 | Description                                |
 | ----------- | ------------------------- | ------------------------------------------ |
 | `getZoom`   | `() => number`            | Get the current zoom level (1 = 100%).     |
-| `setZoom`   | `(level: number) => void` | Set the zoom level (clamped to 0.2 - 5.0). |
+| `setZoom`   | `(level: number) => void` | Set the zoom level (clamped to 0.1 - 5.0). |
 | `zoomIn`    | `() => void`              | Zoom in by one step (10%).                 |
 | `zoomOut`   | `() => void`              | Zoom out by one step (10%).                |
 | `zoomReset` | `() => void`              | Reset zoom to 100%.                        |
 
-::: info Zoom range differs slightly from React
-The Vue and React viewers both clamp zoom to `0.2` - `5.0` (500%).
+::: info Zoom range
+The Vue and React viewers both clamp zoom to `0.1` (10%) - `5.0` (500%), where `1` fits the slide
+to the viewport. Going to another slide keeps the zoom.
 :::
 
 ### Mode
@@ -98,6 +99,56 @@ The Vue and React viewers both clamp zoom to `0.2` - `5.0` (500%).
 | `setActiveSlideIndex` | `(index: number) => void` | Set the active slide (alias of `goTo`).   |
 | `getSlideCount`       | `() => number`            | Get the total number of slides.           |
 | `isDirty`             | `() => boolean`           | Whether the document has unsaved changes. |
+
+### Host-persisted Save
+
+When the host serialises the deck and stores it itself (possibly slowly), use a revision token so
+edits made while the upload is in flight stay unsaved. Nothing reloads and undo history is kept.
+
+| Method            | Signature                                                  | Description                                                                        |
+| ----------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `getSaveRevision` | `() => number`                                             | The revision of the document now. It changes after every edit.                     |
+| `getSaveSnapshot` | `() => Promise<{ revision: number; content: Uint8Array }>` | Serialise the deck for the host. The document stays dirty and no save event fires. |
+| `acknowledgeSave` | `(revision: number) => PptxSaveAcknowledgement`            | Tell the viewer the host persisted `revision`.                                     |
+
+Result types:
+
+```ts
+interface PptxSaveSnapshot {
+	readonly revision: number;
+	readonly content: Uint8Array;
+}
+
+type PptxSaveAcknowledgement =
+	| { readonly status: 'clean'; readonly revision: number }
+	| { readonly status: 'pending'; readonly revision: number; readonly currentRevision: number }
+	| { readonly status: 'stale'; readonly revision: number; readonly savedRevision: number }
+	| { readonly status: 'unknown'; readonly revision: number };
+```
+
+`acknowledgeSave` returns one of:
+
+- `{ status: 'clean' }`: `revision` is still current. The document is clean, `onDirtyChange(false)`
+  fires and the crash-recovery copy is discarded (unless Options > Save keeps the last AutoRecover
+  version).
+- `{ status: 'pending', currentRevision }`: the revision is accepted but edits were made since.
+  The document stays dirty and the recovery copy, which may hold those edits, is kept.
+- `{ status: 'stale' }`: older than a revision already acknowledged. Ignored.
+- `{ status: 'unknown' }`: not a revision this viewer issued. Ignored.
+
+Never acknowledge a failed save: the document then simply stays dirty. Undoing back to the saved
+content is an edit like any other, so the document is dirty until the next save. Unlike
+`getContent()` in Svelte and vanilla, `getSaveSnapshot()` never clears the dirty flag.
+
+```ts
+const { revision, content } = await viewer.getSaveSnapshot();
+try {
+	await host.persist(content);
+	viewer.acknowledgeSave(revision);
+} catch {
+	// not acknowledged: the document stays dirty
+}
+```
 
 ### Slide Access
 
@@ -278,16 +329,16 @@ import {
 } from 'pptx-vue-viewer';
 ```
 
-| Export                         | Type                                                                  | Description                                                                                                           |
-| ------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `PPTX_OPEN_ACCEPT`             | `string`                                                              | Ready-made `<input type="file" accept>` value: `.pptx,.ppsx,.pptm,.potx,.ppt,.json`.                                  |
-| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | The same list unjoined, for a drop target that wants to test extensions itself.                                       |
-| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | Cheap pre-filter for a picked or dropped file name. Extension-only; the real answer is the loader's sniff.            |
-| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | True for the binary PowerPoint 97-2003 family (`.ppt` / `.pps` / `.pot`), which the viewer reads but never writes.    |
-| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | The file-name stem, directories and any loadable extension removed (a path like `decks/report.ppt` becomes `report`). |
-| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | The name a saved copy should be offered under: `report.ppt` becomes `report.pptx`.                                    |
-| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm'`                                          | The formats the save path can produce. Binary `.ppt` is deliberately absent: output is always OpenXML.                |
+| Export                         | Type                                                                  | Description                                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `PPTX_OPEN_ACCEPT`             | `string`                                                              | Ready-made `<input type="file" accept>` value: `.pptx,.ppsx,.pptm,.potx,.ppt,.json`.                                            |
+| `PRESENTATION_OPEN_EXTENSIONS` | `readonly string[]`                                                   | The same list unjoined, for a drop target that wants to test extensions itself.                                                 |
+| `isSupportedPresentationFile`  | `(name?: string \| null) => boolean`                                  | Cheap pre-filter for a picked or dropped file name. Extension-only; the real answer is the loader's sniff.                      |
+| `isLegacyBinaryPresentation`   | `(name?: string \| null) => boolean`                                  | True for the binary PowerPoint 97-2003 family (`.ppt` / `.pps` / `.pot`). `.ppt` can be saved; `.pps` and `.pot` are read-only. |
+| `presentationBaseName`         | `(name?: string \| null, fallback?: string) => string`                | The file-name stem, directories and any loadable extension removed (a path like `decks/report.ppt` becomes `report`).           |
+| `savedPresentationFileName`    | `(name?: string \| null, format?: SavedPresentationFormat) => string` | The name a saved copy should be offered under: `report.ppt` becomes `report.pptx`.                                              |
+| `SavedPresentationFormat`      | `'pptx' \| 'ppsx' \| 'pptm' \| 'ppt'`                                 | The formats the save path can produce, including the binary 97-2003 `.ppt`.                                                     |
 
-`savedPresentationFileName` is the one that matters on Save As. Output is always an OpenXML
-package, so keeping a legacy source extension would hand the user a `.ppt` whose bytes are a ZIP,
+`savedPresentationFileName` is the one that matters on Save As. Output is an OpenXML
+package unless 97-2003 `.ppt` is picked, so keeping a legacy source extension would hand the user a `.ppt` whose bytes are a ZIP,
 which PowerPoint refuses to open.

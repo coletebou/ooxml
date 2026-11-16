@@ -18,6 +18,7 @@
 
 import type { PptxElement, PptxElementWithText, TextSegment } from '../types';
 import { hasTextProperties } from '../types';
+import { at } from '../../../geometry/indexed';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -225,7 +226,7 @@ export function distributeSegmentsAcrossChain(chain: LinkedTextBoxChain): Linked
 	}
 
 	// Gather all text segments from the head element (seq 0).
-	const headMember = chain.members[0];
+	const headMember = at(chain.members, 0);
 	const allSegments = headMember.element.textSegments ?? [];
 
 	if (allSegments.length === 0) {
@@ -246,7 +247,7 @@ export function distributeSegmentsAcrossChain(chain: LinkedTextBoxChain): Linked
 	let remainingSegments = [...allSegments];
 
 	for (let i = 0; i < chain.members.length; i++) {
-		const member = chain.members[i];
+		const member = at(chain.members, i);
 		const isLast = i === chain.members.length - 1;
 
 		if (isLast || remainingSegments.length === 0) {
@@ -261,7 +262,7 @@ export function distributeSegmentsAcrossChain(chain: LinkedTextBoxChain): Linked
 		let charsUsed = 0;
 
 		while (remainingSegments.length > 0 && charsUsed < capacity) {
-			const seg = remainingSegments[0];
+			const seg = at(remainingSegments, 0);
 
 			if (seg.isParagraphBreak) {
 				boxSegments.push(seg);

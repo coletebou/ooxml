@@ -1,19 +1,18 @@
 import { inspectorNumber } from 'ooxml-ui/pptx';
 import type { PptxTableCellStyle } from 'pptx-viewer-core';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 
+import { useTranslation } from '../../i18n/use-translation';
 import { WebSelect } from '../WebControls';
-import { useRecentColors } from './RecentColorsContext';
 import {
 	FILL_MODE_OPTIONS,
 	GRADIENT_TYPE_OPTIONS,
 	LBL,
 	NUM,
-	SECTION_HEADING,
 	SEL,
 } from './table-cell-advanced-fill-constants';
 import { TableCellPatternFill } from './TableCellPatternFill';
+import { useRecentColorCommit } from './useRecentColorCommit';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -98,38 +97,6 @@ export function TableCellAdvancedFill({
 					onUpdateCellStyle={onUpdateCellStyle}
 				/>
 			)}
-
-			{/* Cell Margins */}
-			<div className='space-y-1'>
-				<span className={SECTION_HEADING}>{t('pptx.table.margins')}</span>
-				<div className='grid grid-cols-2 gap-1.5'>
-					{(
-						[
-							['marginTop', 'pptx.table.marginTop'],
-							['marginBottom', 'pptx.table.marginBottom'],
-							['marginLeft', 'pptx.table.marginLeft'],
-							['marginRight', 'pptx.table.marginRight'],
-						] as const
-					).map(([key, i18nKey]) => (
-						<label key={key} className='flex flex-col gap-0.5'>
-							<span className={LBL}>{t(i18nKey)}</span>
-							<input
-								type='number'
-								disabled={!canEdit}
-								className={NUM}
-								min={0}
-								max={200}
-								value={inspectorNumber(cellStyle[key], 0)}
-								onChange={(e) =>
-									onUpdateCellStyle({
-										[key]: Number(e.target.value),
-									})
-								}
-							/>
-						</label>
-					))}
-				</div>
-			</div>
 		</div>
 	);
 }
@@ -144,7 +111,7 @@ function GradientControls({
 	onUpdateCellStyle,
 }: TableCellAdvancedFillProps): React.ReactElement {
 	const { t } = useTranslation();
-	const { pushColor } = useRecentColors();
+	const commitRecentColor = useRecentColorCommit();
 	const stops = cellStyle.gradientFillStops ?? [];
 	const gradType = cellStyle.gradientFillType ?? 'linear';
 
@@ -212,10 +179,8 @@ function GradientControls({
 						disabled={!canEdit}
 						className='h-6 w-6 rounded border border-border cursor-pointer'
 						value={stop.color}
-						onChange={(e) => {
-							updateStop(idx, { color: e.target.value });
-							pushColor(e.target.value);
-						}}
+						ref={commitRecentColor}
+						onChange={(e) => updateStop(idx, { color: e.target.value })}
 					/>
 					<input
 						type='number'

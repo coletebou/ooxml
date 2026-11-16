@@ -16,7 +16,6 @@ import { COLLAB_CSS } from './collab-css';
 import { DOCUMENT_PROPERTIES_CSS } from './document-properties-css';
 import { EDITOR_CSS } from './editor-css';
 import { EQUATION_DIALOG_CSS } from './equation-dialog-css';
-import { EXPORT_PROGRESS_CSS } from './export-progress-css';
 import { FILE_INFO_CSS } from './file-info-css';
 import { INSPECTOR_BASE_CSS } from './inspector-base-css';
 import { INSPECTOR_EXTRAS_CSS } from './inspector-extras-css';
@@ -37,7 +36,6 @@ import { REGION_CSS } from './region-css';
 import { RIBBON_CSS } from './ribbon-css';
 import { RIBBON_QUICK_CSS } from './ribbon-quick-css';
 import { SLIDE_TEMPLATE_DIALOG_CSS } from './slide-template-dialog-css';
-import { SMARTART_DIALOG_CSS } from './smartart-dialog-css';
 
 /**
  * The viewer stylesheet, scoped under the `.pptxv` root class.
@@ -852,7 +850,6 @@ ${RIBBON_CSS}
 ${RIBBON_QUICK_CSS}
 ${DOCUMENT_PROPERTIES_CSS}
 ${FILE_INFO_CSS}
-${SMARTART_DIALOG_CSS}
 ${SLIDE_TEMPLATE_DIALOG_CSS}
 ${EQUATION_DIALOG_CSS}
 ${COLLAB_CSS}
@@ -874,7 +871,6 @@ ${AI_HISTORY_CSS}
 ${AI_FOCUS_CSS}
 ${READING_VIEW_CSS}
 ${OUTLINE_VIEW_CSS}
-${EXPORT_PROGRESS_CSS}
 ${PARITY_BANNERS_CSS}
 ${REGION_CSS}
 ${EDITOR_CHROME_CSS}`;

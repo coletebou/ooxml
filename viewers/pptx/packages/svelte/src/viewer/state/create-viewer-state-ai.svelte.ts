@@ -57,6 +57,9 @@ export function useAiCluster(deps: AiClusterDeps): AiCluster {
 		getHandler: () => loader.handler,
 		getFileName: () => options.getFileName?.(),
 		goToSlide: (index) => viewer.goTo(index),
+		// Picks, then a pin, then the live selection: the same scope the focus
+		// chips show (the panel is created below; this only runs on a tool call).
+		getFocusedTargets: () => panel.effectiveTargets,
 		selectElements: (slideIndex, ids) => {
 			if (slideIndex !== viewer.current) {
 				viewer.goTo(slideIndex);
@@ -84,6 +87,12 @@ export function useAiCluster(deps: AiClusterDeps): AiCluster {
 		// seam. Reads come off the editor + loader; writes route through the same
 		// undoable editor mutations the inspector Properties tab uses.
 		getSections: () => editor.sections,
+		getCustomShows: () => editor.customShows,
+		setCustomShows: (shows) => {
+			deps.setEditable(true);
+			editor.editable = true;
+			editor.presentationMetadata.updateCustomShows(shows);
+		},
 		getPresentationProperties: () => editor.presentationProperties,
 		getCoreProperties: () => editor.coreProperties,
 		getAppProperties: () => editor.appProperties,

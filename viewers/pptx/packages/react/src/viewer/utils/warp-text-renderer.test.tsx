@@ -126,16 +126,33 @@ function multiParagraphWarpedElement(preset: string): PptxElement {
 	} as PptxElement;
 }
 
-function renderWarpedElement(element: PptxElement, height = 100): HTMLDivElement {
+function renderWarpedElement(element: PptxElement, height = 100, width = 300): HTMLDivElement {
 	container = document.createElement('div');
 	document.body.appendChild(container);
 	root = createRoot(container);
 	act(() => {
 		root!.render(
-			<WarpedText element={element} width={300} height={height} fallbackColor='#111827' />,
+			<WarpedText element={element} width={width} height={height} fallbackColor='#111827' />,
 		);
 	});
 	return container;
+}
+
+/** Far wider than a 300px box at the default font size, so it must wrap. */
+const LONG_PARAGRAPH =
+	'The quick brown fox jumps over the lazy dog and then keeps on running far away';
+
+function textPlainElement(text: string): PptxElement {
+	return { ...warpedElement('textPlain'), id: 'wa-plain', text };
+}
+
+/** Distinct unwarped baselines (`y`) among the glyphs: one per wrapped row. */
+function glyphRowCount(scope: ParentNode): number {
+	return new Set(
+		[...scope.querySelectorAll('svg > text, svg > g[data-glyph-slices] > text')].map((t) =>
+			t.getAttribute('y'),
+		),
+	).size;
 }
 
 function renderWarped(preset: string): HTMLDivElement {
@@ -157,12 +174,24 @@ describe('warpedText: envelope/former-simple presets render as true SVG textPath
 		},
 	);
 
-	it.each(['textSlantUp', 'textFadeLeft', 'textFadeRight', 'textCascadeDown'])(
-		'renders an <svg><textPath> for the former "simple" preset %s',
+	it.each([
+		'textSlantUp',
+		'textFadeLeft',
+		'textFadeRight',
+		'textCascadeDown',
+		'textStop',
+		'textTriangle',
+		'textChevron',
+		'textCurveUp',
+		'textWave1',
+		'textDoubleWave1',
+	])(
+		'renders one <text> per glyph (measured two-path envelope) for the former "simple"/path preset %s',
 		(preset) => {
 			const el = renderWarped(preset);
 			expect(el.querySelector('svg')).not.toBeNull();
-			expect(el.querySelector('textPath')).not.toBeNull();
+			expect(el.querySelector('textPath')).toBeNull();
+			expect(logicalGlyphNodes(el)).toHaveLength('Hello'.length);
 		},
 	);
 
@@ -175,9 +204,23 @@ describe('warpedText: envelope/former-simple presets render as true SVG textPath
 		expect(new Set(scales.map((s) => s.toFixed(4))).size).toBeGreaterThan(1);
 	});
 
-	it('renders nothing for textPlain', () => {
+	it('renders textPlain as one glyph per character, never a <textPath>', () => {
 		const el = renderWarped('textPlain');
-		expect(el.querySelector('svg')).toBeNull();
+		expect(el.querySelector('svg')).not.toBeNull();
+		expect(el.querySelector('textPath')).toBeNull();
+		const glyphs = logicalGlyphNodes(el).map(representativeText);
+		expect(glyphs.map((t) => t.textContent).join('')).toBe('Hello');
+	});
+
+	it('wraps a long textPlain paragraph into several rows, but keeps a single word on one', () => {
+		const long = renderWarpedElement(textPlainElement(LONG_PARAGRAPH));
+		expect(glyphRowCount(long)).toBeGreaterThan(1);
+		act(() => root!.unmount());
+		container?.remove();
+		// A word far wider than its small square box stays whole on one row.
+		const word = renderWarpedElement(textPlainElement('schedule'), 40, 40);
+		expect(glyphRowCount(word)).toBe(1);
+		expect(logicalGlyphNodes(word)).toHaveLength('schedule'.length);
 	});
 
 	it('a multi-paragraph inflate element still uses the per-glyph envelope for every line', () => {
@@ -233,13 +276,12 @@ describe('warpedText: envelope/former-simple presets render as true SVG textPath
 		expect(bareGlyphs.length + glyphGroups.length).toBe('MMM'.length);
 	});
 
-	it('renders warped <path> outlines (not <text>) once the font is registered in the outline cache', () => {
+	it('repaints mounted glyphs as warped <path> outlines once the outline font is ready', async () => {
 		const embedded: PptxEmbeddedFont = {
 			name: 'WarpOutlineReactTestFont',
 			dataUrl: '',
 			rawFontData: buildTestFont(),
 		};
-		glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
 		const el = renderWarpedElement({
 			type: 'text',
 			id: 'wa-outline',
@@ -254,6 +296,13 @@ describe('warpedText: envelope/former-simple presets render as true SVG textPath
 				color: '#123456',
 			},
 		} as PptxElement);
+		// The font arrives after the glyphs mounted (a deferred parser load or a
+		// webfont fetch): the cache notification alone must repaint them.
+		await act(async () => {
+			glyphOutlineFontCache.registerEmbeddedFonts([embedded]);
+			await glyphOutlineFontCache.preload();
+			await Promise.resolve();
+		});
 		const paths = el.querySelectorAll('svg > path');
 		expect(paths).toHaveLength('Hello'.length);
 		expect(el.querySelector('svg > text')).toBeNull();
@@ -281,5 +330,22 @@ describe('warpedText: envelope/former-simple presets render as true SVG textPath
 		const topYs = texts.slice(0, 3).map(yOf);
 		const bottomYs = texts.slice(3).map(yOf);
 		expect(Math.max(...topYs)).toBeLessThan(Math.min(...bottomYs));
+	});
+});
+
+describe('warpedText: arch lines lie one line pitch apart', () => {
+	it('puts the two lines of an Arch Up block on ellipses 1.2 em apart, the last on the base ellipse', () => {
+		const el: PptxElement = {
+			...multiParagraphWarpedElement('textArchUp'),
+			textStyle: { textWarpPreset: 'textArchUp', fontSize: 20 },
+		} as PptxElement;
+		const view = renderWarpedElement(el, 150);
+		const radii = [...view.querySelectorAll('defs path')].map((p) =>
+			Number(/A ([\d.]+),/u.exec(p.getAttribute('d') ?? '')?.[1]),
+		);
+		expect(radii).toHaveLength(2);
+		// The box is 300 wide: the base ellipse carries the last line, the first lies 24 px further out.
+		expect(radii[1]).toBe(150);
+		expect(radii[0]).toBeCloseTo(174, 5);
 	});
 });

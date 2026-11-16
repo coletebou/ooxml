@@ -87,7 +87,7 @@ export interface PptxBackgroundRemoval {
 	/** Strokes marking regions the user forced to be background. */
 	backgroundMarks?: PptxBackgroundRemovalMark[];
 	/** Original effect XML, retained for lossless re-emission. */
-	rawXml?: XmlObject;
+	rawXml?: XmlObject | undefined;
 }
 
 export interface PptxImageEffects {
@@ -100,7 +100,7 @@ export interface PptxImageEffects {
 		color1: string;
 		color2: string;
 		/** Original effect XML, retained while the resolved colours are unchanged. */
-		rawXml?: XmlObject;
+		rawXml?: XmlObject | undefined;
 	};
 	/** Grayscale flag. */
 	grayscale?: boolean;
@@ -199,7 +199,7 @@ export interface PptxImageEffects {
 		/** Whether the target colour is fully transparent (alpha = 0). */
 		clrToTransparent?: boolean;
 		/** Original effect XML, including colour transforms and extensions. */
-		rawXml?: XmlObject;
+		rawXml?: XmlObject | undefined;
 	};
 	/** Original grayscale node, including extension or foreign attributes. */
 	grayscaleRawXml?: XmlObject;
@@ -213,7 +213,7 @@ export interface PptxImageEffects {
 		/** Optional baseline colour (hex). */
 		color?: string;
 		/** Original effect XML, including colour transforms and foreign attributes. */
-		rawXml?: XmlObject;
+		rawXml?: XmlObject | undefined;
 	};
 	/** Alpha ceiling (`a:alphaCeiling`): clamps any non-zero alpha to fully opaque. Boolean flag. */
 	alphaCeiling?: boolean;
@@ -231,7 +231,7 @@ export interface PptxImageEffects {
 		/** Raw opaque XML for the `a:cont` child to preserve on save. */
 		contRawXml?: Record<string, unknown>;
 		/** Original effect XML, including foreign attributes. */
-		rawXml?: XmlObject;
+		rawXml?: XmlObject | undefined;
 		/**
 		 * Multiplicative alpha percentage (0..100+), read from a nested
 		 * `<a:alphaModFix>` inside `contRawXml` when present - the common
@@ -260,7 +260,7 @@ export interface PptxImageEffects {
 		/** Resolved hex colour. */
 		color: string;
 		/** Raw opaque colour XML for round-trip. */
-		rawXml?: Record<string, unknown>;
+		rawXml?: Record<string, unknown> | undefined;
 	};
 	/** Luminance modulation (`a:lum`): bright/contrast as fixed percentages (0..100). */
 	lum?: {
@@ -295,7 +295,7 @@ export interface PptxImageEffects {
 		 */
 		resolvedColor?: string;
 		/** Resolved opacity (0-1) of the `a:solidFill` overlay colour, when resolved. */
-		resolvedOpacity?: number;
+		resolvedOpacity?: number | undefined;
 		/**
 		 * Resolved gradient, when the overlay fill is `a:gradFill`. A renderer
 		 * composites this as an SVG paint server (`<linearGradient>` /
@@ -305,7 +305,7 @@ export interface PptxImageEffects {
 			type: 'linear' | 'radial';
 			/** Gradient angle in degrees (`a:lin/@ang`), for a linear gradient. */
 			angle?: number;
-			stops: Array<{ color: string; position: number; opacity?: number }>;
+			stops: Array<{ color: string; position: number; opacity?: number | undefined }>;
 		};
 		/**
 		 * Resolved preset pattern, when the overlay fill is `a:pattFill`. A
@@ -313,8 +313,8 @@ export interface PptxImageEffects {
 		 */
 		resolvedPattern?: {
 			preset: string;
-			foreground?: string;
-			background?: string;
+			foreground?: string | undefined;
+			background?: string | undefined;
 		};
 	};
 	/** Blur (`a:blur`): radius in EMU and grow flag. */
@@ -362,23 +362,23 @@ export type PptxCropShape =
  */
 export interface PptxImageProperties {
 	/** Base64 data-URL for the decoded image. */
-	imageData?: string;
+	imageData?: string | undefined;
 	/** Path within the PPTX ZIP archive. */
-	imagePath?: string;
+	imagePath?: string | undefined;
 	/** Base64 data-URL for an SVG variant (from blip extension asvg:svgBlip). Preferred over raster when available. */
 	svgData?: string;
 	/** Path to the SVG file within the PPTX ZIP archive. */
 	svgPath?: string;
 	/** Alt text / description from `p:cNvPr/@descr`. */
-	altText?: string;
+	altText?: string | undefined;
 	/** Crop from left edge as 0..1 fraction (OOXML `a:srcRect/@l`). */
-	cropLeft?: number;
+	cropLeft?: number | undefined;
 	/** Crop from top edge as 0..1 fraction (OOXML `a:srcRect/@t`). */
-	cropTop?: number;
+	cropTop?: number | undefined;
 	/** Crop from right edge as 0..1 fraction (OOXML `a:srcRect/@r`). */
-	cropRight?: number;
+	cropRight?: number | undefined;
 	/** Crop from bottom edge as 0..1 fraction (OOXML `a:srcRect/@b`). */
-	cropBottom?: number;
+	cropBottom?: number | undefined;
 	/**
 	 * Stretch target inset from the left frame edge as a signed fraction
 	 * (OOXML `a:stretch/a:fillRect/@l`). Unlike `cropLeft` (which selects a
@@ -386,20 +386,20 @@ export interface PptxImageProperties {
 	 * FRAME the whole image is stretched into; negative values push the
 	 * image beyond the frame edge, and the overflow is clipped.
 	 */
-	fillRectLeft?: number;
+	fillRectLeft?: number | undefined;
 	/** Stretch target inset from the top frame edge (`a:fillRect/@t`). */
-	fillRectTop?: number;
+	fillRectTop?: number | undefined;
 	/** Stretch target inset from the right frame edge (`a:fillRect/@r`). */
-	fillRectRight?: number;
+	fillRectRight?: number | undefined;
 	/** Stretch target inset from the bottom frame edge (`a:fillRect/@b`). */
-	fillRectBottom?: number;
+	fillRectBottom?: number | undefined;
 	/** Image tiling offset X in px. */
 	tileOffsetX?: number;
 	/** Image tiling offset Y in px. */
 	tileOffsetY?: number;
-	/** Image tiling scale X as percentage (100 = 100%). */
+	/** Image tiling scale X as a fraction of the image's own width (1 = 100%, `a:tile/@sx`). */
 	tileScaleX?: number;
-	/** Image tiling scale Y as percentage (100 = 100%). */
+	/** Image tiling scale Y as a fraction of the image's own height (1 = 100%, `a:tile/@sy`). */
 	tileScaleY?: number;
 	/** Image tiling flip mode. */
 	tileFlip?: 'none' | 'x' | 'y' | 'xy';
@@ -413,7 +413,7 @@ export interface PptxImageProperties {
 	 */
 	dpi?: number;
 	/** Image recolour/artistic effect properties. */
-	imageEffects?: PptxImageEffects;
+	imageEffects?: PptxImageEffects | undefined;
 	/**
 	 * Crop-to-shape (CSS clip-path shape name).
 	 *
@@ -435,3 +435,23 @@ export interface PptxImageProperties {
 // bundling (the emitted `declare module` points at a path that no longer
 // exists in the flattened output), which silently dropped the fields from
 // every published binding's types.
+
+/**
+ * How a picture fills its frame: the `a:tile` or `a:stretch/a:fillRect`
+ * fields of {@link PptxImageProperties}, which a shape's picture fill
+ * carries as `ShapeStyle.fillImageLayout`. Tile fields win over the
+ * fill rectangle.
+ */
+export type PptxImageLayout = Pick<
+	PptxImageProperties,
+	| 'tileOffsetX'
+	| 'tileOffsetY'
+	| 'tileScaleX'
+	| 'tileScaleY'
+	| 'tileFlip'
+	| 'tileAlignment'
+	| 'fillRectLeft'
+	| 'fillRectTop'
+	| 'fillRectRight'
+	| 'fillRectBottom'
+>;

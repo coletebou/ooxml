@@ -1,10 +1,11 @@
+import { patchPictureEffects, type PictureEffectPatch } from '../../drawingml/picture-effects';
 import type { DrawingAnchor, DrawingObject } from '../model';
 import { removeSlicers } from '../slicer/book';
 import { deleteTimeline } from './timelines';
-import { type EditContext, sheetAt } from './context';
+import { type EditContext, sheetAt, sheetDrawingAt } from './context';
 
 function drawingAt(ctx: EditContext, s: number, index: number): DrawingObject {
-	const drawing = sheetAt(ctx.workbook, s).drawings[index];
+	const drawing = sheetDrawingAt(ctx.workbook, s, index);
 	if (!drawing) throw new RangeError(`No drawing at index ${index} on sheet ${s}`);
 	return drawing;
 }
@@ -71,6 +72,56 @@ export function deleteDrawing(ctx: EditContext, s: number, index: number): void 
 		[{ kind: 'sheet', sheet: s }],
 		() => {
 			sheet.drawings.splice(index, 1);
+		},
+		{ sheet: s },
+	);
+}
+
+/** Crops the picture in source-image fractions (one undo step). Negative insets pad the frame. */
+export function setPictureCrop(
+	ctx: EditContext,
+	s: number,
+	index: number,
+	crop: import('../../drawingml/picture-crop').DrawingPictureCrop,
+): void {
+	const drawing = drawingAt(ctx, s, index);
+	if (drawing.kind !== 'image') throw new RangeError('Only pictures can be cropped');
+	const sides = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom'] as const;
+	if (
+		sides.some((side) => crop[side] !== undefined && !Number.isFinite(crop[side])) ||
+		1 - (crop.cropLeft ?? 0) - (crop.cropRight ?? 0) <= 0 ||
+		1 - (crop.cropTop ?? 0) - (crop.cropBottom ?? 0) <= 0
+	)
+		throw new RangeError('Picture crop needs a positive source span and finite insets');
+	ctx.run(
+		'Crop picture',
+		'annotations',
+		[{ kind: 'sheet', sheet: s }],
+		() => {
+			drawing.crop = Object.fromEntries(
+				sides.flatMap((side) => (crop[side] === undefined ? [] : [[side, crop[side]]])),
+			);
+		},
+		{ sheet: s },
+	);
+}
+
+/** Applies admitted picture effects in one undo step, retaining every unknown effect. */
+export function editPictureEffects(
+	ctx: EditContext,
+	s: number,
+	index: number,
+	patch: PictureEffectPatch,
+): void {
+	const drawing = drawingAt(ctx, s, index);
+	if (drawing.kind !== 'image') throw new RangeError('Only pictures have picture effects');
+	const effects = patchPictureEffects(drawing.effects ?? [], patch);
+	ctx.run(
+		'Format picture',
+		'annotations',
+		[{ kind: 'sheet', sheet: s }],
+		() => {
+			drawing.effects = effects;
 		},
 		{ sheet: s },
 	);

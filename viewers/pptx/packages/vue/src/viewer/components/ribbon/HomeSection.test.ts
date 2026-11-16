@@ -55,6 +55,29 @@ function mountHome(overrides: Record<string, unknown> = {}) {
  * ribbon box rather than only unit-testing the shared function.
  */
 describe('homeSection - font size box (shared fontSizeOf)', () => {
+	it('offers real weight faces and forwards Medium and regular family choices', async () => {
+		const onUpdateTextStyle = vi.fn();
+		const wrapper = mountHome({
+			selectedElement: textShape({ textStyle: { fontFamily: 'DM Sans' } }),
+			themeFonts: { heading: 'DM Sans', body: 'ADLaM Display' },
+			onUpdateTextStyle,
+		});
+		const picker = wrapper.get('[data-font-picker="family"]').element;
+		const families = Array.from(picker.querySelectorAll('option'), (row) => row.value);
+		for (const family of ['DM Sans', 'DM Sans Light', 'DM Sans Medium', 'DM Sans SemiBold']) {
+			expect(families).toContain(family);
+		}
+		expect(families).not.toContain('DM Sans Regular');
+		expect(families).toContain('ADLaM Display');
+		expect(families).not.toContain('ADLaM Display Medium');
+		await choose(picker, 'DM Sans Medium');
+		await choose(picker, 'DM Sans');
+		expect(onUpdateTextStyle.mock.calls).toStrictEqual([
+			[{ fontFamily: 'DM Sans Medium' }],
+			[{ fontFamily: 'DM Sans' }],
+		]);
+	});
+
 	it('renders the shared font-step artwork and forwards each action once', async () => {
 		const onAction = vi.fn();
 		const wrapper = mount(FontHomeControls, {
@@ -104,7 +127,7 @@ describe('homeSection - font size box (shared fontSizeOf)', () => {
 		expect(popup()).toBeTruthy();
 	});
 
-	it('does not format a table with stale cell state from another table', () => {
+	it('formats the whole table when the cell state belongs to another table', () => {
 		const wrapper = mountHome({
 			selectedElement: { type: 'table', id: 'table-2' },
 			tableEditorState: { elementId: 'table-1', rowIndex: 0, columnIndex: 0 },
@@ -112,7 +135,7 @@ describe('homeSection - font size box (shared fontSizeOf)', () => {
 		for (const label of ['Font family', 'Font size']) {
 			expect(
 				(wrapper.get(`[aria-label="${label}"]`).element as PptxUiSelectElement).disabled,
-			).toBeTruthy();
+			).toBeFalsy();
 		}
 	});
 
@@ -122,7 +145,7 @@ describe('homeSection - font size box (shared fontSizeOf)', () => {
 		['read-only text', textShape(), false, true],
 		['text selection', textShape(), true, false],
 		['empty shape', { ...textShape(), type: 'shape', text: '' }, true, false],
-		['table without a selected cell', { type: 'table', id: 'tb1' }, true, true],
+		['table without a selected cell (whole table)', { type: 'table', id: 'tb1' }, true, false],
 	] as const)('gates font pickers for %s', (_name, selectedElement, canEdit, disabled) => {
 		const wrapper = mountHome({ selectedElement, canEdit });
 		for (const label of ['Font family', 'Font size']) {

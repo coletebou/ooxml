@@ -1,6 +1,5 @@
 import { findReplacementAvailability } from 'ooxml-ui/pptx';
 import React, { useRef, useEffect, useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
 import {
 	LuSearch,
 	LuReplace,
@@ -10,6 +9,7 @@ import {
 	LuCaseSensitive,
 } from 'react-icons/lu';
 
+import { useTranslation } from '../i18n/use-translation';
 import { WebCheckbox } from './WebControls';
 
 export interface FindReplacePanelProps {
@@ -22,7 +22,7 @@ export interface FindReplacePanelProps {
 	onSetFindIncludeChartTitles?: (value: boolean) => void;
 	onSetFindIncludeChartData?: (value: boolean) => void;
 	onSetFindIncludeNotes?: (value: boolean) => void;
-	findResults: Array<{
+	findResults: ReadonlyArray<{
 		slideIndex: number;
 		elementId: string;
 		segmentIndex: number;
@@ -76,11 +76,11 @@ export function FindReplacePanel({
 		searchInputRef.current?.focus();
 	}, []);
 
-	/* Re-run search when query or case-sensitivity changes */
+	/* Search the kept query when the bar opens; a new query or scope searches as it is set */
 	useEffect(() => {
 		onPerformFind();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [findQuery, findMatchCase, findIncludeNotes, findIncludeChartTitles, findIncludeChartData]);
+	}, []);
 
 	const handleSearchKeyDown = useCallback(
 		(event: React.KeyboardEvent<HTMLInputElement>) => {

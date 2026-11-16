@@ -1,4 +1,11 @@
 import type {
+	CompatibilityWarningToast,
+	PdfExportSettings,
+	VectorPdfExportResult,
+} from 'ooxml-ui/pptx';
+import { choosePdfExportSelection } from 'ooxml-ui/pptx';
+
+import type {
 	ExportController,
 	ExportGifOptions,
 	ExportPdfOptions,
@@ -19,6 +26,8 @@ export interface ExportLifecycleDeps {
 	doc: Document;
 	/** Host the off-screen capture stage mounts into; matches the viewer container. */
 	container: HTMLElement;
+	/** Where the export progress modal mounts (the chrome root, which carries the theme). */
+	getModalHost?(): HTMLElement;
 	store: Store<ViewerState>;
 	registry: ElementRendererRegistry;
 	getTranslator(): Translator;
@@ -50,8 +59,16 @@ export interface ExportLifecycleDeps {
 	 * notes/handouts fallback path, read fresh on every print.
 	 */
 	getPrintHighQuality?(): boolean;
+	/** Options > Advanced > Save as PDF, read on every PDF export. */
+	getPdfExportSettings?(): PdfExportSettings;
 	/** Source file name (title-bar name); drives export download names. */
 	fileName?: string;
+	/** The open document's name, read on every export (wins over {@link fileName}). */
+	getFileName?(): string | undefined;
+	/** The viewer's `onPdfExportReport`: what a vector PDF approximated. */
+	onPdfExportReport?(result: VectorPdfExportResult): void;
+	/** Show the PDF approximation notice in the compatibility toast stack. */
+	notify?(toast: CompatibilityWarningToast): void;
 }
 
 /** The export slice of the public viewer API (see `PptxViewerInstance`). */
@@ -73,6 +90,11 @@ export interface ViewerExportApi {
 }
 
 export interface ExportLifecycle extends ViewerExportApi {
+	/**
+	 * File > Export > PDF from the viewer's own UI: the PDF options step (range, hidden slides)
+	 * first, then the export. The programmatic `exportPdf()` never asks.
+	 */
+	exportPdfFromUi(): Promise<void>;
 	/** Remove the off-screen capture stage from the DOM. */
 	destroy(): void;
 }
@@ -96,6 +118,11 @@ export abstract class ViewerExportHost implements ViewerExportApi {
 
 	async exportPdf(options?: ExportPdfOptions): Promise<void> {
 		return this.exporter.exportPdf(options);
+	}
+
+	/** File > Export > PDF from the viewer UI (options step first); see {@link ExportLifecycle}. */
+	async exportPdfFromUi(): Promise<void> {
+		return this.exporter.exportPdfFromUi();
 	}
 
 	async exportGif(options?: ExportGifOptions): Promise<void> {
@@ -133,10 +160,16 @@ export function createExportLifecycle(deps: ExportLifecycleDeps): ExportLifecycl
 		rasterizeSlide: rasterizer.rasterizeSlide,
 		rasterizeSlideToRaster: rasterizer.rasterizeSlideToRaster,
 		rasterizeSlideToTiles: rasterizer.rasterizeSlideToTiles,
+		mountSlide: (index) => rasterizer.mountSlide(index),
+		getPdfExportSettings: deps.getPdfExportSettings,
+		getImageResolutionScale: () => deps.getImageResolutionScale(),
 		fileName: deps.fileName,
+		...(deps.getFileName ? { getFileName: () => deps.getFileName?.() } : {}),
 		getTranslator: deps.getTranslator,
 		getIncludeHiddenSlides: deps.getIncludeHiddenSlides,
 		getPrintHighQuality: deps.getPrintHighQuality,
+		onPdfExportReport: (result) => deps.onPdfExportReport?.(result),
+		...(deps.notify ? { notify: (toast: CompatibilityWarningToast) => deps.notify?.(toast) } : {}),
 	});
 	// Multi-slide exports (PDF / GIF / video) run through the progress envelope
 	// so a visible modal (bar + status + Cancel) accompanies them, exactly like
@@ -145,6 +178,7 @@ export function createExportLifecycle(deps: ExportLifecycleDeps): ExportLifecycl
 	const modal = createExportProgressModal({
 		doc: deps.doc,
 		getTranslator: deps.getTranslator,
+		...(deps.getModalHost ? { getHost: deps.getModalHost } : {}),
 		onCancel: () => progressUi.cancel(),
 	});
 	const progressUi = createExportProgressUi({
@@ -157,6 +191,25 @@ export function createExportLifecycle(deps: ExportLifecycleDeps): ExportLifecycl
 		exportSlidePng: (index) => controller.exportSlidePng(index),
 		copySlideAsImage: (index) => controller.copySlideAsImage(index),
 		exportPdf: (options) => progressUi.runPdf(options),
+		exportPdfFromUi: async () => {
+			const state = deps.store.get();
+			if (state.slides.length === 0) return;
+			const selection = await choosePdfExportSelection(deps.getModalHost?.() ?? deps.container, {
+				settings: deps.getPdfExportSettings?.() ?? { mode: 'vector', includeHiddenSlides: false },
+				slides: state.slides,
+				currentSlide: state.currentSlide,
+				translate: deps.getTranslator(),
+			});
+			if (selection === null) return;
+			await progressUi.runPdf({
+				...(selection.includeHiddenSlides !== undefined
+					? { includeHiddenSlides: selection.includeHiddenSlides }
+					: {}),
+				...(selection.from !== undefined ? { from: selection.from } : {}),
+				...(selection.to !== undefined ? { to: selection.to } : {}),
+				...(selection.slideIndexes ? { slideIndexes: selection.slideIndexes } : {}),
+			});
+		},
 		exportJson: () => controller.exportJson(),
 		exportGif: (options) => progressUi.runGif(options),
 		exportVideo: (options) => progressUi.runVideo(options),

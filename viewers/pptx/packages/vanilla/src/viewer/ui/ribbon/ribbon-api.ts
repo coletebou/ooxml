@@ -39,7 +39,8 @@ export interface Ribbon {
 	 * Editing > Find; exposed so the editor keymap can drive Ctrl/Cmd+F, which
 	 * this binding had no shortcut for at all.
 	 */
-	toggleFindReplace(): void;
+	/** Close the bar open in `mode`, switch its mode, or open it (Ctrl+F / Ctrl+H). */
+	toggleFindReplace(mode?: 'find' | 'replace'): void;
 	openEquationEditor(id: string, omml: Record<string, unknown>): void;
 	/** Title-bar command search: the Insert > Equation panel, SmartArt dialog, Design > Slide Size and Browse Themes. */
 	toggleEquationPanel(): void;
@@ -57,6 +58,11 @@ export interface Ribbon {
 	 * left out; removing the tab that is showing falls back to the default tab.
 	 */
 	setRibbonAddIns(tabs: readonly RibbonAddInTab[]): void;
+	/**
+	 * Draw the Ribbon Display Options state again. Call it once the ribbon is in the document:
+	 * full-screen mode puts its strip beside the ribbon, which needs the ribbon's parent.
+	 */
+	syncRibbonDisplay(): void;
 	/** Leave the File backstage and show the normal default ribbon tab. */
 	showDefaultTab(): void;
 	/** Apply Options > General ScreenTip style to the tab-bar tooltips. */

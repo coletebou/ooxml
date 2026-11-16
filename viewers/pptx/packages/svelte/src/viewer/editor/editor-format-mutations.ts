@@ -1,8 +1,8 @@
 import {
 	fontSizeOf,
 	shapeFillChange,
-	shapeOutlineChange,
 	shapeStylePatch,
+	strokeColorPatch,
 	textFontSizePatch,
 	textFontSizePtToPx,
 	textStylePatch,
@@ -98,14 +98,13 @@ export function setSolidFillPatch(
 	return shapeStylePatch(el, shapeFillChange(color, ref));
 }
 
-/** Set the shape stroke (outline) colour, via the shared decision function. Same `ref` contract as {@link setSolidFillPatch}. */
+/** Set the shape stroke (outline) colour, via the shared `strokeColorPatch`. Same `ref` contract as {@link setSolidFillPatch}. */
 export function setStrokeColorPatch(
 	el: PptxElement,
 	color: string,
 	ref?: PptxThemeColorRef,
 ): Partial<PptxElement> {
-	const current = hasShapeProperties(el) ? (el.shapeStyle ?? {}) : {};
-	return shapeStylePatch(el, shapeOutlineChange(color, ref, current));
+	return strokeColorPatch(el, color, ref);
 }
 
 /** Read the shape stroke width (defaults to 1 when unset). */
@@ -129,18 +128,5 @@ export function setFillOpacityPatch(el: PptxElement, opacity: number): Partial<P
 	const base = hasShapeProperties(el) ? (el.shapeStyle ?? {}) : {};
 	return {
 		shapeStyle: { ...base, fillOpacity: Math.min(1, Math.max(0, opacity)) },
-	} as Partial<PptxElement>;
-}
-
-/** Read the shape stroke opacity (0..1, defaults to fully opaque when unset). */
-export function strokeOpacityOf(el: PptxElement): number {
-	return hasShapeProperties(el) ? (el.shapeStyle?.strokeOpacity ?? 1) : 1;
-}
-
-/** Set the shape stroke opacity (0..1), preserving other shape-style fields. */
-export function setStrokeOpacityPatch(el: PptxElement, opacity: number): Partial<PptxElement> {
-	const base = hasShapeProperties(el) ? (el.shapeStyle ?? {}) : {};
-	return {
-		shapeStyle: { ...base, strokeOpacity: Math.min(1, Math.max(0, opacity)) },
 	} as Partial<PptxElement>;
 }

@@ -85,7 +85,7 @@ describe('SmartArt node view', () => {
 		const element = dom.querySelector('office-ui-smartart')!;
 		const svg = element.shadowRoot!.querySelector('svg')!;
 		expect(svg.getAttribute('role')).toBe('img');
-		expect(svg.children.length).toBe(diagram.drawing!.shapes.length);
+		expect(svg.querySelectorAll('g[data-model-id]').length).toBe(diagram.drawing!.shapes.length);
 		expect(svg.textContent).toMatch(/\S/);
 		// The frame, not the shapes' bounding box, sets the scale.
 		expect(svg.getAttribute('viewBox')).toBe(
@@ -95,7 +95,7 @@ describe('SmartArt node view', () => {
 		expect(view.update?.(node, [], {} as never)).toBe(false);
 	});
 
-	it('shows a labelled box with the node text when there is no cached drawing', async () => {
+	it('draws an approximate layout of the nodes when there is no cached drawing', async () => {
 		const { runs } = await diagramRuns();
 		const base = runs[0]!.image!.diagram!;
 		const { drawing: _drawing, ...rest } = base;
@@ -104,14 +104,30 @@ describe('SmartArt node view', () => {
 			...runs[0]!,
 			image: { ...runs[0]!.image!, diagram },
 		})[0]!;
+		const dom = smartArtNodeView(node, diagram, undefined, 'fr').dom as HTMLElement;
+		expect(dom.dataset.rendering).toBe('interpreted');
+		const svg = dom.querySelector('office-ui-smartart')!.shadowRoot!.querySelector('svg')!;
+		const texts = [...svg.querySelectorAll('text')].map((text) => text.textContent);
+		expect(texts.sort()).toEqual(
+			diagram.nodes
+				.filter((entry) => entry.text)
+				.map((entry) => entry.text)
+				.sort(),
+		);
+		expect(dom.querySelector('.dve-smartart-notes')!.textContent).toContain(
+			'disposition approximative',
+		);
+	});
+
+	it('shows a labelled box when a diagram without a cached drawing has no nodes', async () => {
+		const { runs } = await diagramRuns();
+		const { drawing: _drawing, ...rest } = runs[0]!.image!.diagram!;
+		const diagram: DocxDiagram = { ...rest, nodes: [], rendering: 'placeholder' };
+		const node = runToInlineNodes({ ...runs[0]!, image: { ...runs[0]!.image!, diagram } })[0]!;
 		const dom = smartArtNodeView(node, diagram, undefined).dom as HTMLElement;
 		expect(dom.querySelector('office-ui-smartart')).toBeNull();
 		expect(dom.dataset.rendering).toBe('placeholder');
-		const items = [...dom.querySelectorAll('.dve-smartart-placeholder li')].map(
-			(li) => li.textContent,
-		);
-		expect(items.length).toBeGreaterThan(0);
-		expect(items).toEqual(diagram.nodes.filter((entry) => entry.text).map((entry) => entry.text));
+		expect(dom.querySelector('.dve-smartart-placeholder')).not.toBeNull();
 	});
 
 	it('lists issues and approximations without claiming fidelity', async () => {
@@ -123,8 +139,21 @@ describe('SmartArt node view', () => {
 		const notes = diagramNotes(diagram, { approximatedGeometries: ['star5'], flattened3d: 2 });
 		expect(notes.join('\n')).toContain('missing-part: colors part is absent');
 		expect(notes.join('\n')).toContain('star5');
-		expect(notes.join('\n')).toContain('2 shape(s) with 3D drawn flat');
+		expect(notes.join('\n')).toContain('2 shapes with 3D drawn flat.');
 		expect(notes.at(-1)).toMatch(/not Word-identical/);
+		const counted = { flattened3d: 1, approximated3d: 3 };
+		expect(diagramNotes(diagram, counted).join('\n')).toContain('1 shape with 3D drawn flat.');
+		expect(diagramNotes(diagram, counted).join('\n')).toContain(
+			'3 shapes with 3D drawn approximately.',
+		);
+		expect(diagramNotes(diagram, counted, undefined, undefined, 'fr').join('\n')).toContain(
+			'3 formes 3D dessinées de façon approximative.',
+		);
+		for (const locale of ['de', 'es', 'zh-CN'] as const) {
+			const text = diagramNotes(diagram, counted, undefined, undefined, locale).join('\n');
+			expect(text).not.toContain('drawn');
+			expect(text).not.toContain('smartart.note');
+		}
 	});
 });
 

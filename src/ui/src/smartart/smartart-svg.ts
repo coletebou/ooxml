@@ -1,7 +1,14 @@
+import type { DiagramPictureResolver } from './smartart-picture';
 import { hexToRgbChannels } from 'ooxml-core/color';
-import { resolveDrawingColor } from 'ooxml-core/diagram';
-import type { DiagramDrawing, DiagramDrawingShape } from 'ooxml-core/diagram';
-import type { DrawingColor, DrawingFill, DrawingPath } from 'ooxml-core/drawingml';
+import { resolveDiagramSceneCamera, resolveDrawingColor } from 'ooxml-core/diagram';
+import type { DiagramDrawing } from 'ooxml-core/diagram';
+import type { DrawingColor } from 'ooxml-core/drawingml';
+
+import { diagramShapeElement } from './smartart-geometry';
+import { diagramFill } from './smartart-paint';
+import { diagramTextElement } from './smartart-text';
+import { diagramEffects } from './smartart-effects';
+import { paintDiagramShape3d, projectedPlacement, type SmartArt3dPlacement } from './smartart-3d';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const EMU_PER_PX = 9525;
@@ -10,10 +17,20 @@ export interface SmartArtRenderReport {
 	shapeCount: number;
 	/** Preset geometries drawn as a plain rectangle because no outline is available here. */
 	approximatedGeometries: string[];
-	/** Shapes that carry 3D scene data: drawn flat, the 3D is kept only in the source part. */
+	/** Shapes that carry 3D the painter cannot draw: drawn flat, the 3D kept in the source part. */
 	flattened3d: number;
-	/** Fill kinds drawn as a neutral placeholder (gradient is approximated by its first stop). */
+	/**
+	 * Shapes drawn with approximate 3D: a lit bevel, an extrusion along the camera's depth and a
+	 * diagram's spatial camera as a per-shape affine projection. Not Office's 3D renderer.
+	 */
+	approximated3d?: number;
+	/** The spatial camera preset the diagram was projected through. */
+	camera?: string;
+	/** Unsupported fill kinds and approximated path-gradient geometries. */
 	approximatedFills: string[];
+	/** Text layouts that require unavailable fonts or unsupported typography. */
+	approximatedText?: string[];
+	unappliedEffects?: string[];
 	/** DrawingML transforms the shared resolver cannot apply yet. */
 	unappliedColorTransforms?: string[];
 }
@@ -48,79 +65,14 @@ export function colorToCss(
 	return '#9ca3af';
 }
 
-function fillToCss(
-	fill: DrawingFill | undefined,
-	scheme: SchemeColors,
-	report: SmartArtRenderReport,
-): string {
-	if (!fill) return 'none';
-	if (fill.kind === 'none') return 'none';
-	if (fill.kind === 'solid') return colorToCss(fill.color, scheme, report) ?? 'none';
-	if (!report.approximatedFills.includes(fill.kind)) report.approximatedFills.push(fill.kind);
-	if (fill.kind === 'gradient') return colorToCss(fill.stops[0]?.color, scheme, report) ?? 'none';
-	return '#d1d5db';
-}
-
-/** Path coordinates are in the path's own units; scale them to the frame (px). */
-function pathData(path: DrawingPath, widthPx: number, heightPx: number): string {
-	const sx = path.width ? widthPx / path.width : 1;
-	const sy = path.height ? heightPx / path.height : 1;
-	const x = (v: number) => +(v * sx).toFixed(2);
-	const y = (v: number) => +(v * sy).toFixed(2);
-	const out: string[] = [];
-	for (const c of path.commands) {
-		if (c.op === 'M' || c.op === 'L') out.push(`${c.op}${x(c.x)} ${y(c.y)}`);
-		else if (c.op === 'C')
-			out.push(`C${x(c.x1)} ${y(c.y1)} ${x(c.x2)} ${y(c.y2)} ${x(c.x)} ${y(c.y)}`);
-		else if (c.op === 'Q') out.push(`Q${x(c.x1)} ${y(c.y1)} ${x(c.x)} ${y(c.y)}`);
-		else if (c.op === 'Z') out.push('Z');
-		// Arc commands (`A`) need the current point and angle maths; dropped, reported by the caller.
+function diagramExtent(drawing: DiagramDrawing): { width: number; height: number } {
+	let width = 0;
+	let height = 0;
+	for (const { frame } of drawing.shapes) {
+		width = Math.max(width, frame.x + frame.width);
+		height = Math.max(height, frame.y + frame.height);
 	}
-	return out.join('');
-}
-
-const hasArc = (shape: DiagramDrawingShape): boolean =>
-	Boolean(shape.paths?.some((p) => p.commands.some((c) => c.op === 'A')));
-
-function shapeElement(
-	doc: Document,
-	shape: DiagramDrawingShape,
-	report: SmartArtRenderReport,
-): SVGElement {
-	const { frame } = shape;
-	const w = frame.width / EMU_PER_PX;
-	const h = frame.height / EMU_PER_PX;
-	if (shape.paths?.length) {
-		const el = doc.createElementNS(SVG_NS, 'g');
-		for (const path of shape.paths) {
-			const p = doc.createElementNS(SVG_NS, 'path');
-			p.setAttribute('d', pathData(path, w, h));
-			el.append(p);
-		}
-		if (hasArc(shape) && !report.approximatedGeometries.includes('custom:arc')) {
-			report.approximatedGeometries.push('custom:arc');
-		}
-		return el;
-	}
-	if (shape.geometry === 'ellipse') {
-		const e = doc.createElementNS(SVG_NS, 'ellipse');
-		e.setAttribute('rx', String(w / 2));
-		e.setAttribute('ry', String(h / 2));
-		e.setAttribute('cx', String(w / 2));
-		e.setAttribute('cy', String(h / 2));
-		return e;
-	}
-	const rect = doc.createElementNS(SVG_NS, 'rect');
-	rect.setAttribute('width', String(w));
-	rect.setAttribute('height', String(h));
-	if (shape.geometry === 'roundRect') {
-		const adj = (shape.adjustments?.adj ?? 16667) / 100000;
-		rect.setAttribute('rx', String(Math.min(w, h) * adj));
-	} else if (shape.geometry !== 'rect' && !report.approximatedGeometries.includes(shape.geometry)) {
-		report.approximatedGeometries.push(shape.geometry);
-		rect.setAttribute('data-approximated', shape.geometry);
-	}
-	return rect;
+	return { width, height };
 }
 
 /** Render a core `DiagramDrawing` into an `<svg>`: pure DOM construction, no markup injection. */
@@ -129,6 +81,7 @@ export function renderDiagramDrawing(
 	drawing: DiagramDrawing,
 	scheme: SchemeColors = {},
 	fonts: SchemeFonts = {},
+	resolvePicture?: DiagramPictureResolver,
 ): { svg: SVGSVGElement; report: SmartArtRenderReport } {
 	const report: SmartArtRenderReport = {
 		shapeCount: drawing.shapes.length,
@@ -137,8 +90,14 @@ export function renderDiagramDrawing(
 		approximatedFills: [],
 	};
 	const svg = doc.createElementNS(SVG_NS, 'svg');
+	const defs = doc.createElementNS(SVG_NS, 'defs');
+	svg.append(defs);
 	let right = 0;
 	let bottom = 0;
+	const camera = resolveDiagramSceneCamera(drawing.scene3d);
+	const extent = drawing.extentEmu ?? diagramExtent(drawing);
+	const centre = { x: extent.width / EMU_PER_PX / 2, y: extent.height / EMU_PER_PX / 2 };
+	if (camera) report.camera = drawing.scene3d?.cameraPreset ?? 'rotation';
 	for (const shape of drawing.shapes) {
 		const { frame } = shape;
 		right = Math.max(right, (frame.x + frame.width) / EMU_PER_PX);
@@ -149,17 +108,51 @@ export function renderDiagramDrawing(
 		const cy = frame.height / EMU_PER_PX / 2;
 		const fx = shape.flipHorizontal ? -1 : 1;
 		const fy = shape.flipVertical ? -1 : 1;
-		const transform = [`translate(${frame.x / EMU_PER_PX} ${frame.y / EMU_PER_PX})`];
+		const placement: SmartArt3dPlacement | undefined = camera
+			? {
+					camera,
+					centre,
+					matrix: projectedPlacement(camera, centre, {
+						x: frame.x / EMU_PER_PX,
+						y: frame.y / EMU_PER_PX,
+						width: frame.width / EMU_PER_PX,
+						height: frame.height / EMU_PER_PX,
+					}),
+				}
+			: undefined;
+		const transform = [
+			placement
+				? `matrix(${placement.matrix.join(' ')})`
+				: `translate(${frame.x / EMU_PER_PX} ${frame.y / EMU_PER_PX})`,
+		];
 		if (shape.rotation) transform.push(`rotate(${shape.rotation} ${cx} ${cy})`);
 		if (fx !== 1 || fy !== 1) {
 			transform.push(`translate(${cx} ${cy}) scale(${fx} ${fy}) translate(${-cx} ${-cy})`);
 		}
 		group.setAttribute('transform', transform.join(' '));
-		const body = shapeElement(doc, shape, report);
-		body.setAttribute('fill', fillToCss(shape.fill, scheme, report));
+		const body = diagramShapeElement(doc, shape, report.approximatedGeometries);
+		body.setAttribute(
+			'fill',
+			diagramFill(doc, defs, shape.fill, scheme, report, drawing.pictureParts, resolvePicture, {
+				width: frame.width / EMU_PER_PX,
+				height: frame.height / EMU_PER_PX,
+				...(shape.rotation !== undefined ? { rotation: shape.rotation } : {}),
+				...(shape.flipHorizontal ? { flipHorizontal: true } : {}),
+				...(shape.flipVertical ? { flipVertical: true } : {}),
+			}),
+		);
+		diagramEffects(doc, defs, body, shape, scheme, report);
 		const stroke =
-			shape.line?.fill?.kind === 'solid'
-				? colorToCss(shape.line.fill.color, scheme, report)
+			shape.line?.fill && shape.line.widthEmu !== 0
+				? diagramFill(
+						doc,
+						defs,
+						shape.line.fill,
+						scheme,
+						report,
+						drawing.pictureParts,
+						resolvePicture,
+					)
 				: undefined;
 		body.setAttribute('stroke', stroke ?? 'none');
 		if (stroke)
@@ -168,59 +161,25 @@ export function renderDiagramDrawing(
 				String(Math.max(0.5, (shape.line?.widthEmu ?? 9525) / EMU_PER_PX)),
 			);
 		group.append(body);
-		if (shape.has3d) {
-			report.flattened3d += 1;
-			group.setAttribute('data-flattened-3d', '');
+		if (shape.has3d || placement) {
+			if (paintDiagramShape3d(doc, defs, group, body, shape, placement)) {
+				report.approximated3d = (report.approximated3d ?? 0) + 1;
+				group.setAttribute('data-approximated-3d', '');
+			} else {
+				report.flattened3d += 1;
+				group.setAttribute('data-flattened-3d', '');
+			}
 		}
-		if (shape.text?.text) group.append(textElement(doc, shape, scheme, fonts, report));
+		if (shape.text?.text) group.append(diagramTextElement(doc, shape, scheme, fonts, report));
 		svg.append(group);
 	}
-	svg.setAttribute('viewBox', `0 0 ${Math.max(right, 1)} ${Math.max(bottom, 1)}`);
-	return { svg, report };
-}
-
-function textElement(
-	doc: Document,
-	shape: DiagramDrawingShape,
-	scheme: SchemeColors,
-	fonts: SchemeFonts,
-	report: SmartArtRenderReport,
-): SVGElement {
-	const frame = shape.textFrame ?? {
-		x: shape.frame.x,
-		y: shape.frame.y,
-		width: shape.frame.width,
-		height: shape.frame.height,
-	};
-	const ox = (frame.x - shape.frame.x) / EMU_PER_PX;
-	const oy = (frame.y - shape.frame.y) / EMU_PER_PX;
-	const w = frame.width / EMU_PER_PX;
-	const h = frame.height / EMU_PER_PX;
-	const text = doc.createElementNS(SVG_NS, 'text');
-	const first = shape.text?.paragraphs[0]?.runs[0];
-	const sizePx = ((first?.sizePt ?? 12) * 96) / 72;
-	text.setAttribute('x', String(ox + w / 2));
-	text.setAttribute('y', String(oy + h / 2));
-	text.setAttribute('text-anchor', 'middle');
-	text.setAttribute('dominant-baseline', 'central');
-	text.setAttribute('font-size', String(sizePx));
-	text.setAttribute(
-		'fill',
-		colorToCss(first?.color ?? shape.style?.font?.color, scheme, report) ?? 'currentColor',
+	svg.setAttribute(
+		'viewBox',
+		`0 0 ${Math.max(drawing.extentEmu ? drawing.extentEmu.width / EMU_PER_PX : right, 1)} ${Math.max(drawing.extentEmu ? drawing.extentEmu.height / EMU_PER_PX : bottom, 1)}`,
 	);
-	if (first?.bold) text.setAttribute('font-weight', '700');
-	if (first?.italic) text.setAttribute('font-style', 'italic');
-	const ref = shape.style?.font?.fontIndex;
-	const inherited = ref === 'major' ? fonts.major : ref === 'minor' ? fonts.minor : undefined;
-	const typeface = first?.typeface;
-	const font =
-		typeface === '+mj-lt'
-			? fonts.major
-			: typeface === '+mn-lt'
-				? fonts.minor
-				: (typeface ?? inherited);
-	if (font) text.setAttribute('font-family', font);
-	text.textContent =
-		shape.text?.paragraphs.map((p) => p.runs.map((r) => r.text).join('')).join(' ') ?? '';
-	return text;
+	// The viewBox is the shapes' frames, and a centred outline straddles them: a
+	// node on the drawing's edge lost the outer half of its line to the
+	// viewport clip an inline <svg> applies by default.
+	svg.setAttribute('overflow', 'visible');
+	return { svg, report };
 }

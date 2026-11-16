@@ -1,7 +1,9 @@
 import {
 	armEditorKeyboard,
+	createSaveRevisionController,
 	cycleSelectableElement,
 	deliverSavedPresentation,
+	isCleanAfterSave,
 	isDialogAvailable,
 	mapCustomizedEditorKey,
 	mapInlineTextFormatKey,
@@ -9,8 +11,12 @@ import {
 	parentSelection,
 	removeGuide,
 	savedPresentationFileName,
+	savedPresentationRevision,
 } from 'ooxml-ui/pptx';
 import type {
+	CollaborationHistoryTarget,
+	PptxSaveAcknowledgement,
+	PptxSaveSnapshot,
 	FreeformToolKind,
 	ResolvedCustomization,
 	ResolvedKeyboardCustomization,
@@ -60,6 +66,7 @@ import { createEditActions } from './editor-edit-ops';
 import type { FindReplaceActions } from './editor-find-replace-actions';
 import { createFindReplaceActions } from './editor-find-replace-actions';
 import { attachCanvasImagePaste } from './editor-image-paste';
+import { attachCanvasInlineRichPaste } from './editor-inline-rich-paste';
 import { createEditorKeydownHandler } from './editor-keyboard';
 import { selectionInteractivity } from './editor-lock-gates';
 import { createEditorOps } from './editor-operations';
@@ -83,27 +90,48 @@ export interface EditorControllerDeps {
 	getHandler(): PptxHandler | null;
 	/** Host `storage` option: Save / Save As go to `storage.save()` instead of a download. */
 	getStorage?(): import('ooxml-ui/pptx').DocumentStorage | undefined;
+	/** The host acknowledged the current save revision: drop the crash-recovery copy. */
+	discardRecoveryOnHostSave?(): void;
 	/** Adopt a handler produced by an in-session mutation (Slide Master view CRUD). */
-	setHandler(handler: PptxHandler): void;
+	setHandler(handler: PptxHandler, keepPrevious?: boolean): void;
 	/** Options > General > "User name" override for new comment/reply authorship. */
 	getUserName?: () => string | undefined;
+	/** Host `listConversionScope` option: how far a bare caret's Bullets / Numbering reach. */
+	getListConversionScope?: () => import('ooxml-ui/pptx').ListConversionScope | undefined;
 	/** Options > Proofing > AutoCorrect, applied to committed inline-edit text. */
-	transformCommittedText?: (text: string) => string;
+	transformCommittedText?: (text: string, previous?: string) => string;
 	/** Host `onChange` callback: fired after every committed mutation. */
 	onChange?: () => void;
 	/** Host `onNotesUpdate` callback: the new text after a speaker-notes edit lands. */
 	onNotesUpdate?: (notes: string) => void;
 	/** Notified with slide-space coordinates on stage pointer move (collaboration cursor broadcast). */
 	onCursorMove?: (x: number, y: number) => void;
-	/** Mirror in-progress inline-editor text to collaborators (live preview). */
-	onInlineTextInput?: (elementId: string, text: string) => void;
+	/**
+	 * In-progress inline-editor text: the collaboration live preview and the
+	 * autosave draft. `null` when the editor closes.
+	 */
+	onInlineTextInput?: (elementId: string | null, text: string) => void;
 	/** Push any queued live-preview frame out before an inline commit lands. */
 	flushInlineTextInput?: () => void;
 	/** The host's keyboard customisation, read on every key press. */
 	getKeyboardCustomization?: () => ResolvedKeyboardCustomization | undefined;
 	/** The host's resolved UI customisation (Edit Points gating, hidden commands). */
 	getCustomization?: () => ResolvedCustomization | undefined;
+	/**
+	 * Offer a dialog to the host before the viewer opens its own: the building blocks
+	 * (`createViewerBuildingBlocks`) turn these into host requests. Returns true when the host
+	 * took it, so the viewer opens nothing. Unset for the full viewer.
+	 */
+	requestHostDialog?: (request: HostDialogRequest) => boolean;
 }
+
+/** A dialog the viewer would open, offered to the host first (see `requestHostDialog`). */
+export type HostDialogRequest =
+	| { kind: 'hyperlink' }
+	| { kind: 'equation'; existingOmml: Record<string, unknown> | null }
+	| { kind: 'find' }
+	/** The keyboard shortcut help (`?`, Ctrl+/) toggled. */
+	| { kind: 'shortcuts' };
 
 export interface EditorController {
 	hasActivePointerInteraction(): boolean;
@@ -123,6 +151,8 @@ export interface EditorController {
 	canRedo(): boolean;
 	/** File > Options > Advanced > "Maximum number of undos". */
 	setHistoryDepth(depth: number): void;
+	/** The undo history; a collaboration session routes it through the room's own history. */
+	readonly history: CollaborationHistoryTarget;
 	deleteSelected(): void;
 	duplicateSelected(): string | null;
 	getSelectedElementId(): string | null;
@@ -159,6 +189,12 @@ export interface EditorController {
 	save(format?: PptxSaveFormat): Promise<Uint8Array>;
 	downloadAs(format: PptxSaveFormat, fileName?: string): Promise<void>;
 	downloadPptx(fileName?: string): Promise<void>;
+	/** The revision of the document as it is now (see `createSaveRevisionController`). */
+	getSaveRevision(): number;
+	/** Serialise for a host that persists the deck itself; the document stays dirty. */
+	getSaveSnapshot(): Promise<PptxSaveSnapshot>;
+	/** The host persisted `revision`: clean only if it is still current. */
+	acknowledgeSave(revision: number): PptxSaveAcknowledgement;
 	destroy(): void;
 }
 
@@ -196,6 +232,9 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		cancelInlineList: () => interactions.closeInline(false),
 	});
 
+	// A room's history changes canUndo/canRedo without any local edit going through the ops.
+	ops.history.subscribe(updateToolbar);
+
 	const editActions = createEditActions({
 		doc,
 		getTranslator: deps.getTranslator,
@@ -204,6 +243,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		getHandler: deps.getHandler,
 		setHandler: deps.setHandler,
 		getUserName: deps.getUserName,
+		getListConversionScope: deps.getListConversionScope,
 	});
 	const findReplaceActions = createFindReplaceActions({ store, ops });
 
@@ -224,6 +264,13 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		ops.commitChange();
 	};
 
+	/** Ctrl+F / Ctrl+H: the host's find bar when it takes it, else the ribbon's panel. */
+	const toggleFindReplace = (mode?: 'find' | 'replace'): void => {
+		if (!deps.requestHostDialog?.({ kind: 'find' })) {
+			deps.getChrome().ribbon?.toggleFindReplace(mode);
+		}
+	};
+
 	/** Ctrl+K: open the hyperlink dialog for the currently selected element. */
 	const openHyperlinkForSelection = (): void => {
 		const customization = deps.getCustomization?.();
@@ -234,7 +281,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		const element = state.selectedElementId
 			? findActiveElement(state, state.selectedElementId)
 			: undefined;
-		if (!element) {
+		if (!element || deps.requestHostDialog?.({ kind: 'hyperlink' })) {
 			return;
 		}
 		openHyperlinkEditDialog(
@@ -318,8 +365,10 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 				editActions.clearFormatting();
 				return true;
 			case 'find':
+				toggleFindReplace('find');
+				return true;
 			case 'findReplace':
-				deps.getChrome().ribbon?.toggleFindReplace();
+				toggleFindReplace('replace');
 				return true;
 			default:
 				return false;
@@ -377,7 +426,11 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		onCursorMove: deps.onCursorMove,
 		onInlineTextInput: deps.onInlineTextInput,
 		flushInlineTextInput: deps.flushInlineTextInput,
-		onEditEquation: (id, omml) => deps.getChrome().ribbon?.openEquationEditor(id, omml),
+		onEditEquation: (id, omml) => {
+			if (!deps.requestHostDialog?.({ kind: 'equation', existingOmml: omml ?? null })) {
+				deps.getChrome().ribbon?.openEquationEditor(id, omml);
+			}
+		},
 		onEyedropper: (color) => editActions.setShapeFill(color),
 		onInlineLiveFormatKey,
 	});
@@ -541,11 +594,15 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 			store.set({ formatPainterSourceId: null });
 			return true;
 		},
-		toggleShortcuts: () => deps.getChrome().shortcuts.toggle(),
+		toggleShortcuts: () => {
+			if (!deps.requestHostDialog?.({ kind: 'shortcuts' })) {
+				deps.getChrome().shortcuts.toggle();
+			}
+		},
 		// Same action as Home > Editing > Find. Null when the host disabled the
 		// ribbon, in which case there is no find panel to open and the chord
 		// correctly does nothing.
-		toggleFind: () => deps.getChrome().ribbon?.toggleFindReplace(),
+		toggleFind: () => toggleFindReplace('find'),
 		closeShortcuts: () => {
 			const panel = deps.getChrome().shortcuts;
 			if (!panel.isOpen()) {
@@ -560,7 +617,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		pasteFormat: pasteFormatOntoSelection,
 		addSlide: () => editActions.addSlide(),
 		openHyperlink: openHyperlinkForSelection,
-		toggleFindReplace: () => deps.getChrome().ribbon?.toggleFindReplace(),
+		toggleFindReplace: () => toggleFindReplace('replace'),
 		clearFormatting: () => editActions.clearFormatting(),
 		cycleSelection: (direction) => {
 			const state = store.get();
@@ -618,9 +675,12 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 	};
 
 	let detachImagePaste: (() => void) | undefined;
+	let detachRichPaste: (() => void) | undefined;
 	const detachChrome = (): void => {
 		detachImagePaste?.();
 		detachImagePaste = undefined;
+		detachRichPaste?.();
+		detachRichPaste = undefined;
 		interactions.closeInline(true);
 		interactions.closeInline(false);
 		attachedWrap?.removeEventListener('pointerdown', onStagePointerDown);
@@ -685,6 +745,37 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		syncOverlay();
 	});
 
+	// Serialise without clearing the dirty flag, deliver, and only then decide: a rejected upload
+	// keeps the document unsaved, and so does an edit made while it was in flight.
+	const saveChangeSources = (): readonly unknown[] => {
+		const state = store.get();
+		return [state.slides, state.templateElementsBySlideId, state.slideMasters, state.sections];
+	};
+	const saveRevision = createSaveRevisionController({
+		getSources: saveChangeSources,
+		serialize: () => ops.serialize('pptx'),
+		markClean: () => store.set({ dirty: false }),
+		discardRecovery: () => deps.discardRecoveryOnHostSave?.(),
+	});
+	const deliverSave = async (
+		format: PptxSaveFormat,
+		fileName: string,
+		reason: 'save' | 'saveAs',
+	): Promise<void> => {
+		const revision = savedPresentationRevision(saveChangeSources());
+		const bytes = await ops.serialize(format);
+		await deliverSavedPresentation({
+			storage: deps.getStorage?.(),
+			bytes,
+			format,
+			fileName,
+			reason,
+		});
+		if (isCleanAfterSave(revision, saveChangeSources())) {
+			store.set({ dirty: false });
+		}
+	};
+
 	return {
 		attachChrome() {
 			detachChrome();
@@ -729,6 +820,15 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 				getHandler: deps.getHandler,
 				isEditing: interactions.inlineActive,
 				insertElement: editActions.insertElement,
+			});
+			detachRichPaste = attachCanvasInlineRichPaste(attachedRoot, {
+				store,
+				inlineElementId: () => interactions.inlineElementId(),
+				closeInline: (commit) => interactions.closeInline(commit),
+				openInlineEdit: (id) => interactions.openInlineEdit(id),
+				pushHistory: () => ops.pushHistory(),
+				previewElement: (id, patch) => ops.previewElement(id, patch),
+				commitChange: () => ops.commitChange(),
 			});
 			attachedWrap.addEventListener('pointerdown', onStagePointerDown);
 			attachedWrap.addEventListener('pointermove', interactions.onStagePointerMove);
@@ -792,6 +892,7 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		canUndo: () => ops.canUndo(),
 		canRedo: () => ops.canRedo(),
 		setHistoryDepth: (depth) => ops.setHistoryDepth(depth),
+		history: ops.history,
 		deleteSelected: () => ops.deleteSelected(),
 		duplicateSelected: () => ops.duplicateSelected(),
 		getSelectedElementId: () => store.get().selectedElementId,
@@ -836,31 +937,17 @@ export function createEditorController(deps: EditorControllerDeps): EditorContro
 		updateHeaderFooter: (value) => ops.updateHeaderFooter(value),
 		updateCustomShows: (value) => ops.updateCustomShows(value),
 		save: (format) => ops.save(format),
+		getSaveRevision: () => saveRevision.getRevision(),
+		getSaveSnapshot: () => saveRevision.snapshot(),
+		acknowledgeSave: (revision) => saveRevision.acknowledge(revision),
 		// Every name below goes through the shared save-name decision, so a host
 		// that passes the deck it opened (`report.ppt`) gets `report.pptx` back
 		// rather than a `.ppt` whose bytes are an OpenXML package. With a host
 		// `storage` the bytes go to `storage.save()` instead of a download.
-		async downloadAs(format, fileName) {
-			const bytes = await ops.save(format);
-			await deliverSavedPresentation({
-				storage: deps.getStorage?.(),
-				bytes,
-				format,
-				fileName: savedPresentationFileName(fileName, format),
-				reason: 'saveAs',
-			});
-		},
+		downloadAs: (format, fileName) =>
+			deliverSave(format, savedPresentationFileName(fileName, format), 'saveAs'),
 		// File > Save: `.pptx`, reported to the host's storage as `save` (Save As is `downloadAs`).
-		async downloadPptx(fileName) {
-			const bytes = await ops.save('pptx');
-			await deliverSavedPresentation({
-				storage: deps.getStorage?.(),
-				bytes,
-				format: 'pptx',
-				fileName: savedPresentationFileName(fileName),
-				reason: 'save',
-			});
-		},
+		downloadPptx: (fileName) => deliverSave('pptx', savedPresentationFileName(fileName), 'save'),
 		destroy() {
 			unsubscribe();
 			cropMode.destroy();

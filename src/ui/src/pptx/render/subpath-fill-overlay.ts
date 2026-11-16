@@ -28,46 +28,19 @@
  * ({@link suppressesCssFill}) drops the CSS background so the flat colour does
  * not show underneath.
  *
- * Restricted to a solid (or absent) fill: a gradient/pattern/image fill keeps
- * the existing single merged clip-path box, since neither geometry kind's
- * sub-paths can carry an independent paint SERVER (only a solid, mode-shifted
- * colour), and the common case for both bug classes - shading/bevel highlights,
- * `smileyFace`'s eyes - is a solid theme colour.
+ * A solid (or absent) fill is painted entirely by the overlay. A gradient,
+ * pattern or picture fill keeps the single merged clip-path box (a sub-path
+ * cannot carry its own paint server) and gets only the shading veils on top
+ * (`buildShadingOverlay`).
  */
-import type {
-	CustomGeometryPath,
-	CustomGeometryRawData,
-	CustomGeometrySubpathSvg,
-	PptxElement,
-} from 'ooxml-core/pptx';
-import {
-	customGeometryPathsToSvgSubpaths,
-	evaluateCustomGeometryPaths,
-	evaluatePresetShape,
-	hasShapeProperties,
-} from 'ooxml-core/pptx';
+import type { PptxElement } from 'ooxml-core/pptx';
+import { hasShapeProperties } from 'ooxml-core/pptx';
 
 import { DEFAULT_FILL_COLOR } from '../constants';
+import { silhouetteFillsOverlay } from './silhouette-effects';
+import { getSubpathGeometry } from './subpath-geometry';
 import type { SubpathPaint } from './vector-subpath-paint';
 import { buildSubpathPaints } from './vector-subpath-paint';
-
-/**
- * The box a preset is evaluated at: the element's authored extent, floored at
- * zero. Matches `getContainerStyle`'s `paintedElementSize` (not imported
- * directly, to avoid a `fill-style.ts` <-> `element-style.ts` <->
- * `subpath-fill-overlay.ts` import cycle: `fill-style.ts` consumes
- * {@link suppressesCssFill} and `element-style.ts` consumes `fill-style.ts`).
- * This used to pad out to `MIN_ELEMENT_SIZE`, which stretched a degenerate
- * shape's per-sub-path fill overlay past its authored extent in read-only
- * rendering (issue #285); any interaction-only padding now lives solely in
- * `elementHitTargetStyle`, which never touches paint.
- */
-function paintedSize(element: PptxElement): { width: number; height: number } {
-	return {
-		width: Math.max(element.width, 0),
-		height: Math.max(element.height, 0),
-	};
-}
 
 /** Everything a binding needs to paint an element's per-sub-path fill overlay. */
 export interface SubpathFillOverlay {
@@ -77,106 +50,13 @@ export interface SubpathFillOverlay {
 	readonly viewBoxWidth: number;
 	/** `viewBox` height, in the same coordinate space as every `paints[].d`. */
 	readonly viewBoxHeight: number;
-}
-
-/**
- * Whether any sub-path needs individual paint handling: a non-`norm` fill mode
- * or an explicit stroke opt-out. Mirrors the threshold the React custom-geometry
- * renderer already used, now shared with preset geometry too. A shape whose
- * sub-paths are all plain (unset/`norm` fill, stroked) renders identically
- * either way, so declining here keeps ordinary shapes on the cheaper CSS path.
- */
-function needsPerSubpathPaint(subpaths: readonly CustomGeometrySubpathSvg[]): boolean {
-	return subpaths.some(
-		(sp) => (sp.fillMode !== undefined && sp.fillMode !== 'norm') || sp.stroke === false,
-	);
-}
-
-/** The custom-geometry / preset slots read off an element. */
-interface SubpathCapableElement {
-	pathData?: string;
-	pathWidth?: number;
-	pathHeight?: number;
-	customGeometryPaths?: CustomGeometryPath[];
-	customGeometryRawData?: CustomGeometryRawData;
-	shapeType?: string;
-	shapeAdjustments?: Record<string, number>;
-}
-
-/** Resolved per-sub-path geometry needing individual paint, or `undefined`. */
-interface SubpathGeometry {
-	subpaths: CustomGeometrySubpathSvg[];
-	width: number;
-	height: number;
-}
-
-/** Sub-path-capable element types: `PptxCustomPathProperties` lives only on these. */
-function asSubpathCapable(element: PptxElement): SubpathCapableElement | undefined {
-	if (element.type === 'shape' || element.type === 'image' || element.type === 'picture') {
-		return element;
-	}
-	return undefined;
-}
-
-/**
- * Resolve an element's per-sub-path geometry when, and only when, it genuinely
- * needs individual paint handling - custom geometry with structured sub-paths,
- * or a preset whose evaluated sub-paths vary. Returns `undefined` for every
- * ordinary shape so callers keep their existing single merged fill/clip.
- */
-function getSubpathGeometry(element: PptxElement): SubpathGeometry | undefined {
-	const slots = asSubpathCapable(element);
-	if (!slots) {
-		return undefined;
-	}
-
-	// Custom geometry: only the STRUCTURED sub-paths (from `a:custGeom/a:pathLst`)
-	// carry per-sub-path `@fill`/`@stroke`; a freeform with only aggregate
-	// `pathData` (no structured paths) has no per-sub-path intent to honour.
-	if (slots.pathData && slots.pathWidth && slots.pathHeight) {
-		// Live-evaluate the raw `a:pathLst` against the current adjust values so a
-		// mid-drag `a:ahXY`/`a:ahPolar` reshape moves the per-sub-path overlay
-		// with the clip path; falls back to the parse-time paths when the raw
-		// XML is missing (older data) or the guide list cannot be evaluated.
-		const structured =
-			evaluateCustomGeometryPaths(
-				slots.customGeometryRawData,
-				slots.pathWidth,
-				slots.pathHeight,
-				slots.shapeAdjustments,
-			) ?? slots.customGeometryPaths;
-		if (!structured || structured.length === 0) {
-			return undefined;
-		}
-		const subpaths = customGeometryPathsToSvgSubpaths(
-			structured,
-			slots.pathWidth,
-			slots.pathHeight,
-		);
-		return needsPerSubpathPaint(subpaths)
-			? { subpaths, width: slots.pathWidth, height: slots.pathHeight }
-			: undefined;
-	}
-
-	// Preset geometry: evaluate at the same PAINTED size the container box uses
-	// (padded for degenerate shapes), so the overlay's viewBox lines up with it.
-	if (!slots.shapeType) {
-		return undefined;
-	}
-	const { width, height } = paintedSize(element);
-	const result = evaluatePresetShape(slots.shapeType, width, height, slots.shapeAdjustments);
-	// `fillNone` (every sub-path opts out of fill, e.g. `arc`) is an OPEN preset:
-	// `./stroke-only-preset` already routes it through the stroke overlay with no
-	// fill at all, so it must not also be treated as a multi-sub-path FILL here.
-	if (!result || result.fillNone || result.paths.length === 0) {
-		return undefined;
-	}
-	const subpaths: CustomGeometrySubpathSvg[] = result.paths.map((p) => ({
-		d: p.d,
-		fillMode: p.fill as CustomGeometrySubpathSvg['fillMode'],
-		stroke: p.stroke,
-	}));
-	return needsPerSubpathPaint(subpaths) ? { subpaths, width, height } : undefined;
+	/**
+	 * Set when the overlay paints the fill of a shape that is not clipped (its
+	 * shadow and glow are a silhouette filter, see `silhouette-effects`), as
+	 * opposed to the shading sub-paths of a shape that is. A binding that paints
+	 * the whole fill itself (React's custom geometry and wedge callouts) skips it.
+	 */
+	readonly silhouette?: boolean;
 }
 
 /**
@@ -200,7 +80,58 @@ function hasReproducibleFillMode(element: PptxElement): boolean {
  * consumed by shared `getComputedFillStyle`.
  */
 export function suppressesCssFill(element: PptxElement): boolean {
-	return hasReproducibleFillMode(element) && getSubpathGeometry(element) !== undefined;
+	return (
+		hasReproducibleFillMode(element) &&
+		getSubpathGeometry(element, silhouetteFillsOverlay(element)) !== undefined
+	);
+}
+
+/** The black or white veil that shifts a fill by a sub-path's `@fill` mode. */
+function shadeVeil(mode: string | undefined, opacity: number): string | undefined {
+	const strength =
+		mode === 'lighten' || mode === 'darken'
+			? 0.4
+			: mode === 'lightenLess' || mode === 'darkenLess'
+				? 0.2
+				: 0;
+	if (strength === 0) {
+		return undefined;
+	}
+	const channel = mode?.startsWith('lighten') ? 255 : 0;
+	return `rgba(${channel},${channel},${channel},${Math.round(strength * opacity * 1000) / 1000})`;
+}
+
+/**
+ * A gradient, pattern or picture fill cannot be painted per sub-path (the CSS
+ * box keeps painting it), but PowerPoint still shades the `lighten`/`darken`
+ * sub-paths of such a shape (a can's lid, a cube's faces, a bevel, the eyes of a
+ * smiley, a folded corner): each pixel moves toward white or black by the same
+ * 40% / 20% as for a solid colour. That is a translucent white or black veil
+ * over just those sub-paths, painted above the unchanged fill. Returns
+ * `undefined` when no sub-path shades.
+ */
+function buildShadingOverlay(element: PptxElement): SubpathFillOverlay | undefined {
+	if (!hasShapeProperties(element)) {
+		return undefined;
+	}
+	const ss = element.shapeStyle;
+	if (ss?.fillMode !== 'gradient' && ss?.fillMode !== 'pattern' && ss?.fillMode !== 'image') {
+		return undefined;
+	}
+	const geometry = getSubpathGeometry(element);
+	if (!geometry) {
+		return undefined;
+	}
+	const opacity = ss.fillOpacity ?? 1;
+	const paints = geometry.subpaths.map((subpath) => ({
+		d: subpath.d,
+		fill: shadeVeil(subpath.fillMode, opacity) ?? 'none',
+		stroked: subpath.stroke !== false,
+	}));
+	if (paints.every((paint) => paint.fill === 'none')) {
+		return undefined;
+	}
+	return { paints, viewBoxWidth: geometry.width, viewBoxHeight: geometry.height };
 }
 
 /**
@@ -209,9 +140,10 @@ export function suppressesCssFill(element: PptxElement): boolean {
  */
 export function buildSubpathFillOverlay(element: PptxElement): SubpathFillOverlay | undefined {
 	if (!hasReproducibleFillMode(element)) {
-		return undefined;
+		return buildShadingOverlay(element);
 	}
-	const geometry = getSubpathGeometry(element);
+	const silhouette = silhouetteFillsOverlay(element);
+	const geometry = getSubpathGeometry(element, silhouette);
 	if (!geometry) {
 		return undefined;
 	}
@@ -223,5 +155,6 @@ export function buildSubpathFillOverlay(element: PptxElement): SubpathFillOverla
 		paints: buildSubpathPaints(geometry.subpaths, hasFill, fillColor, ss?.fillOpacity),
 		viewBoxWidth: geometry.width,
 		viewBoxHeight: geometry.height,
+		...(silhouette ? { silhouette: true } : {}),
 	};
 }

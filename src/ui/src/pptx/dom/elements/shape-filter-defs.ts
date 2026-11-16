@@ -8,7 +8,8 @@ import {
 	getComputedEffectStyle,
 	getDuotoneSvgFilter,
 	getEffectStyleSource,
-	getSoftEdgeSvgFilter,
+	getShapeEffectFilterDefs,
+	getSilhouetteFillLayer,
 	isPatternPaint,
 	strokeOutlineViewBox,
 	svgGradientMarkup,
@@ -44,9 +45,11 @@ export function renderShapeFilterDefs(doc: Document, element: PptxElement): SVGS
 	if (duotone) {
 		markups.push(duotone.filterMarkup);
 	}
-	const softEdge = getSoftEdgeSvgFilter(style, element.id);
-	if (softEdge) {
-		markups.push(softEdge.filterMarkup);
+	// The soft-edge feather and the silhouette shadow / glow of a shape whose
+	// clip-path would cut its box-shadow off, as one definition.
+	const effectDefs = getShapeEffectFilterDefs(element);
+	if (effectDefs) {
+		markups.push(effectDefs.filterMarkup);
 	}
 	// `getBevelLightingSvgFilter` derives `shape3d`/`scene3d` from the element's
 	// own `shapeStyle` internally (a group never carries a bevel, same as
@@ -153,13 +156,32 @@ export function renderHollowHitOutline(doc: Document, element: PptxElement): SVG
 	svg.setAttribute('style', OUTLINE_SVG_STYLE);
 	const path = createSvgEl(doc, 'path', {
 		d: hit.d,
-		fill: 'none',
-		stroke: 'transparent',
+		fill: hit.fill,
+		stroke: hit.stroke,
 		'stroke-width': hit.strokeWidth,
 	});
-	path.setAttribute('style', 'pointer-events:stroke');
+	path.setAttribute('style', `pointer-events:${hit.pointerEvents}`);
 	svg.appendChild(path);
+	if (hit.textCss) {
+		const style = createSvgEl(doc, 'style', {});
+		style.textContent = hit.textCss;
+		svg.appendChild(style);
+	}
 	return svg;
+}
+
+/**
+ * The clipped child layer that paints a gradient, pattern or picture fill of a
+ * silhouette shape (see `silhouette-fill-layer`), or `null`.
+ */
+export function renderShapeFillLayer(doc: Document, element: PptxElement): HTMLElement | null {
+	const layer = getSilhouetteFillLayer(element);
+	if (!layer) {
+		return null;
+	}
+	const div = createEl(doc, 'div', 'pptx-vanilla-silhouette-fill', { ...layer.style });
+	div.setAttribute('aria-hidden', 'true');
+	return div;
 }
 
 /**
@@ -186,6 +208,9 @@ export function renderShapeSubpathFillOverlay(
 		preserveAspectRatio: 'none',
 	});
 	svg.setAttribute('style', 'position:absolute;inset:0;width:100%;height:100%');
+	if (overlay.silhouette) {
+		svg.setAttribute('data-pptx-silhouette-fill', '');
+	}
 	for (const paint of overlay.paints) {
 		const path = createSvgEl(doc, 'path', { d: paint.d, fill: paint.fill, stroke: 'none' });
 		svg.appendChild(path);
@@ -200,6 +225,7 @@ export function renderStrokeOutline(doc: Document, element: PptxElement): SVGSVG
 	}
 	const svg = createSvgEl(doc, 'svg', {
 		class: 'pptx-vanilla-gradient-outline',
+		'data-pptx-outline': '',
 		'aria-hidden': 'true',
 		viewBox: strokeOutlineViewBox(element),
 		preserveAspectRatio: 'none',
@@ -231,7 +257,7 @@ export function renderStrokeOutline(doc: Document, element: PptxElement): SVGSVG
 	}
 	for (const strand of outline.strands) {
 		const path = createSvgEl(doc, 'path', {
-			d: outline.d,
+			d: strand.d ?? outline.d,
 			fill: 'none',
 			stroke: outline.stroke,
 			'stroke-width': strand.strokeWidth,
@@ -242,6 +268,9 @@ export function renderStrokeOutline(doc: Document, element: PptxElement): SVGSVG
 			path.setAttribute('stroke-dasharray', outline.dashArray);
 		}
 		path.style.setProperty('stroke-width', strand.cssStrokeWidth);
+		if (strand.cssTransform) {
+			path.style.setProperty('transform', strand.cssTransform);
+		}
 		if (strand.offset !== 0) {
 			path.style.setProperty('transform', `translate(0, ${strand.offset}px)`);
 		}

@@ -1,7 +1,11 @@
 /**
  * text-advanced-panel.component.ts: Standalone Angular component for editing
- * advanced text properties (letter spacing, line spacing, paragraph alignment,
- * indent, text direction, vertical anchor) on a selected PPTX element.
+ * advanced text properties on a selected PPTX element: paragraph alignment, and
+ * the shared Text Box options (`TEXT_BOX_SECTIONS`: vertical anchor, text
+ * direction, autofit, wrap, columns) and character and paragraph spacing
+ * (`CHARACTER_SPACING_SECTIONS`, `PARAGRAPH_SPACING_SECTIONS`: indentation,
+ * spacing, line spacing, right-to-left) drawn by the generic
+ * `pptx-inspector-fields` renderer.
  *
  * Selector: `pptx-text-advanced-panel`
  *
@@ -27,22 +31,17 @@ import {
 	CUSTOM_ELEMENTS_SCHEMA,
 } from '@angular/core';
 import { TranslatePipe } from '@ngx-translate/core';
+import {
+	CHARACTER_SPACING_SECTIONS,
+	PARAGRAPH_SPACING_SECTIONS,
+	TEXT_BOX_SECTIONS,
+	textStylePatch,
+} from 'ooxml-ui/pptx';
 import type { PptxElement, TextStyle } from 'pptx-viewer-core';
 import { hasTextProperties } from 'pptx-viewer-core';
 
-import { isSelectControl, isCheckboxControl } from './control-event-targets';
-import {
-	ALIGN_OPTIONS,
-	TEXT_DIRECTION_OPTIONS,
-	VALIGN_OPTIONS,
-	alignPatch,
-	characterSpacingPatch,
-	lineSpacingPatch,
-	textAdvancedPatch,
-	textAdvancedStateOf,
-	textDirectionPatch,
-	vAlignPatch,
-} from './text-advanced-helpers';
+import { InspectorFieldsComponent } from './inspector-fields.component';
+import { ALIGN_OPTIONS, alignPatch, textAdvancedStateOf } from './text-advanced-helpers';
 import type { TextAdvancedState } from './text-advanced-helpers';
 
 @Component({
@@ -50,7 +49,7 @@ import type { TextAdvancedState } from './text-advanced-helpers';
 	selector: 'pptx-text-advanced-panel',
 	standalone: true,
 	changeDetection: ChangeDetectionStrategy.OnPush,
-	imports: [TranslatePipe],
+	imports: [TranslatePipe, InspectorFieldsComponent],
 	template: `
 		<div class="pptx-ng-txadv">
 			@if (!hasText()) {
@@ -76,183 +75,28 @@ import type { TextAdvancedState } from './text-advanced-helpers';
 					</div>
 				</section>
 
-				<!-- ── Vertical anchor ──────────────────────────────────── -->
+				<!-- ── Text box options (shared descriptors) ───────────────── -->
 				<section class="pptx-ng-txadv__section">
-					<div class="pptx-ng-txadv__row">
-						<label class="pptx-ng-txadv__label" for="txadv-valign">{{
-							'pptx.textAdvanced.vAlign' | translate
-						}}</label>
-						<pptx-ui-select
-							id="txadv-valign"
-							class="pptx-ng-txadv__select"
-							[value]="state().vAlign"
-							(change)="onVAlignChange($event)"
-						>
-							@for (opt of vAlignOptions; track opt[0]) {
-								<option [value]="opt[0]" [selected]="opt[0] === state().vAlign">
-									{{ opt[1] }}
-								</option>
-							}
-						</pptx-ui-select>
-					</div>
+					<pptx-inspector-fields
+						[sections]="textBoxSections"
+						[target]="textStyle()"
+						(patch)="onTextBoxPatch($event)"
+					/>
 				</section>
 
-				<!-- ── Text direction ────────────────────────────────────── -->
-				<section class="pptx-ng-txadv__section">
-					<div class="pptx-ng-txadv__row">
-						<label class="pptx-ng-txadv__label" for="txadv-dir">{{
-							'pptx.animation.direction' | translate
-						}}</label>
-						<pptx-ui-select
-							id="txadv-dir"
-							class="pptx-ng-txadv__select"
-							[value]="state().textDirection"
-							(change)="onTextDirectionChange($event)"
-						>
-							@for (opt of textDirectionOptions; track opt[0]) {
-								<option [value]="opt[0]" [selected]="opt[0] === state().textDirection">
-									{{ opt[1] }}
-								</option>
-							}
-						</pptx-ui-select>
-					</div>
-
-					<div class="pptx-ng-txadv__row">
-						<label class="pptx-ng-txadv__label" for="txadv-rtl">
-							<pptx-ui-checkbox
-								id="txadv-rtl"
-								class="pptx-ng-txadv__checkbox"
-								[checked]="state().rtl"
-								(change)="onRtlToggle($event)"
-							></pptx-ui-checkbox>
-							{{ 'pptx.textAdvanced.rtl' | translate }}
-						</label>
-					</div>
-				</section>
-
-				<!-- ── Spacing ───────────────────────────────────────────── -->
+				<!-- ── Spacing, indentation and direction (shared descriptors) ── -->
 				<section class="pptx-ng-txadv__section">
 					<h4 class="pptx-ng-txadv__heading">{{ 'pptx.textAdvanced.spacing' | translate }}</h4>
-					@if (elementKey(); as key) {
-						<div class="pptx-ng-txadv__grid" [attr.data-el-key]="key">
-							<!-- Character spacing -->
-							<label class="pptx-ng-txadv__label" for="txadv-cs">{{
-								'pptx.textAdvanced.letterSpc' | translate
-							}}</label>
-							<input
-								id="txadv-cs"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="numeric"
-								min="-5000"
-								max="10000"
-								step="50"
-								[value]="state().characterSpacing"
-								(change)="onCharacterSpacingChange($event)"
-							/>
-
-							<!-- Line spacing multiplier -->
-							<label class="pptx-ng-txadv__label" for="txadv-ls">{{
-								'pptx.textAdvanced.lineSpc' | translate
-							}}</label>
-							<input
-								id="txadv-ls"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="decimal"
-								min="0.5"
-								max="5"
-								step="0.05"
-								[value]="state().lineSpacing"
-								(change)="onLineSpacingChange($event)"
-							/>
-
-							<!-- Exact line spacing (pt) -->
-							<label class="pptx-ng-txadv__label" for="txadv-lspt">{{
-								'pptx.textAdvanced.lineSpcPt' | translate
-							}}</label>
-							<input
-								id="txadv-lspt"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="decimal"
-								min="0"
-								max="200"
-								step="1"
-								[value]="state().lineSpacingExactPt ?? ''"
-								[placeholder]="'pptx.textAdvanced.autoPlaceholder' | translate"
-								(change)="onLineSpacingExactPtChange($event)"
-							/>
-
-							<!-- Para spacing before -->
-							<label class="pptx-ng-txadv__label" for="txadv-spb">{{
-								'pptx.textAdvanced.spaceBefore' | translate
-							}}</label>
-							<input
-								id="txadv-spb"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="numeric"
-								min="0"
-								max="200"
-								[value]="state().paragraphSpacingBefore"
-								(change)="onSpacingBeforeChange($event)"
-							/>
-
-							<!-- Para spacing after -->
-							<label class="pptx-ng-txadv__label" for="txadv-spa">{{
-								'pptx.textAdvanced.spaceAfter' | translate
-							}}</label>
-							<input
-								id="txadv-spa"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="numeric"
-								min="0"
-								max="200"
-								[value]="state().paragraphSpacingAfter"
-								(change)="onSpacingAfterChange($event)"
-							/>
-						</div>
-					}
-				</section>
-
-				<!-- ── Indent & margin ───────────────────────────────────── -->
-				<section class="pptx-ng-txadv__section">
-					<h4 class="pptx-ng-txadv__heading">{{ 'pptx.textAdvanced.indentMargin' | translate }}</h4>
-					@if (elementKey(); as key) {
-						<div class="pptx-ng-txadv__grid" [attr.data-el-key]="key">
-							<label class="pptx-ng-txadv__label" for="txadv-ind">{{
-								'pptx.textAdvanced.indent' | translate
-							}}</label>
-							<input
-								id="txadv-ind"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="numeric"
-								min="-500"
-								max="500"
-								step="4"
-								[value]="state().paragraphIndent"
-								(change)="onIndentChange($event)"
-							/>
-
-							<label class="pptx-ng-txadv__label" for="txadv-ml">{{
-								'pptx.textProperties.leftMargin' | translate
-							}}</label>
-							<input
-								id="txadv-ml"
-								class="pptx-ng-txadv__input pptx-ng-txadv__input--number"
-								type="number"
-								inputmode="numeric"
-								min="0"
-								max="500"
-								step="4"
-								[value]="state().paragraphMarginLeft"
-								(change)="onMarginLeftChange($event)"
-							/>
-						</div>
-					}
+					<pptx-inspector-fields
+						[sections]="characterSpacingSections"
+						[target]="textStyle()"
+						(patch)="onTextBoxPatch($event)"
+					/>
+					<pptx-inspector-fields
+						[sections]="paragraphSpacingSections"
+						[target]="textStyle()"
+						(patch)="onTextBoxPatch($event)"
+					/>
 				</section>
 			}
 		</div>
@@ -306,47 +150,6 @@ import type { TextAdvancedState } from './text-advanced-helpers';
 			flex-wrap: wrap;
 		}
 
-		.pptx-ng-txadv__grid {
-			display: grid;
-			grid-template-columns: auto 1fr;
-			align-items: center;
-			gap: 0.3rem 0.4rem;
-		}
-
-		.pptx-ng-txadv__label {
-			font-size: 10px;
-			color: var(--pptx-inspector-muted, #888);
-			text-align: right;
-			flex-shrink: 0;
-			display: flex;
-			align-items: center;
-			gap: 0.25rem;
-		}
-
-		.pptx-ng-txadv__select,
-		.pptx-ng-txadv__input {
-			background: var(--pptx-inspector-input-bg, #2d2d2d);
-			border: 1px solid var(--pptx-inspector-border, #444);
-			color: inherit;
-			border-radius: 3px;
-			padding: 2px 4px;
-			font-size: 12px;
-		}
-
-		.pptx-ng-txadv__select {
-			flex: 1;
-			min-width: 0;
-		}
-
-		.pptx-ng-txadv__input--number {
-			width: 72px;
-			text-align: right;
-		}
-
-		.pptx-ng-txadv__checkbox {
-			cursor: pointer;
-		}
-
 		.pptx-ng-txadv__align-btn {
 			height: 24px;
 			min-width: 36px;
@@ -376,13 +179,6 @@ import type { TextAdvancedState } from './text-advanced-helpers';
 				font-size: 14px;
 			}
 
-			.pptx-ng-txadv__input,
-			.pptx-ng-txadv__select {
-				min-height: 36px;
-				font-size: 16px;
-				padding: 4px 8px;
-			}
-
 			.pptx-ng-txadv__align-btn {
 				height: 36px;
 				min-width: 48px;
@@ -407,13 +203,17 @@ export class TextAdvancedPanelComponent {
 	/** Derived advanced text state from the current element. */
 	protected readonly state = computed<TextAdvancedState>(() => textAdvancedStateOf(this.element()));
 
-	/** Stable key for keying inputs to the current element (prevents caret-reset mid-edit). */
-	protected readonly elementKey = computed(() => this.element().id);
-
 	/** Exposed option arrays for the template. */
 	protected readonly alignOptions = ALIGN_OPTIONS;
-	protected readonly vAlignOptions = VALIGN_OPTIONS;
-	protected readonly textDirectionOptions = TEXT_DIRECTION_OPTIONS;
+	protected readonly textBoxSections = TEXT_BOX_SECTIONS;
+	protected readonly characterSpacingSections = CHARACTER_SPACING_SECTIONS;
+	protected readonly paragraphSpacingSections = PARAGRAPH_SPACING_SECTIONS;
+
+	/** The element's text style, the value the Text Box descriptors read. */
+	protected readonly textStyle = computed<TextStyle | undefined>(() => {
+		const el = this.element();
+		return hasTextProperties(el) ? el.textStyle : undefined;
+	});
 
 	// ── Short display label for alignment buttons ──────────────────────────────
 
@@ -444,99 +244,11 @@ export class TextAdvancedPanelComponent {
 		this.emit(alignPatch(this.element(), align));
 	}
 
-	protected onVAlignChange(event: Event): void {
-		const val = selectValueFromEvent(event) as NonNullable<TextStyle['vAlign']> | null;
-		if (val && (val === 'top' || val === 'middle' || val === 'bottom')) {
-			this.emit(vAlignPatch(this.element(), val));
-		}
-	}
+	// ── Text box options ──────────────────────────────────────────────────────
 
-	// ── Direction ─────────────────────────────────────────────────────────────
-
-	protected onTextDirectionChange(event: Event): void {
-		const val = selectValueFromEvent(event);
-		if (val && isTextDirection(val)) {
-			this.emit(textDirectionPatch(this.element(), val));
-		}
-	}
-
-	protected onRtlToggle(event: Event): void {
-		const checked = checkedFromEvent(event);
-		if (checked === null) {
-			return;
-		}
-		this.emit(textAdvancedPatch(this.element(), { rtl: checked }));
-	}
-
-	// ── Spacing ───────────────────────────────────────────────────────────────
-
-	protected onCharacterSpacingChange(event: Event): void {
-		const val = numberFromEvent(event);
-		if (val === null) {
-			return;
-		}
-		this.emit(characterSpacingPatch(this.element(), val));
-	}
-
-	protected onLineSpacingChange(event: Event): void {
-		const val = numberFromEvent(event);
-		if (val === null || val <= 0) {
-			return;
-		}
-		// Changing multiplier clears exact-pt mode.
-		this.emit(lineSpacingPatch(this.element(), val, null));
-	}
-
-	protected onLineSpacingExactPtChange(event: Event): void {
-		const target = event.target;
-		if (!(target instanceof HTMLInputElement)) {
-			return;
-		}
-		const raw = target.value.trim();
-		if (raw.length === 0) {
-			// Empty → revert to multiplier mode; use current multiplier.
-			this.emit(lineSpacingPatch(this.element(), this.state().lineSpacing, null));
-			return;
-		}
-		const val = parseFloat(raw);
-		if (!Number.isFinite(val) || val <= 0) {
-			return;
-		}
-		this.emit(lineSpacingPatch(this.element(), 1.0, val));
-	}
-
-	protected onSpacingBeforeChange(event: Event): void {
-		const val = numberFromEvent(event);
-		if (val === null) {
-			return;
-		}
-		this.emit(textAdvancedPatch(this.element(), { paragraphSpacingBefore: Math.max(0, val) }));
-	}
-
-	protected onSpacingAfterChange(event: Event): void {
-		const val = numberFromEvent(event);
-		if (val === null) {
-			return;
-		}
-		this.emit(textAdvancedPatch(this.element(), { paragraphSpacingAfter: Math.max(0, val) }));
-	}
-
-	// ── Indent & margin ───────────────────────────────────────────────────────
-
-	protected onIndentChange(event: Event): void {
-		const val = numberFromEvent(event);
-		if (val === null) {
-			return;
-		}
-		this.emit(textAdvancedPatch(this.element(), { paragraphIndent: val }));
-	}
-
-	protected onMarginLeftChange(event: Event): void {
-		const val = numberFromEvent(event);
-		if (val === null) {
-			return;
-		}
-		this.emit(textAdvancedPatch(this.element(), { paragraphMarginLeft: Math.max(0, val) }));
+	/** Merge a Text Box field's body-level text-style patch into the element. */
+	protected onTextBoxPatch(patch: Partial<TextStyle>): void {
+		this.emit(textStylePatch(this.element(), patch));
 	}
 
 	// ── Internal ──────────────────────────────────────────────────────────────
@@ -544,46 +256,4 @@ export class TextAdvancedPanelComponent {
 	private emit(p: Partial<PptxElement>): void {
 		this.patch.emit(p);
 	}
-}
-
-// ── Module-private helpers ────────────────────────────────────────────────────
-
-function numberFromEvent(event: Event): number | null {
-	const target = event.target;
-	if (!(target instanceof HTMLInputElement)) {
-		return null;
-	}
-	const parsed = parseFloat(target.value);
-	return Number.isFinite(parsed) ? parsed : null;
-}
-
-function selectValueFromEvent(event: Event): string | null {
-	const target = event.target;
-	if (!isSelectControl(target)) {
-		return null;
-	}
-	const val = target.value.trim();
-	return val.length > 0 ? val : null;
-}
-
-function checkedFromEvent(event: Event): boolean | null {
-	const target = event.target;
-	if (!isCheckboxControl(target)) {
-		return null;
-	}
-	return target.checked;
-}
-
-const TEXT_DIRECTION_VALUES = new Set<string>([
-	'horizontal',
-	'vertical',
-	'vertical270',
-	'eaVert',
-	'wordArtVert',
-	'wordArtVertRtl',
-	'mongolianVert',
-]);
-
-function isTextDirection(val: string): val is NonNullable<TextStyle['textDirection']> {
-	return TEXT_DIRECTION_VALUES.has(val);
 }

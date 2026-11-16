@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import type { ThemeColorPickerCommit } from 'ooxml-ui/pptx';
 import {
+	CHARACTER_SPACING_SECTIONS,
+	PARAGRAPH_SPACING_SECTIONS,
+	TEXT_BOX_SECTIONS,
+	applyTextStyleUpdate,
+	text3dInheritsFromTemplate,
+	textColorOf,
 	textFontFamilyPatch,
 	textFontSizePatch,
 	textFontSizePtToPx,
@@ -13,7 +19,9 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { injectRecentColors } from '../../composables/recent-colors-context';
+import { useLiveElementColor } from '../../composables/useLiveElementColor';
 import RecentColorsRow from '../RecentColorsRow.vue';
+import InspectorFields from './InspectorFields.vue';
 import Text3DProperties from './Text3DProperties.vue';
 import TextEffectsPanel from './TextEffectsPanel.vue';
 import TextWarpGallery from './TextWarpGallery.vue';
@@ -22,24 +30,27 @@ import ThemeColorSwatchGrid from './ThemeColorSwatchGrid.vue';
 /**
  * TextPanel: typography inspector for the Vue `pptx-vue-viewer` editor.
  *
- * Exposes character/paragraph formatting (`fontFamily`, `fontSize`, `bold`,
- * `italic`, `underline`, `strikethrough`, `color`, `align`, `vAlign`) read from
- * `element.textStyle`. Each control emits a SHALLOW `update` patch carrying the
- * FULL merged `textStyle` sub-object so the parent can forward it verbatim to
- * `ops.updateElement(id, patch)`.
+ * Character formatting with the shared character spacing
+ * (`CHARACTER_SPACING_SECTIONS`, `part="font"`), and alignment plus the shared
+ * Text Box options and paragraph spacing (`TEXT_BOX_SECTIONS`,
+ * `PARAGRAPH_SPACING_SECTIONS`, `part="paragraph"`) read from `element.textStyle`.
+ * Each control emits a SHALLOW `update` patch carrying the FULL merged
+ * `textStyle` so the parent forwards it to `ops.updateElement(id, patch)`.
  *
  * Only text-bearing elements (`hasTextProperties`) expose editable controls;
- * other element types show a muted note instead. The Text Warp gallery comes
- * last, after the formatting, as in React's `TextAdvancedSections`.
+ * other element types show a muted note instead. After the formatting come the
+ * Text Warp gallery, the Text Effects (shadow, glow, reflection) and 3-D text,
+ * in that order, as in React's `TextAdvancedSections`.
  */
 type AlignValue = NonNullable<TextStyle['align']>;
-type VAlignValue = NonNullable<TextStyle['vAlign']>;
 
 const props = withDefaults(
 	defineProps<{
 		element: PptxElement;
-		/** Read-only decks keep the Text Warp tiles visible but unpickable. */
+		/** Read-only decks keep the Text Warp, Text Effects and 3-D controls visible but inert. */
 		canEdit?: boolean;
+		/** Format pane section: `font` (characters, effects) or `paragraph` (alignment, text box). */
+		part?: 'font' | 'paragraph';
 	}>(),
 	{ canEdit: true },
 );
@@ -68,12 +79,6 @@ const ALIGN_OPTIONS: ReadonlyArray<{ value: AlignValue; labelKey: string }> = [
 	{ value: 'justify', labelKey: 'pptx.textPanel.alignJustify' },
 ];
 
-const VALIGN_OPTIONS: ReadonlyArray<{ value: VAlignValue; labelKey: string }> = [
-	{ value: 'top', labelKey: 'pptx.textPanel.valignTop' },
-	{ value: 'middle', labelKey: 'pptx.textPanel.valignMiddle' },
-	{ value: 'bottom', labelKey: 'pptx.textPanel.valignBottom' },
-];
-
 const TOGGLES: ReadonlyArray<{
 	key: 'bold' | 'italic' | 'underline' | 'strikethrough';
 	label: string;
@@ -98,7 +103,6 @@ const fontSize = computed<number>(() =>
 const color = computed<string>(() => textStyle.value?.color ?? '#000000');
 const colorRef = computed(() => textStyle.value?.colorRef);
 const align = computed<AlignValue | undefined>(() => textStyle.value?.align);
-const vAlign = computed<VAlignValue | undefined>(() => textStyle.value?.vAlign);
 
 function patchTextStyle(next: Partial<TextStyle>): void {
 	emit('update', textStylePatch(props.element, next));
@@ -120,9 +124,13 @@ function onFontSize(event: Event): void {
 	emit('update', textFontSizePatch(props.element, textFontSizePtToPx(points)));
 }
 
-function onColor(event: Event): void {
-	patchTextStyle({ color: (event.target as HTMLInputElement).value, colorRef: undefined });
-}
+/** The native picker: live while dragging, one `update` and one recent colour per pick. */
+const colorEvents = useLiveElementColor({
+	element: () => props.element,
+	colorOf: textColorOf,
+	patch: (el, hex) => textStylePatch(el, { color: hex, colorRef: undefined }),
+	commit: (patch) => emit('update', patch),
+});
 
 function onColorPick(hex: string): void {
 	patchTextStyle({ color: hex, colorRef: undefined });
@@ -146,22 +154,20 @@ function setAlign(value: AlignValue): void {
 	patchTextStyle({ align: value });
 }
 
-function setVAlign(value: VAlignValue): void {
-	patchTextStyle({ vAlign: value });
-}
-
 function onWarpSelect(style: Pick<TextStyle, 'textWarpPreset'>): void {
 	patchTextStyle(style);
 }
 
+/** Run effects (`a:rPr/a:effectLst`) reach every run, as the ribbon applies them. */
 function onTextEffectPatch(patch: Partial<TextStyle>): void {
-	patchTextStyle(patch);
+	emit('update', applyTextStyleUpdate(props.element, patch, null).patch);
 }
 </script>
 
 <template>
 	<div class="pptx-vue-text-panel flex flex-col gap-2 p-2">
 		<h3
+			v-if="!props.part"
 			class="pptx-vue-text-title text-xs font-semibold uppercase tracking-wide text-muted-foreground"
 		>
 			{{ t('pptx.textPanel.title') }}
@@ -172,137 +178,148 @@ function onTextEffectPatch(patch: Partial<TextStyle>): void {
 		</p>
 
 		<div v-else class="pptx-vue-text-fields flex flex-col gap-2">
-			<label class="pptx-vue-text-field flex flex-col gap-1">
-				<span class="pptx-vue-text-label text-muted-foreground">{{
-					t('pptx.textPanel.font')
-				}}</span>
-				<pptx-ui-select
-					:aria-label="t('pptx.textPanel.font')"
-					class="pptx-vue-text-input w-full bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-					:value="fontFamily"
-					@change="onFontFamily"
-				>
-					<option value="">{{ t('pptx.textPanel.default') }}</option>
-					<option v-for="font in FONT_OPTIONS" :key="font" :value="font">
-						{{ font }}
-					</option>
-					<option v-if="fontFamily && !FONT_OPTIONS.includes(fontFamily)" :value="fontFamily">
-						{{ fontFamily }}
-					</option>
-				</pptx-ui-select>
-			</label>
-
-			<div class="pptx-vue-text-row grid grid-cols-2 gap-2">
+			<template v-if="props.part !== 'paragraph'">
 				<label class="pptx-vue-text-field flex flex-col gap-1">
 					<span class="pptx-vue-text-label text-muted-foreground">{{
-						t('pptx.textPanel.size')
+						t('pptx.textPanel.font')
 					}}</span>
-					<input
-						type="number"
+					<pptx-ui-select
+						:aria-label="t('pptx.textPanel.font')"
 						class="pptx-vue-text-input w-full bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
-						min="1"
-						step="any"
-						:value="fontSize"
-						@input="onFontSize"
-					/>
+						:value="fontFamily"
+						@change="onFontFamily"
+					>
+						<option value="">{{ t('pptx.textPanel.default') }}</option>
+						<option v-for="font in FONT_OPTIONS" :key="font" :value="font">
+							{{ font }}
+						</option>
+						<option v-if="fontFamily && !FONT_OPTIONS.includes(fontFamily)" :value="fontFamily">
+							{{ fontFamily }}
+						</option>
+					</pptx-ui-select>
 				</label>
-				<label class="pptx-vue-text-field flex flex-col gap-1">
+
+				<div class="pptx-vue-text-row grid grid-cols-2 gap-2">
+					<label class="pptx-vue-text-field flex flex-col gap-1">
+						<span class="pptx-vue-text-label text-muted-foreground">{{
+							t('pptx.textPanel.size')
+						}}</span>
+						<input
+							type="number"
+							class="pptx-vue-text-input w-full bg-muted border border-border rounded px-2 py-1 max-md:min-h-[44px]"
+							min="1"
+							step="any"
+							:value="fontSize"
+							@input="onFontSize"
+						/>
+					</label>
+					<label class="pptx-vue-text-field flex flex-col gap-1">
+						<span class="pptx-vue-text-label text-muted-foreground">{{
+							t('pptx.textPanel.color')
+						}}</span>
+						<input
+							type="color"
+							class="pptx-vue-text-color w-full h-8 bg-muted border border-border rounded p-0.5"
+							:value="color"
+							v-on="colorEvents"
+						/>
+					</label>
+				</div>
+				<ThemeColorSwatchGrid
+					:selected-ref="colorRef"
+					:selected-hex="color"
+					@pick="onColorThemePick"
+				/>
+				<RecentColorsRow
+					v-if="recentColors"
+					:colors="recentColors.recent.value"
+					@pick="onColorPick"
+				/>
+
+				<div class="pptx-vue-text-field flex flex-col gap-1">
 					<span class="pptx-vue-text-label text-muted-foreground">{{
-						t('pptx.textPanel.color')
+						t('pptx.textPanel.style')
 					}}</span>
-					<input
-						type="color"
-						class="pptx-vue-text-color w-full h-8 bg-muted border border-border rounded p-0.5"
-						:value="color"
-						@input="onColor"
-						@change="onColorPick(($event.target as HTMLInputElement).value)"
-					/>
-				</label>
-			</div>
-			<ThemeColorSwatchGrid
-				:selected-ref="colorRef"
-				:selected-hex="color"
-				@pick="onColorThemePick"
-			/>
-			<RecentColorsRow
-				v-if="recentColors"
-				:colors="recentColors.recent.value"
-				@pick="onColorPick"
-			/>
-
-			<div class="pptx-vue-text-field flex flex-col gap-1">
-				<span class="pptx-vue-text-label text-muted-foreground">{{
-					t('pptx.textPanel.style')
-				}}</span>
-				<div class="pptx-vue-text-toggles flex flex-wrap gap-1">
-					<button
-						v-for="tg in TOGGLES"
-						:key="tg.key"
-						type="button"
-						class="pptx-vue-text-toggle min-w-8 rounded border border-border px-2 py-1 transition-colors max-md:min-h-[44px] max-md:min-w-[44px]"
-						:class="
-							isActive(tg.key)
-								? 'pptx-vue-text-toggle-active bg-primary text-white font-semibold'
-								: 'bg-muted hover:bg-accent'
-						"
-						:aria-pressed="isActive(tg.key)"
-						:title="t(tg.titleKey)"
-						@click="toggle(tg.key)"
-					>
-						{{ tg.label }}
-					</button>
+					<div class="pptx-vue-text-toggles flex flex-wrap gap-1">
+						<button
+							v-for="tg in TOGGLES"
+							:key="tg.key"
+							type="button"
+							class="pptx-vue-text-toggle min-w-8 rounded border border-border px-2 py-1 transition-colors max-md:min-h-[44px] max-md:min-w-[44px]"
+							:class="
+								isActive(tg.key)
+									? 'pptx-vue-text-toggle-active bg-primary text-white font-semibold'
+									: 'bg-muted hover:bg-accent'
+							"
+							:aria-pressed="isActive(tg.key)"
+							:title="t(tg.titleKey)"
+							@click="toggle(tg.key)"
+						>
+							{{ tg.label }}
+						</button>
+					</div>
 				</div>
-			</div>
 
-			<div class="pptx-vue-text-field flex flex-col gap-1">
-				<span class="pptx-vue-text-label text-muted-foreground">
-					{{ t('pptx.textPanel.horizontalAlign') }}
-				</span>
-				<div class="pptx-vue-text-toggles flex flex-wrap gap-1">
-					<button
-						v-for="opt in ALIGN_OPTIONS"
-						:key="opt.value"
-						type="button"
-						class="pptx-vue-text-toggle min-w-8 rounded border border-border px-2 py-1 transition-colors max-md:min-h-[44px] max-md:min-w-[44px]"
-						:class="
-							align === opt.value
-								? 'pptx-vue-text-toggle-active bg-primary text-white font-semibold'
-								: 'bg-muted hover:bg-accent'
-						"
-						:aria-pressed="align === opt.value"
-						:title="t(opt.labelKey)"
-						@click="setAlign(opt.value)"
-					>
-						{{ t(opt.labelKey) }}
-					</button>
+				<InspectorFields
+					:sections="CHARACTER_SPACING_SECTIONS"
+					:target="textStyle"
+					:disabled="!props.canEdit"
+					@patch="patchTextStyle"
+				/>
+			</template>
+
+			<template v-if="props.part !== 'font'">
+				<div class="pptx-vue-text-field flex flex-col gap-1">
+					<span class="pptx-vue-text-label text-muted-foreground">
+						{{ t('pptx.textPanel.horizontalAlign') }}
+					</span>
+					<div class="pptx-vue-text-toggles flex flex-wrap gap-1">
+						<button
+							v-for="opt in ALIGN_OPTIONS"
+							:key="opt.value"
+							type="button"
+							class="pptx-vue-text-toggle min-w-8 rounded border border-border px-2 py-1 transition-colors max-md:min-h-[44px] max-md:min-w-[44px]"
+							:class="
+								align === opt.value
+									? 'pptx-vue-text-toggle-active bg-primary text-white font-semibold'
+									: 'bg-muted hover:bg-accent'
+							"
+							:aria-pressed="align === opt.value"
+							:title="t(opt.labelKey)"
+							@click="setAlign(opt.value)"
+						>
+							{{ t(opt.labelKey) }}
+						</button>
+					</div>
 				</div>
-			</div>
 
-			<div class="pptx-vue-text-field flex flex-col gap-1">
-				<span class="pptx-vue-text-label text-muted-foreground">
-					{{ t('pptx.textPanel.verticalAlign') }}
-				</span>
-				<div class="pptx-vue-text-toggles flex flex-wrap gap-1">
-					<button
-						v-for="opt in VALIGN_OPTIONS"
-						:key="opt.value"
-						type="button"
-						class="pptx-vue-text-toggle min-w-8 rounded border border-border px-2 py-1 transition-colors max-md:min-h-[44px] max-md:min-w-[44px]"
-						:class="
-							vAlign === opt.value
-								? 'pptx-vue-text-toggle-active bg-primary text-white font-semibold'
-								: 'bg-muted hover:bg-accent'
-						"
-						:aria-pressed="vAlign === opt.value"
-						:title="t(opt.labelKey)"
-						@click="setVAlign(opt.value)"
-					>
-						{{ t(opt.labelKey) }}
-					</button>
-				</div>
-			</div>
+				<InspectorFields
+					:sections="TEXT_BOX_SECTIONS"
+					:target="textStyle"
+					:disabled="!props.canEdit"
+					@patch="patchTextStyle"
+				/>
 
-			<TextWarpGallery :ts="textStyle" :disabled="!props.canEdit" @select="onWarpSelect" />
+				<InspectorFields
+					:sections="PARAGRAPH_SPACING_SECTIONS"
+					:target="textStyle"
+					:disabled="!props.canEdit"
+					@patch="patchTextStyle"
+				/>
+			</template>
+
+			<template v-if="props.part !== 'paragraph'">
+				<TextWarpGallery :ts="textStyle" :disabled="!props.canEdit" @select="onWarpSelect" />
+
+				<TextEffectsPanel :ts="textStyle" :disabled="!props.canEdit" @update="onTextEffectPatch" />
+
+				<Text3DProperties
+					:ts="textStyle"
+					:inherits="text3dInheritsFromTemplate(props.element)"
+					:disabled="!props.canEdit"
+					@update="patchTextStyle"
+				/>
+			</template>
 		</div>
 	</div>
 </template>
